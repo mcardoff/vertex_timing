@@ -1,0 +1,5 @@
+-/eventdisplays/*
+-/ntuple
+-/ntuple_ttbar
+-*.root
+-*.pdf
