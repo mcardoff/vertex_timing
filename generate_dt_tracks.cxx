@@ -1,17 +1,22 @@
-void generate_dt_tracks() {
-  bool debug = false;
-  gStyle->SetOptStat(0);
-  // colors
-  auto c1 = TColor::GetColor("#3f90da");
-  auto c2 = TColor::GetColor("#ffa90e");
-  auto c3 = TColor::GetColor("#bd1f01");
-  auto c4 = TColor::GetColor("#94a4a2");
-  auto c5 = TColor::GetColor("#832db6");
-  TCanvas *canvas = new TCanvas("canvas", "Histograms", 800, 600);
-  TChain chain("ntuple");
+#include <TCanvas.h>
+#include <TLatex.h>
+#include <TColor.h>
+#include <TStyle.h>
+#include <TChain.h>
+#include <TTreeReader.h>
+#include <TTreeReaderArray.h>
+#include <TLegend.h>
+#include <TH1.h>
+#include <TH2.h>
+#include <TF1.h>
+#include <iostream>
+#include <boost/filesystem.hpp>
 
+#define debug false
+
+void setup_chain(TChain &chain) {
   // VBF H->Invisible sample
-  for (const auto& entry : std::filesystem::directory_iterator("./ntuple")) {
+  for (const auto& entry : boost::filesystem::directory_iterator("./ntuple")) {
     if(debug) {std::cout << "Adding file: " << entry.path() << std::endl;}
     chain.Add(entry.path().c_str());
     // break; // add 1
@@ -21,33 +26,79 @@ void generate_dt_tracks() {
     std::cerr << "No ROOT files found in directory: " << std::endl;
     return;
   }
+}
 
+TF1* dgaus_fit(TH1F *hist, double fit_bound) {
+  TF1 *fit_1 = new TF1(Form("fit_%s",hist->GetName()), "dgaus", -fit_bound, fit_bound);
+  fit_1->SetParameters(0, hist->GetMaximum(), 1e-2, 26.0, 175.0);
+  fit_1->FixParameter(4, 175);
+  hist->Fit(fit_1, "R");
+  return fit_1;
+}
+
+void generate_dt_tracks() {
+  gStyle->SetOptStat(0);
+  // colors
+  auto c1 = TColor::GetColor("#3f90da");
+  auto c2 = TColor::GetColor("#ffa90e");
+  auto c3 = TColor::GetColor("#bd1f01");
+  auto c4 = TColor::GetColor("#94a4a2");
+  auto c5 = TColor::GetColor("#832db6");
+
+  TChain chain ("ntuple");
+  setup_chain(chain);
   TTreeReader reader(&chain);
+  TCanvas *canvas = new TCanvas("canvas", "Histograms", 800, 600);
   // jet variables
-  TTreeReaderArray<float> jet_pt (reader, "AntiKt4EMPFlowJets_pt");
-  TTreeReaderArray<float> jet_eta(reader, "AntiKt4EMPFlowJets_eta");
-  TTreeReaderArray<std::vector<int>> jet_track_indices(reader, "AntiKt4EMTopoJets_track_idx");
+  TTreeReaderArray<float> jet_pt
+    (reader, "AntiKt4EMTopoJets_pt");
+  TTreeReaderArray<float> jet_eta
+    (reader, "AntiKt4EMTopoJets_eta");
+  TTreeReaderArray<std::vector<int>> jet_track_indices
+    (reader, "AntiKt4EMTopoJets_track_idx");
+  TTreeReaderArray<float> truth_hsjet_pt
+    (reader, "TruthHSJet_pt");
 
   // vertex variables
   /// truth vertex
-  TTreeReaderArray<float> truth_vtx_z   (reader, "TruthVtx_z");
-  TTreeReaderArray<float> truth_vtx_time(reader, "TruthVtx_time");
+  TTreeReaderArray<float> truth_vtx_z
+    (reader, "TruthVtx_z");
+  TTreeReaderArray<float> truth_vtx_time
+    (reader, "TruthVtx_time");
 
   /// reco vertex
-  TTreeReaderArray<float> reco_vtx_z      (reader, "RecoVtx_z");
-  TTreeReaderArray<float> reco_vtx_time   (reader, "RecoVtx_time");
-  TTreeReaderArray<float> reco_vtx_timeRes(reader, "RecoVtx_timeRes");
-  TTreeReaderArray<int>   reco_vtx_valid  (reader, "RecoVtx_hasValidTime");
+  TTreeReaderArray<float> reco_vtx_z
+    (reader, "RecoVtx_z");
+  TTreeReaderArray<float> reco_vtx_time
+    (reader, "RecoVtx_time");
+  TTreeReaderArray<float> reco_vtx_timeRes
+    (reader, "RecoVtx_timeRes");
+  TTreeReaderArray<int>   reco_vtx_valid
+    (reader, "RecoVtx_hasValidTime");
 
   // track variables
-  TTreeReaderArray<float> track_z0(reader, "Track_z0");
-  TTreeReaderArray<float> track_pt(reader, "Track_pt");
-  TTreeReaderArray<float> track_eta(reader, "Track_eta");
-  TTreeReaderArray<float> track_time(reader, "Track_time");
-  TTreeReaderArray<float> track_time_res(reader, "Track_timeRes");
-  TTreeReaderArray<float> track_var_z0(reader, "Track_var_z0");
-  TTreeReaderArray<int>   track_to_truthvtx(reader, "Track_truthVtx_idx");
-  TTreeReaderArray<int>   track_time_valid(reader, "Track_hasValidTime");
+  TTreeReaderArray<float> track_z0
+    (reader, "Track_z0");
+  TTreeReaderArray<float> track_pt
+    (reader, "Track_pt");
+  TTreeReaderArray<float> track_eta
+    (reader, "Track_eta");
+  TTreeReaderArray<float> track_time
+    (reader, "Track_time");
+  TTreeReaderArray<float> track_time_res
+    (reader, "Track_timeRes");
+  TTreeReaderArray<float> track_var_z0
+    (reader, "Track_var_z0");
+  TTreeReaderArray<int>   track_to_truthvtx
+    (reader, "Track_truthVtx_idx");
+  TTreeReaderArray<int>   track_to_particle
+    (reader, "Track_truthPart_idx");
+  TTreeReaderArray<int>   track_time_valid
+    (reader, "Track_hasValidTime");
+
+  // particle vars
+  TTreeReaderArray<float> prod_vtx_z
+    (reader, "TruthPart_prodVtx_z");
 
   int bins = 50;
 
@@ -338,32 +389,32 @@ void generate_dt_tracks() {
   normlegend->AddEntry(hist_norm4, Form(">2 Forward Jet, #sigma = %.2f", normfit_4->GetParameter(2)), "l");
   normlegend->Draw();
   
-  canvas->Print("dtplots.pdf(", "pdf");
+  canvas->Print("figs/trackdtplots.pdf(", "pdf");
 
   // individual plots with fits
   hist_norm1->Draw("HIST");
   normfit_1->SetLineColor(c1);
   normfit_1->Draw("SAME");
   normlegend->Draw();
-  canvas->Print("dtplots.pdf", "pdf");
+  canvas->Print("figs/trackdtplots.pdf", "pdf");
 
   hist_norm2->Draw("HIST");
   normfit_2->SetLineColor(c2);
   normfit_2->Draw("SAME");
   normlegend->Draw();
-  canvas->Print("dtplots.pdf", "pdf");
+  canvas->Print("figs/trackdtplots.pdf", "pdf");
 
   hist_norm3->Draw("HIST");
   normfit_3->SetLineColor(c3);
   normfit_3->Draw("SAME");
   normlegend->Draw();
-  canvas->Print("dtplots.pdf", "pdf");
+  canvas->Print("figs/trackdtplots.pdf", "pdf");
 
   hist_norm4->Draw("HIST");
   normfit_4->SetLineColor(c5);
   normfit_4->Draw("SAME");
   normlegend->Draw();
-  canvas->Print("dtplots.pdf", "pdf");
+  canvas->Print("figs/trackdtplots.pdf", "pdf");
 
   // NON DIVIDED BY RESOS
   hist1->Scale(1/hist1->Integral());
@@ -423,32 +474,32 @@ void generate_dt_tracks() {
   legend->AddEntry(hist3, Form("=2 Forward Jet #sigma = %.2f", fit_3->GetParameter(3)), "l");
   legend->AddEntry(hist4, Form(">2 Forward Jet #sigma = %.2f", fit_4->GetParameter(3)), "l");
   legend->Draw();
-  canvas->Print("dtplots.pdf", "pdf");
+  canvas->Print("figs/trackdtplots.pdf", "pdf");
 
   // individual plots with fits
   hist1->Draw("HIST");
   fit_1->SetLineColor(c1);
   fit_1->Draw("SAME");
   legend->Draw();
-  canvas->Print("dtplots.pdf", "pdf");
+  canvas->Print("figs/trackdtplots.pdf", "pdf");
 
   hist2->Draw("HIST");
   fit_2->SetLineColor(c2);
   fit_2->Draw("SAME");
   legend->Draw();
-  canvas->Print("dtplots.pdf", "pdf");
+  canvas->Print("figs/trackdtplots.pdf", "pdf");
 
   hist3->Draw("HIST");
   fit_3->SetLineColor(c3);
   fit_3->Draw("SAME");
   legend->Draw();
-  canvas->Print("dtplots.pdf", "pdf");
+  canvas->Print("figs/trackdtplots.pdf", "pdf");
 
   hist4->Draw("HIST");
   fit_4->SetLineColor(c5);
   fit_4->Draw("SAME");
   legend->Draw();
-  canvas->Print("dtplots.pdf", "pdf");
+  canvas->Print("figs/trackdtplots.pdf", "pdf");
 
   canvas->SetLogy(false);
 
@@ -477,7 +528,7 @@ void generate_dt_tracks() {
   nTracksLegend->AddEntry(nTracks3, Form("=2 Forward Jet"), "l");
   nTracksLegend->AddEntry(nTracks4, Form(">2 Forward Jet"), "l");
   nTracksLegend->Draw();
-  canvas->Print("dtplots.pdf", "pdf");
+  canvas->Print("figs/trackdtplots.pdf", "pdf");
 
   // nfortracks plot
   nForTracks1->SetMaximum(1.1*std::max({nForTracks1->GetMaximum(), nForTracks2->GetMaximum(), nForTracks3->GetMaximum(), nForTracks4->GetMaximum()}));
@@ -504,7 +555,7 @@ void generate_dt_tracks() {
   nForTracksLegend->AddEntry(nForTracks3, Form("=2 Forward Jet"), "l");
   nForTracksLegend->AddEntry(nForTracks4, Form(">2 Forward Jet"), "l");
   nForTracksLegend->Draw();
-  canvas->Print("dtplots.pdf", "pdf");
+  canvas->Print("figs/trackdtplots.pdf", "pdf");
 
   nHSTracks1->SetMaximum(1.1*std::max({nHSTracks1->GetMaximum(),nNonHSTracks1->GetMaximum(),nUnkHSTracks1->GetMaximum()}));
 
@@ -526,7 +577,7 @@ void generate_dt_tracks() {
   nTracksClass1->AddEntry(nUnkHSTracks1, Form("Truth Unknown"), "l");
   nTracksClass1->Draw();
 
-  canvas->Print("dtplots.pdf", "pdf");
+  canvas->Print("figs/trackdtplots.pdf", "pdf");
 
   nHSTracks2->SetMaximum(1.1*std::max({nHSTracks2->GetMaximum(),nNonHSTracks2->GetMaximum(),nUnkHSTracks2->GetMaximum()}));
 
@@ -548,7 +599,7 @@ void generate_dt_tracks() {
   nTracksClass2->AddEntry(nUnkHSTracks2, Form("Truth Unknown"), "l");
   nTracksClass2->Draw();
 
-  canvas->Print("dtplots.pdf", "pdf");
+  canvas->Print("figs/trackdtplots.pdf", "pdf");
 
   nHSTracks3->SetMaximum(1.1*std::max({nHSTracks3->GetMaximum(),nNonHSTracks3->GetMaximum(),nUnkHSTracks3->GetMaximum()}));
 
@@ -570,7 +621,7 @@ void generate_dt_tracks() {
   nTracksClass3->AddEntry(nUnkHSTracks3, Form("Truth Unknown"), "l");
   nTracksClass3->Draw();
 
-  canvas->Print("dtplots.pdf", "pdf");
+  canvas->Print("figs/trackdtplots.pdf", "pdf");
 
   nHSTracks4->SetMaximum(1.1*std::max({nHSTracks4->GetMaximum(),nNonHSTracks4->GetMaximum(),nUnkHSTracks4->GetMaximum()}));
 
@@ -592,7 +643,7 @@ void generate_dt_tracks() {
   nTracksClass4->AddEntry(nUnkHSTracks4, Form("Truth Unknown"), "l");
   nTracksClass4->Draw();
 
-  canvas->Print("dtplots.pdf)", "pdf");
+  canvas->Print("figs/trackdtplots.pdf)", "pdf");
 
   if(debug) {
     std::cout << "    fit 1 has " << 100*fit_1->GetParError(3)/fit_1->GetParameter(3) << "% error on sigma" << std::endl;

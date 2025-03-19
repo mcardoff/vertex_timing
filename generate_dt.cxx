@@ -1,17 +1,31 @@
-void generate_dt() {
-  bool debug = false;
-  gStyle->SetOptStat(0);
-  // colors
-  auto c1 = TColor::GetColor("#3f90da");
-  auto c2 = TColor::GetColor("#ffa90e");
-  auto c3 = TColor::GetColor("#bd1f01");
-  auto c4 = TColor::GetColor("#94a4a2");
-  auto c5 = TColor::GetColor("#832db6");
-  TCanvas *canvas = new TCanvas("canvas", "Histograms", 800, 600);
-  TChain chain("ntuple");
+#include <TCanvas.h>
+#include <TLatex.h>
+#include <TColor.h>
+#include <TStyle.h>
+#include <TChain.h>
+#include <TTreeReader.h>
+#include <TTreeReaderArray.h>
+#include <TLegend.h>
+#include <TH1.h>
+#include <TH2.h>
+#include <TF1.h>
+#include <iostream>
+#include <boost/filesystem.hpp>
 
+#define debug false
+
+// cut variables
+auto min_jets          =  2;    // min number of jets
+auto min_jetpt         =  30.0; // self explanatory
+auto min_abs_eta       =  2.0;  // min eta for a vtx to be considered "forward"
+auto min_abs_track_eta =  2.4;  // min eta for a track to be considered "forward"
+auto min_track_pt      =  1.0;  // track_pt > 1.0 GeV
+auto max_vtx_dz        =  2.0;  // max error for reco HS vertex z
+auto max_nsigma        =  3.0;  // how close a track can be to PV
+
+void setup_chain(TChain &chain) {
   // VBF H->Invisible sample
-  for (const auto& entry : std::filesystem::directory_iterator("./ntuple")) {
+  for (const auto& entry : boost::filesystem::directory_iterator("./ntuple")) {
     if(debug) {std::cout << "Adding file: " << entry.path() << std::endl;}
     chain.Add(entry.path().c_str());
     // break; // add 1
@@ -21,64 +35,186 @@ void generate_dt() {
     std::cerr << "No ROOT files found in directory: " << std::endl;
     return;
   }
+}
 
+void set_maximum(TH1F *hist1, TH1F *hist2, TH1F *hist3, TH1F *hist4) {
+  // assume they're normalized
+  float max_val = 1.2*std::max({hist1->GetMaximum(), hist2->GetMaximum(), hist3->GetMaximum(), hist4->GetMaximum()});
+  hist1->SetMaximum(max_val);
+  hist2->SetMaximum(max_val);
+  hist3->SetMaximum(max_val);
+  hist4->SetMaximum(max_val);
+  return;
+}
+
+void draw_hist_with_fits(TCanvas* canvas, bool is_dgaus, const char* fname,
+			 TH1F *hist1, TH1F *hist2, TH1F *hist3, TH1F *hist4,
+			 TF1  *fit_1, TF1  *fit_2, TF1  *fit_3, TF1  *fit_4) {
+  canvas->SetLogy(true);
+  TLatex latex;
+  latex.SetTextSize(0.04);
+  latex.SetTextAlign(13);  // Align left-top
+
+  hist1->Draw("HIST");
+  hist2->Draw("HIST SAME");
+  hist3->Draw("HIST SAME");
+  hist4->Draw("HIST SAME");
+  latex.DrawLatexNDC(0.15, 0.85, Form("N_{jets}\\geq %d, p_{T} > %0.2f GeV", min_jets, min_jetpt));
+    
+  TLegend *legend = new TLegend(0.65, 0.65, 0.9, 0.9);
+  if(is_dgaus){
+    legend->AddEntry(hist1, Form("=0 Forward Jet #sigma = %.2f#pm%.2f(%.2f%%)",
+				 fit_1->GetParameter(3), fit_1->GetParError(3),
+				 100*fit_1->GetParError(3)/fit_1->GetParameter(3)), "l");
+    legend->AddEntry(hist2, Form("=1 Forward Jet #sigma = %.2f#pm%.2f(%.2f%%)",
+				 fit_2->GetParameter(3), fit_2->GetParError(3),
+				 100*fit_2->GetParError(3)/fit_2->GetParameter(3)), "l");
+    legend->AddEntry(hist3, Form("=2 Forward Jet #sigma = %.2f#pm%.2f(%.2f%%)",
+				 fit_3->GetParameter(3), fit_3->GetParError(3),
+				 100*fit_3->GetParError(3)/fit_3->GetParameter(3)), "l");
+    legend->AddEntry(hist4, Form(">2 Forward Jet #sigma = %.2f#pm%.2f(%.2f%%)",
+				 fit_4->GetParameter(3), fit_4->GetParError(3),
+				 100*fit_4->GetParError(3)/fit_4->GetParameter(3)), "l");
+  } else {
+    legend->AddEntry(hist1, Form("=0 Forward Jet, #sigma = %.2f", fit_1->GetParameter(2)), "l");
+    legend->AddEntry(hist2, Form("=1 Forward Jet, #sigma = %.2f", fit_2->GetParameter(2)), "l");
+    legend->AddEntry(hist3, Form("=2 Forward Jet, #sigma = %.2f", fit_3->GetParameter(2)), "l");
+    legend->AddEntry(hist4, Form(">2 Forward Jet, #sigma = %.2f", fit_4->GetParameter(2)), "l");
+  }
+
+  legend->Draw();
+  canvas->Print(Form("%s(",fname), "pdf");
+
+  // individual plots with fits
+  hist1->Draw("HIST");
+  fit_1->Draw("SAME");
+  latex.DrawLatexNDC(0.15, 0.85, "N(Forward Jet) = 0");
+  legend->Draw();
+  canvas->Print(fname, "pdf");
+
+  hist2->Draw("HIST");
+  fit_2->Draw("SAME");
+  latex.DrawLatexNDC(0.15, 0.85, "N(Forward Jet) = 1");
+  legend->Draw();
+  canvas->Print(fname, "pdf");
+
+  hist3->Draw("HIST");
+  fit_3->Draw("SAME");
+  latex.DrawLatexNDC(0.15, 0.85, "N(Forward Jet) = 2");
+  legend->Draw();
+  canvas->Print(fname, "pdf");
+
+  hist4->Draw("HIST");
+  fit_4->Draw("SAME");
+  latex.DrawLatexNDC(0.15, 0.85, "N(Forward Jet) > 2");
+  legend->Draw();
+  canvas->Print(Form("%s)",fname), "pdf");
+  canvas->SetLogy(false);
+}
+
+TF1* dgaus_fit(TH1F *hist, double fit_bound, Int_t color) {
+  TF1 *fit_1 = new TF1(Form("fit_%s",hist->GetName()), "dgaus", -fit_bound, fit_bound);
+  fit_1->SetParameters(0, hist->GetMaximum(), 1e-2, 26.0, 175.0);
+  fit_1->FixParameter(4, 175);
+  hist->Fit(fit_1, "R");
+  // set color while we're here
+  hist->SetLineColor(color);
+  fit_1->SetLineColor(color);
+  return fit_1;
+}
+
+TF1* gaus_fit(TH1F *hist, double fit_bound, Int_t color) {
+  TF1 *fit_1 = new TF1(Form("fit_%s",hist->GetName()), "gaus", -fit_bound, fit_bound);
+  hist->Fit(fit_1, "R");
+  // set color while we're here
+  hist->SetLineColor(color);
+  fit_1->SetLineColor(color);
+  return fit_1;
+}
+
+void generate_dt() {
+  gStyle->SetOptStat(0);
+  // colors
+  auto c1 = TColor::GetColor("#3f90da");
+  auto c2 = TColor::GetColor("#ffa90e");
+  auto c3 = TColor::GetColor("#bd1f01");
+  auto c4 = TColor::GetColor("#94a4a2");
+  auto c5 = TColor::GetColor("#832db6");
+
+  TChain chain ("ntuple");
+  setup_chain(chain);
   TTreeReader reader(&chain);
-  // jet variables
-  TTreeReaderArray<float> jet_pt (reader, "AntiKt4EMTopoJets_pt");
-  TTreeReaderArray<float> jet_eta(reader, "AntiKt4EMTopoJets_eta");
-  TTreeReaderArray<std::vector<int>> jet_track_indices(reader, "AntiKt4EMTopoJets_track_idx");
+  TCanvas *canvas = new TCanvas("canvas", "Histograms", 800, 600);
 
-  TTreeReaderArray<float> truth_hsjet_pt (reader, "TruthHSJet_pt");
+  // jet variables
+  TTreeReaderArray<float> jet_pt
+    // (reader, "TruthHSJet_pt");
+    (reader, "AntiKt4EMTopoJets_pt");
+  TTreeReaderArray<float> jet_eta
+    // (reader, "TruthHSJet_eta");
+    (reader, "AntiKt4EMTopoJets_eta");
+  TTreeReaderArray<std::vector<int>> jet_track_indices
+    (reader, "AntiKt4EMTopoJets_track_idx");
 
   // vertex variables
   /// truth vertex
-  TTreeReaderArray<float> truth_vtx_z   (reader, "TruthVtx_z");
-  TTreeReaderArray<float> truth_vtx_time(reader, "TruthVtx_time");
+  TTreeReaderArray<float> truth_vtx_z
+    (reader, "TruthVtx_z");
+  TTreeReaderArray<float> truth_vtx_time
+    (reader, "TruthVtx_time");
 
   /// reco vertex
-  TTreeReaderArray<float> reco_vtx_z      (reader, "RecoVtx_z");
-  TTreeReaderArray<float> reco_vtx_time   (reader, "RecoVtx_time");
-  TTreeReaderArray<float> reco_vtx_timeRes(reader, "RecoVtx_timeRes");
-  TTreeReaderArray<int>   reco_vtx_valid  (reader, "RecoVtx_hasValidTime");
+  TTreeReaderArray<float> reco_vtx_z
+    (reader, "RecoVtx_z");
+  TTreeReaderArray<float> reco_vtx_time
+    (reader, "RecoVtx_time");
+  TTreeReaderArray<float> reco_vtx_timeRes
+    (reader, "RecoVtx_timeRes");
+  TTreeReaderArray<int>   reco_vtx_valid
+    (reader, "RecoVtx_hasValidTime");
 
   // track variables
-  TTreeReaderArray<float> track_z0(reader, "Track_z0");
-  TTreeReaderArray<float> track_pt(reader, "Track_pt");
-  TTreeReaderArray<float> track_eta(reader, "Track_eta");
-  TTreeReaderArray<float> track_time(reader, "Track_time");
-  TTreeReaderArray<float> track_time_res(reader, "Track_timeRes");
-  TTreeReaderArray<float> track_var_z0(reader, "Track_var_z0");
-  TTreeReaderArray<int>   track_to_truthvtx(reader, "Track_truthVtx_idx");
-  TTreeReaderArray<int>   track_to_particle(reader, "Track_truthPart_idx");
-  TTreeReaderArray<int>   track_time_valid(reader, "Track_hasValidTime");
+  TTreeReaderArray<float> track_z0
+    (reader, "Track_z0");
+  TTreeReaderArray<float> track_pt
+    (reader, "Track_pt");
+  TTreeReaderArray<float> track_eta
+    (reader, "Track_eta");
+  TTreeReaderArray<float> track_time
+    (reader, "Track_time");
+  TTreeReaderArray<float> track_time_res
+    (reader, "Track_timeRes");
+  TTreeReaderArray<float> track_var_z0
+    (reader, "Track_var_z0");
+  TTreeReaderArray<int>   track_to_truthvtx
+    (reader, "Track_truthVtx_idx");
+  TTreeReaderArray<int>   track_to_particle
+    (reader, "Track_truthPart_idx");
+  TTreeReaderArray<int>   track_time_valid
+    (reader, "Track_hasValidTime");
 
   // particle vars
-  TTreeReaderArray<float> prod_vtx_z  (reader, "TruthPart_prodVtx_z");
+  TTreeReaderArray<float> prod_vtx_z
+    (reader, "TruthPart_prodVtx_z");
 
-  int bins = 50;
+  int bins = 200;
+  double diff_bound = 1000.0;
+  double res_bound = 100.0;
 
   // Histograms
-  double non_norm_bound = 200.0;
   /// Store vertex dt = reco_vtx_time[0] - truth_vtx_time[0]
-  TH1F *hist1 = new TH1F("hist1", "RecoVtx t_{0} - TruthVtx t_{0};#Delta t;Entries", bins, -non_norm_bound, non_norm_bound);
-  TH1F *hist2 = new TH1F("hist2", "RecoVtx t_{0} - TruthVtx t_{0},nForwardJet=1;#Delta t;Entries", bins, -non_norm_bound, non_norm_bound);
-  TH1F *hist3 = new TH1F("hist3", "RecoVtx t_{0} - TruthVtx t_{0},nForwardJet=2;#Delta t;Entries", bins, -non_norm_bound, non_norm_bound);
-  TH1F *hist4 = new TH1F("hist4", "RecoVtx t_{0} - TruthVtx t_{0},nForwardJet>2;#Delta t;Entries", bins, -non_norm_bound, non_norm_bound);
+  TH1F *hist1 = new TH1F("hist1", "RecoVtx t_{0} - TruthVtx t_{0};#Delta t (ps);Entries", bins, -diff_bound, diff_bound);
+  TH1F *hist2 = new TH1F("hist2", "RecoVtx t_{0} - TruthVtx t_{0};#Delta t (ps);Entries", bins, -diff_bound, diff_bound);
+  TH1F *hist3 = new TH1F("hist3", "RecoVtx t_{0} - TruthVtx t_{0};#Delta t (ps);Entries", bins, -diff_bound, diff_bound);
+  TH1F *hist4 = new TH1F("hist4", "RecoVtx t_{0} - TruthVtx t_{0};#Delta t (ps);Entries", bins, -diff_bound, diff_bound);
 
   /// Store dt/res
-  TH1F *hist_norm1 = new TH1F("hist_norm1", "(RecoVtx t_{0} - TruthVtx t_{0})/#sigma_{t};#Delta t;Entries", bins, -20, 20);
-  TH1F *hist_norm2 = new TH1F("hist_norm2", "(RecoVtx t_{0} - TruthVtx t_{0})/#sigma_{t},nForwardJet=1;#Delta t;Entries", bins, -20, 20);
-  TH1F *hist_norm3 = new TH1F("hist_norm3", "(RecoVtx t_{0} - TruthVtx t_{0})/#sigma_{t},nForwardJet=2;#Delta t;Entries", bins, -20, 20);
-  TH1F *hist_norm4 = new TH1F("hist_norm4", "(RecoVtx t_{0} - TruthVtx t_{0})/#sigma_{t},nForwardJet>2;#Delta t;Entries", bins, -20, 20);
+  TH1F *normhist1 = new TH1F("normhist1", "(RecoVtx t_{0} - TruthVtx t_{0})/#sigma_{t};res(t);Entries", bins, -res_bound, res_bound);
+  TH1F *normhist2 = new TH1F("normhist2", "(RecoVtx t_{0} - TruthVtx t_{0})/#sigma_{t};res(t);Entries", bins, -res_bound, res_bound);
+  TH1F *normhist3 = new TH1F("normhist3", "(RecoVtx t_{0} - TruthVtx t_{0})/#sigma_{t};res(t);Entries", bins, -res_bound, res_bound);
+  TH1F *normhist4 = new TH1F("normhist4", "(RecoVtx t_{0} - TruthVtx t_{0})/#sigma_{t};res(t);Entries", bins, -res_bound, res_bound);
 
-  // cut variables
-  int    min_jets    = 2;    // min number of jets
-  double min_jetpt   = 30.0; // self explanatory
-  double min_abs_eta = 2.0;  // min eta for a vtx to be considered "forward"
-  double min_abs_track_eta = 2.4;  // min eta for a track to be considered "forward"
-  double min_track_pt = 1.0;  // track_pt > 1.0 GeV
-  double max_vtx_dz  = 2.0;  // max error for reco HS vertex z
-  double max_nsigma  = 2.0;  // how close a track can be to PV
+  TH1I *nForJetHist = new TH1I("forjethist", "number of fjets>2;nJet;Entries",10,-0.5,9.5);
 
   while (reader.Next()) {
     if (jet_pt.GetSize() < min_jets ) {
@@ -114,225 +250,73 @@ void generate_dt() {
 	nForwardJet++;
     }
 
-    // new forward jet classification
-    // int nForwardJet = 0;
-    // for(auto jet_idx: jet_track_indices) {
-    //   bool isForward = false;
-    //   for(auto idx: jet_idx) {
-    // 	if(std::abs(track_eta[idx]) > min_abs_eta) {
-    // 	  // this is a forward jet
-    // 	  isForward = true;
-    // 	  break;
-    // 	}
-    //   }
-    //   if(isForward)
-    // 	nForwardJet++;
-    // }
-
     if (debug)
       std::cout << "nForwardJet = " << nForwardJet << std::endl;
 
-    if (reco_vtx_valid[0] == 1) {
-      float diff = reco_vtx_time[0] - truth_vtx_time[0];
-      float reso = diff / (reco_vtx_timeRes[0]);
+    float diff = reco_vtx_time[0] - truth_vtx_time[0];
+    float reso = diff / (reco_vtx_timeRes[0]);
     
-      if (nForwardJet == 0)        { // exactly 0 forward jets
-	hist1->Fill(diff);
-	hist_norm1->Fill(reso);
-      } else if (nForwardJet == 1) { // exactly 1 forward jet
-	hist2->Fill(diff);
-	hist_norm2->Fill(reso);
-      } else if (nForwardJet == 2) { // exactly 2 forward jet
-	hist3->Fill(diff);
-	hist_norm3->Fill(reso);
-      } else { // more
-	hist4->Fill(diff);
-	hist_norm4->Fill(reso);
-      } 
-    }
+    if (nForwardJet == 0)        { // exactly 0 forward jets
+      hist1->Fill(diff);
+      normhist1->Fill(reso);
+    } else if (nForwardJet == 1) { // exactly 1 forward jet
+      hist2->Fill(diff);
+      normhist2->Fill(reso);
+    } else if (nForwardJet == 2) { // exactly 2 forward jet
+      hist3->Fill(diff);
+      normhist3->Fill(reso);
+    } else { // more
+      nForJetHist->Fill(nForwardJet);
+      hist4->Fill(diff);
+      normhist4->Fill(reso);
+    } 
   }
 
-  TLatex latex;
-  latex.SetTextSize(0.04);
-  latex.SetTextAlign(13);  // Align left-top
-
-  hist_norm1->Scale(1/hist_norm1->Integral());
-  hist_norm2->Scale(1/hist_norm2->Integral());
-  hist_norm3->Scale(1/hist_norm3->Integral());
-  hist_norm4->Scale(1/hist_norm4->Integral());
-  
-  hist_norm1->SetMaximum(1.2*std::max({hist_norm1->GetMaximum(), hist_norm2->GetMaximum(), hist_norm3->GetMaximum(), hist_norm4->GetMaximum()}));
-  hist_norm2->SetMaximum(hist_norm1->GetMaximum());
-  hist_norm3->SetMaximum(hist_norm1->GetMaximum());
-  hist_norm4->SetMaximum(hist_norm1->GetMaximum());
-
-  canvas->SetLogy(true);
-  
-  hist_norm1->SetLineColor(c1);
-  hist_norm1->SetLineWidth(2);
-  hist_norm1->Draw("HIST");
-  latex.DrawLatexNDC(0.15, 0.85, Form("N_{jets}\\geq %d, p_{T} > %0.2f GeV", min_jets, min_jetpt));
-
-  hist_norm2->SetLineColor(c2);
-  hist_norm2->SetLineWidth(2);
-  hist_norm2->Draw("HIST SAME");
-
-  hist_norm3->SetLineColor(c3);
-  hist_norm3->SetLineWidth(2);
-  hist_norm3->Draw("HIST SAME");
-
-  hist_norm4->SetLineColor(c5);
-  hist_norm4->SetLineWidth(2);
-  hist_norm4->Draw("HIST SAME");
-
-  double normfit_bound = 20;
-
-  TF1 *normfit_1 = new TF1("normfit_1", "gaus", -normfit_bound, normfit_bound);
-  hist_norm1->Fit(normfit_1, "R");
-  TF1 *normfit_2 = new TF1("normfit_2", "gaus", -normfit_bound, normfit_bound);
-  hist_norm2->Fit(normfit_2, "R");
-  TF1 *normfit_3 = new TF1("normfit_3", "gaus", -normfit_bound, normfit_bound);
-  hist_norm3->Fit(normfit_3, "R");
-  TF1 *normfit_4 = new TF1("normfit_4", "gaus", -normfit_bound, normfit_bound);
-  hist_norm4->Fit(normfit_4, "R");
-  
-  TLegend *normlegend = new TLegend(0.65, 0.65, 0.9, 0.9);
-  normlegend->AddEntry(hist_norm1, Form("=0 Forward Jet, #sigma = %.2f", normfit_1->GetParameter(2)), "l");
-  normlegend->AddEntry(hist_norm2, Form("=1 Forward Jet, #sigma = %.2f", normfit_2->GetParameter(2)), "l");
-  normlegend->AddEntry(hist_norm3, Form("=2 Forward Jet, #sigma = %.2f", normfit_3->GetParameter(2)), "l");
-  normlegend->AddEntry(hist_norm4, Form(">2 Forward Jet, #sigma = %.2f", normfit_4->GetParameter(2)), "l");
-  normlegend->Draw();
-  
-  canvas->Print("dtplots.pdf(", "pdf");
-
-  // individual plots with fits
-  hist_norm1->Draw("HIST");
-  normfit_1->SetLineColor(c1);
-  normfit_1->Draw("SAME");
-  normlegend->Draw();
-  canvas->Print("dtplots.pdf", "pdf");
-
-  hist_norm2->Draw("HIST");
-  normfit_2->SetLineColor(c2);
-  normfit_2->Draw("SAME");
-  normlegend->Draw();
-  canvas->Print("dtplots.pdf", "pdf");
-
-  hist_norm3->Draw("HIST");
-  normfit_3->SetLineColor(c3);
-  normfit_3->Draw("SAME");
-  normlegend->Draw();
-  canvas->Print("dtplots.pdf", "pdf");
-
-  hist_norm4->Draw("HIST");
-  normfit_4->SetLineColor(c5);
-  normfit_4->Draw("SAME");
-  normlegend->Draw();
-  canvas->Print("dtplots.pdf", "pdf");
+  // Normalize Histograms, set line width
+  for(auto hist: {hist1, hist2, hist3, hist4, normhist1, normhist2, normhist3, normhist4}) {
+    hist->Scale(1/hist->Integral());
+    hist->SetLineWidth(2);
+  }
 
   // NON DIVIDED BY RESOS
-  hist1->Scale(1/hist1->Integral());
-  hist2->Scale(1/hist2->Integral());
-  hist3->Scale(1/hist3->Integral());
-  hist4->Scale(1/hist4->Integral());
+  set_maximum(hist1, hist2, hist3, hist4);
+  set_maximum(normhist1, normhist2, normhist3, normhist4);
 
-  hist1->SetMaximum(1.2*std::max({hist1->GetMaximum(), hist2->GetMaximum(), hist3->GetMaximum(), hist4->GetMaximum()}));
-  hist2->SetMaximum(hist1->GetMaximum());
-  hist3->SetMaximum(hist1->GetMaximum());
-  hist4->SetMaximum(hist1->GetMaximum());
-  
-  hist1->SetLineColor(c1);
-  hist1->SetLineWidth(2);
-  hist1->Draw("HIST");
-  latex.DrawLatexNDC(0.15, 0.85, Form("N_{jets}\\geq %d, p_{T} > %0.2f GeV", min_jets, min_jetpt));
-
-  hist2->SetLineColor(c2);
-  hist2->SetLineWidth(2);
-  hist2->Draw("HIST SAME");
-
-  hist3->SetLineColor(c3);
-  hist3->SetLineWidth(2);
-  hist3->Draw("HIST SAME");
-  
-  hist4->SetLineColor(c5);
-  hist4->SetLineWidth(2);
-  hist4->Draw("HIST SAME");
-
-  double fit_bound = non_norm_bound;
+  double fit_bound = diff_bound;
+  double normfit_bound = 20;
 
   TF1 *f1 = new TF1("dgaus",
 		    "[1] * exp(-0.5 * ((x - [0]) / [3])^2) + [2] * exp(-0.5 * ((x - [0]) / [4])^2)",
 		    -fit_bound, fit_bound);
   f1->SetParNames("Mean", "Norm1", "Norm2", "Sigma1", "Sigma2");
-
-  TF1 *fit_1 = new TF1("fit_1", "dgaus", -fit_bound, fit_bound);
-  fit_1->SetParameters(0, hist1->GetMaximum(), 1e-2, 26.0, 175.0);
-  fit_1->FixParameter(4, 175);
-  hist1->Fit(fit_1, "R");
-  TF1 *fit_2 = new TF1("fit_2", "dgaus", -fit_bound, fit_bound);
-  fit_2->SetParameters(0, hist2->GetMaximum(), 1e-2, 26.0, 175.0);
-  fit_2->FixParameter(4, 175);
-  hist2->Fit(fit_2, "R");
-  TF1 *fit_3 = new TF1("fit_3", "dgaus", -fit_bound, fit_bound);
-  fit_3->SetParameters(0, hist3->GetMaximum(), 1e-2, 26.0, 175.0);
-  fit_3->FixParameter(4, 175);
-  hist3->Fit(fit_3, "R");
-  TF1 *fit_4 = new TF1("fit_4", "dgaus", -fit_bound, fit_bound);
-  fit_4->SetParameters(0, hist4->GetMaximum(), 1e-2, 26.0, 175.0);
-  fit_4->FixParameter(4, 175);
-  hist4->Fit(fit_4, "R");
-    
-  TLegend *legend = new TLegend(0.65, 0.65, 0.9, 0.9);
-  legend->AddEntry(hist1, Form("=0 Forward Jet #sigma = %.2f#pm%.2f(%.2f%%)",
-			       fit_1->GetParameter(3),
-			       fit_1->GetParError(3),
-			       100*fit_1->GetParError(3)/fit_1->GetParameter(3)), "l");
-  legend->AddEntry(hist2, Form("=1 Forward Jet #sigma = %.2f#pm%.2f(%.2f%%)",
-			       fit_2->GetParameter(3),
-			       fit_2->GetParError(3),
-			       100*fit_2->GetParError(3)/fit_2->GetParameter(3)), "l");
-  legend->AddEntry(hist3, Form("=2 Forward Jet #sigma = %.2f#pm%.2f(%.2f%%)",
-			       fit_3->GetParameter(3),
-			       fit_3->GetParError(3),
-			       100*fit_3->GetParError(3)/fit_3->GetParameter(3)), "l");
-  legend->AddEntry(hist4, Form(">3 Forward Jet #sigma = %.2f#pm%.2f(%.2f%%)",
-			       fit_4->GetParameter(3),
-			       fit_4->GetParError(3),
-			       100*fit_4->GetParError(3)/fit_4->GetParameter(3)), "l");
   
-  legend->Draw();
-  canvas->Print("dtplots.pdf", "pdf");
+  TF1 *fit_1 = dgaus_fit(hist1, fit_bound, c1);
+  TF1 *fit_2 = dgaus_fit(hist2, fit_bound, c2);
+  TF1 *fit_3 = dgaus_fit(hist3, fit_bound, c3);
+  TF1 *fit_4 = dgaus_fit(hist4, fit_bound, c5);
 
-  // individual plots with fits
-  hist1->Draw("HIST");
-  fit_1->SetLineColor(c1);
-  fit_1->Draw("SAME");
-  legend->Draw();
-  canvas->Print("dtplots.pdf", "pdf");
+  TF1 *normfit_1 = gaus_fit(normhist1, normfit_bound, c1);
+  TF1 *normfit_2 = gaus_fit(normhist2, normfit_bound, c2);
+  TF1 *normfit_3 = gaus_fit(normhist3, normfit_bound, c3);
+  TF1 *normfit_4 = gaus_fit(normhist4, normfit_bound, c5);
 
-  hist2->Draw("HIST");
-  fit_2->SetLineColor(c2);
-  fit_2->Draw("SAME");
-  legend->Draw();
-  canvas->Print("dtplots.pdf", "pdf");
+  draw_hist_with_fits(canvas, true, "figs/dt_plots.pdf",
+		      hist1, hist2, hist3, hist4,
+		      fit_1, fit_2, fit_3, fit_4);
 
-  hist3->Draw("HIST");
-  fit_3->SetLineColor(c3);
-  fit_3->Draw("SAME");
-  legend->Draw();
-  canvas->Print("dtplots.pdf", "pdf");
+  draw_hist_with_fits(canvas, false, "figs/resdt_plots.pdf",
+		      normhist1, normhist2, normhist3, normhist4,
+		      normfit_1, normfit_2, normfit_3, normfit_4);
 
-  hist4->Draw("HIST");
-  fit_4->SetLineColor(c5);
-  fit_4->Draw("SAME");
-  legend->Draw();
-  canvas->Print("dtplots.pdf)", "pdf");
-
-  canvas->SetLogy(false);
-
-  std::cout << "hist1 has " << hist1->GetEntries() << " Entries" << std::endl;
-
+  nForJetHist->SetMaximum(1.1*nForJetHist->GetMaximum());
+  nForJetHist->Draw("HIST F");
+  nForJetHist->SetLineWidth(2);
+  nForJetHist->SetLineColor(c1);
+  nForJetHist->SetFillColor(c1);
+  canvas->SaveAs("figs/nforjet.pdf");
+  
   if(debug) {
+    std::cout << "hist1 has " << hist1->GetEntries() << " Entries" << std::endl;
     std::cout << "    fit 1 has " << 100*fit_1->GetParError(3)/fit_1->GetParameter(3) << "% error on sigma" << std::endl;
     std::cout << "    fit 2 has " << 100*fit_2->GetParError(3)/fit_2->GetParameter(3) << "% error on sigma" << std::endl;
     std::cout << "    fit 3 has " << 100*fit_3->GetParError(3)/fit_3->GetParameter(3) << "% error on sigma" << std::endl;

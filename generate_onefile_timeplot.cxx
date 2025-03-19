@@ -1,3 +1,24 @@
+#include <TCanvas.h>
+#include <TLatex.h>
+#include <TColor.h>
+#include <TLine.h>
+#include <TStyle.h>
+#include <TFile.h>
+#include <TTreeReader.h>
+#include <TTreeReaderArray.h>
+#include <TLegend.h>
+#include <TH1.h>
+#include <TH2.h>
+#include <TF1.h>
+#include <iostream>
+#include <boost/filesystem.hpp>
+
+// Explicitly load the dictionary for ROOT to recognize nested vectors
+#ifdef __CLING__
+#pragma link C++ class std::vector<std::vector<int>>+;
+#endif
+
+
 void generate_onefile_timeplot() {
   bool debug = false;
   gStyle->SetOptStat(0);
@@ -10,26 +31,26 @@ void generate_onefile_timeplot() {
   auto c5 = TColor::GetColor("#832db6");
 
   auto Number = "000034";
-  Number="000036";
-  Number="000037";
-  Number="000045";
-  Number="000046";
-  Number="001445";
-  Number="001446";
-  Number="001447";
-  Number="001449";
-  Number="001450";
-  Number="001451";
-  Number="001452";
-  Number="001528";
-  Number="001537";
-  Number="001538";
-  Number="001550";
-  Number="001975";
-  Number="001982";
-  Number="002016";
-  Number="002017";
-  Number="002029";
+  // Number="000036";
+  // Number="000037";
+  // Number="000045";
+  // Number="000046";
+  // Number="001445";
+  // Number="001446";
+  // Number="001447";
+  // Number="001449";
+  // Number="001450";
+  // Number="001451";
+  // Number="001452";
+  // Number="001528";
+  // Number="001537";
+  // Number="001538";
+  // Number="001550";
+  // Number="001975";
+  // Number="001982";
+  // Number="002016";
+  // Number="002017";
+  // Number="002029";
   
   TCanvas *canvas = new TCanvas("canvas", "Track Time Histogram", 800, 600);
   TFile *file = TFile::Open(Form("./ntuple/user.scheong.42871997.Output._%s.SuperNtuple.root", Number));
@@ -62,10 +83,10 @@ void generate_onefile_timeplot() {
 
   // int num_events = (int)tree->GetEntries();
   int numpages = 1;
-  canvas->Print(Form("trackhists_%s_0fjet.pdf(",Number), "pdf");
-  canvas->Print(Form("trackhists_%s_1fjet.pdf(",Number), "pdf");
-  canvas->Print(Form("trackhists_%s_2fjet.pdf(",Number), "pdf");
-  canvas->Print(Form("trackhists_%s_2pfjet.pdf(",Number), "pdf");
+  canvas->Print(Form("figs/trackhists_%s_0fjet.pdf(",Number), "pdf");
+  canvas->Print(Form("figs/trackhists_%s_1fjet.pdf(",Number), "pdf");
+  canvas->Print(Form("figs/trackhists_%s_2fjet.pdf(",Number), "pdf");
+  canvas->Print(Form("figs/trackhists_%s_2pfjet.pdf(",Number), "pdf");
   std::vector<int> nHSTracksValidTime;
 
   std::vector<std::string> eventDisplayCommands;
@@ -116,21 +137,6 @@ void generate_onefile_timeplot() {
       if (std::abs(eta) > min_abs_eta)
 	nForwardJet++;
     }
-
-    // new forward jet classification
-    // int nForwardJet = 0;
-    // for(auto jet_idx: jet_track_indices) {
-    //   bool isForward = false;
-    //   for(auto idx: jet_idx) {
-    // 	if(std::abs(track_eta[idx]) > min_abs_eta) {
-    // 	  // this is a forward jet
-    // 	  isForward = true;
-    // 	  break;
-    // 	}
-    //   }
-    //   if(isForward)
-    // 	nForwardJet++;
-    // }
     
     // select valid times
     std::vector<float> selected_times;
@@ -142,7 +148,7 @@ void generate_onefile_timeplot() {
       if (!(track_time_valid[idx] == 1 && track_pt[idx] > min_track_pt))
 	continue; // skip low pt tracks
 
-      float nsigma = (track_z0[idx] - reco_vtx_z[0])/std::sqrt(track_var_z0[idx]);
+      float nsigma = (track_z0[idx] - reco_vtx_z[0])/std::sqrt(track_var_z0[idx]+reco_vertex_time_res);
       if(std::abs(nsigma) > max_nsigma) {
 	if(debug)
 	  std::cout << "Skipping track " << idx << " due to high nsigma" << std::endl;
@@ -205,13 +211,13 @@ void generate_onefile_timeplot() {
       hist->SetMaximum(1.25*hist->GetMaximum());
       // separate into nforjet regions
       if (nForwardJet == 0)
-	canvas->Print(Form("trackhists_%s_0fjet.pdf",Number), "pdf");
+	canvas->Print(Form("figs/trackhists_%s_0fjet.pdf",Number), "pdf");
       if (nForwardJet == 1) 
-	canvas->Print(Form("trackhists_%s_1fjet.pdf",Number), "pdf");
+	canvas->Print(Form("figs/trackhists_%s_1fjet.pdf",Number), "pdf");
       if (nForwardJet == 2) 
-	canvas->Print(Form("trackhists_%s_2fjet.pdf",Number), "pdf");
+	canvas->Print(Form("figs/trackhists_%s_2fjet.pdf",Number), "pdf");
       if (nForwardJet >= 2) 
-	canvas->Print(Form("trackhists_%s_2pfjet.pdf",Number), "pdf");
+	canvas->Print(Form("figs/trackhists_%s_2pfjet.pdf",Number), "pdf");
 
       if (nForwardJet == 0)
 	eventDisplayCommands.push_back(Form("/usr/bin/python3 event_display_VBF_R25.py --file_num %s --event_num %lld --vtxID 0",Number,reader.GetCurrentEntry()));
@@ -224,10 +230,10 @@ void generate_onefile_timeplot() {
   }
 
   // may result in dupes
-  canvas->Print(Form("trackhists_%s_0fjet.pdf)",Number), "pdf");
-  canvas->Print(Form("trackhists_%s_1fjet.pdf)",Number), "pdf");
-  canvas->Print(Form("trackhists_%s_2fjet.pdf)",Number), "pdf");
-  canvas->Print(Form("trackhists_%s_2pfjet.pdf)",Number), "pdf");
+  canvas->Print(Form("figs/trackhists_%s_0fjet.pdf)",Number), "pdf");
+  canvas->Print(Form("figs/trackhists_%s_1fjet.pdf)",Number), "pdf");
+  canvas->Print(Form("figs/trackhists_%s_2fjet.pdf)",Number), "pdf");
+  canvas->Print(Form("figs/trackhists_%s_2pfjet.pdf)",Number), "pdf");
 
   int minN = *std::min_element(nHSTracksValidTime.begin(), nHSTracksValidTime.end());
   int maxN = *std::max_element(nHSTracksValidTime.begin(), nHSTracksValidTime.end());
