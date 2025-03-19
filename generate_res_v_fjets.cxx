@@ -9,7 +9,7 @@
 #include <iostream>
 #include <boost/filesystem.hpp>
 
-void generate_res_v_tracks() {
+void generate_res_v_fjets() {
   bool debug = false;
   gStyle->SetOptStat(0);
   // colors
@@ -78,29 +78,25 @@ void generate_res_v_tracks() {
   TTreeReaderArray<int> track_time_valid
     (reader, "Track_hasValidTime");
 
-  int track_min = 0, track_max = 60;
+  int fjet_min = 0, fjet_max = 10;
   double diff_min = -1000.0, diff_max = 1000.0;
   double res_min = -110, res_max = 110;
-  int bins_x = (track_max-track_min)/3, bins_y=(diff_max-diff_min);
+  int bins_x = (fjet_max-fjet_min), bins_y=(diff_max-diff_min);
   
   // Histograms
   /// Store vertex dt = reco_vtx_time[0] - truth_vtx_time[0]
   TH2F *hist1 = new TH2F(
 			 "hist1",
 			 "RecoVtx t_{0} - TruthVtx t_{0} vs Forward Tracks;n Forward Track;#Delta t[ps]",
-			 bins_x,               // bin x
-			 track_min-0.5, track_max-0.5, // bounds x
-			 bins_y,               // bin y
-			 diff_min, diff_max    // bounds y
+			 bins_x, fjet_min-0.5, fjet_max-0.5, // bounds x
+			 bins_y, diff_min, diff_max          // bounds y
 			 );
 
   TH2F *hist2 = new TH2F(
 			 "hist2",
 			 "(RecoVtx t_{0} - TruthVtx t_{0})/#sigma_{t} vs Forward Tracks;n Forward Track;#Delta t[ps]",
-			 bins_x,               // bin x
-			 track_min, track_max, // bounds x
-			 bins_y,               // bin y
-			 res_min, res_max      // bounds y
+			 bins_x, fjet_min, fjet_max, // bounds x
+			 bins_y, res_min, res_max    // bounds y
 			 );
 
   // cut variables
@@ -147,22 +143,16 @@ void generate_res_v_tracks() {
       continue;
     }
     
-    int nForwardTrack = 0;
     int nForwardJet = 0;
-    for(int i = 0; i < track_eta.GetSize(); ++i) {
-      auto eta = track_eta[i];
-      auto valid = track_time_valid[i];
-      auto pt = track_pt[i];
-      // if (std::abs(eta) > min_abs_track_eta && valid == 1 && pt > min_track_pt)
-      auto nsigma = (track_z0[i] - reco_vtx_z[0])/std::sqrt(track_var_z0[i]);
-      if (eta > min_abs_track_eta && pt > min_track_pt && std::abs(nsigma) < max_nsigma)
-	nForwardTrack++;
+    for(auto eta : jet_eta) {
+      if (std::abs(eta) > min_abs_jet_eta)
+	nForwardJet++;
     }
     
     float diff = reco_vtx_time[0] - truth_vtx_time[0];
     float res = diff/reco_vtx_timeRes[0];
-    if (nForwardTrack > track_max || nForwardTrack < track_min) 
-      std::cout << "!!!!!n_ftrack: " << nForwardTrack << std::endl;
+    if (nForwardJet > fjet_max || nForwardJet < fjet_min) 
+      std::cout << "!!!!!n_fjet: " << nForwardJet << std::endl;
     if (diff > diff_max || diff < diff_min)
       std::cout << "!!!!!diff: " << diff << std::endl;
     if (res > res_max || res < res_min)
@@ -170,8 +160,8 @@ void generate_res_v_tracks() {
     // std::cout << "--------------------" << std::endl;
     // std::cout << "reso: " << diff << std::endl;
     // std::cout << "--------------------" << std::endl;
-    hist1->Fill(nForwardTrack, diff); // increments value
-    hist2->Fill(nForwardTrack, res); // increments value
+    hist1->Fill(nForwardJet, diff); // increments value
+    hist2->Fill(nForwardJet, res); // increments value
   }
 
   // Fit Gaussian to each slice along Y axis
@@ -181,16 +171,16 @@ void generate_res_v_tracks() {
 
   // Draw histogram
   hist1->Draw("COLZ");
-  canvas->SaveAs("figs/2dhist_tracks.pdf(");
-  canvas->SaveAs("figs/diff_tracks.pdf");
+  canvas->SaveAs("figs/2dhist_jets.pdf(");
+  canvas->SaveAs("figs/diff_jets.pdf");
     
   hist1_1->Draw();
-  canvas->SaveAs("figs/2dhist_tracks.pdf");
-  canvas->SaveAs("figs/diff_trackfit_mean.pdf");
+  canvas->SaveAs("figs/2dhist_jets.pdf");
+  canvas->SaveAs("figs/diff_jetfit_mean.pdf");
     
   hist1_2->Draw();
-  canvas->SaveAs("figs/2dhist_tracks.pdf)");
-  canvas->SaveAs("figs/diff_trackfit_sigma.pdf");
+  canvas->SaveAs("figs/2dhist_jets.pdf)");
+  canvas->SaveAs("figs/diff_jetfit_sigma.pdf");
 
   // hist2->FitSlicesY();
   // TH1D *hist2_1 = (TH1D*)gDirectory->Get("hist2_1"); // Mean values
@@ -198,16 +188,16 @@ void generate_res_v_tracks() {
 
   // // Draw histogram
   // hist2->Draw("COLZ");
-  // canvas->SaveAs("figs/2dhist_tracks.pdf");
-  // canvas->SaveAs("figs/res_tracks.pdf");
+  // canvas->SaveAs("figs/2dhist_jets.pdf");
+  // canvas->SaveAs("figs/res_jets.pdf");
     
   // hist2_1->Draw();
-  // canvas->SaveAs("figs/2dhist_tracks.pdf");
-  // canvas->SaveAs("figs/res_trackfit_mean.pdf");
+  // canvas->SaveAs("figs/2dhist_jets.pdf");
+  // canvas->SaveAs("figs/res_jetfit_mean.pdf");
     
   // hist2_2->Draw();
-  // canvas->SaveAs("figs/2dhist_tracks.pdf)");
-  // canvas->SaveAs("figs/res_trackfit_sigma.pdf");
+  // canvas->SaveAs("figs/2dhist_jets.pdf)");
+  // canvas->SaveAs("figs/res_jetfit_sigma.pdf");
 
   hist1_2->Print("all");
 }
