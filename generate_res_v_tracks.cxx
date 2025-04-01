@@ -1,10 +1,12 @@
 #include <TCanvas.h>
+#include <TLatex.h>
 #include <TColor.h>
 #include <TStyle.h>
 #include <TChain.h>
 #include <TTreeReader.h>
 #include <TTreeReaderArray.h>
 #include <TH1.h>
+#include <TF1.h>
 #include <TH2.h>
 #include <iostream>
 #include <boost/filesystem.hpp>
@@ -81,7 +83,7 @@ void generate_res_v_tracks() {
   int track_min = 0, track_max = 60;
   double diff_min = -1000.0, diff_max = 1000.0;
   double res_min = -110, res_max = 110;
-  int bins_x = (track_max-track_min)/3, bins_y=(diff_max-diff_min);
+  int bins_x = (track_max-track_min)/4, bins_y=(diff_max-diff_min)/8;
   
   // Histograms
   /// Store vertex dt = reco_vtx_time[0] - truth_vtx_time[0]
@@ -89,7 +91,7 @@ void generate_res_v_tracks() {
 			 "hist1",
 			 "RecoVtx t_{0} - TruthVtx t_{0} vs Forward Tracks;n Forward Track;#Delta t[ps]",
 			 bins_x,               // bin x
-			 track_min-0.5, track_max-0.5, // bounds x
+			 track_min, track_max, // bounds x
 			 bins_y,               // bin y
 			 diff_min, diff_max    // bounds y
 			 );
@@ -175,22 +177,107 @@ void generate_res_v_tracks() {
   }
 
   // Fit Gaussian to each slice along Y axis
-  hist1->FitSlicesY();
-  TH1D *hist1_1 = (TH1D*)gDirectory->Get("hist1_1"); // Mean values
-  TH1D *hist1_2 = (TH1D*)gDirectory->Get("hist1_2"); // Sigma values
+  TF1 *f1 = new TF1("dgaus",
+		    "[1] * exp(-0.5 * ((x - [0]) / [3])^2) + [2] * exp(-0.5 * ((x - [0]) / [4])^2)",
+		    diff_min, diff_max);
+  f1->SetParNames("Mean", "Norm1", "Norm2", "Sigma1", "Sigma2");
+  TF1 *fit_1 = new TF1("fit_", "dgaus", diff_min, diff_max);
+  fit_1->SetParameters(0, 0.8*hist1->GetMaximum(), 1e-2, 26.0, 175.0);
+  fit_1->FixParameter(4, 175);
+  fit_1->SetParLimits(3,0,1.E6);
+  hist1->FitSlicesY(fit_1);
+  TH1D *hist1_1 = (TH1D*)gDirectory->Get("hist1_0"); // Mean values
+  TH1D *hist1_2 = (TH1D*)gDirectory->Get("hist1_3"); // Sigma values
 
   // Draw histogram
   hist1->Draw("COLZ");
-  canvas->SaveAs("figs/2dhist_tracks.pdf(");
-  canvas->SaveAs("figs/diff_tracks.pdf");
+  canvas->SaveAs("figs/track2dhist/2dhist_tracks.pdf(");
+  canvas->SaveAs("figs/track2dhist/diff_tracks.pdf");
     
   hist1_1->Draw();
-  canvas->SaveAs("figs/2dhist_tracks.pdf");
-  canvas->SaveAs("figs/diff_trackfit_mean.pdf");
-    
+  canvas->SaveAs("figs/track2dhist/2dhist_tracks.pdf");
+  canvas->SaveAs("figs/track2dhist/diff_trackfit_mean.pdf");
+
+  // hist1_2->SetMaximum(30);
+  // hist1_2->SetMinimum(0);
   hist1_2->Draw();
-  canvas->SaveAs("figs/2dhist_tracks.pdf)");
-  canvas->SaveAs("figs/diff_trackfit_sigma.pdf");
+  canvas->SaveAs("figs/track2dhist/2dhist_tracks.pdf)");
+  canvas->SaveAs("figs/track2dhist/diff_trackfit_sigma.pdf");
+
+  TLatex latex;
+  latex.SetTextSize(0.04);
+  latex.SetTextAlign(13);  // Align left-top
+
+  TH1D *hSlice2 = hist1->ProjectionY("hSlice2", 1, 1);
+  hSlice2->Scale(1/hSlice2->Integral());
+  
+  TH1D *hSlice3 = hist1->ProjectionY("hSlice3", 2, 2);
+  hSlice3->Scale(1/hSlice3->Integral());
+  
+  TH1D *hSlice4 = hist1->ProjectionY("hSlice4", 3, 3);
+  hSlice4->Scale(1/hSlice4->Integral());
+  
+  TH1D *hSlice5 = hist1->ProjectionY("hSlice5", 4, 4);
+  hSlice5->Scale(1/hSlice5->Integral());
+  
+  TH1D *hSlice6 = hist1->ProjectionY("hSlice6", 5, 5);
+  hSlice6->Scale(1/hSlice6->Integral());
+  
+  TH1D *hSlice7 = hist1->ProjectionY("hSlice7", 6, 6);
+  hSlice7->Scale(1/hSlice7->Integral());
+  
+  TH1D *hSlice8 = hist1->ProjectionY("hSlice8", 7, 7);
+  hSlice8->Scale(1/hSlice8->Integral());
+  
+  TH1D *hSlice9 = hist1->ProjectionY("hSlice9", 8, 8);
+  hSlice9->Scale(1/hSlice9->Integral());
+
+  float max_val = 1.2*std::max({
+      hSlice2->GetMaximum(),
+      hSlice3->GetMaximum(),
+      hSlice4->GetMaximum(),
+      hSlice5->GetMaximum(),
+      hSlice6->GetMaximum(),
+      hSlice7->GetMaximum(),
+      hSlice8->GetMaximum(),
+      hSlice9->GetMaximum(),
+    });
+
+  hSlice2->SetMaximum(max_val);
+  hSlice2->SetMinimum(1e-3);
+  hSlice3->SetMaximum(max_val);
+  hSlice3->SetMinimum(1e-3);
+  hSlice4->SetMaximum(max_val);
+  hSlice4->SetMinimum(1e-3);
+  hSlice5->SetMaximum(max_val);
+  hSlice5->SetMinimum(1e-3);
+  hSlice6->SetMaximum(max_val);
+  hSlice6->SetMinimum(1e-3);
+  hSlice7->SetMaximum(max_val);
+  hSlice7->SetMinimum(1e-3);
+  hSlice8->SetMaximum(max_val);
+  hSlice8->SetMinimum(1e-3);
+  hSlice9->SetMaximum(max_val);
+  hSlice9->SetMinimum(1e-3);
+  
+  canvas->SetLogy(true);
+  hSlice2->Draw("HIST");
+  canvas->SaveAs("figs/track2dhist/slices.pdf(");
+  hSlice3->Draw("HIST");
+  canvas->SaveAs("figs/track2dhist/slices.pdf");
+  hSlice4->Draw("HIST");
+  canvas->SaveAs("figs/track2dhist/slices.pdf");
+  hSlice5->Draw("HIST");
+  canvas->SaveAs("figs/track2dhist/slices.pdf");
+  hSlice6->Draw("HIST");
+  canvas->SaveAs("figs/track2dhist/slices.pdf");
+  hSlice7->Draw("HIST");
+  canvas->SaveAs("figs/track2dhist/slices.pdf");
+  hSlice8->Draw("HIST");
+  canvas->SaveAs("figs/track2dhist/slices.pdf");
+  hSlice9->Draw("HIST");
+  canvas->SaveAs("figs/track2dhist/slices.pdf)");
+  canvas->SetLogy(false);
 
   // hist2->FitSlicesY();
   // TH1D *hist2_1 = (TH1D*)gDirectory->Get("hist2_1"); // Mean values
