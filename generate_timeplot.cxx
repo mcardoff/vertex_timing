@@ -163,7 +163,7 @@ void generate_timeplot() {
       if (!(track_time_valid[idx] == 1 && track_pt[idx] > min_track_pt))
 	continue; // skip low pt tracks
 
-      float nsigma = (track_z0[idx] - reco_vtx_z[0])/std::sqrt(track_var_z0[idx]+reco_vertex_time_res);
+      float nsigma = (track_z0[idx] - reco_vtx_z[0])/std::sqrt(track_var_z0[idx]);
       if(std::abs(nsigma) > max_nsigma) {
 	if(debug)
 	  std::cout << "Skipping track " << idx << " due to high nsigma" << std::endl;

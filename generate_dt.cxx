@@ -17,7 +17,7 @@
 // cut variables
 auto min_jets          =  2;    // min number of jets
 auto min_jetpt         =  30.0; // self explanatory
-auto min_abs_eta       =  2.0;  // min eta for a vtx to be considered "forward"
+auto min_abs_eta       =  2.0;  // min eta for a jet to be considered "forward"
 auto min_abs_track_eta =  2.4;  // min eta for a track to be considered "forward"
 auto min_track_pt      =  1.0;  // track_pt > 1.0 GeV
 auto max_vtx_dz        =  2.0;  // max error for reco HS vertex z
@@ -44,6 +44,12 @@ void set_maximum(TH1F *hist1, TH1F *hist2, TH1F *hist3, TH1F *hist4) {
   hist2->SetMaximum(max_val);
   hist3->SetMaximum(max_val);
   hist4->SetMaximum(max_val);
+  
+  float min_val = 1e-3;
+  hist1->SetMinimum(min_val);
+  hist2->SetMinimum(min_val);
+  hist3->SetMinimum(min_val);
+  hist4->SetMinimum(min_val);
   return;
 }
 
@@ -63,23 +69,23 @@ void draw_hist_with_fits(TCanvas* canvas, bool is_dgaus, const char* fname,
     
   TLegend *legend = new TLegend(0.65, 0.65, 0.9, 0.9);
   if(is_dgaus){
-    legend->AddEntry(hist1, Form("=0 Forward Jet #sigma = %.2f#pm%.2f(%.2f%%)",
-				 fit_1->GetParameter(3), fit_1->GetParError(3),
-				 100*fit_1->GetParError(3)/fit_1->GetParameter(3)), "l");
-    legend->AddEntry(hist2, Form("=1 Forward Jet #sigma = %.2f#pm%.2f(%.2f%%)",
-				 fit_2->GetParameter(3), fit_2->GetParError(3),
-				 100*fit_2->GetParError(3)/fit_2->GetParameter(3)), "l");
-    legend->AddEntry(hist3, Form("=2 Forward Jet #sigma = %.2f#pm%.2f(%.2f%%)",
-				 fit_3->GetParameter(3), fit_3->GetParError(3),
-				 100*fit_3->GetParError(3)/fit_3->GetParameter(3)), "l");
-    legend->AddEntry(hist4, Form(">2 Forward Jet #sigma = %.2f#pm%.2f(%.2f%%)",
-				 fit_4->GetParameter(3), fit_4->GetParError(3),
-				 100*fit_4->GetParError(3)/fit_4->GetParameter(3)), "l");
+    legend->AddEntry(hist1, Form("=0 Forward Jet #sigma = %.2f, #chi^{2}=%.2f",
+				 fit_1->GetParameter(3), fit_1->GetChisquare()), "l");
+    legend->AddEntry(hist2, Form("=1 Forward Jet #sigma = %.2f, #chi^{2}=%.2f",
+				 fit_2->GetParameter(3), fit_2->GetChisquare()), "l");
+    legend->AddEntry(hist3, Form("=2 Forward Jet #sigma = %.2f, #chi^{2}=%.2f",
+				 fit_3->GetParameter(3), fit_3->GetChisquare()), "l");
+    legend->AddEntry(hist4, Form(">2 Forward Jet #sigma = %.2f, #chi^{2}=%.2f",
+				 fit_4->GetParameter(3), fit_4->GetChisquare()), "l");
   } else {
-    legend->AddEntry(hist1, Form("=0 Forward Jet, #sigma = %.2f", fit_1->GetParameter(2)), "l");
-    legend->AddEntry(hist2, Form("=1 Forward Jet, #sigma = %.2f", fit_2->GetParameter(2)), "l");
-    legend->AddEntry(hist3, Form("=2 Forward Jet, #sigma = %.2f", fit_3->GetParameter(2)), "l");
-    legend->AddEntry(hist4, Form(">2 Forward Jet, #sigma = %.2f", fit_4->GetParameter(2)), "l");
+    legend->AddEntry(hist1, Form("=0 Forward Jet, #sigma = %.2f, #chi^{2}=%.2f",
+				 fit_1->GetParameter(2), fit_1->GetChisquare()), "l");
+    legend->AddEntry(hist2, Form("=1 Forward Jet, #sigma = %.2f, #chi^{2}=%.2f",
+				 fit_2->GetParameter(2), fit_2->GetChisquare()), "l");
+    legend->AddEntry(hist3, Form("=2 Forward Jet, #sigma = %.2f, #chi^{2}=%.2f",
+				 fit_3->GetParameter(2), fit_3->GetChisquare()), "l");
+    legend->AddEntry(hist4, Form(">2 Forward Jet, #sigma = %.2f, #chi^{2}=%.2f",
+				 fit_4->GetParameter(2), fit_4->GetChisquare()), "l");
   }
 
   legend->Draw();
@@ -116,6 +122,7 @@ TF1* dgaus_fit(TH1F *hist, double fit_bound, Int_t color) {
   TF1 *fit_1 = new TF1(Form("fit_%s",hist->GetName()), "dgaus", -fit_bound, fit_bound);
   fit_1->SetParameters(0, hist->GetMaximum(), 1e-2, 26.0, 175.0);
   fit_1->FixParameter(4, 175);
+  fit_1->SetParLimits(3,0,1.E6);
   hist->Fit(fit_1, "R");
   // set color while we're here
   hist->SetLineColor(color);
@@ -125,6 +132,7 @@ TF1* dgaus_fit(TH1F *hist, double fit_bound, Int_t color) {
 
 TF1* gaus_fit(TH1F *hist, double fit_bound, Int_t color) {
   TF1 *fit_1 = new TF1(Form("fit_%s",hist->GetName()), "gaus", -fit_bound, fit_bound);
+  fit_1->SetParameters(hist->GetMaximum(),hist->GetMean(), 20);
   hist->Fit(fit_1, "R");
   // set color while we're here
   hist->SetLineColor(color);
@@ -147,10 +155,14 @@ void generate_dt() {
   TCanvas *canvas = new TCanvas("canvas", "Histograms", 800, 600);
 
   // jet variables
-  TTreeReaderArray<float> jet_pt
+  TTreeReaderArray<float> pflowjet_pt
+    (reader, "AntiKt4EMPFlowJets_pt");
+  TTreeReaderArray<float> topojet_pt
     // (reader, "TruthHSJet_pt");
     (reader, "AntiKt4EMTopoJets_pt");
-  TTreeReaderArray<float> jet_eta
+  TTreeReaderArray<float> pflowjet_eta
+    (reader, "AntiKt4EMPFlowJets_eta");
+  TTreeReaderArray<float> topojet_eta
     // (reader, "TruthHSJet_eta");
     (reader, "AntiKt4EMTopoJets_eta");
   TTreeReaderArray<std::vector<int>> jet_track_indices
@@ -197,9 +209,9 @@ void generate_dt() {
   TTreeReaderArray<float> prod_vtx_z
     (reader, "TruthPart_prodVtx_z");
 
-  int bins = 200;
+  int bins = 250;
   double diff_bound = 1000.0;
-  double res_bound = 100.0;
+  double res_bound = 110.0;
 
   // Histograms
   /// Store vertex dt = reco_vtx_time[0] - truth_vtx_time[0]
@@ -217,7 +229,7 @@ void generate_dt() {
   TH1I *nForJetHist = new TH1I("forjethist", "number of fjets>2;nJet;Entries",10,-0.5,9.5);
 
   while (reader.Next()) {
-    if (jet_pt.GetSize() < min_jets ) {
+    if (topojet_pt.GetSize() < min_jets ) {
       if(debug)
 	std::cout << "Skipping low jet event" << std::endl;
       continue;  // Skip if no jets are present
@@ -235,18 +247,18 @@ void generate_dt() {
 	std::cout << "Skipping event due to incorrect HS vertex" << std::endl;
       continue;
     }
-    
-    // check if jet pt > 30 GeV
-    float min_pt = *std::min_element(jet_pt.begin(), jet_pt.end());
-    if(min_pt < min_jetpt) {
+
+    // check if jet pt > 30 GeV, count forward jets
+    float min_topopt  = *std::min_element(topojet_pt.begin() , topojet_pt.end() );
+    if(min_topopt < min_jetpt) {	
       if(debug)
 	std::cout << "Skipping event due to low jet pt" << std::endl;
       continue;
     }
 
     int nForwardJet = 0;
-    for(auto eta : jet_eta) {
-      if (std::abs(eta) > min_abs_eta)
+    for(auto eta: topojet_eta) {
+      if (std::abs(eta) - min_abs_eta > 1e-6)
 	nForwardJet++;
     }
 
@@ -255,6 +267,11 @@ void generate_dt() {
 
     float diff = reco_vtx_time[0] - truth_vtx_time[0];
     float reso = diff / (reco_vtx_timeRes[0]);
+    if (std::abs(diff) > diff_bound)
+      std::cout << "DIFF OUT OF BOUNDS: " << diff << std::endl;
+
+    if (std::abs(reso) > res_bound)
+      std::cout << "RESO OUT OF BOUNDS: " << reso << std::endl;
     
     if (nForwardJet == 0)        { // exactly 0 forward jets
       hist1->Fill(diff);
@@ -278,12 +295,11 @@ void generate_dt() {
     hist->SetLineWidth(2);
   }
 
-  // NON DIVIDED BY RESOS
   set_maximum(hist1, hist2, hist3, hist4);
   set_maximum(normhist1, normhist2, normhist3, normhist4);
 
   double fit_bound = diff_bound;
-  double normfit_bound = 20;
+  double normfit_bound = res_bound;
 
   TF1 *f1 = new TF1("dgaus",
 		    "[1] * exp(-0.5 * ((x - [0]) / [3])^2) + [2] * exp(-0.5 * ((x - [0]) / [4])^2)",
