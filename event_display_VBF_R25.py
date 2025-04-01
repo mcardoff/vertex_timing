@@ -33,17 +33,19 @@ tree = root_file["ntuple"]
 
 my_branches = tree.arrays([
     'TruthVtx_z',
+    'TruthVtx_time',
     'TruthVtx_isHS',
     'RecoVtx_isHS',
+    'RecoVtx_z',
+    'RecoVtx_time',
     'Track_truthVtx_idx',
-    'TruthVtx_isHS',
     'RecoVtx_sumPt2',
     # 'RecoVtx_isPU',
     'RecoVtx_track_idx',
     'AntiKt4EMTopoJets_track_idx',
-    'RecoVtx_z',
     'Track_z0',
     'Track_pt',
+    'Track_time',
     'Track_hasValidTime',
     'Track_qOverP',
     'Track_theta',
@@ -52,14 +54,19 @@ my_branches = tree.arrays([
     'AntiKt4EMTopoJets_pt',
     'AntiKt4EMTopoJets_eta',
     'AntiKt4EMTopoJets_phi',
-    'AntiKt4EMTopoJets_truthHSJet_idx'
+    'AntiKt4EMTopoJets_truthHSJet_idx',
+    'TruthHSJet_pt',
+    'TruthHSJet_eta',
+    'TruthHSJet_phi',
 ])
 
 # my_branches = tree.arrays(['TruthVtx_z', 'RecoVtx_sumPt2', 'RecoVtx_z'])
 
 vtx_z = my_branches.RecoVtx_z[event_num][vtxID]
+vtx_t = my_branches.RecoVtx_time[event_num][vtxID]
 sumpt = my_branches.RecoVtx_sumPt2[event_num][vtxID]
 truth_z = my_branches.TruthVtx_z[event_num][0]
+truth_t = my_branches.TruthVtx_time[event_num][0]
 
 selected_HS_vtx_id = None
 max_sumpt = float('-inf')
@@ -124,14 +131,15 @@ connected_tracks = []
 for idx in range(len(my_branches.Track_z0[event_num])):
     dz = my_branches.Track_z0[event_num][idx] - my_branches.RecoVtx_z[event_num][vtxID]
     nsigma = dz / sqrt(my_branches.Track_var_z0[event_num][idx])
-    if(abs(nsigma) < 2.0 and my_branches.Track_pt[event_num][idx] > 1.0 and my_branches.Track_hasValidTime[event_num][idx] == 1):
+    isHS = my_branches.Track_truthVtx_idx[event_num][idx] == 0
+    if(abs(nsigma) < 3.0 and my_branches.Track_pt[event_num][idx] > 1.0 and isHS):
+        #   and my_branches.Track_hasValidTime[event_num][idx] == 1
         connected_tracks.append(idx)
 
 track_info = []
 jet_info = []
 num_jets = 0
 new_sumpt=0
-sum_pt_W =0
 
 num_HS_tracks=0
 
@@ -142,34 +150,14 @@ for idx in connected_tracks:
     track_pT = (p / (np.cosh(track_eta))) / 1000
     track_phi = my_branches.Track_phi[event_num][idx]
     z0 = track_z0 - vtx_z
-    
-    ################################
-    #if (track_pT>25):
-    #    continue
-    ################################
-    
+        
     my_track_z0.append(track_z0)
-
-    ####################################################
-    ### Calculate minDR ################################
-    ####################################################
     
-    minDr = 1000;
-    closestJetIndex = -1;
-    jpt_val = 0.0;
-
-    num_jet_match_01=0
-    num_jet_match_05=0
-    
-    njets_b1 = 0
-    njets_b2 = 0
-
     # Loop over jets
     for j in range(len(my_branches.AntiKt4EMTopoJets_track_idx[event_num])):
         if my_branches.AntiKt4EMTopoJets_pt[event_num][j] < 30.0:
             continue
-        njets_b1=njets_b1+1
-    
+        # njets_b1=njets_b1+1    
         trackPT0 = 0
         trackPT = 0
         jet_pt_05_rpt = 0
@@ -187,11 +175,11 @@ for idx in connected_tracks:
             signi_cut = delz / sqrt(my_branches.Track_var_z0[event_num][jdx])
     
             if abs(signi_cut) > 3.0:
+                # print("CONTINUING FROM INSIDE LOOP")
                 continue
             trackPT += pt2
     
         Rpt = trackPT / my_branches.AntiKt4EMTopoJets_pt[event_num][j]
-        #print("jet#", j, "jet_pt", my_branches.AntiKt4EMTopoJets_pt[event_num][j], "Rpt:", Rpt)
             
         jet_pt = my_branches.AntiKt4EMTopoJets_pt[event_num][j]
         jet_eta = my_branches.AntiKt4EMTopoJets_eta[event_num][j]
@@ -213,56 +201,11 @@ for idx in connected_tracks:
         if jet_tuple not in jet_info:
             jet_info.append(jet_tuple)
         
-        #num_jets += 1  # Increment counter
+        num_jets += 1  # Increment counter
         
-        if Rpt < 0.02:
-        #if Rpt < 0.00:
-            continue
-            
-    ####################################################
-    ####################################################
-        njets_b2=njets_b2+1
-
-        deta = my_branches.AntiKt4EMTopoJets_eta[event_num][j] - track_eta
-        dphi = my_branches.AntiKt4EMTopoJets_phi[event_num][j] - my_branches.Track_phi[event_num][idx]
-        
-        if dphi > pi:
-            dphi -= 2 * pi
-        Dr = sqrt(deta**2 + dphi**2)
-    
-        # Check if the current jet is closer than the previously found closest jet
-        if Dr < minDr and Dr <= 0.8:
-        #if Dr < minDr:
-            minDr = Dr  # Update minimum Dr
-            closestJetIndex = j  # Update index of closest jet
-            jpt = my_branches.AntiKt4EMTopoJets_pt[event_num][closestJetIndex]
-            jpt_val = jpt
-    
-        jet_pt_01_rpt += my_branches.AntiKt4EMTopoJets_pt[event_num][j]
-        num_jet_match_01 += 1
-    
-        if Rpt > 0.5:
-            jet_pt_05_rpt += my_branches.AntiKt4EMTopoJets_pt[event_num][j]
-            num_jet_match_05 += 1
-            
-    #print(njets_b1, njets_b2)
-    
-    if minDr == 1000:
-        minDr = 1.0
-
-    #print("minDr :", minDr)
-    #print("jpt :", jpt_val)
-
-    pt_W = (track_pT ** 2) * (jpt_val ** 2) / minDr
-    sum_pt_W = sum_pt_W+pt_W
-
-    #print("pt_W :", pt_W)
-    
-    ####################################################
-    ####################################################
     
     
-    new_sumpt= new_sumpt + (track_pT ** 2)
+    # new_sumpt= new_sumpt + (track_pT ** 2)
 
     pz = track_pT * math.sinh(track_eta)
     signX = track_eta / abs(track_eta)
@@ -271,28 +214,69 @@ for idx in connected_tracks:
     x = (track_pT / 2) * math.cos(theta) * signX
     y = (track_pT / 2) * math.sin(theta) * signY
 
-    #status = my_branches.track_status[event_num][idx]
-    #status = my_branches.Track_isTruthHS[event_num][idx]
     Track_truthVtx_id = my_branches.Track_truthVtx_idx[event_num][idx]
-    if (Track_truthVtx_id==-1):
+    if (Track_truthVtx_id!=0):
         continue
 
-    status = my_branches.TruthVtx_isHS[event_num][Track_truthVtx_id]
+    status = my_branches.Track_hasValidTime[event_num][idx]
+    my_branches.TruthVtx_isHS[event_num][Track_truthVtx_id]
     
-    if (status==1):
+    if (my_branches.TruthVtx_isHS[event_num][Track_truthVtx_id]==1):
         num_HS_tracks=num_HS_tracks+1
+        track_info.append([vtx_z, z0, x, y, status])
     
-    track_info.append([vtx_z, z0, x, y, status])
-    #track_info.append(compute_track_line(track_pT, track_eta, track_phi, vtx_z, z0, status))
 
     
-#print("jet_pt_list size: ", len(jet_pt_list))
-
 print("number of HS tracks : ", num_HS_tracks)
 
-# Plot the graph
-plt.figure(figsize=(12, 6))
+for truth_jet_idx in range(len(my_branches.TruthHSJet_pt[event_num])):
+    truth_jet_pt  = my_branches.TruthHSJet_pt[event_num][truth_jet_idx]
+    if truth_jet_pt < 30.0:
+        continue
+    truth_jet_eta = my_branches.TruthHSJet_eta[event_num][truth_jet_idx]
+    truth_jet_phi = my_branches.TruthHSJet_phi[event_num][truth_jet_idx]
+    truth_jet_pz = truth_jet_pt * np.sinh(truth_jet_eta)
 
+    truth_jet_signX = np.sign(truth_jet_eta) if truth_jet_eta != 0 else 1  # Avoid division by zero
+    truth_jet_signY = np.sign(np.sin(truth_jet_phi)) if np.sin(truth_jet_phi) != 0 else 1
+
+    truth_jet_theta = np.arctan(truth_jet_pt / abs(truth_jet_pz))
+    truth_jet_x = (truth_jet_pt / 40) * np.cos(truth_jet_theta) * truth_jet_signX
+    truth_jet_y = (truth_jet_pt / 40) * np.sin(truth_jet_theta) * truth_jet_signY
+    truth_jet_tuple = (
+        truth_jet_pt, truth_jet_eta, truth_jet_phi, 2, truth_jet_x, truth_jet_y, 1.0)
+
+    jet_info.append(truth_jet_tuple)
+
+
+# Collect information for track time histogram
+hist_times = []
+for (track, z0) in enumerate(my_branches.Track_z0[event_num]):
+    this_pt = my_branches.Track_pt[event_num][track]
+    this_hasValidTime = my_branches.Track_hasValidTime[event_num][track]
+    if (this_hasValidTime == 0) or this_pt < 1.0:
+        continue
+
+    nsigma = (z0 - vtx_z)/np.sqrt(my_branches.Track_var_z0[event_num][track])
+    if np.abs(nsigma) > 3.0:
+        continue
+
+    hist_times.append(my_branches.Track_time[event_num][track])
+
+# Plot the graph
+figs, axs = plt.subplots(2,1,figsize=(12, 12))
+time_histo = axs[1]
+event_display = axs[0]
+
+################### Draw Time Histogram #######################
+histvals = time_histo.hist(hist_times,50,label='Track Time', lw=5, alpha=0.35, color='blue')
+time_histo.plot([vtx_t,vtx_t],[0, histvals[0].max()], 'green', label='Reco Vtx Time')
+time_histo.plot([truth_t,truth_t],[0, histvals[0].max()], 'red', label='Truth Vtx Time')
+time_histo.legend()
+time_histo.set_ylim(0, 1+histvals[0].max())
+time_histo.set_xlabel("Track Time [ps]")
+time_histo.set_ylabel("Frequency")
+time_histo.set_title("Track Time Histogram")
 
 ################### Draw Tracks ###############################
 
@@ -303,7 +287,7 @@ for track in track_info:
     y = track[3]  # y length
     status = track[4]
     if status == 1:
-        color = 'blue'  # Set color to blue for hard-scatter tracks
+        color = 'blue'  
     elif status == 0:
         color = 'red'
     elif status == 2:        
@@ -312,7 +296,7 @@ for track in track_info:
         color = 'cyan' 
     else:
         color = 'black' 
-    plt.plot([Z + z0, Z + z0 + x], [0, y], color=color)
+    event_display.plot([Z + z0, Z + z0 + x], [0, y], color=color)
     
 ################## Draw Reference eta lines ##################################
 def draw_eta_reference_lines(vtx_z, eta_ref, line_length=50, linestyle='dashed'):
@@ -331,10 +315,11 @@ def draw_eta_reference_lines(vtx_z, eta_ref, line_length=50, linestyle='dashed')
     y_ref_neg_mirror = -y_ref_neg
 
     # Draw the reference lines
-    plt.plot([vtx_z, vtx_z + x_ref_pos], [0, y_ref_pos], linestyle=linestyle, color='lightgrey',label=fr'$\eta = {eta_ref}$')
-    plt.plot([vtx_z, vtx_z + x_ref_neg], [0, y_ref_neg], linestyle=linestyle, color='lightgrey')
-    plt.plot([vtx_z, vtx_z + x_ref_pos], [0, y_ref_pos_mirror], linestyle=linestyle, color='lightgrey')
-    plt.plot([vtx_z, vtx_z + x_ref_neg], [0, y_ref_neg_mirror], linestyle=linestyle, color='lightgrey')
+    # event_display.plot([vtx_z, vtx_z + x_ref_pos], [0, y_ref_pos], linestyle=linestyle, color='lightgrey',label=fr'$\eta = {eta_ref}$')
+    event_display.plot([vtx_z, vtx_z + x_ref_pos], [0, y_ref_pos], linestyle=linestyle, color='lightgrey')
+    event_display.plot([vtx_z, vtx_z + x_ref_neg], [0, y_ref_neg], linestyle=linestyle, color='lightgrey')
+    event_display.plot([vtx_z, vtx_z + x_ref_pos], [0, y_ref_pos_mirror], linestyle=linestyle, color='lightgrey')
+    event_display.plot([vtx_z, vtx_z + x_ref_neg], [0, y_ref_neg_mirror], linestyle=linestyle, color='lightgrey')
     
     # Define label position
     # label_x_eta = vtx_z + 3.5
@@ -342,8 +327,8 @@ def draw_eta_reference_lines(vtx_z, eta_ref, line_length=50, linestyle='dashed')
 
     # Adjust y position for multiple labels to avoid overlap
     # offset = 0.5 * (eta_ref - 2.9)  # Slight shift based on eta_ref value
-    # plt.plot([label_x_eta - 0.4, label_x_eta], [label_y_eta - 0.90 - offset, label_y_eta - 0.90 - offset], linestyle=linestyle, color='lightgrey', linewidth=1.5)
-    # plt.text(label_x_eta + 0.2, label_y_eta - 0.90 - offset, , fontsize=12, color='lightgrey')
+    # event_display.plot([label_x_eta - 0.4, label_x_eta], [label_y_eta - 0.90 - offset, label_y_eta - 0.90 - offset], linestyle=linestyle, color='lightgrey', linewidth=1.5)
+    # event_display.text(label_x_eta + 0.2, label_y_eta - 0.90 - offset, , fontsize=12, color='lightgrey')
 
 linestyles = ['dashed', 'dotted']
 etas = [2.4, 2.0]
@@ -353,6 +338,15 @@ for line, eta in zip(linestyles,etas):
 
 ################## Draw Jets ##################################
 text_index = 0
+# jet_pt        0
+# jet_eta       1
+# jet_phi       2
+# jet_isHS_size 3
+# jet_x         4
+# jet_y         5
+# Rpt           6
+
+# print(len(jet_info))
 
 for i in range(len(jet_info)):
     x_jet = jet_info[i][4]  # jet_x is at index 4
@@ -371,7 +365,11 @@ for i in range(len(jet_info)):
         if isHS == 0 and Rpt < 0.02:
             continue
 
-    color = 'green' if isHS >= 1 else 'grey'
+    color = 'grey'
+    if isHS == 1:
+        color = 'green'
+    elif isHS == 2:
+        color = 'blue'
     alpha = 1.0
     
     cone_length = np.sqrt(x_jet**2 + y_jet**2)  # Length of the cone
@@ -387,11 +385,11 @@ for i in range(len(jet_info)):
     base_left_x, base_left_y = vtx_z + x_jet + perp_x, y_jet + perp_y
     base_right_x, base_right_y = vtx_z + x_jet - perp_x, y_jet - perp_y
 
-    plt.fill([tip_x, base_left_x, base_right_x], [tip_y, base_left_y, base_right_y], color=color, alpha=0.5)
+    event_display.fill([tip_x, base_left_x, base_right_x], [tip_y, base_left_y, base_right_y], color=color, alpha=0.5)
     jet_text = f"Jet {text_index+1}: $p_T$={jet_info[i][0]:.0f} GeV, $\eta$={jet_info[i][1] :.1f}"
     color2 = 'green' if isHS >= 1 else 'black'  # Set color based on isHS value
-    #plt.text(vtx_z-4.5-0.3, 0.9 - (1.2 + i * 0.1), jet_text, weight='bold', fontsize=12, color=color2)
-    plt.text(vtx_z - 4.5 - 0.3, 0.9 - (1.2 + text_index * 0.1), jet_text,
+    #event_display.text(vtx_z-4.5-0.3, 0.9 - (1.2 + i * 0.1), jet_text, weight='bold', fontsize=12, color=color2)
+    event_display.text(vtx_z - 4.5 - 0.3, 0.9 - (1.2 + text_index * 0.1), jet_text,
              weight='bold', fontsize=12, color=color2)
     text_index += 1
 ################################################################
@@ -399,62 +397,67 @@ for i in range(len(jet_info)):
 # Determine the x-coordinate based on the Z coordinate range
 x_coord = vtx_z-4.8  # Set it to the minimum x-coordinate of the line_positions
 y_coord = 0.9  # Set the y-coordinate for the text annotations
-plt.text(x_coord, y_coord, f"Reco z = {vtx_z:.1f} mm", weight='bold', fontsize=12)
-plt.text(x_coord, y_coord - 0.1, f"Truth z = {truth_z:.1f} mm", weight='bold', fontsize=12)
-plt.text(x_coord, y_coord - 0.2, f"Sum $\\mathbf{{p_T^2}}$ = {new_sumpt:.2e} $\\mathbf{{GeV^2}}$", weight='bold', fontsize=12)
-plt.text(x_coord, y_coord - 0.3, f"Sum $\\mathbf{{p_TW}}$ = {sum_pt_W:.2e} $\\mathbf{{GeV^4}}$", weight='bold', fontsize=12)
+event_display.text(x_coord, y_coord, f"Reco (z,t) = ({vtx_z:.1f} mm, {vtx_t:.1f} ps)", weight='bold', fontsize=12)
+event_display.text(x_coord, y_coord - 0.1, f"Truth (z,t) = ({truth_z:.1f} mm, {truth_t:.1f} ps)", weight='bold', fontsize=12)
     
 ################## Add tracks and jets legend ###################
 
-track_legend = [mlines.Line2D([], [], color='blue', label='HS tracks'),
-                mlines.Line2D([], [], color='red', label='PU tracks')]
+legend_entries = [mlines.Line2D([], [], color='blue'),
+                  mlines.Line2D([], [], color='red'),
+                  mpatches.Rectangle((0, 0), 1, 1,  color='green', alpha=0.5),
+                  mpatches.Rectangle((0, 0), 1, 1,  color='blue', alpha=0.5),
+                  mpatches.Rectangle((0, 0), 1, 1,  color='grey', alpha=0.5)]
 
-jet_legend = [mpatches.Rectangle((0, 0), 1, 1,  color='green', alpha=0.5, label='HS jet'),
-              mpatches.Rectangle((0, 0), 1, 1,  color='grey', alpha=0.5, label='PU jet')]
+label_names = ['Valid Time',
+               'No Valid Time',
+               'HS jet',
+               'Truth jet',
+               'PU jet']
 
-eta_legend = [mlines.Line2D([], [], color='lightgrey',linestyle=style, label=fr'$\eta = {eta}$') for style,eta in zip(linestyles,etas)]
+eta_legend = [mlines.Line2D([], [], color='lightgrey',linestyle=style) for style,eta in zip(linestyles,etas)]
+eta_labels = [fr'$\eta = {eta}$' for eta in etas]
 
 # Combine both legends into one
-hs_legend = plt.legend(handles=track_legend + jet_legend, loc='upper right', title='Track and Jet Types', bbox_to_anchor=(1.0, 0.9))
+event_display.legend(legend_entries+eta_legend, label_names+eta_labels, loc='upper right', title='Track and Jet Types', bbox_to_anchor=(1.0, 0.9))
 
 # Add the legend manually to the plot
-plt.gca().add_artist(hs_legend)
+# figs.gca().add_artist(hs_legend)
 
 ##################### Draw Reco and truth vertices ###############
 
 # Plot the line for the recovertex_z values
 reco_vertices_z = [z for z, _ in reco_vertices]
 marker_colors_reco = ['blue' if z == vtx_z else 'black' for z in reco_vertices_z]
-plt.scatter(reco_vertices_z, [0] * len(reco_vertices_z), color=marker_colors_reco, marker='o', s=100)
-plt.axhline(y=0.0, color='black', linestyle='--')
+event_display.scatter(reco_vertices_z, [0] * len(reco_vertices_z), color=marker_colors_reco, marker='o', s=100)
+event_display.axhline(y=0.0, color='black', linestyle='--')
 
 truth_vertices_z = [z for z, _ in truth_vertices]
 marker_colors = ['blue' if z == truth_z else 'black' for z in truth_vertices_z]
-plt.scatter(truth_vertices_z, [-0.75] * len(truth_vertices_z), color=marker_colors, marker='|', s=100)
-plt.axhline(y=-0.75, color='black', linestyle='--')
+event_display.scatter(truth_vertices_z, [-0.75] * len(truth_vertices_z), color=marker_colors, marker='|', s=100)
+event_display.axhline(y=-0.75, color='black', linestyle='--')
 
 label_x = vtx_z + 3.5
 label_y = 0.05
-plt.text(label_x, label_y, 'Reco vertices', fontsize=12)
-plt.text(label_x, label_y-0.75, 'Truth vertices', fontsize=12)
-#plt.text(label_x-3, 0.85, 'ATLAS Simulation Preliminary', fontsize=16, weight='bold', style='italic')
-plt.text(label_x-2.2, 0.85, 'ATLAS Simulation Internal', fontsize=16, weight='bold', style='italic')
+event_display.text(label_x, label_y, 'Reco vertices', fontsize=12)
+event_display.text(label_x, label_y-0.75, 'Truth vertices', fontsize=12)
+#event_display.text(label_x-3, 0.85, 'ATLAS Simulation Preliminary', fontsize=16, weight='bold', style='italic')
+event_display.text(label_x-2.2, 0.85, 'ATLAS Simulation Internal', fontsize=16, weight='bold', style='italic')
 
 
 ################################################################
 
-plt.ylim(-1.0, 1.0)
-plt.xlim(vtx_z-5.0, vtx_z+5.0)
-plt.title(f'Event# {event_num} : Vertex# {vtxID}')
-plt.xlabel('Z [mm]')
-#plt.ylabel('R [mm]')
-plt.yticks([])
-# plt.legend()
-#plt.grid(True)
-#plt.savefig(f'figures/fig_{event_num}_{vtxID}_sumpt2.png')
-plt.savefig(f'./eventdisplays/0fjet/{file_num}/fig_{event_num}_{vtxID}.pdf')
+event_display.set_ylim(-1.0, 1.0)
+event_display.set_xlim(vtx_z-5.0, vtx_z+5.0)
+event_display.set_title(f'Event# {event_num} : Vertex# {vtxID}')
+event_display.set_xlabel('Z [mm]')
+#event_display.ylabel('R [mm]')
+event_display.set_yticks([])
+# event_display.legend()
+#event_display.grid(True)
+#event_display.savefig(f'figures/fig_{event_num}_{vtxID}_sumpt2.png')
+plt.savefig(f'./figs/trackhists/{file_num}/tjeventdisplay_{event_num}_{vtxID}.pdf')
 
-print(f"Event display has been saved as figures/fig_{event_num}_{vtxID}.pdf")
+print(f"Event display has been saved as ./figs/trackhists/{file_num}/tjeventdisplay_{event_num}_{vtxID}.pdf")
 
 #plt.show()
 
