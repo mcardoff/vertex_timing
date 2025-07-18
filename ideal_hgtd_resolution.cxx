@@ -1,4 +1,5 @@
 #include <Rtypes.h>
+#include <TRandom1.h>
 #include <TBranch.h>
 #include <TChain.h>
 #include <TFile.h>
@@ -40,14 +41,46 @@
 
 using namespace myutl;
 
+double getSmearedTrackTime(int idx, double res, BranchPointerWrapper *branch) {
+  // know that it has a valid time in HGTD and has a valid truth link
+  
+  int particle_idx = branch->track_to_particle[idx]; // this is anything
+  int truthvtx_idx = branch->track_to_truthvtx[idx]; // this is anything
+  if (debug) std::cout << "Particle_idx: " << particle_idx << std::endl;
+  if (debug) std::cout << "TruthVtx_idx: " << truthvtx_idx << std::endl;
+  double t_part, reso = res;
+  if (particle_idx == -1) { // no particle link
+    if (truthvtx_idx != -1) { // some valid truth link, smear that vertex time
+      if (debug) std::cout << "PATH A" << std::endl;
+      t_part = branch->truth_vtx_time[truthvtx_idx];
+    } else { // some random pileup, assume
+      if (debug) std::cout << "PATH B" << std::endl;
+      t_part = gRandom->Gaus(branch->truth_vtx_time[0],175);
+    }
+  } else {
+    if (debug) std::cout << "PATH C" << std::endl;
+    t_part = branch->particle_t[particle_idx];
+  }
+  if (debug) std::cout << "DONE" << std::endl;
+  return gRandom->Gaus(t_part,reso);
+}
+
 std::vector<Cluster> doConeClustering(std::vector<int> indices, BranchPointerWrapper *branch) {
   std::vector<bool> checked(branch->track_pt.GetSize(), false);
   std::vector<Cluster> clusters;
+  double fixed_res = 10.0;
+  
+  if (debug)
+    std::cout << "Got: " << indices.size() << std::endl;
 
   std::vector<int> timefiltered_indices;
+  std::map<int,double> smeared_times, smeared_resos;
   for (auto idx: indices) {
-    if (branch->track_time_valid[idx] == 1)
+    if (branch->track_time_valid[idx] == 1) {
+      // std::cout << "BLEHHHHHH: " << std::endl;
       timefiltered_indices.push_back(idx);
+      smeared_times.emplace(idx, getSmearedTrackTime(idx, fixed_res, branch));
+    }
   }
 
   while (true) {
@@ -68,16 +101,17 @@ std::vector<Cluster> doConeClustering(std::vector<int> indices, BranchPointerWra
 
     // Step 2: Build cluster around max_pt_idx
     checked[max_pt_idx] = true;
-    double t1 = branch->track_time[max_pt_idx];
-    double s1 = branch->track_time_res[max_pt_idx];
+
+    double t1 = smeared_times[max_pt_idx];
+    double s1 = fixed_res;
 
     std::vector<int> to_merge = {max_pt_idx};
 
     for (int idx : timefiltered_indices) {
       if (checked[idx]) continue;
 
-      double t2 = branch->track_time[idx];
-      double s2 = branch->track_time_res[idx];
+      double t2 = smeared_times[idx];
+      double s2 = fixed_res;
       double nsigma = std::abs(t1 - t2) / std::sqrt(s1 * s1 + s2 * s2);
 
       if (nsigma < 3.0) {
@@ -89,9 +123,10 @@ std::vector<Cluster> doConeClustering(std::vector<int> indices, BranchPointerWra
     // Step 3: Form cluster from selected indices
     std::vector<Cluster> simpleclusters;
     for (int idx : to_merge) {
-      double trk_time = branch->track_time[idx];
+      
+      double trk_time = smeared_times[idx];
       double trk_pt = branch->track_pt[idx];
-      double res = branch->track_time_res[idx];
+      double res = fixed_res;
       double significance = std::abs(branch->track_z0[idx] - branch->reco_vtx_z[0]) / std::sqrt(branch->track_var_z0[idx]);
       bool ismaxpt = idx == max_pt_idx;
       
@@ -122,96 +157,11 @@ std::vector<Cluster> doConeClustering(std::vector<int> indices, BranchPointerWra
   return clusters;
 }
 
-void doSimultaneousClustering(std::vector<Cluster> *collection, double dist_cut) {
-  double distance = 1.e30;
-  while (collection->size() > 1) {
-    // std::cout << "entering while loop" << std::endl;
-
-    int i0 = 0;
-    int j0 = 0;
-
-    distance = getDistanceBetweenClusters(collection->at(0), collection->at(1));
-
-    for (size_t i = 0; i < collection->size(); i++) {
-      for (size_t j = i + 1; j < collection->size(); j++) {
-	Cluster a = collection->at(i);
-	Cluster b = collection->at(j);
-
-	if (a.wasMerged or b.wasMerged)
-	  continue;
-	
-	double current_distance =
-	  getDistanceBetweenClusters(a, b);
-	if (current_distance <= distance) {
-	  distance = current_distance;
-	  i0 = i;
-	  j0 = j;
-	}
-      } // j loop
-    } // i loop
-
-    // fuse closest two vertices
-    if (distance < dist_cut and i0 != j0) {
-      Cluster new_cluster = mergeClusters(collection->at(i0),collection->at(j0));
-      collection->erase(collection->begin()+j0);
-      if (i0 < j0)
-	collection->erase(collection->begin()+i0);
-      else
-	collection->erase(collection->begin()+(i0-1));
-
-      collection->push_back(new_cluster);
-    } else {
-      if (std::find_if(collection->begin(), collection->end(),
-		       [](Cluster a) {return a.wasMerged;}) != collection->end()) {
-	for (int idx=0; idx < collection->size(); ++idx) {
-	  collection->at(idx).wasMerged = false;
-	}
-	
-      } else {
-	break;
-      }
-    }
-    // break;
-  } // While
-}
-
-std::vector<Cluster> makeSimpleClusters(std::vector<int> track_indices, BranchPointerWrapper *branch) {
-  std::vector<Cluster> simpleClusters;
-  for (auto idx: track_indices) {
-    if (branch->track_time_valid[idx] == 1) {
-      double trk_time = branch->track_time[idx];
-      double trk_pt = branch->track_pt[idx];
-      double res = branch->track_time_res[idx];
-      double significance = std::abs(branch->track_z0[idx] - branch->reco_vtx_z[0]) / std::sqrt(branch->track_var_z0[idx]);
-
-      std::map<ScoreType,double> scores;
-      scores[ScoreType::HGTD] = 0; // do not use this
-      scores[ScoreType::SIG] = exp(-significance);
-      scores[ScoreType::MAXPT] = 0;
-      scores[ScoreType::TRKPT] = trk_pt;
-      scores[ScoreType::SUMPT2] = trk_pt*trk_pt;
-      scores[ScoreType::SIGTRKPT] = trk_pt*exp(-significance);
-      scores[ScoreType::IDEAL] = trk_time;
-
-      Cluster cluster = {{trk_time}, {res}, {trk_time}, {idx}, scores};
-      simpleClusters.push_back(cluster);
-    }
-  }
-  return simpleClusters;
-}
-
-std::vector<Cluster> clusterTracksInTime(std::vector<int> track_indices, double cluster_distance, BranchPointerWrapper *branch, bool isCone) {
+std::vector<Cluster> clusterTracksInTime(std::vector<int> track_indices, double cluster_distance, BranchPointerWrapper *branch) {
   if (track_indices.empty() && debug)
     std::cout << "EMPTY!!!!" << std::endl;
-
   std::vector<Cluster> collection;
-    
-  if (not isCone) {
-    collection = makeSimpleClusters(track_indices, branch);
-    doSimultaneousClustering(&collection, 3.0);
-  } else {
-    collection = doConeClustering(track_indices, branch);
-  }
+  collection = doConeClustering(track_indices, branch);
 
   for (Cluster& cluster: collection)
     cluster.purity = calc_pt_purity(cluster, branch);
@@ -219,7 +169,7 @@ std::vector<Cluster> clusterTracksInTime(std::vector<int> track_indices, double 
   return collection;
 }
 
-void clustering_dt() {
+void ideal_hgtd_resolution() {
   gStyle->SetOptStat(0);
 
   TChain chain ("ntuple");
@@ -260,43 +210,43 @@ void clustering_dt() {
   std::map<ScoreType,TH1D*> inclusive_purity;
   for (ScoreType score: enum_vec) {
     inclusive_resos[score] = new TH1D(Form("inclusivereso_%s",toString(score)),
-				      Form("Inclusive %s t_{0} - TruthVtx t_{0};#Delta t[ps];Entries",toString(score)),
+				      Form("Inclusive %s t_{0} - TruthVtx t_{0} (Ideal Res. HGTD);#Delta t[ps];Entries",toString(score)),
 				      (int)((diff_max-diff_min)/diff_width), diff_min, diff_max);
-    inclusive_purity[score] = new TH1D(Form("inclusivepurity_%s",toString(score)), "Inclusive Purity;Purity;Entries",
+    inclusive_purity[score] = new TH1D(Form("inclusivepurity_%s",toString(score)), "Inclusive Purity (Ideal Res. HGTD);Purity;Entries",
 				       (int)((purity_max-purity_min)/purity_width), purity_min, purity_max);
   }
 
-  PlotObj fjet     ("n Forward Jets", "fjet", "figs/hgtdtimes_nfjet.pdf",
+  PlotObj fjet     ("n Forward Jets", "fjet", "figs/idealres_nfjet.pdf",
 		    fjet_min     , fjet_max    , fjet_width    ,
 		    diff_min     , diff_max    , diff_width    ,
 		    purity_min   , purity_max  , purity_width  ,
 		    fold_fjet    , fold_fjet+fjet_width        );
   
-  PlotObj ftrack   ("n Forward Tracks", "track", "figs/hgtdtimes_ntrack.pdf",
+  PlotObj ftrack   ("n Forward Tracks", "track", "figs/idealres_ntrack.pdf",
 		    track_min    , track_max   , track_width   ,
 		    diff_min     , diff_max    , diff_width    ,
 		    purity_min   , purity_max  , purity_width  ,
 		    fold_track   , fold_track+track_width      );
   
-  PlotObj pu_frac  ("Pile Up Fraction", "pu_frac", "figs/hgtdtimes_pufrac.pdf",
+  PlotObj pu_frac  ("Pile Up Fraction", "pu_frac", "figs/idealres_pufrac.pdf",
 		    pu_frac_min  , pu_frac_max , pu_frac_width ,
 		    diff_min     , diff_max    , diff_width    ,
 		    purity_min   , purity_max  , purity_width  ,
 		    fold_pu_frac , pu_frac_max                 );
   
-  PlotObj hs_track ("n Forward HS Tracks", "hs_track", "figs/hgtdtimes_nhstrack.pdf",
+  PlotObj hs_track ("n Forward HS Tracks", "hs_track", "figs/idealres_nhstrack.pdf",
 		    hs_track_min , hs_track_max, hs_track_width,
 		    diff_min     , diff_max    , diff_width    ,
 		    purity_min   , purity_max  , purity_width  ,
 		    fold_hs_track, fold_hs_track+hs_track_width);
   
-  PlotObj pu_track ("n Forward PU Tracks", "pu_track", "figs/hgtdtimes_nputrack.pdf",
+  PlotObj pu_track ("n Forward PU Tracks", "pu_track", "figs/idealres_nputrack.pdf",
 		    pu_track_min , pu_track_max, pu_track_width,
 		    diff_min     , diff_max    , diff_width    ,
 		    purity_min   , purity_max  , purity_width  ,
 		    fold_pu_track, fold_pu_track+pu_track_width);
   
-  PlotObj recovtx_z("(Reco Vtx z) (mm)", "z", "figs/hgtdtimes_vtx_z.pdf",
+  PlotObj recovtx_z("(Reco Vtx z) (mm)", "z", "figs/idealres_vtx_z.pdf",
 		    z_min        , z_max       , z_width       ,
 		    diff_min     , diff_max    , diff_width    ,
 		    purity_min   , purity_max  , purity_width  ,
@@ -321,16 +271,18 @@ void clustering_dt() {
       continue;
 
     // check if there is one forward jet with pt > 30 GeV
-    int nForwardJet=0;
+    int nForwardJet;
     branch.count_forward_jets(nForwardJet);
-    
-    if (not branch.pass_jet_pt_cut())
+
+    if (not branch.pass_jet_pt_cut()) {
+      if (debug) std::cout << "Skipping pt cut event" << std::endl;
       continue;
+    }
 
     std::vector<int> tracks = getAssociatedTracks(&branch, min_track_pt);
 
-    int nForwardTrack=0, nForwardTrack_HS=0, nForwardTrack_PU=0;
-    branch.count_forward_tracks(nForwardTrack,nForwardTrack_HS,nForwardTrack_PU,tracks);
+    int nForwardTrack, nForwardTrack_HS, nForwardTrack_PU;
+    branch.count_forward_tracks(nForwardJet,nForwardTrack_HS,nForwardTrack_PU,tracks);
 
     hs_pu_inclusive->Fill(nForwardTrack_HS,nForwardTrack_PU);
     
@@ -347,8 +299,6 @@ void clustering_dt() {
     if (debug) {
       std::cout << "nForwardJet = " << nForwardJet << std::endl;
       std::cout << "nForwardTrack = " << nForwardTrack << std::endl;
-      std::cout << "nForwardTrack_HS = " << nForwardTrack_HS << std::endl;
-      std::cout << "nForwardTrack_PU = " << nForwardTrack_PU << std::endl;
       std::cout << "Vertex_z = " << reco_z << std::endl;
     }
 
@@ -375,7 +325,7 @@ void clustering_dt() {
 
     for (ScoreType score : enum_vec) {
       
-      if (branch.reco_vtx_valid[0] == 0 and score == HGTD)
+      if (branch.reco_vtx_valid[0] == 0)
 	continue;
       
       if (fjet.eff_pass.count(score) != 1)
@@ -426,26 +376,92 @@ void clustering_dt() {
   }
   
   // add all objects to plotobjs before drawing everything
-  std::vector<PlotObj*> plots = {&fjet, &ftrack, &hs_track, &pu_track, &pu_frac, &recovtx_z};
-  // fjet.plot_postprocessing();
-  // fjet.plot_logic(canvas);
+  std::vector<PlotObj> plots = {fjet, ftrack, hs_track, pu_track, pu_frac, recovtx_z};
+  for (int i = 0; i < plots.size(); i++) {
+    auto fname = plots[i].fname;
+    double fold_val = plots[i].fold_value;
+    
+    // Draw Comparisons of all the resos
+    TH2D *main2D = plots[i].hist.at(ScoreType::HGTD);
+    TH1D *total = plots[i].eff_total;
 
-  for (auto& plot: plots){
-    std::cout << "Calling plot_postprocessing on: " << &plot << std::endl;
-    plot->plot_postprocessing();
+    // these are all same through diff scores
+    auto xtitle = main2D->GetXaxis()->GetTitle(), ytitle = main2D->GetYaxis()->GetTitle();
+    int xmin = total->GetXaxis()->GetXmin(), xmax = total->GetXaxis()->GetXmax();
+    auto xbin = total->GetNbinsX();
+
+    for (ScoreType score: enum_vec) {
+      TH2D* hist = plots[i].hist.at(score);
+      for(int j = 0; j < hist->GetNbinsX(); ++j) {
+	auto color = colors[j % colors.size()];
+	auto name = Form("%s_slice%d",hist->GetName(),j);
+
+	int right = hist->GetXaxis()->GetBinLowEdge(j+1) >= fold_val
+	  ? hist->GetNbinsX()+1
+	  : j+1;
+
+	TH1D* hSlice = hist->ProjectionY(name, j+1, right);
+
+	if (hSlice->Integral() == 0 || hSlice->GetEntries() < 6)
+	  continue;
+
+	hSlice->SetLineColor(color);
+	hSlice->SetLineWidth(2);
+
+	double leftEdge  = hist->GetXaxis()->GetBinLowEdge(j+1);
+	double rightEdge = hist->GetXaxis()->GetBinLowEdge(right+1);
+	double bin_center = hist->GetXaxis()->GetBinCenter(j+1);
+
+	if (leftEdge < 1.0 && leftEdge > 0.0)
+	  leftEdge *= 100;
+	if (rightEdge < 1.0 && rightEdge > 0.0)
+	  rightEdge *= 100;
+
+	// set correct title
+	hSlice->SetTitle(Form("%s #in [%d,%d);%s;A.U.",
+			      hist->GetTitle(),
+			      (int)leftEdge,(int)rightEdge,
+			      ytitle));
+      
+	// Perform Double Gaussian Fit
+	TF1* dgaus_fit = create_fit(hSlice,true);
+	if (plots[i].params.find(score) == plots[i].params.end()) {
+	  std::cerr << "Missing params entry for score " << toString(score) << std::endl;
+	  continue;  // or throw
+	}
+	plots[i].params.at(score).fill_each(j, dgaus_fit);
+	if (plots[i].slices.at(score).size() < 20)
+	  plots[i].slices.at(score).push_back(std::make_pair(dgaus_fit,hSlice));
+	
+	if (right == hist->GetNbinsX()+1)
+	  break;
+      }
+
+      TH1D* hist_pass = plots[i].eff_pass.at(score);
+      TEfficiency *efficiency_plot = new TEfficiency(*hist_pass, *total);
+      efficiency_plot->SetStatisticOption(TEfficiency::kFNormal);  // use normal approximation
+      efficiency_plot->SetTitle(Form("Efficiency vs %s (Ideal Eff. HGTD);%s;Efficiency", xtitle, xtitle));
+      efficiency_plot->SetLineColor(myutl::colors[score]);
+      efficiency_plot->SetLineWidth(2);
+      
+      plots[i].efficiency.emplace(score, efficiency_plot);
+    }
+    plots[i].set_param_maxes();
   }
+
+  std::cout << "FINISHED CREATING " << std::endl;
   
-  for (auto& plot: plots){
-    std::cout << "Calling plot_logic on: " << &plot << std::endl;
-    plot->plot_logic(canvas);}
+  for (auto plot: plots) {
+    plot.plot_logic(canvas);
+  }  
   
-  plot_inclusive("figs/hgtdtimes_resos_logscale.pdf", true, true, -400, 400,
+  plot_inclusive("figs/idealres_resos_logscale.pdf", true, true, -400, 400,
 		 canvas, inclusive_resos);
 
-  plot_inclusive("figs/hgtdtimes_resos_linscale.pdf", false, true, -150, 150,
+  plot_inclusive("figs/idealres_resos_linscale.pdf", false, true, -150, 150,
 		 canvas, inclusive_resos);
 
-  auto purity_fname = "figs/hgtdtimes_purity.pdf";
+  const char * purity_fname = "figs/idealres_purity.pdf";
   canvas->Print(Form("%s[",purity_fname));
   inclusive_purity.at(ScoreType::TRKPT)->Draw("HIST");
   double maxval = 0.0;
@@ -480,4 +496,7 @@ void clustering_dt() {
   hs_pu_inclusive->Draw("COLZ");
   canvas->Print(Form("%s",hs_pu_fname));
   canvas->Print(Form("%s]",hs_pu_fname));
+
+  // std::cout << "N incorrect = " << n_incorrect << std::endl;
+  // std::cout << "N BAD = " << n_chosen << std::endl;
 }
