@@ -25,7 +25,7 @@ auto max_nsigma        =  3.0;  // how close a track can be to PV
 
 void setup_chain(TChain &chain) {
   // VBF H->Invisible sample
-  for (const auto& entry : boost::filesystem::directory_iterator("./ntuple")) {
+  for (const auto& entry : boost::filesystem::directory_iterator("../ntuple")) {
     if(debug) {std::cout << "Adding file: " << entry.path() << std::endl;}
     chain.Add(entry.path().c_str());
     // break; // add 1
@@ -331,15 +331,9 @@ void generate_dt() {
   nForJetHist->SetFillColor(c1);
   canvas->SaveAs("figs/nforjet.pdf");
   
-  if(debug) {
-    std::cout << "hist1 has " << hist1->GetEntries() << " Entries" << std::endl;
-    std::cout << "    fit 1 has " << 100*fit_1->GetParError(3)/fit_1->GetParameter(3) << "% error on sigma" << std::endl;
-    std::cout << "    fit 2 has " << 100*fit_2->GetParError(3)/fit_2->GetParameter(3) << "% error on sigma" << std::endl;
-    std::cout << "    fit 3 has " << 100*fit_3->GetParError(3)/fit_3->GetParameter(3) << "% error on sigma" << std::endl;
-    std::cout << "    fit 4 has " << 100*fit_4->GetParError(3)/fit_4->GetParameter(3) << "% error on sigma" << std::endl;
-    std::cout << "normfit 1 has " << 100*normfit_1->GetParError(2)/normfit_1->GetParameter(2) << "% error on sigma" << std::endl;
-    std::cout << "normfit 2 has " << 100*normfit_2->GetParError(2)/normfit_2->GetParameter(2) << "% error on sigma" << std::endl;
-    std::cout << "normfit 3 has " << 100*normfit_3->GetParError(2)/normfit_3->GetParameter(2) << "% error on sigma" << std::endl;
-    std::cout << "normfit 4 has " << 100*normfit_4->GetParError(2)/normfit_4->GetParameter(2) << "% error on sigma" << std::endl;
-  }
+  std::cout << "N(=0 forward jet) " << hist1->GetEntries() << std::endl;
+  std::cout << "N(=1 forward jet) " << hist2->GetEntries() << std::endl;
+  std::cout << "N(=2 forward jet) " << hist3->GetEntries() << std::endl;
+  std::cout << "N(>2 forward jet) " << hist4->GetEntries() << std::endl;
+
 }

@@ -31,7 +31,7 @@ auto max_nsigma        =  3.0;  // how close a track can be to PV
 
 void setup_chain(TChain &chain) {
   // VBF H->Invisible sample
-  for (const auto& entry : boost::filesystem::directory_iterator("./ntuple")) {
+  for (const auto& entry : boost::filesystem::directory_iterator("../ntuple")) {
     if(debug) {std::cout << "Adding file: " << entry.path() << std::endl;}
     chain.Add(entry.path().c_str());
     // break; // add 1
@@ -59,11 +59,11 @@ void generate_timeplot() {
 
   // jet variables
   TTreeReaderArray<float> jet_pt
-    // (reader, "TruthHSJet_pt");
-    (reader, "AntiKt4EMTopoJets_pt");
+    (reader, "TruthHSJet_pt");
+    // (reader, "AntiKt4EMTopoJets_pt");
   TTreeReaderArray<float> jet_eta
-    // (reader, "TruthHSJet_eta");
-    (reader, "AntiKt4EMTopoJets_eta");
+    (reader, "TruthHSJet_eta");
+    // (reader, "AntiKt4EMTopoJets_eta");
   TTreeReaderArray<std::vector<int>> jet_track_indices
     (reader, "AntiKt4EMTopoJets_track_idx");
 
@@ -110,10 +110,10 @@ void generate_timeplot() {
 
   // int num_events = (int)tree->GetEntries();
   int numpages = 1;
-  canvas->Print("figs/trackhists_0fjet.pdf(", "pdf");
-  canvas->Print("figs/trackhists_1fjet.pdf(", "pdf");
-  canvas->Print("figs/trackhists_2fjet.pdf(", "pdf");
-  canvas->Print("figs/trackhists_2pfjet.pdf(", "pdf");
+  canvas->Print("figs/trackhists_0fjet.pdf[", "pdf");
+  canvas->Print("figs/trackhists_1fjet.pdf[", "pdf");
+  canvas->Print("figs/trackhists_2fjet.pdf[", "pdf");
+  canvas->Print("figs/trackhists_2pfjet.pdf[", "pdf");
 
   while (reader.Next()) {
     if (jet_pt.GetSize() < min_jets) {
@@ -242,8 +242,8 @@ void generate_timeplot() {
     }
   }
 
-  canvas->Print("figs/trackhists_0fjet.pdf)", "pdf");
-  canvas->Print("figs/trackhists_1fjet.pdf)", "pdf");
-  canvas->Print("figs/trackhists_2fjet.pdf)", "pdf");
-  canvas->Print("figs/trackhists_2pfjet.pdf)", "pdf");
+  canvas->Print("figs/trackhists_0fjet.pdf]", "pdf");
+  canvas->Print("figs/trackhists_1fjet.pdf]", "pdf");
+  canvas->Print("figs/trackhists_2fjet.pdf]", "pdf");
+  canvas->Print("figs/trackhists_2pfjet.pdf]", "pdf");
 }
