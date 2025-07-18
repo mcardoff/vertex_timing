@@ -3,3 +3,6 @@
 -/ntuple_ttbar
 -*.root
 -*.pdf
+-*.bak
+-*.jpg
+-/.ipynb_checkpoints/*
