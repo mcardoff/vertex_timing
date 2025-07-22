@@ -63,6 +63,30 @@ namespace myutl {
   static double max_vtx_dz        =  2.0;  // max error for reco HS vertex z
   static double max_nsigma        =  3.0;  // how close a track can be to PV
 
+  const double diff_min = -1000.0, diff_max = 1000.0;
+  const double diff_width = 2.0;
+
+  const double purity_min = 0, purity_max = 1;
+  const double purity_width = 0.05;
+
+  const double fjet_min = 1, fjet_max = 31, fold_fjet = 5;
+  const double fjet_width = 1.0;
+
+  const double track_min = 0, track_max = 100, fold_track = 20;
+  const double track_width = 1.0;
+
+  const double pu_track_min = track_min, pu_track_max = track_max, fold_hs_track = fold_track;
+  const double pu_track_width = track_width;
+
+  const double hs_track_min = track_min, hs_track_max = track_max, fold_pu_track = fold_track;
+  const double hs_track_width = track_width;
+
+  const double pu_frac_min = 0, pu_frac_max = 1 , fold_pu_frac = pu_frac_max;
+  const double pu_frac_width = 0.05;
+
+  const double z_min = -200, z_max = 200, fold_z = 100;
+  const double z_width = 10.0;
+
   
   static TF1 *dgaus_fitfunc = new TF1("dgaus", "[1]*TMath::Exp(-0.5 * ((x - [0]) / [3])^2) + [2]*TMath::Exp(-0.5 * ((x - [0]) / [4])^2)");
 
@@ -139,8 +163,7 @@ namespace myutl {
 
     bool operator!=(const Cluster& other) {
       return !(*this == other);
-    }
-      
+    }      
   };
 
   struct BranchPointerWrapper {
@@ -632,7 +655,7 @@ namespace myutl {
       canvas->Print(Form("%s]",fname));
     }
   };
-
+  
   static double getSmearedTrackTime(int idx, double res, BranchPointerWrapper *branch) {
     // know that it has a valid time in HGTD and has a valid truth link
 
@@ -803,7 +826,7 @@ namespace myutl {
       }
     }
     return simpleClusters;
-}
+  }
 
   static void doSimultaneousClustering(std::vector<Cluster> *collection, double dist_cut) {
     double distance = 1.e30;
@@ -1138,5 +1161,120 @@ namespace myutl {
   template <typename T>
   static T folded(T raw, T fold) {
     return (raw >= fold) ? fold : raw;
+  }
+
+  static void process_event_data(
+    BranchPointerWrapper *branch,
+    bool smeared_times,
+    bool valid_times,
+    std::map<ScoreType,TH1D*>& inclusive_resos,
+    std::map<ScoreType,TH1D*>& inclusive_purity,
+    PlotObj& fjet,
+    PlotObj& ftrack,
+    PlotObj& pu_frac,
+    PlotObj& hs_track,
+    PlotObj& pu_track,
+    PlotObj& recovtx_z,
+    TH2D* hs_pu_inclusive
+  ) {
+    // check if vertex selection is correct & number of jets
+    if (not branch->pass_basic_cuts()) return;
+
+    // check if there is one forward jet with pt > 30 GeV
+    if (not branch->pass_jet_pt_cut()) return;
+
+    int nForwardJet=0;
+    branch->count_forward_jets(nForwardJet);
+    
+    std::vector<int> tracks = getAssociatedTracks(branch, min_track_pt);
+
+    int nForwardTrack=0, nForwardTrack_HS=0, nForwardTrack_PU=0;
+    branch->count_forward_tracks(nForwardTrack,nForwardTrack_HS,nForwardTrack_PU,tracks);
+
+    hs_pu_inclusive->Fill(nForwardTrack_HS,nForwardTrack_PU);
+    
+    double pu_ratio = (double)nForwardTrack_PU / (double)nForwardTrack;
+    double reco_z = branch->reco_vtx_z[0];
+
+    auto eff_fill_val_fjet     = folded(nForwardJet     , (int)fold_fjet) ;
+    auto eff_fill_val_track    = folded(nForwardTrack   , (int)fold_track);
+    auto eff_fill_val_hs_track = folded(nForwardTrack_HS, (int)fold_hs_track);
+    auto eff_fill_val_pu_track = folded(nForwardTrack_PU, (int)fold_pu_track);
+    auto eff_fill_val_z        = reco_z;
+    auto eff_fill_val_pu_ratio = pu_ratio;
+
+    if (debug) {
+      std::cout << "nForwardJet = " << nForwardJet << std::endl;
+      std::cout << "nForwardTrack = " << nForwardTrack << std::endl;
+      std::cout << "nForwardTrack_HS = " << nForwardTrack_HS << std::endl;
+      std::cout << "nForwardTrack_PU = " << nForwardTrack_PU << std::endl;
+      std::cout << "Vertex_z = " << reco_z << std::endl;
+    }
+    
+    std::vector<Cluster> cluster =
+      clusterTracksInTime(tracks, branch, 3.0, 10.0, smeared_times, valid_times, true);
+
+    fjet.eff_total->     Fill(eff_fill_val_fjet    );
+    ftrack.eff_total->   Fill(eff_fill_val_track   );
+    pu_frac.eff_total->  Fill(eff_fill_val_pu_ratio);
+    hs_track.eff_total-> Fill(eff_fill_val_hs_track);
+    pu_track.eff_total-> Fill(eff_fill_val_pu_track);
+    recovtx_z.eff_total->Fill(eff_fill_val_z       );
+    
+    // std::cout << "Acessing cluster size" << std::endl;
+    if (cluster.size() == 0) return;
+
+    std::map<ScoreType,Cluster> chosen = chooseCluster(cluster, branch);
+
+    // run HGTD Clustering (simultaneous)
+    std::vector<Cluster> hgtd_clusters =
+      clusterTracksInTime(tracks, branch, 3.0, -1, false, true, false);
+
+    if (branch->reco_vtx_valid[0] == 1)
+      chosen[ScoreType::HGTD] = chooseHGTDCluster(hgtd_clusters, branch);
+
+    for (ScoreType score : enum_vec) {
+      
+      if (branch->reco_vtx_valid[0] == 0 and score == HGTD)
+	continue;
+      
+      if (fjet.eff_pass.count(score) != 1)
+	continue;
+      
+      if (score == ScoreType::INVALID)
+	continue;
+      
+      Cluster scored = chosen[score];
+      double score_based_time = scored.values.at(0);
+      double cluster_purity = scored.purity;
+      double diff = score_based_time - branch->truth_vtx_time[0];
+      inclusive_resos.at(score)->Fill(diff);
+      inclusive_purity.at(score)->Fill(cluster_purity);
+      
+      if (passEfficiency(diff, scored, branch)) {
+	fjet.eff_pass.at(score)->     Fill(eff_fill_val_fjet    );
+	ftrack.eff_pass.at(score)->   Fill(eff_fill_val_track   );
+	pu_frac.eff_pass.at(score)->  Fill(eff_fill_val_pu_ratio);
+	hs_track.eff_pass.at(score)-> Fill(eff_fill_val_hs_track);
+	pu_track.eff_pass.at(score)-> Fill(eff_fill_val_pu_track);
+	recovtx_z.eff_pass.at(score)->Fill(eff_fill_val_z       );
+      }
+      
+      // fill diff hists
+      fjet.hist.at(score)->     Fill(nForwardJet     , diff);
+      ftrack.hist.at(score)->   Fill(nForwardTrack   , diff);
+      pu_frac.hist.at(score)->  Fill(pu_ratio        , diff);
+      hs_track.hist.at(score)-> Fill(nForwardTrack_HS, diff);
+      pu_track.hist.at(score)-> Fill(nForwardTrack_PU, diff);
+      recovtx_z.hist.at(score)->Fill(reco_z          , diff);
+
+      // fill purities
+      fjet.purity.at(score)->     Fill(nForwardJet     , cluster_purity);
+      ftrack.purity.at(score)->   Fill(nForwardTrack   , cluster_purity);
+      pu_frac.purity.at(score)->  Fill(pu_ratio        , cluster_purity);
+      hs_track.purity.at(score)-> Fill(nForwardTrack_HS, cluster_purity);
+      pu_track.purity.at(score)-> Fill(nForwardTrack_PU, cluster_purity);
+      recovtx_z.purity.at(score)->Fill(reco_z          , cluster_purity);
+    }
   }
 }

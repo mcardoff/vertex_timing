@@ -13,30 +13,6 @@ void clustering_dt() {
   TCanvas *canvas = new TCanvas("canvas", "Histograms", 800, 600);
   canvas->SetLeftMargin(0.15);
 
-  double diff_min = -1000.0, diff_max = 1000.0;
-  double diff_width = 2.0;
-
-  double purity_min = 0, purity_max = 1;
-  double purity_width = 0.05;
-
-  double fjet_min = 1, fjet_max = 31, fold_fjet = 5;
-  double fjet_width = 1.0;
-
-  double track_min = 0, track_max = 100, fold_track = 20;
-  double track_width = 1.0;
-
-  double pu_track_min = track_min, pu_track_max = track_max, fold_hs_track = fold_track;
-  double pu_track_width = track_width;
-
-  double hs_track_min = track_min, hs_track_max = track_max, fold_pu_track = fold_track;
-  double hs_track_width = track_width;
-
-  double pu_frac_min = 0, pu_frac_max = 1 , fold_pu_frac = pu_frac_max;
-  double pu_frac_width = 0.05;
-
-  double z_min = -200, z_max = 200, fold_z = 100;
-  double z_width = 10.0;
-
   // All Needed Histogramming information
   const char* time_type = "HGTD Times";
   std::map<ScoreType,TH1D*> inclusive_resos;
@@ -106,110 +82,10 @@ void clustering_dt() {
 
     auto readnum = chain.GetReadEntry()+1;
 
-    // if (readnum > 1000)
-    //   continue;
     if (progress and readnum % 1000 == 0) std::cout << "Progress: " << readnum << "/" << chain.GetEntries() << "\n";
 
-    if (not branch.pass_basic_cuts()) // check n_jet cut and vertex dz cut
-      continue;
-
-    // check if there is one forward jet with pt > 30 GeV
-    int nForwardJet=0;
-    branch.count_forward_jets(nForwardJet);
-    
-    if (not branch.pass_jet_pt_cut()) continue;
-
-    std::vector<int> tracks = getAssociatedTracks(&branch, min_track_pt);
-
-    int nForwardTrack=0, nForwardTrack_HS=0, nForwardTrack_PU=0;
-    branch.count_forward_tracks(nForwardTrack,nForwardTrack_HS,nForwardTrack_PU,tracks);
-
-    hs_pu_inclusive->Fill(nForwardTrack_HS,nForwardTrack_PU);
-    
-    double pu_ratio = (double)nForwardTrack_PU / (double)nForwardTrack;
-    double reco_z = branch.reco_vtx_z[0];
-
-    auto eff_fill_val_fjet     = folded(nForwardJet     , (int)fold_fjet) ;
-    auto eff_fill_val_track    = folded(nForwardTrack   , (int)fold_track);
-    auto eff_fill_val_hs_track = folded(nForwardTrack_HS, (int)fold_hs_track);
-    auto eff_fill_val_pu_track = folded(nForwardTrack_PU, (int)fold_pu_track);
-    auto eff_fill_val_z        = reco_z;
-    auto eff_fill_val_pu_ratio = pu_ratio;
-
-    if (debug) {
-      std::cout << "nForwardJet = " << nForwardJet << std::endl;
-      std::cout << "nForwardTrack = " << nForwardTrack << std::endl;
-      std::cout << "nForwardTrack_HS = " << nForwardTrack_HS << std::endl;
-      std::cout << "nForwardTrack_PU = " << nForwardTrack_PU << std::endl;
-      std::cout << "Vertex_z = " << reco_z << std::endl;
-    }
-    
-    std::vector<Cluster> cluster =
-      clusterTracksInTime(tracks, &branch, 3.0, 10.0, smeared_times, valid_times, true);
-
-    fjet.eff_total->     Fill(eff_fill_val_fjet    );
-    ftrack.eff_total->   Fill(eff_fill_val_track   );
-    pu_frac.eff_total->  Fill(eff_fill_val_pu_ratio);
-    hs_track.eff_total-> Fill(eff_fill_val_hs_track);
-    pu_track.eff_total-> Fill(eff_fill_val_pu_track);
-    recovtx_z.eff_total->Fill(eff_fill_val_z       );
-    
-    // std::cout << "Acessing cluster size" << std::endl;
-    if (cluster.size() == 0)
-      continue;
-
-    std::map<ScoreType,Cluster> chosen = chooseCluster(cluster, &branch);
-
-    // run HGTD Clustering (simultaneous)
-    std::vector<Cluster> hgtd_clusters =
-      clusterTracksInTime(tracks, &branch, 3.0, -1, false, true, false);
-
-    if (branch.reco_vtx_valid[0] == 1)
-      chosen[ScoreType::HGTD] = chooseHGTDCluster(hgtd_clusters, &branch);
-
-    for (ScoreType score : enum_vec) {
-      
-      if (branch.reco_vtx_valid[0] == 0 and score == HGTD)
-	continue;
-      
-      if (fjet.eff_pass.count(score) != 1)
-	continue;
-      
-      if (score == ScoreType::INVALID)
-	continue;
-      
-      Cluster scored = chosen[score];
-      double score_based_time = scored.values.at(0);
-      double cluster_purity = scored.purity;
-      double diff = score_based_time - branch.truth_vtx_time[0];
-      inclusive_resos.at(score)->Fill(diff);
-      inclusive_purity.at(score)->Fill(cluster_purity);
-      
-      if (passEfficiency(diff, scored, &branch)) {
-	fjet.eff_pass.at(score)->     Fill(eff_fill_val_fjet    );
-	ftrack.eff_pass.at(score)->   Fill(eff_fill_val_track   );
-	pu_frac.eff_pass.at(score)->  Fill(eff_fill_val_pu_ratio);
-	hs_track.eff_pass.at(score)-> Fill(eff_fill_val_hs_track);
-	pu_track.eff_pass.at(score)-> Fill(eff_fill_val_pu_track);
-	recovtx_z.eff_pass.at(score)->Fill(eff_fill_val_z       );
-      }
-      
-      // fill diff hists
-      fjet.hist.at(score)->     Fill(nForwardJet     , diff);
-      ftrack.hist.at(score)->   Fill(nForwardTrack   , diff);
-      pu_frac.hist.at(score)->  Fill(pu_ratio        , diff);
-      hs_track.hist.at(score)-> Fill(nForwardTrack_HS, diff);
-      pu_track.hist.at(score)-> Fill(nForwardTrack_PU, diff);
-      recovtx_z.hist.at(score)->Fill(reco_z          , diff);
-
-      // fill purities
-      fjet.purity.at(score)->     Fill(nForwardJet     , cluster_purity);
-      ftrack.purity.at(score)->   Fill(nForwardTrack   , cluster_purity);
-      pu_frac.purity.at(score)->  Fill(pu_ratio        , cluster_purity);
-      hs_track.purity.at(score)-> Fill(nForwardTrack_HS, cluster_purity);
-      pu_track.purity.at(score)-> Fill(nForwardTrack_PU, cluster_purity);
-      recovtx_z.purity.at(score)->Fill(reco_z          , cluster_purity);
-    }
+    process_event_data(&branch, smeared_times, valid_times, inclusive_resos, inclusive_purity,
+		       fjet, ftrack, pu_frac, hs_track, pu_track, recovtx_z, hs_pu_inclusive);
   }
   
   // add all objects to plotobjs before drawing everything
