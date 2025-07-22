@@ -1,19 +1,44 @@
+#include <Rtypes.h>
+#include <TRandom1.h>
 #include <TCanvas.h>
-#include <TColor.h>
 #include <TChain.h>
+#include <TColor.h>
+#include <TDirectory.h>
 #include <TEfficiency.h>
+#include <TFile.h>
 #include <TF1.h>
+#include <TGaxis.h>
+#include <TGraph.h>
 #include <TGraphAsymmErrors.h>
+#include <TGraphErrors.h>
 #include <TH1.h>
 #include <TH2.h>
 #include <TLatex.h>
 #include <TLegend.h>
-#include <TLine.h>
+#include <TLine.h> 
 #include <TProfile.h>
+#include <TMath.h>
+#include <TTreeReader.h>
 #include <TTreeReaderArray.h>
-#include <memory>
+#include <TString.h>
+#include <TStyle.h>
 
+// Boost Headers
 #include <boost/filesystem.hpp>
+
+// Standard C++ Library Headers
+#include <algorithm>
+#include <cassert>
+#include <cmath>
+#include <cstddef>
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
+#include <ostream>
+#include <utility>
+#include <vector>
+#include <map>    
+#include <memory> 
 
 namespace myutl {
   static bool debug = false;
@@ -32,7 +57,7 @@ namespace myutl {
   // cut variables
   static int    min_jets          =  1;    // min number of jets
   static double min_jetpt         =  30.0; // self explanatory
-  static double min_abs_eta_jet   =  2.0;  // min eta for a jet to be considered "forward"
+  static double min_abs_eta_jet   =  2.4;  // min eta for a jet to be considered "forward"
   static double min_abs_eta_track =  2.4;  // min eta for a track to be considered "forward"
   static double min_track_pt      =  1.0;  // track_pt > 1.0 GeV
   static double max_vtx_dz        =  2.0;  // max error for reco HS vertex z
@@ -61,9 +86,9 @@ namespace myutl {
   }
   
   /// enums and utilities for them
-  enum ScoreType { HGTD = 0, SIG = 1, SUMPT2 = 3, TRKPT = 2, SIGTRKPT = 4, MAXPT = 5, IDEAL = 6, INVALID = -99 };
+  enum ScoreType { HGTD = 0, SIG = 1, SUMPT2 = 3, TRKPT = 2, SIGTRKPT = 4, MAXPT = 5, IDEAL = 6, MAXHS = 7, INVALID = -99 };
   // std::vector<ScoreType> enum_vec = {HGTD,  SIG, SUMPT2, TRKPT, SIGTRKPT, IDEAL}; // valid values
-  static std::vector<ScoreType> enum_vec = {HGTD, TRKPT, IDEAL}; // valid values
+  static std::vector<ScoreType> enum_vec = {HGTD, SUMPT2, IDEAL, MAXHS}; // valid values
 
   static const char* toString(myutl::ScoreType score) {
     switch (score) {
@@ -74,6 +99,7 @@ namespace myutl {
     case ScoreType::SIGTRKPT: return "Track p_{T}*exp(-|s|)";
     case ScoreType::MAXPT:    return "Cluster with max p_{T}";
     case ScoreType::IDEAL:    return "Ideal cluster choice";
+    case ScoreType::MAXHS:    return "Max HS Track Clsuter";
     default:                  return "INVALID";
     }
   }
@@ -188,19 +214,20 @@ namespace myutl {
       // check reco HS vertex is with 2mm of truth HS vertex
       if(std::abs(truth_vtx_z[0] - reco_vtx_z[0]) > max_vtx_dz) {
 	if(debug)	std::cout << "Skipping event due to incorrect HS vertex" << std::endl;
-	return false;;
+	return false;
       }
       
       return true;
     }
 
     bool pass_jet_pt_cut() { 
-      int passptcount = 0;
+      int passptcount = 0, passptetacount = 0;
       for(int jet_idx = 0; jet_idx < truthhsjet_eta.GetSize(); ++jet_idx) {
 	float eta = truthhsjet_eta[jet_idx], pt = truthhsjet_pt[jet_idx];
-	passptcount += pt > min_jetpt ? 1 : 0;
-	if (passptcount >= 2)
-	  return true;
+	passptcount += (pt > min_jetpt) ? 1 : 0;
+	passptetacount += (pt > min_jetpt) and (eta > min_abs_eta_jet) ? 1 : 0;
+        if (passptcount >= 2 and passptetacount >= 1)
+          return true;
       }
       if (debug) std::cout << "Skipping pt cut event" << std::endl;
       return false;
@@ -211,7 +238,7 @@ namespace myutl {
     for(int jet_idx = 0; jet_idx < this->topojet_eta.GetSize(); ++jet_idx) {
       float jet_eta = this->topojet_eta[jet_idx];
       if (std::abs(jet_eta) > min_abs_eta_jet)
-	(nForwardJet)++;
+	nForwardJet++;
     }
   }
     
@@ -220,11 +247,12 @@ namespace myutl {
       nFTrack = 0; nFTrack_HS = 0; nFTrack_PU = 0;
       for(auto trk_idx: tracks) {
 	auto eta = this->track_eta[trk_idx];
-	auto valid = this->track_time_valid[trk_idx];
+	auto valid = this->track_time_valid[trk_idx] == 1;
 	auto pt = this->track_pt[trk_idx];
 	auto truthvtx = this->track_to_truthvtx[trk_idx];
 	// already know these pass association
-	if (std::abs(eta) > min_abs_eta_track) {
+	if (std::abs(eta) > min_abs_eta_track and
+	    pt > min_track_pt and valid) {
 	  nFTrack++;
 	  if (truthvtx != -1 and this->truth_vtx_ishs[truthvtx])
 	    nFTrack_HS++;
@@ -242,25 +270,25 @@ namespace myutl {
     TH1D* back_amp_dist;
     TH1D* amp_ratio_dist;
 
-    FitParams(const char* title, const char* name,
+    FitParams(const char* title, const char* times, const char* name, 
 	      double x_min, double fold_val, double fold_max,
 	      double x_width, int color) {
-      auto full_title = Form("%%s vs %s;%s;%%s", title, title);
-      mean_dist = new TH1D(Form("mean_dist_%s", name),
-			   Form(full_title, "Common #mu", "#mu"),
-			   (int)((fold_max-x_min)/x_width), x_min, fold_max);
+      auto full_title = Form("%%s vs %s (%s);%s;%%s", title, times, title);
+      mean_dist      = new TH1D(Form("mean_dist_%s", name),
+				Form(full_title, "Common #mu", "#mu"),
+				(int)((fold_max-x_min)/x_width), x_min, fold_max);
     
-      sigma_dist = new TH1D(Form("sigma_dist_%s", name),
-			    Form(full_title, "Core #sigma", "Core #sigma"),
-			    (int)((fold_max-x_min)/x_width), x_min, fold_max);
+      sigma_dist     = new TH1D(Form("sigma_dist_%s", name),
+				Form(full_title, "Core #sigma", "Core #sigma"),
+				(int)((fold_max-x_min)/x_width), x_min, fold_max);
     
-      core_amp_dist = new TH1D(Form("amp1_dist_%s", name),
-			       Form(full_title, "Core Amplitude", "Amplitude"),
-			       (int)((fold_max-x_min)/x_width), x_min, fold_max);
+      core_amp_dist  = new TH1D(Form("amp1_dist_%s", name),
+				Form(full_title, "Core Amplitude", "Amplitude"),
+				(int)((fold_max-x_min)/x_width), x_min, fold_max);
     
-      back_amp_dist = new TH1D(Form("amp2_dist_%s", name),
-			       Form(full_title, "Bkg Amplitude", "Amplitude"),
-			       (int)((fold_max-x_min)/x_width), x_min, fold_max);
+      back_amp_dist  = new TH1D(Form("amp2_dist_%s", name),
+				Form(full_title, "Bkg Amplitude", "Amplitude"),
+				(int)((fold_max-x_min)/x_width), x_min, fold_max);
     
       amp_ratio_dist = new TH1D(Form("ampratio_dist_%s", name),
 				Form(full_title, "Core Amp/Bkg Amp", "A.U."),
@@ -315,61 +343,63 @@ namespace myutl {
     const char* fname;
     const char* xtitle;
     const char* ytitle;
+    const char*  times;
     double x_min, x_max, x_wid;
     double y_min, y_max, y_wid;
+    std::map<ScoreType, FitParams> params; 
     std::unique_ptr<TH1D> eff_total;
     std::map<ScoreType, std::unique_ptr<TH1D>> eff_pass;
+    std::map<ScoreType, std::unique_ptr<TEfficiency>> efficiency; 
     std::map<ScoreType, std::unique_ptr<TH2D>> hist;
     std::map<ScoreType, std::unique_ptr<TH2D>> purity;
-    std::map<ScoreType, FitParams> params; // FitParams might handle its own pointers, or be values
     std::map<ScoreType, std::vector<std::unique_ptr<TH1D>>> slices_hists;
     std::map<ScoreType, std::vector<std::unique_ptr<TF1>>> slices_fits;
-    std::map<ScoreType, std::unique_ptr<TEfficiency>> efficiency; // This needs to be carefully managed if created from eff_pass and eff_total
     std::unique_ptr<TLegend> algolegend;
 
-  PlotObj(const char* title, const char* name, const char* fname,
-	  double x_min, double x_max, double x_wid,
-	  double y_min, double y_max, double y_wid,
-	  double p_min, double p_max, double p_wid,
-	  double fold_val, double fold_max)
-    : bin_width(x_wid), fname(fname),
-      xtitle(title), ytitle("#Delta t[ps]"),
-      fold_value(fold_val), fold_max(fold_max),
-      x_min(x_min), x_max(x_max), x_wid(x_wid),
-      y_min(y_min), y_max(y_max), y_wid(y_wid)
+    PlotObj(const char* title, const char* times,
+	    const char* name, const char* fname,
+	    double x_min, double x_max, double x_wid,
+	    double y_min, double y_max, double y_wid,
+	    double p_min, double p_max, double p_wid,
+	    double fold_val, double fold_max)
+      : bin_width(x_wid), fname(fname),
+	xtitle(title), ytitle("#Delta t[ps]"), times(times),
+	x_min(x_min), x_max(x_max), x_wid(x_wid),
+	y_min(y_min), y_max(y_max), y_wid(y_wid),
+	fold_value(fold_val), fold_max(fold_max)
     {// Allocate with make_unique for owned objects
       algolegend = std::make_unique<TLegend>(0.6, 0.7, 0.9, 0.9);
       algolegend->SetTextSize(0.03);
 
       for (ScoreType score : enum_vec) {
-	hist[score] = std::make_unique<TH2D>(Form("%s_%s", name, toString(score)),
-					     Form("%s t_{0} - TruthVtx t_{0} vs %s ;%s;#Delta t[ps]", toString(score), title, title),
-					     (int)((x_max - x_min) / x_wid), x_min, x_max,
-					     (int)((y_max - y_min) / y_wid), y_min, y_max);
+	hist[score]    = std::make_unique<TH2D>(Form("%s_%s", name, toString(score)),
+						Form("%s t_{0} - TruthVtx t_{0} vs %s (%s);%s;#Delta t[ps]",
+						     toString(score), title, times, title),
+						(int)((x_max - x_min) / x_wid), x_min, x_max,
+						(int)((y_max - y_min) / y_wid), y_min, y_max);
 
-	purity[score] = std::make_unique<TH2D>(Form("cluster_purity_%s_%s", name, toString(score)),
-					       Form("%s Cluster Purity vs %s ;%s;Cluster Purity", toString(score), title, title),
-					       (int)((x_max - x_min) / x_wid), x_min, x_max,
-					       (int)((p_max - p_min) / p_wid), p_min, p_max);
+	purity[score]  = std::make_unique<TH2D>(Form("cluster_purity_%s_%s", name, toString(score)),
+						Form("%s Cluster Purity vs %s (%s);%s;Cluster Purity",
+						     toString(score), title, times, title),
+						(int)((x_max - x_min) / x_wid), x_min, x_max,
+						(int)((p_max - p_min) / p_wid), p_min, p_max);
 
 	eff_pass[score] = std::make_unique<TH1D>(Form("good_%s_%s", name, toString(score)),
-						 Form("%s Eff Events ;Entries;%s", title, title),
+						 Form("%s Eff. Events Count vs %s (%s);Entries;%s",
+						      toString(score), title, times, title),
 						 (int)((fold_max - x_min) / x_wid), x_min, fold_max);
 
 	purity[score]->SetLineColor(colors[score]);
 
-	this->params.emplace(score,
-			     FitParams(title, Form("%s_%s", name, toString(score)),
-				       x_min, fold_val, fold_max, x_wid,
-				       colors[score]));
-        // slices_hists[score] = {};
-        // slices_fits[score] = {}; 
+	this->params.emplace(score, FitParams(title, times, Form("%s_%s", name, toString(score)),
+					      x_min, fold_val, fold_max, x_wid,colors[score]));
 
 	algolegend->AddEntry(params.at(score).sigma_dist, toString(score));
       }
 
       eff_total = std::make_unique<TH1D>(Form("flat_%s", name),
-					 Form("%s All Events ;Entries;%s", title, title),
+					 Form("n Events vs %s (%s);Entries;%s",
+					      title, times, title),
 					 (int)((fold_max - x_min) / x_wid), x_min, fold_max);
     }
 
@@ -467,7 +497,7 @@ namespace myutl {
 
 	std::unique_ptr<TEfficiency> eff = std::make_unique<TEfficiency>(*this->eff_pass.at(score), *this->eff_total);
 	eff->SetStatisticOption(TEfficiency::kFNormal);  // use normal approximation
-	eff->SetTitle(Form("Efficiency vs %s;%s;Efficiency", this->xtitle, this->xtitle));
+	eff->SetTitle(Form("Efficiency vs %s (%s);%s;Efficiency", this->xtitle, this->times, this->xtitle));
         eff->SetLineColor(myutl::colors[score]);
         eff->SetLineWidth(2);
 	efficiency[score] = std::move(eff);
@@ -496,7 +526,7 @@ namespace myutl {
 	prof->GetXaxis()->SetNdivisions(510);  // 5 major, 1 minor subdivision
 	prof->GetYaxis()->SetRangeUser(purity_ymin,purity_ymax);
 	if (first) {
-	  prof->SetTitle(Form("Avg. Cluster Purity vs. %s",entry->GetXaxis()->GetTitle()));
+	  prof->SetTitle(Form("Avg. Cluster Purity vs. %s (%s)",entry->GetXaxis()->GetTitle(),this->times));
 	  prof->Draw("E1");  // 'E' to draw error bars
 	  first = false;
 	} else
@@ -603,7 +633,31 @@ namespace myutl {
     }
   };
 
-  static bool passTrackVertexAssociation(int track_idx, int vertex_idx, BranchPointerWrapper *branch, double min_trk_pt, double significance_cut) {
+  static double getSmearedTrackTime(int idx, double res, BranchPointerWrapper *branch) {
+    // know that it has a valid time in HGTD and has a valid truth link
+
+    int particle_idx = branch->track_to_particle[idx]; // this is anything
+    int truthvtx_idx = branch->track_to_truthvtx[idx]; // this is anything
+    if (debug) std::cout << "Particle_idx: " << particle_idx << std::endl;
+    if (debug) std::cout << "TruthVtx_idx: " << truthvtx_idx << std::endl;
+    double t_part, reso = res;
+    if (particle_idx == -1) { // no particle link
+      if (truthvtx_idx != -1) { // some valid truth link, smear that vertex time
+        if (debug) std::cout << "PATH A" << std::endl;
+        t_part = branch->truth_vtx_time[truthvtx_idx];
+      } else { // some random pileup, assume
+        if (debug) std::cout << "PATH B" << std::endl;
+        t_part = gRandom->Gaus(branch->truth_vtx_time[0],175);
+      }
+    } else {
+      if (debug) std::cout << "PATH C" << std::endl;
+      t_part = branch->particle_t[particle_idx];
+    }
+    if (debug) std::cout << "DONE" << std::endl;
+    return gRandom->Gaus(t_part,reso);
+  }
+
+  static bool passTrackVertexAssociation(int track_idx, int vertex_idx, BranchPointerWrapper *branch, double significance_cut) {
     double
       trk_z0    = branch->track_z0[track_idx],
       trk_z_var = branch->track_var_z0[track_idx],
@@ -611,16 +665,6 @@ namespace myutl {
       trk_eta   = branch->track_eta[track_idx],
       vx_z      = branch->reco_vtx_z[vertex_idx],
       vx_z_var  = 0.0;
-  
-    if (trk_pt < min_trk_pt)
-      return false;
-
-    // if (std::abs(trk_eta) < 2.4 || std::abs(trk_eta) > 4.0)
-    //   return false;
-
-    if (branch->track_time_valid[track_idx] == 0)
-      return false;
-
     double nsigma = std::abs(trk_z0 - vx_z) / std::sqrt(trk_z_var + vx_z_var);
     return nsigma < significance_cut;
   }
@@ -680,9 +724,8 @@ namespace myutl {
     merged_cluster.nConstituents = a.nConstituents+b.nConstituents;
     merged_cluster.max_pt_cluster = a.max_pt_cluster || b.max_pt_cluster;
 
-    for (ScoreType score: enum_vec) {
+    for (ScoreType score: enum_vec)
       merged_cluster.scores[score] = a.scores[score]+b.scores[score];
-    }
 
     merged_cluster.scores[ScoreType::IDEAL] = merged_cluster.values.at(0);
 
@@ -708,19 +751,258 @@ namespace myutl {
       double
 	trk_eta = branch->track_eta[trk],
 	trk_pt  = branch->track_pt[trk];
-      if (std::abs(trk_eta) < 2.4 || std::abs(trk_eta) > 4.0)
+      if (std::abs(trk_eta) < 2.38 || std::abs(trk_eta) > 4.0)
 	continue;
 
-      if (trk_pt < 1.0)
+      if (trk_pt < min_trk_pt)
 	continue;
 
-      if (passTrackVertexAssociation(trk, 0, branch, min_trk_pt, 3.0))
+      if (passTrackVertexAssociation(trk, 0, branch, 3.0))
 	good_tracks.push_back(trk);
     }
 
     return good_tracks;
   }
 
+  static std::vector<Cluster> makeSimpleClusters(
+    std::vector<int> track_indices,
+    BranchPointerWrapper *branch,
+    bool use_smeared_times,                         // if true, use smeared_times map
+    const std::map<int, double>& smeared_times_map, // map of smeared times
+    double fixed_res,                               // fixed resolution for smeared times
+    bool check_time_valid                           // if true, apply branch->track_time_valid check
+  ) {
+    std::vector<Cluster> simpleClusters;
+    for (auto idx: track_indices) {
+      if (!check_time_valid || branch->track_time_valid[idx] == 1) {
+	double trk_time;
+	double trk_res; 
+	if (use_smeared_times) {
+	  trk_time = smeared_times_map.at(idx);
+	  trk_res  = fixed_res;
+	} else {
+	  trk_time = branch->track_time[idx];   
+	  trk_res  = branch->track_time_res[idx];
+	}
+
+	double trk_pt = branch->track_pt[idx];
+	double z_significance = std::abs(branch->track_z0[idx] - branch->reco_vtx_z[0]) / std::sqrt(branch->track_var_z0[idx]);
+
+	std::map<ScoreType,double> scores;
+	scores[ScoreType::HGTD] = 0; // do not use this
+	scores[ScoreType::SIG] = exp(-z_significance);
+	scores[ScoreType::MAXPT] = 0;
+	scores[ScoreType::TRKPT] = trk_pt;
+	scores[ScoreType::SUMPT2] = trk_pt*trk_pt;
+	scores[ScoreType::SIGTRKPT] = trk_pt*exp(-z_significance);
+	scores[ScoreType::MAXHS] = branch->track_to_truthvtx[idx] == 0 ? 1 : 0;
+	scores[ScoreType::IDEAL] = trk_time;
+
+	Cluster cluster = {{trk_time}, {trk_res}, {trk_time}, {idx}, scores};
+	simpleClusters.push_back(cluster);
+      }
+    }
+    return simpleClusters;
+}
+
+  static void doSimultaneousClustering(std::vector<Cluster> *collection, double dist_cut) {
+    double distance = 1.e30;
+    while (collection->size() > 1) {
+      // std::cout << "entering while loop" << std::endl;
+
+      int i0 = 0;
+      int j0 = 0;
+
+      distance = getDistanceBetweenClusters(collection->at(0), collection->at(1));
+
+      for (size_t i = 0; i < collection->size(); i++) {
+	for (size_t j = i + 1; j < collection->size(); j++) {
+	  Cluster a = collection->at(i);
+	  Cluster b = collection->at(j);
+
+	  if (a.wasMerged or b.wasMerged)
+	    continue;
+	
+	  double current_distance =
+	    getDistanceBetweenClusters(a, b);
+	  if (current_distance <= distance) {
+	    distance = current_distance;
+	    i0 = i;
+	    j0 = j;
+	  }
+	} // j loop
+      } // i loop
+
+      // fuse closest two vertices
+      if (distance < dist_cut and i0 != j0) {
+	Cluster new_cluster = mergeClusters(collection->at(i0),collection->at(j0));
+	collection->erase(collection->begin()+j0);
+	if (i0 < j0)
+	  collection->erase(collection->begin()+i0);
+	else
+	  collection->erase(collection->begin()+(i0-1));
+
+	collection->push_back(new_cluster);
+      } else {
+	if (std::find_if(collection->begin(), collection->end(),
+			 [](Cluster a) {return a.wasMerged;}) != collection->end()) {
+	  for (int idx=0; idx < collection->size(); ++idx) {
+	    collection->at(idx).wasMerged = false;
+	  }
+	
+	} else {
+	  break;
+	}
+      }
+      // break;
+    } // While
+  }
+
+  static std::vector<Cluster> doConeClustering(
+    std::vector<int> input_indices,             
+    BranchPointerWrapper *branch,
+    float nsigma_cut_val,                           // Size of window in t to use
+    bool use_smeared_times,                         // if true, use smeared_times map
+    const std::map<int, double>& smeared_times_map, // map of smeared times
+    double fixed_res,                               // fixed resolution for smeared times
+    bool check_time_valid                           // if true, apply branch->track_time_valid check
+  ) {
+    if (debug) std::cout << "Starting n-sigma cone clustering with " << input_indices.size() << " tracks" << std::endl;
+	
+    std::vector<Cluster> clusters;
+    if (input_indices.empty()) {
+      if (debug) std::cout << "No tracks for cone clustering" << std::endl;
+      return clusters;
+    }
+    
+    std::vector<bool> processed_track_indices(branch->track_pt.GetSize(), false);
+
+    // Step 0: Filter input indices based on time validity if requested
+    std::vector<int> timefiltered_indices;
+    for (auto idx : input_indices) {
+      if (!check_time_valid || branch->track_time_valid[idx] == 1) { // Apply check only if requested
+	timefiltered_indices.push_back(idx);
+      }
+    }
+    
+    while (true) {
+      // Step 1: Find the highest-pt unprocessed track from the time-filtered list
+      int max_pt_seed_idx = -1;
+      double max_pt_val = -1.0;
+
+      for (int idx : timefiltered_indices) {
+	if (processed_track_indices[idx]) continue; // Skip if already processed
+
+	double this_pt = branch->track_pt[idx];
+	if (this_pt > max_pt_val) {
+	  max_pt_val = this_pt;
+	  max_pt_seed_idx = idx;
+	}
+      }
+
+      if (max_pt_seed_idx == -1) break; // all tracks have been checked
+
+      // Step 2: Build cluster around max_pt_seed_idx
+      processed_track_indices[max_pt_seed_idx] = true; // Mark seed as processed
+
+      // Determine seed time and resolution based on `use_smeared_times`
+      double seed_time;
+      double seed_time_res;
+
+      if (use_smeared_times) {
+	seed_time = smeared_times_map.at(max_pt_seed_idx);
+	seed_time_res = fixed_res; // Use fixed_res for smeared times
+      } else {
+	seed_time = branch->track_time[max_pt_seed_idx];
+	seed_time_res = branch->track_time_res[max_pt_seed_idx];
+      }
+
+      std::vector<int> tracks_to_merge_into_cluster = {max_pt_seed_idx};
+
+      for (int candidate_idx : timefiltered_indices) {
+	if (processed_track_indices[candidate_idx]) continue; // Skip if already processed
+
+	// Determine candidate time and resolution based on `use_smeared_times`
+	double candidate_time;
+	double candidate_time_res;
+
+	if (use_smeared_times) {
+	  candidate_time = smeared_times_map.at(candidate_idx);
+	  candidate_time_res = fixed_res; // Use fixed_res for smeared times
+	} else {
+	  candidate_time = branch->track_time[candidate_idx];
+	  candidate_time_res = branch->track_time_res[candidate_idx];
+	}
+
+	double dt_diff_abs = std::abs(seed_time - candidate_time);
+	double dt_res_combined = std::sqrt(seed_time_res*seed_time_res + candidate_time_res*candidate_time_res);
+	double nsigma = dt_diff_abs / dt_res_combined;
+
+	if (nsigma < nsigma_cut_val) { // Use the passed nsigma_cut_val
+	  tracks_to_merge_into_cluster.push_back(candidate_idx);
+	  processed_track_indices[candidate_idx] = true; // Mark as processed
+	}
+      }
+      
+      std::vector<Cluster> initial_simple_clusters_for_seed =
+	makeSimpleClusters(tracks_to_merge_into_cluster, branch,
+			   use_smeared_times, smeared_times_map,
+			   fixed_res, check_time_valid);
+
+      Cluster final_seed_cluster;
+      final_seed_cluster = initial_simple_clusters_for_seed[0];
+      for (size_t k = 1; k < initial_simple_clusters_for_seed.size(); ++k) {
+	final_seed_cluster = mergeClusters(final_seed_cluster, initial_simple_clusters_for_seed[k]);
+      }
+      clusters.push_back(final_seed_cluster);
+      
+    }
+      
+    for (Cluster& cluster: clusters)
+      cluster.purity = calc_pt_purity(cluster, branch);
+    
+    return clusters;
+  }
+
+  static std::vector<Cluster> clusterTracksInTime(
+     std::vector<int> track_indices,
+     BranchPointerWrapper *branch,
+     double distance_cut,    // Cone size/distance cut
+     double smear_res,       // fixed resolution for smeared times
+     bool use_smeared_times, // for ideal cases
+     bool check_time_valid,  // for ideal efficiency
+     bool isCone
+  ) {
+    if (track_indices.empty() && debug)
+      std::cout << "EMPTY!!!!" << std::endl;
+
+    std::map<int,double> smeared_times_map;
+
+    // if use smeared times, generated
+    if (use_smeared_times) {
+      for (auto idx: track_indices) {
+	if (!check_time_valid || branch->track_time_valid[idx] == 1) {
+	  double smeared_time = getSmearedTrackTime(idx, smear_res, branch);
+	  smeared_times_map.emplace(idx, smeared_time);
+	}
+      }
+    }
+
+    std::vector<Cluster> collection;
+    
+    if (not isCone) {
+      collection = makeSimpleClusters(track_indices, branch, use_smeared_times, smeared_times_map, smear_res, check_time_valid);
+      doSimultaneousClustering(&collection, distance_cut);
+    } else {
+      collection = doConeClustering(track_indices, branch, distance_cut, use_smeared_times, smeared_times_map, smear_res, check_time_valid);
+    }
+
+    for (Cluster& cluster: collection)
+      cluster.purity = calc_pt_purity(cluster, branch);
+
+    return collection;
+  }
+  
   static Cluster chooseHGTDCluster(std::vector<Cluster> collection, BranchPointerWrapper *branch) {
     double min_diff = 1e50, reco_time = branch->reco_vtx_time[0];
     Cluster min_cluster;
@@ -807,6 +1089,33 @@ namespace myutl {
     canvas->Print(Form("%s]",fname));
   }
 
+  static void plot_purity(const char* fname, bool logscale, TCanvas* canvas, TLegend* legend, std::map<ScoreType,TH1D*> purity_map) {
+    canvas->Print(Form("%s[",fname));
+    double maxval = 0.7;
+    bool first = true;
+    canvas->SetLogy(logscale);
+    for (auto pair: purity_map) {
+      TH1D *hist = pair.second;
+      hist->SetLineColor(colors[pair.first % colors.size()]);
+      hist->SetLineWidth(2);
+      hist->SetBinContent(hist->GetNbinsX(), 
+			  hist->GetBinContent(hist->GetNbinsX()) + hist->GetBinContent(hist->GetNbinsX()+1));
+      hist->SetBinContent(hist->GetNbinsX()+1, 0); // clear overflow
+      hist->Scale(1/hist->Integral());
+      hist->SetMaximum(maxval);
+      hist->SetMinimum(0.00);
+      if (first) {
+	hist->Draw("HIST");
+	first = false;
+      } else
+	hist->Draw("HIST SAME");
+    }
+    canvas->SetLogy(false);
+    legend->Draw("SAME");
+    canvas->Print(Form("%s",fname));
+    canvas->Print(Form("%s]",fname));
+  }
+  
   static void setup_chain(TChain &chain, const char* ntuple_dir) {
     // VBF H->Invisible sample
     for (const auto& entry : boost::filesystem::directory_iterator(ntuple_dir)) {
@@ -822,6 +1131,10 @@ namespace myutl {
     }
   }
 
+  static void setup_chain(TChain &chain, std::string Number) {
+    chain.Add(Form("../ntuple/user.scheong.42871997.Output._%s.SuperNtuple.root", Number.c_str()));
+}
+  
   template <typename T>
   static T folded(T raw, T fold) {
     return (raw >= fold) ? fold : raw;
