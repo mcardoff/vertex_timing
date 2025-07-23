@@ -363,7 +363,7 @@ namespace myutl {
   struct PlotObj {
     double bin_width;
     double fold_value, fold_max;
-    const char* fname;
+    TString fname;
     const char* xtitle;
     const char* ytitle;
     const char*  times;
@@ -380,7 +380,7 @@ namespace myutl {
     std::unique_ptr<TLegend> algolegend;
 
     PlotObj(const char* title, const char* times,
-	    const char* name, const char* fname,
+	    const char* fname,
 	    double x_min, double x_max, double x_wid,
 	    double y_min, double y_max, double y_wid,
 	    double p_min, double p_max, double p_wid,
@@ -393,34 +393,35 @@ namespace myutl {
     {// Allocate with make_unique for owned objects
       algolegend = std::make_unique<TLegend>(0.6, 0.7, 0.9, 0.9);
       algolegend->SetTextSize(0.03);
-
+      TString name(title);
+      name.ReplaceAll(" ", "");
       for (ScoreType score : enum_vec) {
-	hist[score]    = std::make_unique<TH2D>(Form("%s_%s", name, toString(score)),
+	hist[score]    = std::make_unique<TH2D>(Form("%s_%s", name.Data(), toString(score)),
 						Form("%s t_{0} - TruthVtx t_{0} vs %s (%s);%s;#Delta t[ps]",
 						     toString(score), title, times, title),
 						(int)((x_max - x_min) / x_wid), x_min, x_max,
 						(int)((y_max - y_min) / y_wid), y_min, y_max);
 
-	purity[score]  = std::make_unique<TH2D>(Form("cluster_purity_%s_%s", name, toString(score)),
+	purity[score]  = std::make_unique<TH2D>(Form("cluster_purity_%s_%s", name.Data(), toString(score)),
 						Form("%s Cluster Purity vs %s (%s);%s;Cluster Purity",
 						     toString(score), title, times, title),
 						(int)((x_max - x_min) / x_wid), x_min, x_max,
 						(int)((p_max - p_min) / p_wid), p_min, p_max);
 
-	eff_pass[score] = std::make_unique<TH1D>(Form("good_%s_%s", name, toString(score)),
+	eff_pass[score] = std::make_unique<TH1D>(Form("good_%s_%s", name.Data(), toString(score)),
 						 Form("%s Eff. Events Count vs %s (%s);Entries;%s",
 						      toString(score), title, times, title),
 						 (int)((fold_max - x_min) / x_wid), x_min, fold_max);
 
 	purity[score]->SetLineColor(colors[score]);
 
-	this->params.emplace(score, FitParams(title, times, Form("%s_%s", name, toString(score)),
+	this->params.emplace(score, FitParams(title, times, Form("%s_%s", name.Data(), toString(score)),
 					      x_min, fold_val, fold_max, x_wid,colors[score]));
 
 	algolegend->AddEntry(params.at(score).sigma_dist, toString(score));
       }
 
-      eff_total = std::make_unique<TH1D>(Form("flat_%s", name),
+      eff_total = std::make_unique<TH1D>(Form("flat_%s", name.Data()),
 					 Form("n Events vs %s (%s);Entries;%s",
 					      title, times, title),
 					 (int)((fold_max - x_min) / x_wid), x_min, fold_max);
@@ -530,7 +531,7 @@ namespace myutl {
     
     inline void plot_logic(TCanvas* canvas) {
       // Draw 2Ds
-      canvas->Print(Form("%s[",fname));
+      canvas->Print(Form("%s[",fname.Data()));
       for (const auto& [score,entry_ptr] : this->hist) {
 	entry_ptr->GetXaxis()->SetRangeUser(entry_ptr->GetXaxis()->GetXmin(), this->fold_max);
 	entry_ptr->Draw("COLZ");
@@ -652,7 +653,7 @@ namespace myutl {
 	  canvas->SetLogy(false);
 	}
       }
-      canvas->Print(Form("%s]",fname));
+      canvas->Print(Form("%s]",fname.Data()));
     }
   };
   
