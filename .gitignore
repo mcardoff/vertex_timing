@@ -4,3 +4,6 @@
 *.txt
 /event_examples/
 *.jpg
+/.ipynb_checkpoints/
+/.clangd
+/.clang-format

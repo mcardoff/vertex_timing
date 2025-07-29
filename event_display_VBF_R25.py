@@ -169,11 +169,11 @@ for idx, z in enumerate(my_branches.TruthVtx_z[event_num]):
 # connected_tracks = my_branches.RecoVtx_track_idx[event_num][vtxID]
 connected_tracks = []
 for idx in range(len(my_branches.Track_z0[event_num])):
-    hasTime = my_branches.Track_hasValidTime[event_num][idx]
+    hasTime = my_branches.Track_hasValidTime[event_num][idx] == 1
     dz = my_branches.Track_z0[event_num][idx] - my_branches.RecoVtx_z[event_num][vtxID]
     nsigma = abs(dz / sqrt(my_branches.Track_var_z0[event_num][idx]))
     isHS = my_branches.Track_truthVtx_idx[event_num][idx] == 0
-    if(abs(nsigma) < 3.0 and my_branches.Track_pt[event_num][idx] > 1.0 and hasTime == 1):
+    if(abs(nsigma) < 3.0 and my_branches.Track_pt[event_num][idx] > 1.0 and hasTime):
         connected_tracks.append(idx)
 
 track_info = []
@@ -261,11 +261,12 @@ for idx in connected_tracks:
     nsigma_track = dz_track / sqrt(my_branches.Track_var_z0[event_num][idx])
 
     isTruthHS = my_branches.TruthVtx_isHS[event_num][Track_truthVtx_id]==1
+    hasTime = my_branches.Track_hasValidTime[event_num][idx] == 1
 
-    # if (isTruthHS and (nsigma_track > 1.5)):
-    #     status = 2
-    # if ((not isTruthHS) and (nsigma_track > 1.5)):
-    #     status = 3
+    if (isTruthHS and (not hasTime)):
+        status = 2
+    if ((not isTruthHS) and (not hasTime)):
+        status = 3
 
     truthpart_idx = my_branches.Track_truthPart_idx[event_num][idx]
     truthpart_pt = my_branches.TruthPart_pt[event_num][truthpart_idx]
@@ -278,11 +279,13 @@ for idx in connected_tracks:
     
     # if (nsigma_track < 3.0 and isTruthHS):
     if (np.abs(nsigma_track) < 3.0):
-        print(f"Adding: {idx}")
         track_info.append([vtx_z, z0, x, y, status])
         num_HS_tracks=num_HS_tracks+1
-    
+
 print("number of HS tracks : ", num_HS_tracks)
+
+# print("max z0: ", max(track_info, key=lambda t: t[0]+t[1])[1])
+# print("min z0: ", min(track_info, key=lambda t: t[0]+t[1])[1])
 
 random.seed(42069)
 guess_time = random.gauss(truth_hs_t,90)
@@ -404,7 +407,7 @@ trange = max_time - min_time;
 extended_min_time = min_time - 0.05 * trange;
 extended_max_time = max_time + 0.05 * trange;
 
-filename = f'./figs/eventdisplays/noForwardHS/event_display_{file_num}_{event_num:04d}_{vtxID}.pdf'
+filename = f'./figs/eventdisplays/ideal_diff_than_trkpt/event_display_{file_num}_{event_num:04d}_{vtxID}.pdf'
 
 colors = [
     "#e41a1c",  # red
@@ -733,7 +736,3 @@ with PdfPages(filename) as pdf:
         print(f"Event display page printed to {filename}")
 
 
-#plt.show()
-
-        
-p
