@@ -22,6 +22,7 @@
 #include <TTreeReaderArray.h>
 #include <TString.h>
 #include <TStyle.h>
+#include <TVector2.h>
 
 // Boost Headers
 #include <boost/filesystem.hpp>
@@ -42,26 +43,28 @@
 
 namespace myutl {
   static bool debug = false;
-  static int c01 = TColor::GetColor("#e41a1c"); 
-  static int c02 = TColor::GetColor("#377eb8"); 
-  static int c03 = TColor::GetColor("#4daf4a"); 
-  static int c04 = TColor::GetColor("#984ea3");
-  static int c05 = TColor::GetColor("#ff7f00"); 
-  static int c06 = TColor::GetColor("#ffff33"); 
-  static int c07 = TColor::GetColor("#a65628"); 
-  static int c08 = TColor::GetColor("#f781bf");
-  static int c09 = TColor::GetColor("#999999"); 
-  static int c10 = TColor::GetColor("#92dadd");
+  static int c01          = kP10Blue  ;  
+  static int c02          = kP10Yellow;  
+  static int c03          = kP10Red   ;  
+  static int c04          = kP10Gray  ; 
+  static int c05          = kP10Violet;  
+  static int c06          = kP10Brown ;  
+  static int c07          = kP10Orange;  
+  static int c08          = kP10Green ; 
+  static int c09          = kP10Ash   ;  
+  static int c10          = kP10Cyan  ; 
   static std::vector<int> colors = {c01, c02, c03, c04, c05, c06, c07, c08, c09, c10};
 
   // cut variables
   static int    min_jets          =  1;    // min number of jets
   static double min_jetpt         =  30.0; // self explanatory
-  static double min_abs_eta_jet   =  2.4;  // min eta for a jet to be considered "forward"
-  static double min_abs_eta_track =  2.4;  // min eta for a track to be considered "forward"
+  static double min_abs_eta_jet   =  2.38;  // min eta for a jet to be considered "forward"
+  static double min_abs_eta_track =  2.38;  // min eta for a track to be considered "forward"
   static double min_track_pt      =  1.0;  // track_pt > 1.0 GeV
   static double max_vtx_dz        =  2.0;  // max error for reco HS vertex z
   static double max_nsigma        =  3.0;  // how close a track can be to PV
+
+  const double min_hgtd_eta = 2.38, max_hgtd_eta = 4.0;
 
   const double diff_min = -1000.0, diff_max = 1000.0;
   const double diff_width = 2.0;
@@ -110,9 +113,14 @@ namespace myutl {
   }
   
   /// enums and utilities for them
-  enum ScoreType { HGTD = 0, SIG = 1, SUMPT2 = 3, TRKPT = 2, SIGTRKPT = 4, MAXPT = 5, IDEAL = 6, MAXHS = 7, INVALID = -99 };
-  // std::vector<ScoreType> enum_vec = {HGTD,  SIG, SUMPT2, TRKPT, SIGTRKPT, IDEAL}; // valid values
-  static std::vector<ScoreType> enum_vec = {HGTD, SUMPT2, IDEAL, MAXHS}; // valid values
+  enum ScoreType {
+    HGTD = 0, SIG = 1, SUMPT2 = 3, TRKPT = 2, SIGTRKPT = 4,
+    MAXPT = 5, IDEAL = 6, MAXHS = 7, JETPTDR = 8, TRKPTDR = 9,
+    INVALID = -99 };
+
+  static std::vector<ScoreType> enum_vec = {
+    HGTD, TRKPT, MAXHS,
+  }; // valid values
 
   static const char* toString(myutl::ScoreType score) {
     switch (score) {
@@ -124,6 +132,8 @@ namespace myutl {
     case ScoreType::MAXPT:    return "Cluster with max p_{T}";
     case ScoreType::IDEAL:    return "Ideal cluster choice";
     case ScoreType::MAXHS:    return "Max HS Track Clsuter";
+    case ScoreType::JETPTDR:  return "exp(-min dR)*Jet p_{T}";
+    case ScoreType::TRKPTDR:  return "exp(-min dR)*Track p_{T}";
     default:                  return "INVALID";
     }
   }
@@ -174,14 +184,18 @@ namespace myutl {
     TTreeReaderArray<float> track_z0;
     TTreeReaderArray<float> track_pt;
     TTreeReaderArray<float> track_eta;
+    TTreeReaderArray<float> track_phi;
     TTreeReaderArray<float> track_var_z0;
     TTreeReaderArray<float> track_time;
     TTreeReaderArray<float> track_time_res;
     TTreeReaderArray<int>   track_time_valid;
     TTreeReaderArray<int>   track_to_truthvtx;
     TTreeReaderArray<int>   track_to_particle;
-    // TTreeReaderArray<int>   track_hgtd_hits;
-    // TTreeReaderArray<int>   track_prim_hits;
+    TTreeReaderArray<bool>  track_quality;
+    TTreeReaderArray<int>   track_hgtd_hits;
+    TTreeReaderArray<int>   track_prim_hits;
+    TTreeReaderArray<float> track_near_idx;
+    TTreeReaderArray<float> track_near_sig;
 
     TTreeReaderArray<float> truth_vtx_z;
     TTreeReaderArray<float> truth_vtx_time;
@@ -194,6 +208,7 @@ namespace myutl {
 
     TTreeReaderArray<float> topojet_pt;
     TTreeReaderArray<float> topojet_eta;
+    TTreeReaderArray<float> topojet_phi;
 
     TTreeReaderArray<float> truthhsjet_pt;
     TTreeReaderArray<float> truthhsjet_eta;
@@ -206,14 +221,18 @@ namespace myutl {
       track_z0         (r, "Track_z0"              ),
       track_pt         (r, "Track_pt"              ),
       track_eta        (r, "Track_eta"             ),
+      track_phi        (r, "Track_phi"             ),
       track_var_z0     (r, "Track_var_z0"          ),
       track_time       (r, "Track_time"            ),
       track_time_res   (r, "Track_timeRes"         ),
       track_time_valid (r, "Track_hasValidTime"    ),
+      track_quality    (r, "Track_quality"         ),
       track_to_truthvtx(r, "Track_truthVtx_idx"    ),
       track_to_particle(r, "Track_truthPart_idx"   ),
-      // track_hgtd_hits  (r, "Track_nHGTDHits"       ),
-      // track_prim_hits  (r, "Track_nHGTDPrimaryHits"),
+      track_hgtd_hits  (r, "Track_nHGTDHits"       ),
+      track_prim_hits  (r, "Track_nHGTDPrimaryHits"),
+      track_near_idx   (r, "Track_nearestVtx_idx"  ),
+      track_near_sig   (r, "Track_nearestVtx_sig"  ),
       truth_vtx_z      (r, "TruthVtx_z"            ),
       truth_vtx_time   (r, "TruthVtx_time"         ),
       truth_vtx_ishs   (r, "TruthVtx_isHS"         ),
@@ -223,6 +242,7 @@ namespace myutl {
       reco_vtx_valid   (r, "RecoVtx_hasValidTime"  ),
       topojet_pt       (r, "AntiKt4EMTopoJets_pt"  ),
       topojet_eta      (r, "AntiKt4EMTopoJets_eta" ),
+      topojet_phi      (r, "AntiKt4EMTopoJets_phi" ),
       truthhsjet_pt    (r, "TruthHSJet_pt"         ),
       truthhsjet_eta   (r, "TruthHSJet_eta"        ),
       particle_t       (r, "TruthPart_prodVtx_time")
@@ -266,16 +286,17 @@ namespace myutl {
   }
     
     void count_forward_tracks(int& nFTrack, int& nFTrack_HS, int& nFTrack_PU,
-				   std::vector<int> tracks) {
+			      std::vector<int> tracks) {
       nFTrack = 0; nFTrack_HS = 0; nFTrack_PU = 0;
       for(auto trk_idx: tracks) {
 	auto eta = this->track_eta[trk_idx];
 	auto valid = this->track_time_valid[trk_idx] == 1;
+	auto quality = this->track_quality[trk_idx] == true;
 	auto pt = this->track_pt[trk_idx];
 	auto truthvtx = this->track_to_truthvtx[trk_idx];
 	// already know these pass association
 	if (std::abs(eta) > min_abs_eta_track and
-	    pt > min_track_pt and valid) {
+	    pt > min_track_pt and valid and quality) {
 	  nFTrack++;
 	  if (truthvtx != -1 and this->truth_vtx_ishs[truthvtx])
 	    nFTrack_HS++;
@@ -283,6 +304,58 @@ namespace myutl {
 	    nFTrack_PU++;
 	}
       }
+    }
+
+    double calc_jetpt_dr_score(int trk_idx) {
+      double
+	trk_eta = this->track_eta[trk_idx],
+	trk_phi = this->track_phi[trk_idx];
+
+
+      double min_dR = 1e6;
+      int min_idx = -1;
+      for (int jet_idx=0; jet_idx < this->topojet_eta.GetSize(); ++jet_idx) {
+	double
+	  jet_eta = this->topojet_eta[jet_idx],
+	  jet_phi = this->topojet_phi[jet_idx];
+
+	double
+	  deta = jet_eta-trk_eta,
+	  dphi = TVector2::Phi_mpi_pi(jet_phi - trk_phi);
+
+	double this_dR = std::sqrt(deta*deta + dphi*dphi);
+	if (this_dR < min_dR) {
+	  min_dR = this_dR;
+	  min_idx = jet_idx;
+	}
+      }
+      double returnScore = this->topojet_pt[min_idx]*std::exp(-min_dR);
+      return returnScore;
+    }
+
+    double calc_trkpt_dr_score(int trk_idx) {
+      double
+	trk_eta = this->track_eta[trk_idx],
+	trk_phi = this->track_phi[trk_idx];
+
+
+      double min_dR = 1e6;
+      for (int jet_idx=0; jet_idx < this->topojet_eta.GetSize(); ++jet_idx) {
+	double
+	  jet_eta = this->topojet_eta[jet_idx],
+	  jet_phi = this->topojet_phi[jet_idx];
+
+	double
+	  deta = jet_eta-trk_eta,
+	  dphi = TVector2::Phi_mpi_pi(jet_phi - trk_phi);
+
+	double this_dR = std::sqrt(deta*deta + dphi*dphi);
+	if (this_dR < min_dR) {
+	  min_dR = this_dR;
+	}
+      }
+      double returnScore = this->track_pt[trk_idx]*std::exp(-min_dR);
+      return returnScore;
     }
   };
 
@@ -317,7 +390,7 @@ namespace myutl {
 				Form(full_title, "Core Amp/Bkg Amp", "A.U."),
 				(int)((fold_max-x_min)/x_width), x_min, fold_max);
 
-      sigma_dist->SetMaximum(50);
+      sigma_dist->SetMaximum(175);
       sigma_dist->SetMinimum(5);
 
       // mean_dist->SetMaximum( 1.0);
@@ -330,8 +403,13 @@ namespace myutl {
     }
 
     void fill_each(int idx, TF1* fit) {
-      sigma_dist->SetBinContent(idx+1,fit->GetParameter("Sigma1"));   // maybe should be i *shrug*
-      sigma_dist->SetBinError(idx+1,fit->GetParError("Sigma1")); // maybe should be i *shrug*
+      double sigma1 = std::min(fit->GetParameter("Sigma1"), fit->GetParameter("Sigma2"));
+      // if (fit->GetChisquare()/fit->GetNDF() < 0.4)
+      // 	return;
+      if (sigma1 < 1) sigma1 = 175.0;
+      
+      sigma_dist->SetBinContent(idx+1,sigma1);
+      sigma_dist->SetBinError(idx+1,fit->GetParError("Sigma1"));
     
       double amp1     = fit->GetParameter("Norm1"), amp2     = fit->GetParameter("Norm2");
       double amp1_err = fit->GetParError ("Norm1"), amp2_err = fit->GetParError ("Norm2");
@@ -541,6 +619,7 @@ namespace myutl {
       // Draw Purities
       double purity_ymin = 0, purity_ymax = 1.4;
       bool first = true;
+      // canvas->SetLogy(true);
       for (const auto& [score,entry] : purity) {
 	TProfile* prof = entry->ProfileX();
 	prof->SetMarkerColor(colors[score]);
@@ -550,7 +629,9 @@ namespace myutl {
 	prof->GetXaxis()->SetNdivisions(510);  // 5 major, 1 minor subdivision
 	prof->GetYaxis()->SetRangeUser(purity_ymin,purity_ymax);
 	if (first) {
-	  prof->SetTitle(Form("Avg. Cluster Purity vs. %s (%s)",entry->GetXaxis()->GetTitle(),this->times));
+	  prof->SetTitle(Form("Avg. Cluster Purity vs. %s (%s);%s;%s",
+			      entry->GetXaxis()->GetTitle(),this->times,
+			      entry->GetXaxis()->GetTitle(),"Purity"));
 	  prof->Draw("E1");  // 'E' to draw error bars
 	  first = false;
 	} else
@@ -558,7 +639,8 @@ namespace myutl {
       }
       algolegend->Draw("SAME");
       canvas->Print(fname);
-
+      // canvas->SetLogy(false);
+      
       // Draw Efficiencies
       first = true;
       double eff_ymin = 0, eff_ymax = 1.4;
@@ -629,6 +711,7 @@ namespace myutl {
 	  std::unique_ptr<TLegend> thislegend = std::make_unique<TLegend>(0.65, 0.75, 0.9, 0.9);
 	  auto res1text = Form("#sigma_{1}^{dgaus}=%.2f",fit->GetParameter(3));
 	  auto res2text = Form("#sigma_{2}^{dgaus}=%.2f",fit->GetParameter(4));
+	  auto chi2text = Form("#chi^{2}=%.2f",fit->GetChisquare()/fit->GetNDF());
 	  thislegend->AddEntry(hSlice,"Histogram");
 	  thislegend->AddEntry(fit,"Double Gaussian Fit");
 
@@ -638,6 +721,7 @@ namespace myutl {
 	  hSlice->GetXaxis()->SetRangeUser(-100, 100);
 	  latex.DrawLatexNDC(0.18, 0.90, res1text);
 	  latex.DrawLatexNDC(0.18, 0.85, res2text);
+	  latex.DrawLatexNDC(0.18, 0.80, chi2text);
 	  thislegend->Draw("SAME");
 	  canvas->Print(fname); // slices
 	
@@ -648,6 +732,7 @@ namespace myutl {
 	  hSlice->GetXaxis()->SetRangeUser(-400, 400);
 	  latex.DrawLatexNDC(0.18, 0.90, res1text);
 	  latex.DrawLatexNDC(0.18, 0.85, res2text);
+	  latex.DrawLatexNDC(0.18, 0.80, chi2text);
 	  thislegend->Draw("SAME");
 	  canvas->Print(fname); // slices
 	  canvas->SetLogy(false);
@@ -664,7 +749,7 @@ namespace myutl {
     int truthvtx_idx = branch->track_to_truthvtx[idx]; // this is anything
     if (debug) std::cout << "Particle_idx: " << particle_idx << std::endl;
     if (debug) std::cout << "TruthVtx_idx: " << truthvtx_idx << std::endl;
-    double t_part, reso = res;
+    double t_part;
     if (particle_idx == -1) { // no particle link
       if (truthvtx_idx != -1) { // some valid truth link, smear that vertex time
         if (debug) std::cout << "PATH A" << std::endl;
@@ -678,7 +763,7 @@ namespace myutl {
       t_part = branch->particle_t[particle_idx];
     }
     if (debug) std::cout << "DONE" << std::endl;
-    return gRandom->Gaus(t_part,reso);
+    return gRandom->Gaus(t_part,res);
   }
 
   static bool passTrackVertexAssociation(int track_idx, int vertex_idx, BranchPointerWrapper *branch, double significance_cut) {
@@ -689,6 +774,10 @@ namespace myutl {
       trk_eta   = branch->track_eta[track_idx],
       vx_z      = branch->reco_vtx_z[vertex_idx],
       vx_z_var  = 0.0;
+    int near = (int)branch->track_near_idx[track_idx];
+    if (near != vertex_idx and branch->track_near_sig[track_idx] < 1.0)
+      return false;
+    
     double nsigma = std::abs(trk_z0 - vx_z) / std::sqrt(trk_z_var + vx_z_var);
     return nsigma < significance_cut;
   }
@@ -774,11 +863,16 @@ namespace myutl {
     for (int trk = 0; trk < branch->track_z0.GetSize(); ++trk) {
       double
 	trk_eta = branch->track_eta[trk],
-	trk_pt  = branch->track_pt[trk];
-      if (std::abs(trk_eta) < 2.38 || std::abs(trk_eta) > 4.0)
-	continue;
+	trk_pt  = branch->track_pt[trk],
+	trk_quality = branch->track_quality[trk];
+
+      if (min_hgtd_eta > std::abs(trk_eta) or std::abs(trk_eta) > max_hgtd_eta)
+        continue;
 
       if (trk_pt < min_trk_pt)
+	continue;
+
+      if (not trk_quality)
 	continue;
 
       if (passTrackVertexAssociation(trk, 0, branch, 3.0))
@@ -820,6 +914,8 @@ namespace myutl {
 	scores[ScoreType::SUMPT2] = trk_pt*trk_pt;
 	scores[ScoreType::SIGTRKPT] = trk_pt*exp(-z_significance);
 	scores[ScoreType::MAXHS] = branch->track_to_truthvtx[idx] == 0 ? 1 : 0;
+	scores[ScoreType::JETPTDR] = branch->calc_jetpt_dr_score(idx);
+	scores[ScoreType::TRKPTDR] = branch->calc_trkpt_dr_score(idx);
 	scores[ScoreType::IDEAL] = trk_time;
 
 	Cluster cluster = {{trk_time}, {trk_res}, {trk_time}, {idx}, scores};
@@ -1039,6 +1135,19 @@ namespace myutl {
     }
     return min_cluster;
   }
+
+  static Cluster chooseBestHGTDCluster(std::vector<Cluster> collection, BranchPointerWrapper *branch) {
+    double min_diff = 1e50, truth_time = branch->truth_vtx_time[0];
+    Cluster min_cluster;
+    for (Cluster cluster: collection) {
+      double this_diff = std::abs(cluster.values.at(0) - truth_time);
+      if (this_diff < min_diff) {
+	min_diff = this_diff;
+	min_cluster = cluster;
+      }
+    }
+    return min_cluster;
+  }
   
   static std::map<ScoreType, Cluster> chooseCluster(std::vector<Cluster> collection, BranchPointerWrapper *branch) {
     std::map<ScoreType,Cluster> output;
@@ -1073,7 +1182,8 @@ namespace myutl {
     return output;
   }
 
-  static bool passEfficiency(double diff, Cluster cluster, BranchPointerWrapper *branch) {
+  static bool passEfficiency(Cluster cluster, BranchPointerWrapper *branch) {
+    double diff = std::abs(cluster.values.at(0)-branch->truth_vtx_time[0]);
     if (diff > 60)
       return false;
 
@@ -1166,8 +1276,8 @@ namespace myutl {
 
   static void process_event_data(
     BranchPointerWrapper *branch,
-    bool smeared_times,
-    bool valid_times,
+    bool use_smeared_times,
+    bool check_valid_times,
     std::map<ScoreType,TH1D*>& inclusive_resos,
     std::map<ScoreType,TH1D*>& inclusive_purity,
     PlotObj& fjet,
@@ -1213,7 +1323,7 @@ namespace myutl {
     }
     
     std::vector<Cluster> cluster =
-      clusterTracksInTime(tracks, branch, 3.0, 10.0, smeared_times, valid_times, true);
+      clusterTracksInTime(tracks, branch, 3.0, 10.0, use_smeared_times, check_valid_times, true);
 
     fjet.eff_total->     Fill(eff_fill_val_fjet    );
     ftrack.eff_total->   Fill(eff_fill_val_track   );
@@ -1222,10 +1332,10 @@ namespace myutl {
     pu_track.eff_total-> Fill(eff_fill_val_pu_track);
     recovtx_z.eff_total->Fill(eff_fill_val_z       );
     
-    // std::cout << "Acessing cluster size" << std::endl;
     if (cluster.size() == 0) return;
 
-    std::map<ScoreType,Cluster> chosen = chooseCluster(cluster, branch);
+    std::map<ScoreType,Cluster> chosen =
+      chooseCluster(cluster, branch);
 
     // run HGTD Clustering (simultaneous)
     std::vector<Cluster> hgtd_clusters =
@@ -1233,26 +1343,34 @@ namespace myutl {
 
     if (branch->reco_vtx_valid[0] == 1)
       chosen[ScoreType::HGTD] = chooseHGTDCluster(hgtd_clusters, branch);
+    
+    // bool eventquery =
+    //   passEfficiency(chosen[ScoreType::IDEAL], branch) &&
+    //   not passEfficiency(chosen[ScoreType::TRKPT], branch);
 
+    // if (eventquery) {
+    //   Long64_t event_num = branch->reader.GetTree()->GetReadEvent()-branch->reader.GetTree()->GetChainOffset();
+    //   TString fileName   = (branch->reader.GetTree()->GetCurrentFile()->GetName());
+    //   TString file =  fileName(40,6);
+    //   std::cout <<
+    // 	Form("python event_display_VBF_R25.py --file_num %s --event_num %lld --vtxID 0",
+    // 	     file.Data(), event_num) << std::endl;
+    // }
+    
     for (ScoreType score : enum_vec) {
       
       if (branch->reco_vtx_valid[0] == 0 and score == HGTD)
-	continue;
-      
-      if (fjet.eff_pass.count(score) != 1)
-	continue;
-      
-      if (score == ScoreType::INVALID)
 	continue;
       
       Cluster scored = chosen[score];
       double score_based_time = scored.values.at(0);
       double cluster_purity = scored.purity;
       double diff = score_based_time - branch->truth_vtx_time[0];
+
       inclusive_resos.at(score)->Fill(diff);
       inclusive_purity.at(score)->Fill(cluster_purity);
       
-      if (passEfficiency(diff, scored, branch)) {
+      if (passEfficiency(scored, branch)) {
 	fjet.eff_pass.at(score)->     Fill(eff_fill_val_fjet    );
 	ftrack.eff_pass.at(score)->   Fill(eff_fill_val_track   );
 	pu_frac.eff_pass.at(score)->  Fill(eff_fill_val_pu_ratio);
