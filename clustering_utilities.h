@@ -831,9 +831,6 @@ namespace myutl {
     // int near = (int)branch->track_near_idx[track_idx];
     // if (near != vertex_idx and std::abs(branch->track_near_sig[track_idx]) < max_trk_vtx_sig)
     //   return false;
-
-    if (branch->track_time_valid[track_idx] == 0)
-      return false;
     
     double nsigma = std::abs(trk_z0 - vx_z) / std::sqrt(trk_z_var + vx_z_var);
     return nsigma < significance_cut;
