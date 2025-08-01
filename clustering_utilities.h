@@ -309,13 +309,12 @@ namespace myutl {
       nFTrack = 0; nFTrack_HS = 0; nFTrack_PU = 0;
       for(auto trk_idx: tracks) {
 	auto eta = this->track_eta[trk_idx];
-	auto valid = this->track_time_valid[trk_idx] == 1;
 	auto quality = this->track_quality[trk_idx] == true;
 	auto pt = this->track_pt[trk_idx];
 	auto truthvtx = this->track_to_truthvtx[trk_idx];
 	// already know these pass association
 	if (eta > min_abs_eta_track and
-	    pt > min_track_pt and valid and quality) {
+	    pt > min_track_pt and quality) {
 	  nFTrack++;
 	  if (truthvtx != -1 and this->truth_vtx_ishs[truthvtx])
 	    nFTrack_HS++;
