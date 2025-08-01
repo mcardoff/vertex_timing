@@ -286,8 +286,6 @@ namespace myutl {
       for(int jet_idx = 0; jet_idx < truthhsjet_eta.GetSize(); ++jet_idx) {
 	float eta = truthhsjet_eta[jet_idx], pt = truthhsjet_pt[jet_idx];
 	passptcount += (pt > min_jetpt) ? 1 : 0;
-	// passptetacount += (pt > min_jetpt) and (eta > min_abs_eta_jet) ? 1 : 0;
-        // if (passptcount >= 2 and passptetacount >= 1)
 	if (passptcount >= 2)
           return true;
       }
@@ -1387,8 +1385,6 @@ namespace myutl {
     
     std::vector<Cluster> cluster =
       clusterTracksInTime(tracks, branch, 3.0, 10.0, use_smeared_times, check_valid_times, true);
-
-    if (cluster.size() == 0) return;
     
     fjet.eff_total->     Fill(eff_fill_val_fjet    );
     ftrack.eff_total->   Fill(eff_fill_val_track   );
@@ -1396,11 +1392,10 @@ namespace myutl {
     hs_track.eff_total-> Fill(eff_fill_val_hs_track);
     pu_track.eff_total-> Fill(eff_fill_val_pu_track);
     recovtx_z.eff_total->Fill(eff_fill_val_z       );
-    
 
-    std::map<ScoreType,Cluster> chosen =
-      chooseCluster(cluster, branch);
+    if (cluster.size() == 0) return;    
 
+    std::map<ScoreType,Cluster> chosen = chooseCluster(cluster, branch);
 
     // run HGTD Clustering (simultaneous)
     std::vector<Cluster> hgtd_clusters =
