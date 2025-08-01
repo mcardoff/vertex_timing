@@ -31,9 +31,7 @@ vtxID = args.vtxID
 file_num = args.file_num
 #############################################################
 
-#root_file = uproot.open('CaloTimingNtuple_ttbarSingleLep_FPT_n100_test_20241211.root')
-#root_file = uproot.open('user.scheong.42871997.Output._000050.SuperNtuple.root')
-root_file = uproot.open(f'../ntuple/user.scheong.42871997.Output._{file_num}.SuperNtuple.root')
+root_file = uproot.open(f'../ntuple-hgtd/user.mcardiff.45809429.Output._{file_num}.SuperNtuple.root')
 tree = root_file["ntuple"]
 
 my_branches = tree.arrays([
@@ -48,7 +46,7 @@ my_branches = tree.arrays([
     'RecoVtx_sumPt2',
     # 'RecoVtx_isPU',
     'RecoVtx_track_idx',
-    'AntiKt4EMTopoJets_track_idx',
+    'AntiKt4EMTopoJets_ghostTrack_idx',
     'Track_z0',
     'Track_pt',
     'Track_eta',
@@ -68,6 +66,7 @@ my_branches = tree.arrays([
     'TruthHSJet_phi',
     "Track_quality",
     'Track_truthPart_idx',
+    'TruthPart_prodVtx_time',
     'TruthPart_pt',
     'TruthPart_eta',
     'TruthPart_phi',
@@ -194,7 +193,7 @@ for idx in connected_tracks:
     my_track_z0.append(track_z0)
     
     # Loop over jets
-    for j in range(len(my_branches.AntiKt4EMTopoJets_track_idx[event_num])):
+    for j in range(len(my_branches.AntiKt4EMTopoJets_ghostTrack_idx[event_num])):
         if my_branches.AntiKt4EMTopoJets_pt[event_num][j] < 30.0:
             continue
         # njets_b1=njets_b1+1    
@@ -203,9 +202,9 @@ for idx in connected_tracks:
         jet_pt_05_rpt = 0
         jet_pt_01_rpt = 0
 
-        for q in range(len(my_branches.AntiKt4EMTopoJets_track_idx[event_num][j])):
+        for q in range(len(my_branches.AntiKt4EMTopoJets_ghostTrack_idx[event_num][j])):
             # Track selection cuts
-            jdx = my_branches.AntiKt4EMTopoJets_track_idx[event_num][j][q]
+            jdx = my_branches.AntiKt4EMTopoJets_ghostTrack_idx[event_num][j][q]
             p2 = abs(1 / my_branches.Track_qOverP[event_num][jdx])
             eta2 = -log(tan(my_branches.Track_theta[event_num][jdx] / 2))
             track_pT2 = p2 / cosh(eta2)
@@ -295,37 +294,45 @@ guess_time = random.gauss(truth_hs_t,90)
                   # [1482, 1251]]
 # cluster_times = [-29.2673, 137.551, 300.575]
 track_clusters = []
+track_times = []
 cluster_times = []
+use_smeared_times = False # True
 try:
-    macro_call = f'runHGTD_Clustering.cxx("{file_num}",{event_num})'
+    macro_call = f'runHGTD_Clustering.cxx("{file_num}",{event_num},{"true" if use_smeared_times else "false"})'
     result = subprocess.run(['root', '-l', '-q', '-b', macro_call],
                             check=True,
                             capture_output=True,
                             text=True)
-    current_block = []
+    current_block_idx = []
+    current_block_times = []
 
     for line in result.stdout.splitlines():
         line = line.strip()
     
         if line == "---------":
-            if current_block:
-                track_clusters.append(current_block)
-                current_block = []
+            if current_block_idx:
+                track_clusters.append(current_block_idx)
+                track_times.append(current_block_times)
+                current_block_idx = []
+                current_block_times = []
             continue
 
         if "t:" in line:
             cluster_times.append(float(line[2:]))
 
         try:
-            num = int(line)
-            current_block.append(num)
+            tup = line.split(",")
+            trk_idx = int(tup[0])
+            trk_time = float(tup[1])
+            current_block_idx.append(trk_idx)
+            current_block_times.append(trk_time)
         except ValueError:
             # Skip lines like "No valid time" or headers
             continue
 
     # Catch last block if not followed by dashed line
-    if current_block:
-        track_clusters.append(current_block)
+    if current_block_idx:
+        track_clusters.append(current_block_idx)
 
     print("Parsed time clusters:")
     for cluster in track_clusters:
@@ -336,41 +343,57 @@ except subprocess.CalledProcessError as e:
     print(f"Stderr: {e.stderr}")
 
 flattened_track_indices = list(chain.from_iterable(track_clusters))
-# full_times = [[-47.44, -33.46, 3.04, -28.85, -65.90, -20.62, -55.05, 53.21, -62.07],
-              # [123.05, 153.92, 121.71, 248.76, 96.19],
-              # [312.56,276.62]]
 flattened_track_times = [my_branches.Track_time[event_num][t] for i in track_clusters for t in i]
 
+def get_smeared_time(index_of_track,smear_res):
+    particle_idx = my_branches.Track_truthPart_idx[event_num][index_of_track]
+    truthvtx_idx = my_branches.Track_truthVtx_idx[event_num][index_of_track]
+    print(f'Track idx: {index_of_track}, Particle: {particle_idx}, TruthVtx: {truthvtx_idx}')
+    t_part = 0
+    if (particle_idx == -1):
+        if (truthvtx_idx != -1):
+            t_part = my_branches.TruthVtx_time[event_num][truthvtx_idx]
+        else:
+            t_part = random.gauss(my_branches.TruthVtx_time[event_num][0],175)
+    else:
+        t_part = my_branches.TruthPart_prodVtx_time[event_num][particle_idx]
+    final = random.gauss(t_part,smear_res)
+    print(f'Original time: {my_branches.Track_time[event_num][index_of_track]:.2f}')
+    print(f'Smeared time: {final:.2f}')
+    print(f'Particle time: {my_branches.TruthPart_prodVtx_time[event_num][particle_idx]:.2f}')
+    return final
+
 # Collect information for track time histogram
-hist_times = []; pt_wghts = []; dR_wghts = []; jR_wghts = []; tR_wghts = []; sg_wghts = []; ps_wghts = []
+hist_times = []; pt_wghts = []#; dR_wghts = []; jR_wghts = []; tR_wghts = []; sg_wghts = []; ps_wghts = []
 max_pt = -1
 max_pt_time = -1
 hard_scatter_times = []
 for (num1, cluster) in enumerate(track_clusters):
-    this_timecluster = []; this_ptw = []; this_dRw = []; this_jRw = []; this_tRw = []; this_sgw = []; this_psw = [];
+    this_timecluster = []; this_ptw = []#; this_dRw = []; this_jRw = []; this_tRw = []; this_sgw = []; this_psw = [];
     for (num2,track) in enumerate(cluster):
         this_pt = my_branches.Track_pt[event_num][track]
         this_phi = my_branches.Track_phi[event_num][track]
         this_eta = my_branches.Track_eta[event_num][track]
         this_hasValidTime = my_branches.Track_hasValidTime[event_num][track]
-        this_time = my_branches.Track_time[event_num][track]
+
+        this_time = track_times[num1][num2]
         
         if this_pt > max_pt:
             max_pt = this_pt
             # max_pt_time = hist_times[num1][num2]
             max_pt_time = this_time
     
-        mindR = 10000.0
-        jetdR = 0.0
-        for (jet,(j_eta,j_phi,j_pt)) in enumerate(zip(my_branches.AntiKt4EMTopoJets_eta[event_num],
-                                                      my_branches.AntiKt4EMTopoJets_phi[event_num],
-                                                      my_branches.AntiKt4EMTopoJets_pt[event_num])):
-            dphi = this_phi - j_phi
-            deta = this_eta - j_eta
-            dR = np.sqrt(dphi*dphi + deta*deta)
-            if dR < mindR:
-                mindR = dR
-                jetdR = j_pt*np.exp(-dR)
+        # mindR = 10000.0
+        # jetdR = 0.0
+        # for (jet,(j_eta,j_phi,j_pt)) in enumerate(zip(my_branches.AntiKt4EMTopoJets_eta[event_num],
+        #                                               my_branches.AntiKt4EMTopoJets_phi[event_num],
+        #                                               my_branches.AntiKt4EMTopoJets_pt[event_num])):
+        #     dphi = this_phi - j_phi
+        #     deta = this_eta - j_eta
+        #     dR = np.sqrt(dphi*dphi + deta*deta)
+        #     if dR < mindR:
+        #         mindR = dR
+        #         jetdR = j_pt*np.exp(-dR)
 
         if (my_branches.Track_truthVtx_idx[event_num][track] == 0):
             hard_scatter_times.append(this_time)
@@ -378,27 +401,27 @@ for (num1, cluster) in enumerate(track_clusters):
         # print(vtx_z + z0)
         this_timecluster.append(this_time)
         this_ptw.append(this_pt)
-        this_dRw.append(np.exp(-mindR))
-        this_jRw.append(jetdR)
-        this_tRw.append(this_pt*np.exp(-mindR))
-        this_psw.append(this_pt*np.exp(-abs(nsigma)))
-        this_sgw.append(np.exp(-abs(nsigma)))
+        # this_dRw.append(np.exp(-mindR))
+        # this_jRw.append(jetdR)
+        # this_tRw.append(this_pt*np.exp(-mindR))
+        # this_psw.append(this_pt*np.exp(-abs(nsigma)))
+        # this_sgw.append(np.exp(-abs(nsigma)))
     hist_times.append(this_timecluster)
     pt_wghts.append(this_ptw);
-    dR_wghts.append(this_dRw);
-    jR_wghts.append(this_jRw);
-    tR_wghts.append(this_tRw);
-    ps_wghts.append(this_psw);
-    sg_wghts.append(this_sgw);
+    # dR_wghts.append(this_dRw);
+    # jR_wghts.append(this_jRw);
+    # tR_wghts.append(this_tRw);
+    # ps_wghts.append(this_psw);
+    # sg_wghts.append(this_sgw);
 
 weight_cases = {
     'Default counts': None,  # No weights, just counts
     'Track pT': pt_wghts,
-    'exp(-min(dR(track,jet)))': dR_wghts,
-    'jet pT*exp(-min(dR(track,jet)))': jR_wghts,
-    'trk pT*exp(-min(dR(track,jet)))': tR_wghts,
-    'exp(-|s|)': sg_wghts,
-    'trk pT*exp(-|s|)': ps_wghts,
+    # 'exp(-min(dR(track,jet)))': dR_wghts,
+    # 'jet pT*exp(-min(dR(track,jet)))': jR_wghts,
+    # 'trk pT*exp(-min(dR(track,jet)))': tR_wghts,
+    # 'exp(-|s|)': sg_wghts,
+    # 'trk pT*exp(-|s|)': ps_wghts,
 }
     
 ################### Draw Time Histogram #######################
@@ -407,7 +430,7 @@ trange = max_time - min_time;
 extended_min_time = min_time - 0.05 * trange;
 extended_max_time = max_time + 0.05 * trange;
 
-filename = f'./figs/eventdisplays/ideal_diff_than_trkpt/event_display_{file_num}_{event_num:04d}_{vtxID}.pdf'
+filename = f'./figs/eventdisplays/smeared_times/event_display_{file_num}_{event_num:04d}_{vtxID}.pdf'
 
 colors = [
     "#e41a1c",  # red
@@ -415,9 +438,17 @@ colors = [
     "#4daf4a",  # green
     "#984ea3",  # purple
     "#ff7f00",  # orange
+    "#000075",  # navy
+    "#bfef45",  # lime
     "#ffff33",  # yellow
+    "#aaffc3",  # mint
     "#a65628",  # brown
+    "#469990",  # teal
+    "#808000",  # olive
+    "#dcbeff",  # lavender
     "#f781bf",  # pink
+    "#ffd8b1",  # apricot
+    "#fffac8",  # beige
     "#999999",  # gray
 ]
 
@@ -657,7 +688,7 @@ with PdfPages(filename) as pdf:
             base_right_x, base_right_y = vtx_z + x_jet - perp_x, y_jet - perp_y
 
             event_display.fill([tip_x, base_left_x, base_right_x], [tip_y, base_left_y, base_right_y], color=color, alpha=0.5)
-            jet_text = f"Jet {text_index+1}: $p_T$={jet_info[i][0]:.0f} GeV, $\eta$={jet_info[i][1] :.1f}, $RpT$={jet_info[i][6]:.2f}"
+            jet_text = f"Jet {text_index+1}: $p_T$={jet_info[i][0]:.0f} GeV, $\eta$={jet_info[i][1] :.1f}"
             color2 = 'green' if isHS >= 1 else 'black'  # Set color based on isHS value
             #event_display.text(vtx_z-4.5-0.3, 0.9 - (1.2 + i * 0.1), jet_text, weight='bold', fontsize=12, color=color2)
             event_display.text(vtx_z - 6.5 - 0.3, 0.9 - (1.2 + text_index * 0.1), jet_text,

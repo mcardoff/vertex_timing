@@ -4,13 +4,13 @@ using namespace myutl;
 
 void clustering_dt() {
   const char* time_type = "HGTD Times";
-  const char* file_prefix = "hgtdtimes";
+  const char* file_prefix = "hgtdtimes_nonear";
   bool smeared_times = false, valid_times = true;
 
   gStyle->SetOptStat(0);
 
   TChain chain ("ntuple");
-  setup_chain(chain, "../ntuple/withhgtd");
+  setup_chain(chain, "../ntuple-hgtd/");
   TTreeReader reader(&chain);
   BranchPointerWrapper branch(reader);
 
@@ -71,6 +71,7 @@ void clustering_dt() {
 				   (int)((hs_track_max-hs_track_min)/hs_track_width), hs_track_min, hs_track_max,
 				   (int)((pu_track_max-pu_track_min)/pu_track_width), pu_track_min, pu_track_max);
 
+  gErrorIgnoreLevel = kWarning;
   std::cout << "Starting Event Loop" << std::endl;
   bool progress = true;
   while (reader.Next()) {
@@ -87,8 +88,13 @@ void clustering_dt() {
   std::vector<PlotObj*> plots = {&fjet, &ftrack, &hs_track, &pu_track, &pu_frac, &recovtx_z};
   for (auto& plot: plots)
     plot->plot_postprocessing();
-
   std::cout << "FINISHED CREATING " << std::endl;
+
+  // for (auto& plot: plots) {
+  //   // plot->print_efficiency_stats(ScoreType::TRKPT);
+  //   // plot->print_efficiency_stats(ScoreType::HGTD);
+  //   // plot->print_efficiency_stats(ScoreType::MAXHS);
+  // }
 
   for (auto& plot: plots)
     plot->plot_logic(canvas);
@@ -100,7 +106,7 @@ void clustering_dt() {
 		 false, true, -150, 150, canvas, inclusive_resos);
 
   plot_purity(Form("figs/%s_purity.pdf", file_prefix),
-	      false, canvas, fjet.algolegend.get(), inclusive_purity);
+	      true, canvas, fjet.algolegend.get(), inclusive_purity);
 
   auto hs_pu_fname = Form("figs/%s_hs_v_pu.pdf", file_prefix);
   canvas->Print(Form("%s[",hs_pu_fname));

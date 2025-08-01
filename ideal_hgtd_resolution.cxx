@@ -4,13 +4,13 @@ using namespace myutl;
 
 void ideal_hgtd_resolution() {
   const char* time_type = "Ideal Res. HGTD";
-  const char* file_prefix = "idealres";
+  const char* file_prefix = "idealres_nonear";
   bool smeared_times = true, valid_times = true;
 
   gStyle->SetOptStat(0);
 
   TChain chain ("ntuple");
-  setup_chain(chain, "../ntuple/");
+  setup_chain(chain, "../ntuple-hgtd/");
   TTreeReader reader(&chain);
   BranchPointerWrapper branch(reader);
 
@@ -71,8 +71,9 @@ void ideal_hgtd_resolution() {
 				   (int)((hs_track_max-hs_track_min)/hs_track_width), hs_track_min, hs_track_max,
 				   (int)((pu_track_max-pu_track_min)/pu_track_width), pu_track_min, pu_track_max);
 
+  gErrorIgnoreLevel = kWarning;
   std::cout << "Starting Event Loop" << std::endl;
-  bool progress = true;
+  bool progress = false;
   while (reader.Next()) {
     std::string filename = chain.GetFile()->GetName(); // file we're in
     Long64_t this_evnt = chain.GetReadEntry() - chain.GetChainOffset(); // +1 bc its 0 indexed
@@ -87,8 +88,13 @@ void ideal_hgtd_resolution() {
   std::vector<PlotObj*> plots = {&fjet, &ftrack, &hs_track, &pu_track, &pu_frac, &recovtx_z};
   for (auto& plot: plots)
     plot->plot_postprocessing();
-
   std::cout << "FINISHED CREATING " << std::endl;
+
+  for (auto& plot: plots) {
+    plot->print_efficiency_stats(ScoreType::TRKPT);
+    plot->print_efficiency_stats(ScoreType::HGTD);
+    plot->print_efficiency_stats(ScoreType::MAXHS);
+  }
 
   for (auto& plot: plots)
     plot->plot_logic(canvas);
@@ -100,7 +106,7 @@ void ideal_hgtd_resolution() {
 		 false, true, -150, 150, canvas, inclusive_resos);
 
   plot_purity(Form("figs/%s_purity.pdf", file_prefix),
-	      false, canvas, fjet.algolegend.get(), inclusive_purity);
+	      true, canvas, fjet.algolegend.get(), inclusive_purity);
 
   auto hs_pu_fname = Form("figs/%s_hs_v_pu.pdf", file_prefix);
   canvas->Print(Form("%s[",hs_pu_fname));
