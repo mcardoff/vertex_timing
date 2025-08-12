@@ -65,6 +65,8 @@ my_branches = tree.arrays([
     'TruthHSJet_eta',
     'TruthHSJet_phi',
     "Track_quality",
+    'Track_nearestVtx_idx',
+    'Track_nearestVtx_sig',
     'Track_truthPart_idx',
     'TruthPart_prodVtx_time',
     'TruthPart_pt',
@@ -242,8 +244,6 @@ for idx in connected_tracks:
         
         num_jets += 1  # Increment counter
     
-    # new_sumpt= new_sumpt + (track_pT ** 2)
-
     pz = track_pT * math.sinh(track_eta)
     signX = track_eta / abs(track_eta)
     signY = math.sin(track_phi) / abs(math.sin(track_phi))
@@ -252,8 +252,6 @@ for idx in connected_tracks:
     y = (track_pT / 2) * math.sin(theta) * signY
 
     Track_truthVtx_id = my_branches.Track_truthVtx_idx[event_num][idx]
-    # if (Track_truthVtx_id!=0):
-        # continue
 
     status = my_branches.TruthVtx_isHS[event_num][Track_truthVtx_id]
     dz_track = my_branches.Track_z0[event_num][idx] - vtx_z
@@ -275,6 +273,14 @@ for idx in connected_tracks:
     # if (not goodMatch):
     #     print("FAKE?")
     #     status = 4
+    near = my_branches.Track_nearestVtx_idx[event_num][idx]
+    nsigma_near = np.abs(my_branches.Track_nearestVtx_sig[event_num][idx])
+    nearcut = not (near != vtxID and nsigma_near < 0.5)
+
+    if ((not nearcut) and isTruthHS):
+        status = 2
+    elif ((not nearcut) and (not isTruthHS)):
+        status = 3
     
     # if (nsigma_track < 3.0 and isTruthHS):
     if (np.abs(nsigma_track) < 3.0):
@@ -430,7 +436,7 @@ trange = max_time - min_time;
 extended_min_time = min_time - 0.05 * trange;
 extended_max_time = max_time + 0.05 * trange;
 
-filename = f'./figs/eventdisplays/smeared_times/event_display_{file_num}_{event_num:04d}_{vtxID}.pdf'
+filename = f'./figs/eventdisplays/new_ntuple/event_display_PUR_{file_num}_{event_num:04d}_{vtxID}.pdf'
 
 colors = [
     "#e41a1c",  # red
@@ -578,7 +584,7 @@ with PdfPages(filename) as pdf:
         time_histo.set_xlim(extended_min_time, extended_max_time)
         time_histo.set_xlabel('Time')
         time_histo.set_ylabel('Counts' if weights is None else 'Weighted Counts')
-        time_histo.set_title(f'Histogram weighted by: {label}')
+        time_histo.set_title(f'Histogram weighted by: {label} (PU Removal)')
 
         # Get bin indices where hard scatter times fall
         hs_bin_indices = np.digitize(hard_scatter_times, bin_edges) - 1

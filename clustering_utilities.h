@@ -40,13 +40,15 @@
 #include <utility>
 #include <vector>
 #include <map>    
-#include <memory> 
+#include <memory>
+
+#define BIGMARKER std::cout << "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" << std::endl;
 
 namespace myutl {
   static bool debug = false;
   static int c01 = kP10Blue  ;
-  static int c02 = kP10Yellow;
-  static int c03 = kP10Red   ;
+  static int c02 = kP10Red   ;
+  static int c03 = kP10Yellow;
   static int c04 = kP10Gray  ;
   static int c05 = kP10Violet;
   static int c06 = kP10Brown ;
@@ -64,7 +66,7 @@ namespace myutl {
   static double min_track_pt      = 1.0;  // track_pt > 1.0 GeV
   static double max_vtx_dz        = 2.0;  // max error for reco HS vertex z
   static double max_nsigma        = 3.0;  // how close a track can be to PV
-  static double max_trk_vtx_sig   = 1.5;  // How close a track can be to another vertex
+  static double max_trk_vtx_sig   = 3.0;  // How close a track can be to another vertex
 
   const double min_hgtd_eta = 2.38, max_hgtd_eta = 4.0;
 
@@ -78,7 +80,7 @@ namespace myutl {
   const double fjet_width = 1.0;
 
   const double track_min = 0, track_max = 100, fold_track = 20;
-  const double track_width = 2.0;
+  const double track_width = 1.0;
 
   const double pu_track_min = track_min, pu_track_max = track_max, fold_hs_track = fold_track;
   const double pu_track_width = track_width;
@@ -102,7 +104,7 @@ namespace myutl {
     fit->FixParameter(0, 0);
     fit->SetParLimits(1, 0, 1.E6); // can only be positive
     fit->SetParLimits(2, 0, 1.E6); // can only be positive
-    fit->SetParLimits(3, 0, 1.E6); // can only be positive
+    fit->SetParLimits(3, 0.1, 1.E6); // can only be positive
     if (fixbkg)
       fit->FixParameter(4, 175);
     else
@@ -132,7 +134,7 @@ namespace myutl {
   
   /// enums and utilities for them
   enum ScoreType {
-    HGTD = 0, SIG = 1, SUMPT2 = 3, TRKPT = 2, SIGTRKPT = 4,
+    HGTD = 0, TRKPT = 1, SIG = 2, SUMPT2 = 3, SIGTRKPT = 4,
     MAXPT = 5, IDEAL = 6, MAXHS = 7, JETPTDR = 8, TRKPTDR = 9,
     INVALID = -99 };
 
@@ -285,8 +287,8 @@ namespace myutl {
       int passptcount = 0, passptetacount = 0;
       for(int jet_idx = 0; jet_idx < truthhsjet_eta.GetSize(); ++jet_idx) {
 	float eta = truthhsjet_eta[jet_idx], pt = truthhsjet_pt[jet_idx];
-	passptcount += (pt > min_jetpt) ? 1 : 0;
-	if (passptcount >= 2)
+	passptcount += (pt > min_jetpt and eta > min_abs_eta_jet) ? 1 : 0;
+	if (passptcount >= min_jets)
           return true;
       }
       if (debug) std::cout << "Skipping pt cut event" << std::endl;
@@ -296,23 +298,24 @@ namespace myutl {
     void count_forward_jets(int& nForwardJet) {
     nForwardJet = 0;
     for(int jet_idx = 0; jet_idx < this->topojet_eta.GetSize(); ++jet_idx) {
-      float jet_eta = this->topojet_eta[jet_idx];
-      if (std::abs(jet_eta) > min_abs_eta_jet)
+      float jet_eta = this->topojet_eta[jet_idx], jet_pt = this->topojet_pt[jet_idx];
+      if (std::abs(jet_eta) > min_abs_eta_jet and jet_pt > 20)
 	nForwardJet++;
     }
   }
     
     void count_forward_tracks(int& nFTrack, int& nFTrack_HS, int& nFTrack_PU,
-			      std::vector<int> tracks) {
+			      std::vector<int> tracks, bool check_time_valid) {
       nFTrack = 0; nFTrack_HS = 0; nFTrack_PU = 0;
       for(auto trk_idx: tracks) {
-	auto eta = this->track_eta[trk_idx];
-	auto quality = this->track_quality[trk_idx] == true;
-	auto pt = this->track_pt[trk_idx];
-	auto truthvtx = this->track_to_truthvtx[trk_idx];
+	double eta = this->track_eta[trk_idx];
+	double pt = this->track_pt[trk_idx];
+	int  truthvtx = this->track_to_truthvtx[trk_idx];
+	bool quality = this->track_quality[trk_idx] == true;
 	// already know these pass association
-	if (eta > min_abs_eta_track and
-	    pt > min_track_pt and quality) {
+	if (std::abs(eta) > min_abs_eta_track and
+	    pt > min_track_pt and quality and
+	    (!check_time_valid || this->track_time_valid[trk_idx] == 1) ) {
 	  nFTrack++;
 	  if (truthvtx != -1 and this->truth_vtx_ishs[truthvtx])
 	    nFTrack_HS++;
@@ -406,12 +409,6 @@ namespace myutl {
 				Form(full_title, "Core Amp/Bkg Amp", "A.U."),
 				(int)((fold_max-x_min)/x_width), x_min, fold_max);
 
-      sigma_dist->SetMaximum(175);
-      sigma_dist->SetMinimum(5);
-
-      // mean_dist->SetMaximum( 1.0);
-      // mean_dist->SetMinimum(-1.0);
-    
       for (auto hist: {mean_dist, sigma_dist, core_amp_dist, back_amp_dist, amp_ratio_dist}) {
 	hist->SetLineWidth(2);
 	hist->SetLineColor(color);
@@ -500,32 +497,32 @@ namespace myutl {
       TString name(title);
       name.ReplaceAll(" ", "");
       for (ScoreType score : enum_vec) {
-	hist[score]    = std::make_unique<TH2D>(Form("%s_%s", name.Data(), toString(score)),
+	hist[score]    = std::make_unique<TH2D>(Form("%s_%s_%s", name.Data(), toString(score),times),
 						Form("%s t_{0} - TruthVtx t_{0} vs %s (%s);%s;#Delta t[ps]",
 						     toString(score), title, times, title),
 						(int)((x_max - x_min) / x_wid), x_min, x_max,
 						(int)((y_max - y_min) / y_wid), y_min, y_max);
 
-	purity[score]  = std::make_unique<TH2D>(Form("cluster_purity_%s_%s", name.Data(), toString(score)),
+	purity[score]  = std::make_unique<TH2D>(Form("cluster_purity_%s_%s_%s", name.Data(), toString(score),times),
 						Form("%s Cluster Purity vs %s (%s);%s;Cluster Purity",
 						     toString(score), title, times, title),
 						(int)((x_max - x_min) / x_wid), x_min, x_max,
 						(int)((p_max - p_min) / p_wid), p_min, p_max);
 
-	eff_pass[score] = std::make_unique<TH1D>(Form("good_%s_%s", name.Data(), toString(score)),
+	eff_pass[score] = std::make_unique<TH1D>(Form("good_%s_%s_%s", name.Data(), toString(score), times),
 						 Form("%s Eff. Events Count vs %s (%s);Entries;%s",
 						      toString(score), title, times, title),
 						 (int)((fold_max - x_min) / x_wid), x_min, fold_max);
 
 	purity[score]->SetLineColor(colors[score]);
 
-	this->params.emplace(score, FitParams(title, times, Form("%s_%s", name.Data(), toString(score)),
+	this->params.emplace(score, FitParams(title, times, Form("%s_%s_%s", name.Data(), toString(score),times),
 					      x_min, fold_val, fold_max, x_wid,colors[score]));
 
 	algolegend->AddEntry(params.at(score).sigma_dist, toString(score));
       }
 
-      eff_total = std::make_unique<TH1D>(Form("flat_%s", name.Data()),
+      eff_total = std::make_unique<TH1D>(Form("flat_%s_%s", name.Data(),times),
 					 Form("n Events vs %s (%s);Entries;%s",
 					      title, times, title),
 					 (int)((fold_max - x_min) / x_wid), x_min, fold_max);
@@ -558,6 +555,9 @@ namespace myutl {
 
 	if (debug) std::cout << "Max val " << toString(key) << ": " << max_val << std::endl;
 	if (debug) std::cout << "Min val " << toString(key) << ": " << min_val << std::endl;
+
+	if (key == FitParamFields::SIGMA)
+	  max_val = 40.0, min_val = 10;
       
 	for (auto& [score, fitparam]: params) {
 	  double pad = 0.5*(1-0.75) * (max_val-min_val);
@@ -668,9 +668,10 @@ namespace myutl {
       
       // Draw Efficiencies
       first = true;
-      double eff_ymin = 0.3, eff_ymax = 1.3;
+      double eff_ymin = 0.0, eff_ymax = 1.4;
       for (auto score : enum_vec) {
 	auto eff = efficiency.at(score).get();
+	auto total = this->eff_total.get();
 	if (first) {
 	  eff->Draw("AP");
 	  gPad->Update();  // Ensure painting
@@ -679,6 +680,23 @@ namespace myutl {
 	  eff->GetPaintedGraph()->GetXaxis()->SetRangeUser(x_min, fold_max);
 	  eff->GetPaintedGraph()->GetXaxis()->SetNdivisions(510);
 	  gPad->Update();
+	  
+	  total->SetLineColor(colors[8]);
+	  total->SetLineWidth(2);
+	  total->Scale(1/total->Integral());
+	  double count_max = total->GetMaximum();
+	  double scale = (1.0 - eff_ymin) / count_max;
+	  total->Scale(scale);
+	  total->Draw("HIST SAME");
+	  
+	  double xright = gPad->GetUxmax();
+	  TGaxis* axis = new TGaxis(xright, eff_ymin, xright, eff_ymax,
+				    0, count_max*(eff_ymax-eff_ymin), 510, "+L");
+	  axis->SetLineColor(colors[8]);
+	  axis->SetLabelColor(colors[8]);
+	  axis->SetTitle("Frequency");
+	  axis->SetTitleColor(colors[8]);
+	  axis->Draw();
 	  first = false;
 	} else
 	  eff->Draw("P SAME");
@@ -689,6 +707,7 @@ namespace myutl {
       max_eff_line->SetLineColor(kRed);
       max_eff_line->SetLineWidth(2);
       max_eff_line->SetLineStyle(4);
+      efflegend->AddEntry(eff_total.get(),this->xtitle);
       efflegend->AddEntry(max_eff_line,"99% Efficiency");
       max_eff_line->Draw("SAME");
       efflegend->Draw("SAME");
@@ -822,18 +841,23 @@ namespace myutl {
     double
       trk_z0    = branch->track_z0[track_idx],
       trk_z_var = branch->track_var_z0[track_idx],
-      trk_pt    = branch->track_pt[track_idx],
-      trk_eta   = branch->track_eta[track_idx],
       vx_z      = branch->reco_vtx_z[vertex_idx],
       vx_z_var  = 0.0;
-    // int near = (int)branch->track_near_idx[track_idx];
-    // if (near != vertex_idx and std::abs(branch->track_near_sig[track_idx]) < max_trk_vtx_sig)
-    //   return false;
     
-    double nsigma = std::abs(trk_z0 - vx_z) / std::sqrt(trk_z_var + vx_z_var);
-    return nsigma < significance_cut;
+    double nsigma_prim = std::abs(trk_z0 - vx_z) / std::sqrt(trk_z_var + vx_z_var);
+    return nsigma_prim < significance_cut;
   }
 
+  static std::vector<int> pileupRemoval(std::vector<int> tracks, BranchPointerWrapper *branch, double significance_cut) {
+    std::vector<int> output;
+    for (const auto& trk: tracks) {
+       int near = (int)branch->track_near_idx[trk];
+       if (not (near != 0 and std::abs(branch->track_near_sig[trk]) < significance_cut))
+	 output.push_back(trk);
+    }
+    return output;
+  }
+  
   static double getDistanceBetweenClusters(Cluster a, Cluster b) {
     std::vector<double> a_v = a.values;
     std::vector<double> a_s = a.sigmas;
@@ -1042,6 +1066,13 @@ namespace myutl {
     if (debug) std::cout << "Starting n-sigma cone clustering with " << input_indices.size() << " tracks" << std::endl;
 	
     std::vector<Cluster> clusters;
+
+    if (input_indices.size() == 1) {
+      clusters = makeSimpleClusters(input_indices, branch, use_smeared_times, smeared_times_map,
+				    fixed_res, check_time_valid);
+      return clusters;
+    }
+    
     if (input_indices.empty()) {
       if (debug) std::cout << "No tracks for cone clustering" << std::endl;
       return clusters;
@@ -1152,7 +1183,8 @@ namespace myutl {
      double smear_res,       // fixed resolution for smeared times
      bool use_smeared_times, // for ideal cases
      bool check_time_valid,  // for ideal efficiency
-     bool isCone
+     bool isCone,
+     bool useNear
   ) {
     if (track_indices.empty() && debug)
       std::cout << "EMPTY!!!!" << std::endl;
@@ -1169,6 +1201,11 @@ namespace myutl {
       }
     }
 
+    if (useNear) {
+      if (debug) std::cout << track_indices.size() << std::endl; 
+      track_indices = pileupRemoval(track_indices, branch, max_trk_vtx_sig);
+      if (debug) std::cout << track_indices.size() << std::endl; 
+    }
     std::vector<Cluster> collection;
     
     if (not isCone) {
@@ -1243,18 +1280,247 @@ namespace myutl {
   }
 
   static bool passEfficiency(Cluster cluster, BranchPointerWrapper *branch) {
+    if (cluster.values.size() == 0)
+      return false;
+
     double diff = std::abs(cluster.values.at(0)-branch->truth_vtx_time[0]);
     if (diff > 60)
       return false;
+    
     else return true;
 
-    // int nHSTrack = 0;
-    // for (auto idx: cluster.track_indices) {
-    //   if (branch->track_to_truthvtx[idx] == 0)
-    // 	nHSTrack++;
-    // }
+    int nHSTrack = 0;
+    for (auto idx: cluster.track_indices) {
+      if (branch->track_to_truthvtx[idx] == 0)
+	nHSTrack++;
+    }
 
-    // return nHSTrack > 0;
+    return nHSTrack > 0;
+  }
+
+  static void plot_money(const char* fname, TCanvas* canvas,
+			 const PlotObj& hgtd, const PlotObj& idealres,
+			 const PlotObj& idealeff, const PlotObj& hgtd_pur) {
+    // Plot Key Metrics for each of these PlotObjs on the same plot
+    canvas->Print(Form("%s[",fname));
+    const auto plts = {&hgtd, &idealres, &idealeff, &hgtd_pur};
+    double x_min = hgtd.x_min, fold_max = hgtd.fold_max;
+    int counter = 0;
+    
+    bool first = true;
+    double res_ymin = 0.0, res_ymax = 70;
+    TLegend* reslegend = new TLegend(0.65, 0.65, 0.9, 0.9);
+    for (const auto &plt: plts) {
+      const auto& params = plt->params;
+      for (auto score : enum_vec) {
+	if (score == HGTD and
+	    (plt->fname.Contains("ideal") or plt->fname.Contains("pur")))
+	  continue;
+	auto res = params.at(score).sigma_dist;
+	res->SetLineColor(colors[counter % colors.size()]);
+	reslegend->AddEntry(res, Form("%s: %s", toString(score), plt->times));
+	counter++;
+	if (first) {
+	  res->SetTitle(Form("Core #sigma vs %s",hgtd.xtitle));
+	  res->GetYaxis()->SetRangeUser(res_ymin,res_ymax);
+	  res->Draw("E1");
+	  first = false;
+	} else
+	  res->Draw("E1 SAME");
+      }
+    }
+    reslegend->Draw("SAME");
+    canvas->Print(fname);
+
+    // Plot Efficiency
+    first = true;
+    double eff_ymin = 0.0, eff_ymax = 1.5;
+    counter = 0;
+    TLegend* efflegend = new TLegend(0.65, 0.65, 0.9, 0.9);
+    for (const auto plt: plts) {
+      const auto& efficiency = plt->efficiency;
+      for (auto score : enum_vec) {
+	if (score == HGTD and
+	    (plt->fname.Contains("ideal") or plt->fname.Contains("pur")))
+	  continue;
+	auto eff = efficiency.at(score).get();
+	eff->SetLineColor(colors[counter % colors.size()]);
+	efflegend->AddEntry(eff, Form("%s: %s", toString(score), plt->times));
+	counter++;
+	if (first) {
+	  eff->SetTitle(Form("Efficiency vs %s",hgtd.xtitle));
+	  eff->Draw("AP");
+	  gPad->Update();  // Ensure painting
+	  eff->GetPaintedGraph()->GetYaxis()->SetRangeUser(eff_ymin, eff_ymax);
+	  eff->GetPaintedGraph()->GetXaxis()->SetLimits(x_min, fold_max);
+	  eff->GetPaintedGraph()->GetXaxis()->SetRangeUser(x_min, fold_max);
+	  eff->GetPaintedGraph()->GetXaxis()->SetNdivisions(510);
+	  gPad->Update();
+	  first = false;
+	} else
+	  eff->Draw("P SAME");
+      }
+    }
+    TLine *max_eff_line = new TLine(x_min, 0.99, fold_max, 0.99);
+    max_eff_line->SetLineColor(kRed);
+    max_eff_line->SetLineWidth(2);
+    max_eff_line->SetLineStyle(4);
+    efflegend->AddEntry(max_eff_line,"99% Efficiency");
+    max_eff_line->Draw("SAME");
+    efflegend->Draw("SAME");
+    canvas->Print(fname);
+
+    // Plot Purity
+    first = true;
+    counter = 0;
+    double pur_ymin = 0.0, pur_ymax = 1.5;
+    TLegend* purlegend = new TLegend(0.65, 0.65, 0.9, 0.9);
+    for (const auto plt: plts) {
+      const auto& purity = plt->purity;
+      for (auto score : enum_vec) {
+	if (score == HGTD and
+	    (plt->fname.Contains("ideal") or plt->fname.Contains("pur")))
+	  continue;
+	const auto& entry = purity.at(score).get();
+	auto pur = purity.at(score).get()->ProfileX();
+	pur->SetLineWidth(2);
+	pur->GetXaxis()->SetRangeUser(x_min, fold_max);
+	pur->GetYaxis()->SetRangeUser(pur_ymin, pur_ymax);
+	pur->SetLineColor(colors[counter % colors.size()]);
+	purlegend->AddEntry(pur, Form("%s: %s", toString(score), plt->times));
+	counter++;
+	if (first) {
+	  pur->SetTitle(Form("Avg. Cluster Purity vs. %s;%s;%s",
+			      entry->GetXaxis()->GetTitle(),
+			      entry->GetXaxis()->GetTitle(),"Purity"));
+	  pur->Draw("E1");  // 'E' to draw error bars
+	  first = false;
+	  
+	} else
+	  pur->Draw("E1 SAME");
+      }
+    }
+    TLine *max_pur_line = new TLine(x_min, 1.0, fold_max, 1.0);
+    max_pur_line->SetLineColor(kRed);
+    max_pur_line->SetLineWidth(2);
+    max_pur_line->SetLineStyle(4);
+    purlegend->AddEntry(max_pur_line,"100% Purity");
+    max_pur_line->Draw("SAME");
+    purlegend->Draw("SAME");
+    canvas->Print(fname);
+    canvas->Print(Form("%s]",fname));
+  }
+
+  static void plot_money(const char* fname, TCanvas* canvas,
+			 const PlotObj& hgtd, const PlotObj& hgtd_pur) {
+    // Plot Key Metrics for each of these PlotObjs on the same plot
+    canvas->Print(Form("%s[",fname));
+    const auto plts = {&hgtd, &hgtd_pur};
+    double x_min = hgtd.x_min, fold_max = hgtd.fold_max;
+    int counter = 0;
+    
+    bool first = true;
+    double res_ymin = 0.0, res_ymax = 70;
+    TLegend* reslegend = new TLegend(0.65, 0.65, 0.9, 0.9);
+    for (const auto &plt: plts) {
+      const auto& params = plt->params;
+      for (auto score : enum_vec) {
+	if (score == HGTD and
+	    (plt->fname.Contains("ideal") or plt->fname.Contains("pur")))
+	  continue;
+	auto res = params.at(score).sigma_dist;
+	res->SetLineColor(colors[counter % colors.size()]);
+	reslegend->AddEntry(res, Form("%s: %s", toString(score), plt->times));
+	counter++;
+	if (first) {
+	  res->SetTitle(Form("Core #sigma vs %s",hgtd.xtitle));
+	  res->GetYaxis()->SetRangeUser(res_ymin,res_ymax);
+	  res->Draw("E1");
+	  first = false;
+	} else
+	  res->Draw("E1 SAME");
+      }
+    }
+    reslegend->Draw("SAME");
+    canvas->Print(fname);
+
+    // Plot Efficiency
+    first = true;
+    double eff_ymin = 0.0, eff_ymax = 1.5;
+    counter = 0;
+    TLegend* efflegend = new TLegend(0.65, 0.65, 0.9, 0.9);
+    for (const auto plt: plts) {
+      const auto& efficiency = plt->efficiency;
+      for (auto score : enum_vec) {
+	if (score == HGTD and
+	    (plt->fname.Contains("ideal") or plt->fname.Contains("pur")))
+	  continue;
+	auto eff = efficiency.at(score).get();
+	eff->SetLineColor(colors[counter % colors.size()]);
+	efflegend->AddEntry(eff, Form("%s: %s", toString(score), plt->times));
+	counter++;
+	if (first) {
+	  eff->SetTitle(Form("Efficiency vs %s",hgtd.xtitle));
+	  eff->Draw("AP");
+	  gPad->Update();  // Ensure painting
+	  eff->GetPaintedGraph()->GetYaxis()->SetRangeUser(eff_ymin, eff_ymax);
+	  eff->GetPaintedGraph()->GetXaxis()->SetLimits(x_min, fold_max);
+	  eff->GetPaintedGraph()->GetXaxis()->SetRangeUser(x_min, fold_max);
+	  eff->GetPaintedGraph()->GetXaxis()->SetNdivisions(510);
+	  gPad->Update();
+	  first = false;
+	} else
+	  eff->Draw("P SAME");
+      }
+    }
+    TLine *max_eff_line = new TLine(x_min, 0.99, fold_max, 0.99);
+    max_eff_line->SetLineColor(kRed);
+    max_eff_line->SetLineWidth(2);
+    max_eff_line->SetLineStyle(4);
+    efflegend->AddEntry(max_eff_line,"99% Efficiency");
+    max_eff_line->Draw("SAME");
+    efflegend->Draw("SAME");
+    canvas->Print(fname);
+
+    // Plot Purity
+    first = true;
+    counter = 0;
+    double pur_ymin = 0.0, pur_ymax = 1.5;
+    TLegend* purlegend = new TLegend(0.65, 0.65, 0.9, 0.9);
+    for (const auto plt: plts) {
+      const auto& purity = plt->purity;
+      for (auto score : enum_vec) {
+	if (score == HGTD and
+	    (plt->fname.Contains("ideal") or plt->fname.Contains("pur")))
+	  continue;
+	const auto& entry = purity.at(score).get();
+	auto pur = purity.at(score).get()->ProfileX();
+	pur->SetLineWidth(2);
+	pur->GetXaxis()->SetRangeUser(x_min, fold_max);
+	pur->GetYaxis()->SetRangeUser(pur_ymin, pur_ymax);
+	pur->SetLineColor(colors[counter % colors.size()]);
+	purlegend->AddEntry(pur, Form("%s: %s", toString(score), plt->times));
+	counter++;
+	if (first) {
+	  pur->SetTitle(Form("Avg. Cluster Purity vs. %s;%s;%s",
+			      entry->GetXaxis()->GetTitle(),
+			      entry->GetXaxis()->GetTitle(),"Purity"));
+	  pur->Draw("E1");  // 'E' to draw error bars
+	  first = false;
+	  
+	} else
+	  pur->Draw("E1 SAME");
+      }
+    }
+    TLine *max_pur_line = new TLine(x_min, 1.0, fold_max, 1.0);
+    max_pur_line->SetLineColor(kRed);
+    max_pur_line->SetLineWidth(2);
+    max_pur_line->SetLineStyle(4);
+    purlegend->AddEntry(max_pur_line,"100% Purity");
+    max_pur_line->Draw("SAME");
+    purlegend->Draw("SAME");
+    canvas->Print(fname);
+    canvas->Print(Form("%s]",fname));
   }
 
   static void plot_inclusive(const char* fname, bool logscale, bool fixbkg, double x_min, double x_max,
@@ -1286,7 +1552,7 @@ namespace myutl {
 
   static void plot_purity(const char* fname, bool logscale, TCanvas* canvas, TLegend* legend, std::map<ScoreType,TH1D*> purity_map) {
     canvas->Print(Form("%s[",fname));
-    double maxval = 1.0;
+    double maxval = 0.4;
     bool first = true;
     canvas->SetLogy(logscale);
     for (auto pair: purity_map) {
@@ -1339,6 +1605,7 @@ namespace myutl {
     BranchPointerWrapper *branch,
     bool use_smeared_times,
     bool check_valid_times,
+    bool use_near, // whether or not to use nearest vtx cut
     std::map<ScoreType,TH1D*>& inclusive_resos,
     std::map<ScoreType,TH1D*>& inclusive_purity,
     PlotObj& fjet,
@@ -1361,7 +1628,7 @@ namespace myutl {
     std::vector<int> tracks = getAssociatedTracks(branch, min_track_pt);
 
     int nForwardTrack=0, nForwardTrack_HS=0, nForwardTrack_PU=0;
-    branch->count_forward_tracks(nForwardTrack,nForwardTrack_HS,nForwardTrack_PU,tracks);
+    branch->count_forward_tracks(nForwardTrack,nForwardTrack_HS,nForwardTrack_PU,tracks, check_valid_times);
 
     hs_pu_inclusive->Fill(nForwardTrack_HS,nForwardTrack_PU);
     
@@ -1384,7 +1651,7 @@ namespace myutl {
     }
     
     std::vector<Cluster> cluster =
-      clusterTracksInTime(tracks, branch, 3.0, 10.0, use_smeared_times, check_valid_times, true);
+      clusterTracksInTime(tracks, branch, 3.0, 10.0, use_smeared_times, check_valid_times, true, use_near);
     
     fjet.eff_total->     Fill(eff_fill_val_fjet    );
     ftrack.eff_total->   Fill(eff_fill_val_track   );
@@ -1393,20 +1660,21 @@ namespace myutl {
     pu_track.eff_total-> Fill(eff_fill_val_pu_track);
     recovtx_z.eff_total->Fill(eff_fill_val_z       );
 
-    if (cluster.size() == 0) return;    
+    std::map<ScoreType,Cluster> chosen;
+    if (cluster.size() != 0)
+      chosen = chooseCluster(cluster, branch);
 
-    std::map<ScoreType,Cluster> chosen = chooseCluster(cluster, branch);
 
     // run HGTD Clustering (simultaneous)
     std::vector<Cluster> hgtd_clusters =
-      clusterTracksInTime(tracks, branch, 3.0, -1, false, true, false);
+      clusterTracksInTime(tracks, branch, 3.0, -1, false, true, false, false);
 
     if (branch->reco_vtx_valid[0] == 1)
       chosen[ScoreType::HGTD] = chooseHGTDCluster(hgtd_clusters, branch);
-    
+
     if (debug) std::cout << "Chose clusters" << std::endl;
-    bool eventquery = not passEfficiency(chosen[ScoreType::TRKPT], branch);
      
+    // bool eventquery = (not passEfficiency(chosen[ScoreType::TRKPT], branch)) and cluster.size() != 0 and pu_ratio > 0.5;
 
     // if (eventquery) {
     // Long64_t event_num = branch->reader.GetTree()->GetReadEvent()-branch->reader.GetTree()->GetChainOffset();
@@ -1418,21 +1686,25 @@ namespace myutl {
     // }
     
     for (ScoreType score : enum_vec) {
-      // std::cout << "Filling Scores: " << toString(score) << std::endl;
+      if (debug) std::cout << "Filling Scores: " << toString(score) << std::endl;
       if (branch->reco_vtx_valid[0] == 0 and score == HGTD)
 	continue;
 
-      // std::cout << "Attempting to access chosen[" << toString(score) << "]" << std::endl;
-      Cluster scored = chosen[score];
-      // std::cout << "Attempting to access scores values, size: " << scored.values.size() << std::endl;
-      double score_based_time = score == HGTD ? branch->reco_vtx_time[0] : scored.values.at(0);
-      // std::cout << "Attempting to access purity" << std::endl;
-      double cluster_purity = scored.purity;
-      double diff = score_based_time - branch->truth_vtx_time[0];
+      if (cluster.size() == 0 and score != HGTD)
+	continue;
 
+      if (debug) std::cout << "Attempting to access chosen[" << toString(score) << "]" << std::endl;
+      Cluster scored = chosen[score];
+      if (debug) std::cout << "Attempting to access scores values, size: " << scored.values.size() << std::endl;
+      double score_based_time = score == HGTD ? branch->reco_vtx_time[0] : scored.values.at(0);
+      if (debug) std::cout << "Attempting to access purity" << std::endl;
+      double cluster_purity = cluster.size() != 0 ? scored.purity : 0;
+      if (debug) std::cout << "Purity: " << cluster_purity << std::endl;
+      double diff = score_based_time - branch->truth_vtx_time[0];
+      if (debug) std::cout << "Diff: " << diff << std::endl;
+      
       inclusive_resos.at(score)->Fill(diff);
       inclusive_purity.at(score)->Fill(cluster_purity);
-      
       if (passEfficiency(scored, branch)) {
 	fjet.eff_pass.at(score)->     Fill(eff_fill_val_fjet    );
 	ftrack.eff_pass.at(score)->   Fill(eff_fill_val_track   );

@@ -73,7 +73,7 @@ void ideal_hgtd_resolution() {
 
   gErrorIgnoreLevel = kWarning;
   std::cout << "Starting Event Loop" << std::endl;
-  bool progress = false;
+  bool progress = true;
   while (reader.Next()) {
     std::string filename = chain.GetFile()->GetName(); // file we're in
     Long64_t this_evnt = chain.GetReadEntry() - chain.GetChainOffset(); // +1 bc its 0 indexed
@@ -90,14 +90,9 @@ void ideal_hgtd_resolution() {
     plot->plot_postprocessing();
   std::cout << "FINISHED CREATING " << std::endl;
 
-  for (auto& plot: plots) {
-    plot->print_efficiency_stats(ScoreType::TRKPT);
-    plot->print_efficiency_stats(ScoreType::HGTD);
-    plot->print_efficiency_stats(ScoreType::MAXHS);
-  }
-
   for (auto& plot: plots)
     plot->plot_logic(canvas);
+  std::cout << "FINISHED PRINTING BULK " << std::endl;
   
   plot_inclusive(Form("figs/%s_resos_logscale.pdf", file_prefix),
 		 true, true, -400, 400, canvas, inclusive_resos);
@@ -110,9 +105,11 @@ void ideal_hgtd_resolution() {
 
   auto hs_pu_fname = Form("figs/%s_hs_v_pu.pdf", file_prefix);
   canvas->Print(Form("%s[",hs_pu_fname));
-  hs_pu_inclusive->GetXaxis()->SetRangeUser(0, 35);
+  hs_pu_inclusive->GetXaxis()->SetRangeUser(0, 50);
   hs_pu_inclusive->GetYaxis()->SetRangeUser(0, 50);
   hs_pu_inclusive->Draw("COLZ");
   canvas->Print(Form("%s",hs_pu_fname));
   canvas->Print(Form("%s]",hs_pu_fname));
+
+  std::cout << "ALL DONE :3" << std::endl;
 }
