@@ -170,11 +170,12 @@ for idx, z in enumerate(my_branches.TruthVtx_z[event_num]):
 # connected_tracks = my_branches.RecoVtx_track_idx[event_num][vtxID]
 connected_tracks = []
 for idx in range(len(my_branches.Track_z0[event_num])):
+    inHGTD = abs(my_branches.Track_eta[event_num][idx]) > 2.38 and abs(my_branches.Track_eta[event_num][idx]) < 4.0
     hasTime = my_branches.Track_hasValidTime[event_num][idx] == 1
     dz = my_branches.Track_z0[event_num][idx] - my_branches.RecoVtx_z[event_num][vtxID]
     nsigma = abs(dz / sqrt(my_branches.Track_var_z0[event_num][idx]))
     isHS = my_branches.Track_truthVtx_idx[event_num][idx] == 0
-    if(abs(nsigma) < 3.0 and my_branches.Track_pt[event_num][idx] > 1.0 and hasTime):
+    if(abs(nsigma) < 3.0 and my_branches.Track_pt[event_num][idx] > 1.0 and inHGTD and hasTime):
         connected_tracks.append(idx)
 
 track_info = []
@@ -260,10 +261,17 @@ for idx in connected_tracks:
     isTruthHS = my_branches.TruthVtx_isHS[event_num][Track_truthVtx_id]==1
     hasTime = my_branches.Track_hasValidTime[event_num][idx] == 1
 
-    if (isTruthHS and (not hasTime)):
-        status = 2
-    if ((not isTruthHS) and (not hasTime)):
-        status = 3
+    # if (isTruthHS and (not hasTime)):
+    #     status = 2
+    # if ((not isTruthHS) and (not hasTime)):
+    #     status = 3
+
+    # if ((not hasTime) and isTruthHS):
+    #     status = 4
+
+    # if ((not hasTime) and (not isTruthHS)):
+    #     status = 5
+    
 
     truthpart_idx = my_branches.Track_truthPart_idx[event_num][idx]
     truthpart_pt = my_branches.TruthPart_pt[event_num][truthpart_idx]
@@ -275,7 +283,7 @@ for idx in connected_tracks:
     #     status = 4
     near = my_branches.Track_nearestVtx_idx[event_num][idx]
     nsigma_near = np.abs(my_branches.Track_nearestVtx_sig[event_num][idx])
-    nearcut = not (near != vtxID and nsigma_near < 0.5)
+    nearcut = not (near != vtxID and nsigma_near < 3.0)
 
     if ((not nearcut) and isTruthHS):
         status = 2
@@ -304,7 +312,7 @@ track_times = []
 cluster_times = []
 use_smeared_times = False # True
 try:
-    macro_call = f'runHGTD_Clustering.cxx("{file_num}",{event_num},{"true" if use_smeared_times else "false"})'
+    macro_call = f'runHGTD_Clustering.cxx("{file_num}",{event_num},{"true" if use_smeared_times else "false"},true)'
     result = subprocess.run(['root', '-l', '-q', '-b', macro_call],
                             check=True,
                             capture_output=True,
@@ -436,7 +444,7 @@ trange = max_time - min_time;
 extended_min_time = min_time - 0.05 * trange;
 extended_max_time = max_time + 0.05 * trange;
 
-filename = f'./figs/eventdisplays/new_ntuple/event_display_PUR_{file_num}_{event_num:04d}_{vtxID}.pdf'
+filename = f'./figs/eventdisplays/pur_degrades/event_display_PUR_{file_num}_{event_num:04d}_{vtxID}.pdf'
 
 colors = [
     "#e41a1c",  # red
@@ -460,6 +468,7 @@ colors = [
 
 
 cluster_colors = colors[:len(track_clusters)]
+print(cluster_colors)
 
 with PdfPages(filename) as pdf:
     for label, weights in weight_cases.items():
@@ -584,7 +593,7 @@ with PdfPages(filename) as pdf:
         time_histo.set_xlim(extended_min_time, extended_max_time)
         time_histo.set_xlabel('Time')
         time_histo.set_ylabel('Counts' if weights is None else 'Weighted Counts')
-        time_histo.set_title(f'Histogram weighted by: {label} (PU Removal)')
+        time_histo.set_title(f'Histogram weighted by: {label}')
 
         # Get bin indices where hard scatter times fall
         hs_bin_indices = np.digitize(hard_scatter_times, bin_edges) - 1
@@ -617,8 +626,14 @@ with PdfPages(filename) as pdf:
             elif status == 3:        
                 color = 'red'
                 linestyle = '--'
+            elif status == 4:
+                color = 'blue'
+                linestyle = '-.'
+            elif status == 5:
+                color = 'red'
+                linestyle = '-.'
             else:
-                color = 'black'
+                color = "black"
                 # print(z0)
             event_display.plot([Z + z0, Z + z0 + x], [0, y], color=color, linestyle=linestyle)
     

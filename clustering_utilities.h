@@ -59,7 +59,9 @@ namespace myutl {
   static std::vector<int> colors = {c01, c02, c03, c04, c05, c06, c07, c08, c09, c10};
 
   // cut variables
-  static int    min_jets          = 1;    // min number of jets
+  static int    min_jets          = 2;    // min number of jets
+  static int    min_passpt_jets   = 2;    // min number of jets required to be >30 GeV
+  static int    min_passeta_jets  = 1;    // min number of forward jets required to be >30 GeV
   static double min_jetpt         = 30.0; // self explanatory
   static double min_abs_eta_jet   = 2.38; // min eta for a jet to be considered "forward"
   static double min_abs_eta_track = 2.38; // min eta for a track to be considered "forward"
@@ -76,7 +78,7 @@ namespace myutl {
   const double purity_min = 0, purity_max = 1;
   const double purity_width = 0.05;
 
-  const double fjet_min = 1, fjet_max = 31, fold_fjet = 5;
+  const double fjet_min = 0, fjet_max = 31, fold_fjet = 5;
   const double fjet_width = 1.0;
 
   const double track_min = 0, track_max = 100, fold_track = 20;
@@ -180,13 +182,13 @@ namespace myutl {
     std::map<ScoreType,double> scores;
     double purity = 0.0;
     bool max_pt_cluster = false;
-    bool wasMerged = false;
-    int nConstituents=1;
+    bool was_merged = false;
+    int n_constituents=1;
 
     bool operator==(const Cluster& other) {
       bool same_values = values.at(0) == other.values.at(0);
       bool same_sigmas = sigmas.at(0) == other.sigmas.at(0);
-      bool same_consts = nConstituents == other.nConstituents;
+      bool same_consts = n_constituents == other.n_constituents;
       // this SHOULD be sufficienct
       return same_consts and same_sigmas and same_values;
     }
@@ -205,7 +207,9 @@ namespace myutl {
     TTreeReaderArray<float> track_pt;
     TTreeReaderArray<float> track_eta;
     TTreeReaderArray<float> track_phi;
+    TTreeReaderArray<float> track_theta;
     TTreeReaderArray<float> track_var_z0;
+    TTreeReaderArray<float> track_var_theta;
     TTreeReaderArray<float> track_time;
     TTreeReaderArray<float> track_time_res;
     TTreeReaderArray<int>   track_time_valid;
@@ -215,6 +219,8 @@ namespace myutl {
     TTreeReaderArray<int>   track_hgtd_hits;
     TTreeReaderArray<int>   track_prim_hits;
     TTreeReaderArray<float> track_near_idx;
+    TTreeReaderArray<float> track_near_z0sin;
+    TTreeReaderArray<float> track_near_z0sin_unc;
     TTreeReaderArray<float> track_near_sig;
 
     TTreeReaderArray<float> truth_vtx_z;
@@ -236,40 +242,44 @@ namespace myutl {
     TTreeReaderArray<float> particle_t;
 
   BranchPointerWrapper(TTreeReader& r)
-    : reader           (r                          ),
-      weight           (r, "weight"                ),
-      track_z0         (r, "Track_z0"              ),
-      track_pt         (r, "Track_pt"              ),
-      track_eta        (r, "Track_eta"             ),
-      track_phi        (r, "Track_phi"             ),
-      track_var_z0     (r, "Track_var_z0"          ),
-      track_time       (r, "Track_time"            ),
-      track_time_res   (r, "Track_timeRes"         ),
-      track_time_valid (r, "Track_hasValidTime"    ),
-      track_quality    (r, "Track_quality"         ),
-      track_to_truthvtx(r, "Track_truthVtx_idx"    ),
-      track_to_particle(r, "Track_truthPart_idx"   ),
-      track_hgtd_hits  (r, "Track_nHGTDHits"       ),
-      track_prim_hits  (r, "Track_nHGTDPrimaryHits"),
-      track_near_idx   (r, "Track_nearestVtx_idx"  ),
-      track_near_sig   (r, "Track_nearestVtx_sig"  ),
-      truth_vtx_z      (r, "TruthVtx_z"            ),
-      truth_vtx_time   (r, "TruthVtx_time"         ),
-      truth_vtx_ishs   (r, "TruthVtx_isHS"         ),
-      reco_vtx_z       (r, "RecoVtx_z"             ),
-      reco_vtx_time    (r, "RecoVtx_time"          ),
-      reco_vtx_timeRes (r, "RecoVtx_timeRes"       ),
-      reco_vtx_valid   (r, "RecoVtx_hasValidTime"  ),
-      topojet_pt       (r, "AntiKt4EMTopoJets_pt"  ),
-      topojet_eta      (r, "AntiKt4EMTopoJets_eta" ),
-      topojet_phi      (r, "AntiKt4EMTopoJets_phi" ),
-      truthhsjet_pt    (r, "TruthHSJet_pt"         ),
-      truthhsjet_eta   (r, "TruthHSJet_eta"        ),
-      particle_t       (r, "TruthPart_prodVtx_time")
+    : reader (r),
+      weight (r, "weight"),
+      track_z0 (r, "Track_z0"),
+      track_pt (r, "Track_pt"),
+      track_eta (r, "Track_eta"),
+      track_theta (r, "Track_theta"),
+      track_phi (r, "Track_phi"),
+      track_var_z0 (r, "Track_var_z0"),
+      track_var_theta (r, "Track_var_theta"),
+      track_time (r, "Track_time"),
+      track_time_res (r, "Track_timeRes"),
+      track_time_valid (r, "Track_hasValidTime"),
+      track_quality (r, "Track_quality"),
+      track_to_truthvtx (r, "Track_truthVtx_idx"),
+      track_to_particle (r, "Track_truthPart_idx"),
+      track_hgtd_hits (r, "Track_nHGTDHits"),
+      track_prim_hits (r, "Track_nHGTDPrimaryHits"),
+      track_near_idx (r, "Track_nearestVtx_idx"),
+      track_near_z0sin (r, "Track_nearestVtx_z0SinTheta"),
+      track_near_z0sin_unc (r, "Track_nearestVtx_z0SinThetaUncertainty"),
+      track_near_sig (r, "Track_nearestVtx_sig"),
+      truth_vtx_z (r, "TruthVtx_z"),
+      truth_vtx_time (r, "TruthVtx_time"),
+      truth_vtx_ishs (r, "TruthVtx_isHS"),
+      reco_vtx_z (r, "RecoVtx_z"),
+      reco_vtx_time (r, "RecoVtx_time"),
+      reco_vtx_timeRes (r, "RecoVtx_timeRes"),
+      reco_vtx_valid (r, "RecoVtx_hasValidTime"),
+      topojet_pt (r, "AntiKt4EMTopoJets_pt"),
+      topojet_eta (r, "AntiKt4EMTopoJets_eta"),
+      topojet_phi (r, "AntiKt4EMTopoJets_phi"),
+      truthhsjet_pt (r, "TruthHSJet_pt"),
+      truthhsjet_eta (r, "TruthHSJet_eta"),
+      particle_t (r, "TruthPart_prodVtx_time")
     {}
 
     bool pass_basic_cuts() {
-      if (topojet_pt.GetSize() < min_jets) {
+      if (truthhsjet_pt.GetSize() < min_jets or topojet_pt.GetSize() < min_jets) {
 	if (debug) std::cout << "Skipping low jet event" << std::endl;
         return false;
       }
@@ -285,21 +295,21 @@ namespace myutl {
 
     bool pass_jet_pt_cut() { 
       int passptcount = 0, passptetacount = 0;
-      for(int jet_idx = 0; jet_idx < truthhsjet_eta.GetSize(); ++jet_idx) {
-	float eta = truthhsjet_eta[jet_idx], pt = truthhsjet_pt[jet_idx];
-	passptcount += (pt > min_jetpt and eta > min_abs_eta_jet) ? 1 : 0;
-	if (passptcount >= min_jets)
-          return true;
+      for(int jet_idx = 0; jet_idx < topojet_eta.GetSize(); ++jet_idx) {
+	float eta = topojet_eta[jet_idx], pt = truthhsjet_pt[jet_idx];
+	if (debug) std::cout << "pt, eta: " << pt << ", " << eta << std::endl;
+	passptcount += (pt > min_jetpt) ? 1 : 0;
+	passptetacount += (pt > min_jetpt and std::abs(eta) > min_abs_eta_jet) ? 1 : 0;
       }
-      if (debug) std::cout << "Skipping pt cut event" << std::endl;
-      return false;
+      if (debug) std::cout << "PASSPT "<< passptcount << ", " << passptetacount << std::endl;
+      return passptcount >= min_passpt_jets and passptetacount >= min_passeta_jets;
     }
 
     void count_forward_jets(int& nForwardJet) {
     nForwardJet = 0;
     for(int jet_idx = 0; jet_idx < this->topojet_eta.GetSize(); ++jet_idx) {
       float jet_eta = this->topojet_eta[jet_idx], jet_pt = this->topojet_pt[jet_idx];
-      if (std::abs(jet_eta) > min_abs_eta_jet and jet_pt > 20)
+      if (std::abs(jet_eta) > min_abs_eta_jet and jet_pt > min_jetpt)
 	nForwardJet++;
     }
   }
@@ -415,7 +425,7 @@ namespace myutl {
       }
     }
 
-    void fill_each(int idx, TF1* fit) {
+    void fillEach(int idx, TF1* fit) {
       double sigma1 = fit->GetParameter("Sigma1");
       
       sigma_dist->SetBinContent(idx+1,sigma1);
@@ -436,7 +446,7 @@ namespace myutl {
       amp_ratio_dist->SetBinError(idx+1,ampratio_err); 
     }
 
-    void fill_gaus(int idx, TF1* fit) {
+    void fillGaus(int idx, TF1* fit) {
       double sigma = fit->GetParameter(2);
       
       sigma_dist->SetBinContent(idx+1,sigma);
@@ -449,7 +459,7 @@ namespace myutl {
       back_amp_dist->SetBinError(idx+1,amp2_err); 
     }
 
-    TH1D* from_enum(FitParamFields fit) {
+    TH1D* fromEnum(FitParamFields fit) {
       switch (fit) {
       case FitParamFields::MEAN:  return mean_dist;
       case FitParamFields::SIGMA: return sigma_dist;
@@ -538,11 +548,11 @@ namespace myutl {
         // you would delete them here.
     }
 
-    inline void set_param_maxes() {
+    inline void setParamMaxes() {
       double max_val = -10, min_val = 1e60;
       for (auto key: fitparam_vec) {
 	for (auto& [score, fitparam]: params) {
-	  TH1D *hist = fitparam.from_enum(key);
+	  TH1D *hist = fitparam.fromEnum(key);
 	  hist->GetXaxis()->SetNdivisions(510);
 	  double this_max = hist->GetMaximum();
 	  if (this_max > max_val)
@@ -561,7 +571,7 @@ namespace myutl {
       
 	for (auto& [score, fitparam]: params) {
 	  double pad = 0.5*(1-0.75) * (max_val-min_val);
-	  fitparam.from_enum(key)->GetYaxis()->SetRangeUser(min_val-pad, max_val+pad);
+	  fitparam.fromEnum(key)->GetYaxis()->SetRangeUser(min_val-pad, max_val+pad);
 	}
 	// reset values
 	max_val = -10;
@@ -569,7 +579,7 @@ namespace myutl {
       }
     }
 
-    inline void plot_postprocessing() {
+    inline void plotPostprocessing() {
       for (ScoreType score: enum_vec) {
 	TH2D* big_hist = hist.at(score).get();
 	for(int j = 0; j < big_hist->GetNbinsX(); ++j) {
@@ -609,11 +619,11 @@ namespace myutl {
 	  double perc_err = dgaus_fit->GetParError("Sigma1")/dgaus_fit->GetParameter("Sigma1");
       
 	  if (perc_err < 0.10) {
-	    params.at(score).fill_each(j, dgaus_fit.get());
+	    params.at(score).fillEach(j, dgaus_fit.get());
 	    slices_fits[score].push_back(std::move(dgaus_fit));
 	  } else {
 	    // use single
-	    params.at(score).fill_gaus(j, sgaus_fit.get());
+	    params.at(score).fillGaus(j, sgaus_fit.get());
 	    slices_fits[score].push_back(std::move(sgaus_fit));
 	  }
 	  slices_hists[score].push_back(std::move(hSlice));
@@ -629,10 +639,10 @@ namespace myutl {
         eff->SetLineWidth(2);
 	efficiency[score] = std::move(eff);
       }
-      this->set_param_maxes();
+      this->setParamMaxes();
     }
     
-    inline void plot_logic(TCanvas* canvas) {
+    inline void plotLogic(TCanvas* canvas) {
       // Draw 2Ds
       canvas->Print(Form("%s[",fname.Data()));
       for (const auto& [score,entry_ptr] : this->hist) {
@@ -717,7 +727,7 @@ namespace myutl {
       for (auto key: fitparam_vec) {
 	first = true;
 	for (auto& [score, param]: params) {
-	  TH1D *hist = param.from_enum(key);
+	  TH1D *hist = param.fromEnum(key);
 	  if (first) {
 	    hist->Draw();
 	    first = false;
@@ -792,7 +802,7 @@ namespace myutl {
       canvas->Print(Form("%s]",fname.Data()));
     }
 
-    inline void print_efficiency_stats(ScoreType score) {
+    inline void printEfficiencyStats(ScoreType score) {
       auto this_pass = eff_pass.at(score).get();
       auto this_totl = eff_total.get();
       std::cout << "Efficiency for dt vs. " << this->xtitle << " ScoreType: " << toString(score) << std::endl;
@@ -852,8 +862,22 @@ namespace myutl {
     std::vector<int> output;
     for (const auto& trk: tracks) {
        int near = (int)branch->track_near_idx[trk];
-       if (not (near != 0 and std::abs(branch->track_near_sig[trk]) < significance_cut))
-	 output.push_back(trk);
+       double sig_near = std::abs(branch->track_near_sig[trk]);
+       double sig_prim = std::abs(branch->track_z0[trk]-branch->reco_vtx_z[0]) / std::sqrt(branch->track_var_z0[trk]);
+       bool query = near != 0 && sig_near < significance_cut;
+       // if (query) {
+       // 	 // std::cout << "near idx,sig: " << Form("(%d,%.2f)", near, sig_near) << std::endl;
+       // 	 // std::cout << "prim idx,sig: " << Form("(%d,%.2f)", branch->track_to_truthvtx[trk],sig_prim) << std::endl;
+       // 	 // std::cout << "--------------------" << std::endl;
+       // 	 std::cout << Form("%d", branch->track_to_truthvtx[trk]) << std::endl;
+       // }
+       
+       if (query) // option a
+       // if (near != 0 && sig_near < sig_prim) // option b
+       // if (near != 0) // option c
+	 continue;
+
+       output.push_back(trk);
     }
     return output;
   }
@@ -884,7 +908,7 @@ namespace myutl {
 
   static Cluster mergeClusters(Cluster a, Cluster b) {
     Cluster merged_cluster;
-    merged_cluster.wasMerged = true;
+    merged_cluster.was_merged = true;
   
     for (size_t i = 0; i < a.values.size(); i++) {
       double v1 = a.values.at(i);
@@ -910,7 +934,7 @@ namespace myutl {
     for (auto i: b.track_indices)
       merged_cluster.track_indices.push_back(i);
 
-    merged_cluster.nConstituents = a.nConstituents+b.nConstituents;
+    merged_cluster.n_constituents = a.n_constituents+b.n_constituents;
     merged_cluster.max_pt_cluster = a.max_pt_cluster || b.max_pt_cluster;
 
     for (ScoreType score: enum_vec)
@@ -1016,7 +1040,7 @@ namespace myutl {
 	  Cluster a = collection->at(i);
 	  Cluster b = collection->at(j);
 
-	  if (a.wasMerged or b.wasMerged)
+	  if (a.was_merged or b.was_merged)
 	    continue;
 	
 	  double current_distance =
@@ -1041,9 +1065,9 @@ namespace myutl {
 	collection->push_back(new_cluster);
       } else {
 	if (std::find_if(collection->begin(), collection->end(),
-			 [](Cluster a) {return a.wasMerged;}) != collection->end()) {
+			 [](Cluster a) {return a.was_merged;}) != collection->end()) {
 	  for (int idx=0; idx < collection->size(); ++idx) {
-	    collection->at(idx).wasMerged = false;
+	    collection->at(idx).was_merged = false;
 	  }
 	
 	} else {
@@ -1299,18 +1323,17 @@ namespace myutl {
   }
 
   static void plot_money(const char* fname, TCanvas* canvas,
-			 const PlotObj& hgtd, const PlotObj& idealres,
-			 const PlotObj& idealeff, const PlotObj& hgtd_pur) {
+			 const std::vector<PlotObj*> plots) {
     // Plot Key Metrics for each of these PlotObjs on the same plot
     canvas->Print(Form("%s[",fname));
-    const auto plts = {&hgtd, &idealres, &idealeff, &hgtd_pur};
-    double x_min = hgtd.x_min, fold_max = hgtd.fold_max;
+    double x_min = plots[0]->x_min, fold_max = plots[0]->fold_max;
+    const char * xtitle = plots[0]->xtitle;
     int counter = 0;
     
     bool first = true;
-    double res_ymin = 0.0, res_ymax = 70;
+    double res_ymin = 0.0, res_ymax = 40;
     TLegend* reslegend = new TLegend(0.65, 0.65, 0.9, 0.9);
-    for (const auto &plt: plts) {
+    for (const auto &plt: plots) {
       const auto& params = plt->params;
       for (auto score : enum_vec) {
 	if (score == HGTD and
@@ -1321,7 +1344,7 @@ namespace myutl {
 	reslegend->AddEntry(res, Form("%s: %s", toString(score), plt->times));
 	counter++;
 	if (first) {
-	  res->SetTitle(Form("Core #sigma vs %s",hgtd.xtitle));
+	  res->SetTitle(Form("Core #sigma vs %s",xtitle));
 	  res->GetYaxis()->SetRangeUser(res_ymin,res_ymax);
 	  res->Draw("E1");
 	  first = false;
@@ -1337,7 +1360,7 @@ namespace myutl {
     double eff_ymin = 0.0, eff_ymax = 1.5;
     counter = 0;
     TLegend* efflegend = new TLegend(0.65, 0.65, 0.9, 0.9);
-    for (const auto plt: plts) {
+    for (const auto plt: plots) {
       const auto& efficiency = plt->efficiency;
       for (auto score : enum_vec) {
 	if (score == HGTD and
@@ -1348,7 +1371,7 @@ namespace myutl {
 	efflegend->AddEntry(eff, Form("%s: %s", toString(score), plt->times));
 	counter++;
 	if (first) {
-	  eff->SetTitle(Form("Efficiency vs %s",hgtd.xtitle));
+	  eff->SetTitle(Form("Efficiency vs %s",xtitle));
 	  eff->Draw("AP");
 	  gPad->Update();  // Ensure painting
 	  eff->GetPaintedGraph()->GetYaxis()->SetRangeUser(eff_ymin, eff_ymax);
@@ -1375,119 +1398,7 @@ namespace myutl {
     counter = 0;
     double pur_ymin = 0.0, pur_ymax = 1.5;
     TLegend* purlegend = new TLegend(0.65, 0.65, 0.9, 0.9);
-    for (const auto plt: plts) {
-      const auto& purity = plt->purity;
-      for (auto score : enum_vec) {
-	if (score == HGTD and
-	    (plt->fname.Contains("ideal") or plt->fname.Contains("pur")))
-	  continue;
-	const auto& entry = purity.at(score).get();
-	auto pur = purity.at(score).get()->ProfileX();
-	pur->SetLineWidth(2);
-	pur->GetXaxis()->SetRangeUser(x_min, fold_max);
-	pur->GetYaxis()->SetRangeUser(pur_ymin, pur_ymax);
-	pur->SetLineColor(colors[counter % colors.size()]);
-	purlegend->AddEntry(pur, Form("%s: %s", toString(score), plt->times));
-	counter++;
-	if (first) {
-	  pur->SetTitle(Form("Avg. Cluster Purity vs. %s;%s;%s",
-			      entry->GetXaxis()->GetTitle(),
-			      entry->GetXaxis()->GetTitle(),"Purity"));
-	  pur->Draw("E1");  // 'E' to draw error bars
-	  first = false;
-	  
-	} else
-	  pur->Draw("E1 SAME");
-      }
-    }
-    TLine *max_pur_line = new TLine(x_min, 1.0, fold_max, 1.0);
-    max_pur_line->SetLineColor(kRed);
-    max_pur_line->SetLineWidth(2);
-    max_pur_line->SetLineStyle(4);
-    purlegend->AddEntry(max_pur_line,"100% Purity");
-    max_pur_line->Draw("SAME");
-    purlegend->Draw("SAME");
-    canvas->Print(fname);
-    canvas->Print(Form("%s]",fname));
-  }
-
-  static void plot_money(const char* fname, TCanvas* canvas,
-			 const PlotObj& hgtd, const PlotObj& hgtd_pur) {
-    // Plot Key Metrics for each of these PlotObjs on the same plot
-    canvas->Print(Form("%s[",fname));
-    const auto plts = {&hgtd, &hgtd_pur};
-    double x_min = hgtd.x_min, fold_max = hgtd.fold_max;
-    int counter = 0;
-    
-    bool first = true;
-    double res_ymin = 0.0, res_ymax = 70;
-    TLegend* reslegend = new TLegend(0.65, 0.65, 0.9, 0.9);
-    for (const auto &plt: plts) {
-      const auto& params = plt->params;
-      for (auto score : enum_vec) {
-	if (score == HGTD and
-	    (plt->fname.Contains("ideal") or plt->fname.Contains("pur")))
-	  continue;
-	auto res = params.at(score).sigma_dist;
-	res->SetLineColor(colors[counter % colors.size()]);
-	reslegend->AddEntry(res, Form("%s: %s", toString(score), plt->times));
-	counter++;
-	if (first) {
-	  res->SetTitle(Form("Core #sigma vs %s",hgtd.xtitle));
-	  res->GetYaxis()->SetRangeUser(res_ymin,res_ymax);
-	  res->Draw("E1");
-	  first = false;
-	} else
-	  res->Draw("E1 SAME");
-      }
-    }
-    reslegend->Draw("SAME");
-    canvas->Print(fname);
-
-    // Plot Efficiency
-    first = true;
-    double eff_ymin = 0.0, eff_ymax = 1.5;
-    counter = 0;
-    TLegend* efflegend = new TLegend(0.65, 0.65, 0.9, 0.9);
-    for (const auto plt: plts) {
-      const auto& efficiency = plt->efficiency;
-      for (auto score : enum_vec) {
-	if (score == HGTD and
-	    (plt->fname.Contains("ideal") or plt->fname.Contains("pur")))
-	  continue;
-	auto eff = efficiency.at(score).get();
-	eff->SetLineColor(colors[counter % colors.size()]);
-	efflegend->AddEntry(eff, Form("%s: %s", toString(score), plt->times));
-	counter++;
-	if (first) {
-	  eff->SetTitle(Form("Efficiency vs %s",hgtd.xtitle));
-	  eff->Draw("AP");
-	  gPad->Update();  // Ensure painting
-	  eff->GetPaintedGraph()->GetYaxis()->SetRangeUser(eff_ymin, eff_ymax);
-	  eff->GetPaintedGraph()->GetXaxis()->SetLimits(x_min, fold_max);
-	  eff->GetPaintedGraph()->GetXaxis()->SetRangeUser(x_min, fold_max);
-	  eff->GetPaintedGraph()->GetXaxis()->SetNdivisions(510);
-	  gPad->Update();
-	  first = false;
-	} else
-	  eff->Draw("P SAME");
-      }
-    }
-    TLine *max_eff_line = new TLine(x_min, 0.99, fold_max, 0.99);
-    max_eff_line->SetLineColor(kRed);
-    max_eff_line->SetLineWidth(2);
-    max_eff_line->SetLineStyle(4);
-    efflegend->AddEntry(max_eff_line,"99% Efficiency");
-    max_eff_line->Draw("SAME");
-    efflegend->Draw("SAME");
-    canvas->Print(fname);
-
-    // Plot Purity
-    first = true;
-    counter = 0;
-    double pur_ymin = 0.0, pur_ymax = 1.5;
-    TLegend* purlegend = new TLegend(0.65, 0.65, 0.9, 0.9);
-    for (const auto plt: plts) {
+    for (const auto plt: plots) {
       const auto& purity = plt->purity;
       for (auto score : enum_vec) {
 	if (score == HGTD and
@@ -1601,7 +1512,7 @@ namespace myutl {
     return (raw >= fold) ? fold : raw;
   }
 
-  static void process_event_data(
+  static std::pair<int,double> process_event_data(
     BranchPointerWrapper *branch,
     bool use_smeared_times,
     bool check_valid_times,
@@ -1616,11 +1527,13 @@ namespace myutl {
     PlotObj& recovtx_z,
     TH2D* hs_pu_inclusive
   ) {
+    int return_code = 0;
+    double return_val = -1.;
     // check if vertex selection is correct & number of jets
-    if (not branch->pass_basic_cuts()) return;
+    if (not branch->pass_basic_cuts()) return std::make_pair(-1,1.);
 
     // check if there is one forward jet with pt > 30 GeV
-    if (not branch->pass_jet_pt_cut()) return;
+    if (not branch->pass_jet_pt_cut()) return std::make_pair(-1,1.);;
 
     int nForwardJet=0;
     branch->count_forward_jets(nForwardJet);
@@ -1712,6 +1625,10 @@ namespace myutl {
 	hs_track.eff_pass.at(score)-> Fill(eff_fill_val_hs_track);
 	pu_track.eff_pass.at(score)-> Fill(eff_fill_val_pu_track);
 	recovtx_z.eff_pass.at(score)->Fill(eff_fill_val_z       );
+	if (score == TRKPT) {
+	  return_code = 1;
+	  return_val = score_based_time;
+	}
       }
       
       // fill diff hists
@@ -1730,5 +1647,6 @@ namespace myutl {
       pu_track.purity.at(score)-> Fill(nForwardTrack_PU, cluster_purity);
       recovtx_z.purity.at(score)->Fill(reco_z          , cluster_purity);
     }
+    return std::make_pair(return_code, return_val);
   }
 }
