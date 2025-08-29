@@ -1,51 +1,13 @@
-#include <Rtypes.h>
-#include <TRandom1.h>
-#include <TCanvas.h>
-#include <TChain.h>
-#include <TColor.h>
-#include <TDirectory.h>
-#include <TEfficiency.h>
-#include <TFile.h>
-#include <TF1.h>
-#include <TGaxis.h>
-#include <TGraph.h>
-#include <TGraphAsymmErrors.h>
-#include <TGraphErrors.h>
-#include <TH1.h>
-#include <TH2.h>
-#include <TLatex.h>
-#include <TLegend.h>
-#include <TLine.h> 
-#include <TProfile.h>
-#include <TMath.h>
-#include <TTreeReader.h>
-#include <TTreeReaderArray.h>
-#include <TString.h>
-#include <TStyle.h>
-#include <TVector2.h>
-
-// Boost Headers
-#include <boost/filesystem.hpp>
-
-// Standard C++ Library Headers
+#include "../clustering_includes.h"
+#include <RtypesCore.h>
 #include <algorithm>
-#include <cassert>
-#include <cmath>
-#include <cstddef>
-#include <cstdlib>
-#include <cstring>
-#include <iostream>
 #include <numeric>
-#include <ostream>
 #include <utility>
-#include <vector>
-#include <map>    
-#include <memory>
 
 #define BIGMARKER std::cout << "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" << std::endl;
 
 namespace myutl {
-  static bool debug = false;
+  static bool debug = false  ;
   static int c01 = kP10Blue  ;
   static int c02 = kP10Red   ;
   static int c03 = kP10Yellow;
@@ -59,13 +21,15 @@ namespace myutl {
   static std::vector<int> colors = {c01, c02, c03, c04, c05, c06, c07, c08, c09, c10};
 
   // cut variables
-  static int    min_jets          = 2;    // min number of jets
-  static int    min_passpt_jets   = 2;    // min number of jets required to be >30 GeV
+  static int    min_jets          = 1;    // min number of jets
+  static int    min_passpt_jets   = 0;    // min number of jets required to be >30 GeV
   static int    min_passeta_jets  = 1;    // min number of forward jets required to be >30 GeV
+  static int    min_hs_track      = 4;    // testing only
   static double min_jetpt         = 30.0; // self explanatory
   static double min_abs_eta_jet   = 2.38; // min eta for a jet to be considered "forward"
   static double min_abs_eta_track = 2.38; // min eta for a track to be considered "forward"
   static double min_track_pt      = 1.0;  // track_pt > 1.0 GeV
+  static double max_track_pt      = 30.0; // track_pt < 30.0 GeV
   static double max_vtx_dz        = 2.0;  // max error for reco HS vertex z
   static double max_nsigma        = 3.0;  // how close a track can be to PV
   static double max_trk_vtx_sig   = 3.0;  // How close a track can be to another vertex
@@ -136,23 +100,24 @@ namespace myutl {
   
   /// enums and utilities for them
   enum ScoreType {
-    HGTD = 0, TRKPT = 1, SIG = 2, SUMPT2 = 3, SIGTRKPT = 4,
-    MAXPT = 5, IDEAL = 6, MAXHS = 7, JETPTDR = 8, TRKPTDR = 9,
+    HGTD = 0, TRKPT = 1, TRKPTZ = 2, SUMPT2 = 3, DZ = 4,
+    PASS = 5, IDEAL = 6, MAXHS = 7, JETPTDR = 8, TRKPTDR = 9,
     INVALID = -99 };
 
   static std::vector<ScoreType> enum_vec = {
-    HGTD, TRKPT, //MAXHS,
+    HGTD, TRKPT, TRKPTZ, PASS, //MAXHS, 
   }; // valid values
 
   static const char* toString(myutl::ScoreType score) {
     switch (score) {
     case ScoreType::HGTD:     return "HGTD Algorithm";
-    case ScoreType::SIG:      return "exp(-|s|)";
+    case ScoreType::TRKPTZ:   return "Track p_{T}exp(-|#Deltaz|)";
+    case ScoreType::DZ:       return "exp(-|#Deltaz|)";
     case ScoreType::SUMPT2:   return "Sum(p_{T})^{2}";
     case ScoreType::TRKPT:    return "Track p_{T}";
-    case ScoreType::SIGTRKPT: return "Track p_{T}*exp(-|s|)";
-    case ScoreType::MAXPT:    return "Cluster with max p_{T}";
+    // case ScoreType::MAXPT:    return "Cluster with max p_{T}";
     case ScoreType::IDEAL:    return "Ideal cluster choice";
+    case ScoreType::PASS:     return "Pass Cluster";
     case ScoreType::MAXHS:    return "Max HS Track Cluster";
     case ScoreType::JETPTDR:  return "exp(-min dR)*Jet p_{T}";
     case ScoreType::TRKPTDR:  return "exp(-min dR)*Track p_{T}";
@@ -174,41 +139,21 @@ namespace myutl {
     }
   }
 
-  struct Cluster {
-    std::vector<double> values;
-    std::vector<double> sigmas;
-    std::vector<double> all_times;
-    std::vector<int> track_indices;
-    std::map<ScoreType,double> scores;
-    double purity = 0.0;
-    bool max_pt_cluster = false;
-    bool was_merged = false;
-    int n_constituents=1;
-
-    bool operator==(const Cluster& other) {
-      bool same_values = values.at(0) == other.values.at(0);
-      bool same_sigmas = sigmas.at(0) == other.sigmas.at(0);
-      bool same_consts = n_constituents == other.n_constituents;
-      // this SHOULD be sufficienct
-      return same_consts and same_sigmas and same_values;
-    }
-
-    bool operator!=(const Cluster& other) {
-      return !(*this == other);
-    }      
-  };
-
   struct BranchPointerWrapper {
     TTreeReader& reader;
 
     TTreeReaderValue<float> weight;
 
     TTreeReaderArray<float> track_z0;
+    TTreeReaderArray<float> track_d0;
     TTreeReaderArray<float> track_pt;
+    TTreeReaderArray<float> track_qp;
     TTreeReaderArray<float> track_eta;
     TTreeReaderArray<float> track_phi;
     TTreeReaderArray<float> track_theta;
     TTreeReaderArray<float> track_var_z0;
+    TTreeReaderArray<float> track_var_d0;
+    TTreeReaderArray<float> track_var_qp;
     TTreeReaderArray<float> track_var_theta;
     TTreeReaderArray<float> track_time;
     TTreeReaderArray<float> track_time_res;
@@ -244,12 +189,16 @@ namespace myutl {
   BranchPointerWrapper(TTreeReader& r)
     : reader (r),
       weight (r, "weight"),
+      track_d0 (r, "Track_d0"),
       track_z0 (r, "Track_z0"),
       track_pt (r, "Track_pt"),
       track_eta (r, "Track_eta"),
+      track_qp (r, "Track_qOverP"),
       track_theta (r, "Track_theta"),
       track_phi (r, "Track_phi"),
+      track_var_d0 (r, "Track_var_d0"),
       track_var_z0 (r, "Track_var_z0"),
+      track_var_qp (r, "Track_var_qOverP"),
       track_var_theta (r, "Track_var_theta"),
       track_time (r, "Track_time"),
       track_time_res (r, "Track_timeRes"),
@@ -305,6 +254,10 @@ namespace myutl {
       return passptcount >= min_passpt_jets and passptetacount >= min_passeta_jets;
     }
 
+    bool pass_forward_hs_tracks(int& nForwardHSTrack) {
+      return 6 >= nForwardHSTrack && nForwardHSTrack >= 2;
+    }
+
     void count_forward_jets(int& nForwardJet) {
     nForwardJet = 0;
     for(int jet_idx = 0; jet_idx < this->topojet_eta.GetSize(); ++jet_idx) {
@@ -322,10 +275,11 @@ namespace myutl {
 	double pt = this->track_pt[trk_idx];
 	int  truthvtx = this->track_to_truthvtx[trk_idx];
 	bool quality = this->track_quality[trk_idx] == true;
+	bool check_query = (this->track_time_valid[trk_idx] == 1);
 	// already know these pass association
 	if (std::abs(eta) > min_abs_eta_track and
-	    pt > min_track_pt and quality and
-	    (!check_time_valid || this->track_time_valid[trk_idx] == 1) ) {
+	    pt > min_track_pt and pt < max_track_pt and
+	    quality and check_query) {
 	  nFTrack++;
 	  if (truthvtx != -1 and this->truth_vtx_ishs[truthvtx])
 	    nFTrack_HS++;
@@ -388,6 +342,30 @@ namespace myutl {
     }
   };
 
+  struct Cluster {
+    std::vector<double> values;
+    std::vector<double> sigmas;
+    std::vector<double> all_times;
+    std::vector<int> track_indices;
+    std::map<ScoreType,double> scores;
+    double purity = 0.0;
+    bool max_pt_cluster = false;
+    bool was_merged = false;
+    int n_constituents=1;
+
+    bool operator==(const Cluster& other) {
+      bool same_values = values.at(0) == other.values.at(0);
+      bool same_sigmas = sigmas.at(0) == other.sigmas.at(0);
+      bool same_consts = n_constituents == other.n_constituents;
+      // this SHOULD be sufficienct
+      return same_consts and same_sigmas and same_values;
+    }
+
+    bool operator!=(const Cluster& other) {
+      return !(*this == other);
+    }
+  };
+
   struct FitParams {
     TH1D* mean_dist;
     TH1D* sigma_dist;
@@ -399,27 +377,28 @@ namespace myutl {
 	      double x_min, double fold_val, double fold_max,
 	      double x_width, int color) {
       auto full_title = Form("%%s vs %s (%s);%s;%%s", title, times, title);
+      int nbins = (int)((fold_max - x_min) / x_width);
       mean_dist      = new TH1D(Form("mean_dist_%s", name),
 				Form(full_title, "Common #mu", "#mu"),
-				(int)((fold_max-x_min)/x_width), x_min, fold_max);
-    
+				nbins, x_min, fold_max);
+
       sigma_dist     = new TH1D(Form("sigma_dist_%s", name),
 				Form(full_title, "Core #sigma", "Core #sigma"),
-				(int)((fold_max-x_min)/x_width), x_min, fold_max);
-    
+				nbins, x_min, fold_max);
+
       core_amp_dist  = new TH1D(Form("amp1_dist_%s", name),
 				Form(full_title, "Core Amplitude", "Amplitude"),
-				(int)((fold_max-x_min)/x_width), x_min, fold_max);
-    
+				nbins, x_min, fold_max);
+
       back_amp_dist  = new TH1D(Form("amp2_dist_%s", name),
 				Form(full_title, "Bkg Amplitude", "Amplitude"),
-				(int)((fold_max-x_min)/x_width), x_min, fold_max);
-    
+				nbins, x_min, fold_max);
+
       amp_ratio_dist = new TH1D(Form("ampratio_dist_%s", name),
 				Form(full_title, "Core Amp/Bkg Amp", "A.U."),
-				(int)((fold_max-x_min)/x_width), x_min, fold_max);
+				nbins, x_min, fold_max);
 
-      for (auto hist: {mean_dist, sigma_dist, core_amp_dist, back_amp_dist, amp_ratio_dist}) {
+      for (const auto& hist: {mean_dist, sigma_dist, core_amp_dist, back_amp_dist, amp_ratio_dist}) {
 	hist->SetLineWidth(2);
 	hist->SetLineColor(color);
       }
@@ -472,353 +451,194 @@ namespace myutl {
   };
 
   struct PlotObj {
+    ScoreType score_to_use;
     double bin_width;
     double fold_value, fold_max;
     TString fname;
     const char* xtitle;
     const char* ytitle;
-    const char*  times;
+    const char* times;
     double x_min, x_max, x_wid;
     double y_min, y_max, y_wid;
-    std::map<ScoreType, FitParams> params; 
+    std::unique_ptr<FitParams> params;
     std::unique_ptr<TH1D> eff_total;
-    std::map<ScoreType, std::unique_ptr<TH1D>> eff_pass;
-    std::map<ScoreType, std::unique_ptr<TEfficiency>> efficiency; 
-    std::map<ScoreType, std::unique_ptr<TH2D>> hist;
-    std::map<ScoreType, std::unique_ptr<TH2D>> purity;
-    std::map<ScoreType, std::vector<std::unique_ptr<TH1D>>> slices_hists;
-    std::map<ScoreType, std::vector<std::unique_ptr<TF1>>> slices_fits;
-    std::unique_ptr<TLegend> algolegend;
+    std::unique_ptr<TH1D> eff_pass;
+    std::unique_ptr<TEfficiency> efficiency;
+    std::unique_ptr<TH2D> hist;
+    std::unique_ptr<TH2D> purity;
+    std::vector<std::unique_ptr<TH1D>> slices_hists;
+    std::vector<std::unique_ptr<TF1>> slices_fits;
 
-    PlotObj(const char* title, const char* times,
-	    const char* fname,
-	    double x_min, double x_max, double x_wid,
-	    double y_min, double y_max, double y_wid,
-	    double p_min, double p_max, double p_wid,
-	    double fold_val, double fold_max)
-      : bin_width(x_wid), fname(fname),
-	xtitle(title), ytitle("#Delta t[ps]"), times(times),
-	x_min(x_min), x_max(x_max), x_wid(x_wid),
-	y_min(y_min), y_max(y_max), y_wid(y_wid),
-	fold_value(fold_val), fold_max(fold_max)
-    {// Allocate with make_unique for owned objects
-      algolegend = std::make_unique<TLegend>(0.6, 0.7, 0.9, 0.9);
-      algolegend->SetTextSize(0.03);
+  PlotObj(const char* title, const char* times,
+	  const char* fname, ScoreType score,
+	  double x_min, double x_max, double x_wid,
+	  double y_min, double y_max, double y_wid,
+	  double p_min, double p_max, double p_wid,
+	  double fold_val, double fold_max)
+    : bin_width(x_wid), fname(fname), score_to_use(score),
+      xtitle(title), ytitle("#Delta t[ps]"), times(times),
+      x_min(x_min), x_max(x_max), x_wid(x_wid),
+      y_min(y_min), y_max(y_max), y_wid(y_wid),
+      fold_value(fold_val), fold_max(fold_max)
+    {
       TString name(title);
       name.ReplaceAll(" ", "");
-      for (ScoreType score : enum_vec) {
-	hist[score]    = std::make_unique<TH2D>(Form("%s_%s_%s", name.Data(), toString(score),times),
-						Form("%s t_{0} - TruthVtx t_{0} vs %s (%s);%s;#Delta t[ps]",
-						     toString(score), title, times, title),
-						(int)((x_max - x_min) / x_wid), x_min, x_max,
-						(int)((y_max - y_min) / y_wid), y_min, y_max);
+      int xbins = (int)((x_max - x_min) / x_wid);
+      int ybins = (int)((y_max - y_min) / y_wid);
+      int pbins = (int)((p_max - p_min) / p_wid);
+      int fbins = (int)((fold_max - x_min) / x_wid);
+      hist = std::make_unique<TH2D>(Form("%s_%s_%s", name.Data(), toString(score),times),
+				    Form("%s t_{0} - TruthVtx t_{0} vs %s (%s);%s;#Delta t[ps]", toString(score), title, times, title),
+				    xbins, x_min, x_max, ybins, y_min, y_max);
 
-	purity[score]  = std::make_unique<TH2D>(Form("cluster_purity_%s_%s_%s", name.Data(), toString(score),times),
-						Form("%s Cluster Purity vs %s (%s);%s;Cluster Purity",
-						     toString(score), title, times, title),
-						(int)((x_max - x_min) / x_wid), x_min, x_max,
-						(int)((p_max - p_min) / p_wid), p_min, p_max);
-
-	eff_pass[score] = std::make_unique<TH1D>(Form("good_%s_%s_%s", name.Data(), toString(score), times),
-						 Form("%s Eff. Events Count vs %s (%s);Entries;%s",
-						      toString(score), title, times, title),
-						 (int)((fold_max - x_min) / x_wid), x_min, fold_max);
-
-	purity[score]->SetLineColor(colors[score]);
-
-	this->params.emplace(score, FitParams(title, times, Form("%s_%s_%s", name.Data(), toString(score),times),
-					      x_min, fold_val, fold_max, x_wid,colors[score]));
-
-	algolegend->AddEntry(params.at(score).sigma_dist, toString(score));
-      }
-
+      eff_pass = std::make_unique<TH1D>(Form("good_%s_%s_%s", name.Data(), toString(score), times),
+					Form("%s Eff. Events Count vs %s (%s);Entries;%s",toString(score), title, times, title),
+					fbins, x_min, fold_max);
+      
       eff_total = std::make_unique<TH1D>(Form("flat_%s_%s", name.Data(),times),
-					 Form("n Events vs %s (%s);Entries;%s",
-					      title, times, title),
-					 (int)((fold_max - x_min) / x_wid), x_min, fold_max);
+					 Form("n Events vs %s (%s);Entries;%s",title, times, title),
+					 fbins, x_min, fold_max);
+      
+      params = std::make_unique<FitParams>(title, times, Form("%s_%s_%s", name.Data(), toString(score),times),
+					   x_min, fold_val, fold_max, x_wid,colors[score]);
+
+      purity = std::make_unique<TH2D>(Form("cluster_purity_%s_%s_%s", name.Data(), toString(score),times),
+				      Form("%s Cluster Purity vs %s (%s);%s;Cluster Purity",toString(score), title, times, title),
+				      xbins, x_min, x_max, pbins, p_min, p_max);
+      purity->SetLineColor(colors[score]);
     }
 
     PlotObj(const PlotObj&) = delete;
     PlotObj& operator=(const PlotObj&) = delete;
     PlotObj(PlotObj&& other) noexcept = default;
     PlotObj& operator=(PlotObj&& other) noexcept = default;
-    ~PlotObj() {
-        // unique_ptr members will be automatically deleted.
-        // If there were any raw pointers that were NOT owned by unique_ptr,
-        // you would delete them here.
+    ~PlotObj() {}
+
+    void FillPurity(double& x, double&y) {
+      this->purity->Fill(x,y);
     }
 
+    void FillPurity(int& x, double&y) {
+      this->purity->Fill(x,y);
+    }
+
+    void FillDiff(double& x, double&y) {
+      this->hist->Fill(x,y);
+    }
+
+    void FillDiff(int& x, double&y) {
+      this->hist->Fill(x,y);
+    }
+
+    void FillPass(double& val) {
+      this->eff_pass->Fill(val);
+    }
+
+    void FillPass(int& val) {
+      this->eff_pass->Fill(val);
+    }
+
+    void FillTotal(double& val) {
+      this->eff_total->Fill(val);
+    }
+
+    void FillTotal(int& val) {
+      this->eff_total->Fill(val);
+    }
+    
     inline void setParamMaxes() {
       double max_val = -10, min_val = 1e60;
       for (auto key: fitparam_vec) {
-	for (auto& [score, fitparam]: params) {
-	  TH1D *hist = fitparam.fromEnum(key);
-	  hist->GetXaxis()->SetNdivisions(510);
-	  double this_max = hist->GetMaximum();
-	  if (this_max > max_val)
-	    max_val = this_max;
+	TH1D *hist = params->fromEnum(key);
+	hist->GetXaxis()->SetNdivisions(510);
+	double this_max = hist->GetMaximum();
+	if (this_max > max_val)
+	  max_val = this_max;
 
-	  double this_min = hist->GetMinimum();
-	  if (this_min < min_val)
-	    min_val = this_min;
-	}
-
-	if (debug) std::cout << "Max val " << toString(key) << ": " << max_val << std::endl;
-	if (debug) std::cout << "Min val " << toString(key) << ": " << min_val << std::endl;
+	double this_min = hist->GetMinimum();
+	if (this_min < min_val)
+	  min_val = this_min;
 
 	if (key == FitParamFields::SIGMA)
 	  max_val = 40.0, min_val = 10;
-      
-	for (auto& [score, fitparam]: params) {
-	  double pad = 0.5*(1-0.75) * (max_val-min_val);
-	  fitparam.fromEnum(key)->GetYaxis()->SetRangeUser(min_val-pad, max_val+pad);
-	}
-	// reset values
-	max_val = -10;
-	min_val = 1e60;
+
+	double pad = 0.5*(1-0.75) * (max_val-min_val);
+	params->fromEnum(key)->GetYaxis()->SetRangeUser(min_val-pad, max_val+pad);
+
       }
     }
 
     inline void plotPostprocessing() {
-      for (ScoreType score: enum_vec) {
-	TH2D* big_hist = hist.at(score).get();
-	for(int j = 0; j < big_hist->GetNbinsX(); ++j) {
-	  auto color = colors[j % colors.size()]; // Assuming colors is std::vector or similar, and size() is valid
-	  auto name = Form("%s_slice%d",big_hist->GetName(),j);
+      for(int j = 0; j < hist->GetNbinsX(); ++j) {
+	auto color = colors[j % colors.size()];
+	auto name = Form("%s_slice%d",hist->GetName(),j);
 
-	  int right = big_hist->GetXaxis()->GetBinLowEdge(j+1) >= fold_value
-	    ? big_hist->GetNbinsX()+1
-	    : j+1;
+	int right = hist->GetXaxis()->GetBinLowEdge(j+1) >= fold_value
+	  ? hist->GetNbinsX()+1 : j+1;
 
-	  std::unique_ptr<TH1D> hSlice = std::unique_ptr<TH1D>((TH1D*)big_hist->ProjectionY(name, j+1, right)->Clone());
+	std::unique_ptr<TH1D> hSlice = std::unique_ptr<TH1D>((TH1D*)hist->ProjectionY(name, j+1, right)->Clone());
 
-	  if (hSlice->Integral() == 0 || hSlice->GetEntries() < 6) {
-	    continue;
-	  }
-
-	  hSlice->SetLineColor(color);
-	  hSlice->SetLineWidth(2);
-
-	  double leftEdge  = big_hist->GetXaxis()->GetBinLowEdge(j+1);
-	  double rightEdge = big_hist->GetXaxis()->GetBinLowEdge(right+1);
-
-	  if (leftEdge < 1.0 && leftEdge > 0.0)
-	    leftEdge *= 100;
-	  if (rightEdge < 1.0 && rightEdge > 0.0)
-	    rightEdge *= 100;
-
-	  hSlice->SetTitle(Form("%s #in [%d,%d);%s;A.U.",
-				big_hist->GetTitle(),
-				(int)leftEdge,(int)rightEdge,
-				this->ytitle));
-      
-	  std::unique_ptr<TF1> dgaus_fit = std::unique_ptr<TF1>(create_dgaus_fit(hSlice.get(),true));
-	  std::unique_ptr<TF1> sgaus_fit = std::unique_ptr<TF1>(create_sgaus_fit(hSlice.get()));
-
-
-	  double perc_err = dgaus_fit->GetParError("Sigma1")/dgaus_fit->GetParameter("Sigma1");
-      
-	  if (perc_err < 0.10) {
-	    params.at(score).fillEach(j, dgaus_fit.get());
-	    slices_fits[score].push_back(std::move(dgaus_fit));
-	  } else {
-	    // use single
-	    params.at(score).fillGaus(j, sgaus_fit.get());
-	    slices_fits[score].push_back(std::move(sgaus_fit));
-	  }
-	  slices_hists[score].push_back(std::move(hSlice));
-	
-	  if (right == big_hist->GetNbinsX()+1)
-	    break;
-	}
-
-	std::unique_ptr<TEfficiency> eff = std::make_unique<TEfficiency>(*this->eff_pass.at(score), *this->eff_total);
-	eff->SetStatisticOption(TEfficiency::kFNormal);  // use normal approximation
-	eff->SetTitle(Form("Efficiency vs %s (%s);%s;Efficiency", this->xtitle, this->times, this->xtitle));
-        eff->SetLineColor(myutl::colors[score]);
-        eff->SetLineWidth(2);
-	efficiency[score] = std::move(eff);
-      }
-      this->setParamMaxes();
-    }
-    
-    inline void plotLogic(TCanvas* canvas) {
-      // Draw 2Ds
-      canvas->Print(Form("%s[",fname.Data()));
-      for (const auto& [score,entry_ptr] : this->hist) {
-	entry_ptr->GetXaxis()->SetRangeUser(entry_ptr->GetXaxis()->GetXmin(), this->fold_max);
-	entry_ptr->Draw("COLZ");
-	canvas->Print(fname);
-      }
-
-      // Draw Purities
-      double purity_ymin = 0, purity_ymax = 1.4;
-      bool first = true;
-      // canvas->SetLogy(true);
-      for (const auto& [score,entry] : purity) {
-	TProfile* prof = entry->ProfileX();
-	prof->SetMarkerColor(colors[score]);
-	prof->SetLineColor(colors[score]);
-	prof->SetLineWidth(2);
-	prof->GetXaxis()->SetRangeUser(x_min, fold_max);
-	prof->GetXaxis()->SetNdivisions(510);  // 5 major, 1 minor subdivision
-	prof->GetYaxis()->SetRangeUser(purity_ymin,purity_ymax);
-	if (first) {
-	  prof->SetTitle(Form("Avg. Cluster Purity vs. %s (%s);%s;%s",
-			      entry->GetXaxis()->GetTitle(),this->times,
-			      entry->GetXaxis()->GetTitle(),"Purity"));
-	  prof->Draw("E1");  // 'E' to draw error bars
-	  first = false;
-	} else
-	  prof->Draw("E1 SAME");  // 'E' to draw error bars
-      }
-      algolegend->Draw("SAME");
-      canvas->Print(fname);
-      // canvas->SetLogy(false);
-      
-      // Draw Efficiencies
-      first = true;
-      double eff_ymin = 0.0, eff_ymax = 1.4;
-      for (auto score : enum_vec) {
-	auto eff = efficiency.at(score).get();
-	auto total = this->eff_total.get();
-	if (first) {
-	  eff->Draw("AP");
-	  gPad->Update();  // Ensure painting
-	  eff->GetPaintedGraph()->GetYaxis()->SetRangeUser(eff_ymin, eff_ymax);
-	  eff->GetPaintedGraph()->GetXaxis()->SetLimits(x_min, fold_max);
-	  eff->GetPaintedGraph()->GetXaxis()->SetRangeUser(x_min, fold_max);
-	  eff->GetPaintedGraph()->GetXaxis()->SetNdivisions(510);
-	  gPad->Update();
-	  
-	  total->SetLineColor(colors[8]);
-	  total->SetLineWidth(2);
-	  total->Scale(1/total->Integral());
-	  double count_max = total->GetMaximum();
-	  double scale = (1.0 - eff_ymin) / count_max;
-	  total->Scale(scale);
-	  total->Draw("HIST SAME");
-	  
-	  double xright = gPad->GetUxmax();
-	  TGaxis* axis = new TGaxis(xright, eff_ymin, xright, eff_ymax,
-				    0, count_max*(eff_ymax-eff_ymin), 510, "+L");
-	  axis->SetLineColor(colors[8]);
-	  axis->SetLabelColor(colors[8]);
-	  axis->SetTitle("Frequency");
-	  axis->SetTitleColor(colors[8]);
-	  axis->Draw();
-	  first = false;
-	} else
-	  eff->Draw("P SAME");
-      }
-
-      TLegend* efflegend = (TLegend*)algolegend->Clone();
-      TLine *max_eff_line = new TLine(x_min, 0.99, fold_max, 0.99);
-      max_eff_line->SetLineColor(kRed);
-      max_eff_line->SetLineWidth(2);
-      max_eff_line->SetLineStyle(4);
-      efflegend->AddEntry(eff_total.get(),this->xtitle);
-      efflegend->AddEntry(max_eff_line,"99% Efficiency");
-      max_eff_line->Draw("SAME");
-      efflegend->Draw("SAME");
-      canvas->Print(fname);
-
-      // Draw Resolution
-      for (auto key: fitparam_vec) {
-	first = true;
-	for (auto& [score, param]: params) {
-	  TH1D *hist = param.fromEnum(key);
-	  if (first) {
-	    hist->Draw();
-	    first = false;
-	  } else
-	    hist->Draw("SAME");
-	}
-
-	TLegend* resolegend = (TLegend*)algolegend->Clone();
-	if (key == SIGMA) {
-	  TLine *min_exp_res = new TLine(x_min, 15, fold_max, 15);
-	  min_exp_res->SetLineColor(kRed);
-	  min_exp_res->SetLineWidth(2);   
-	  min_exp_res->SetLineStyle(4);
-
-	  resolegend->AddEntry(min_exp_res,"15ps");
-	  min_exp_res->Draw("SAME");
-	}
-	resolegend->Draw("SAME");
-	canvas->Print(fname);
-      }
-
-      // draw slices o7
-      TLatex latex;
-      latex.SetTextSize(0.04);
-      latex.SetTextAlign(13);  // Align left-top
-      for (auto score: enum_vec) {
-	const auto& fits = slices_fits[score];
-	const auto& slices = slices_hists[score];
-	if (slices.empty())
+	if (hSlice->Integral() == 0 || hSlice->GetEntries() < 6) {
 	  continue;
-
-	for (int i=0; i < fits.size(); i++) {
-	  auto fit = fits[i].get();
-	  auto hSlice = slices[i].get();
-	  std::unique_ptr<TLegend> thislegend = std::make_unique<TLegend>(0.65, 0.75, 0.9, 0.9);
-	  thislegend->AddEntry(hSlice,"Histogram");
-	  TString restext;
-	  if (fit->GetNpar() == 5) {
-	    restext = Form("#sigma_{1}^{dgaus}=%.2f(%.2f%%), #sigma_{2}^{dgaus}=%.2f(fixed)",
-			   fit->GetParameter(3),100*fit->GetParError(3)/fit->GetParameter(3),
-			   fit->GetParameter(4));
-	    thislegend->AddEntry(fit,"Double Gaussian Fit");
-	  } else {
-	    restext = Form("#sigma_{1}^{gaus}=%.2f(%.2f%%)",
-			   fit->GetParameter(2),100*fit->GetParError(2)/fit->GetParameter(2));
-	    thislegend->AddEntry(fit,"Gaussian Fit");
-	  }
-
-	  auto chi2text = Form("#chi^{2}=%.2f",fit->GetChisquare()/fit->GetNDF());
-
-	  hSlice->GetYaxis()->SetTitleOffset(1.4);
-	  hSlice->Draw("HIST");
-	  fit->Draw("SAME");
-	  hSlice->GetXaxis()->SetRangeUser(-100, 100);
-	  latex.DrawLatexNDC(0.18, 0.90, restext);
-	  latex.DrawLatexNDC(0.18, 0.85, chi2text);
-	  thislegend->Draw("SAME");
-	  canvas->Print(fname); // slices
-	
-	  // with log scale
-	  canvas->SetLogy(true);
-	  hSlice->Draw("HIST");
-	  fit->Draw("SAME");
-	  hSlice->GetXaxis()->SetRangeUser(-400, 400);
-	  latex.DrawLatexNDC(0.18, 0.90, restext);
-	  latex.DrawLatexNDC(0.18, 0.85, chi2text);
-	  thislegend->Draw("SAME");
-	  canvas->Print(fname); // slices
-	  canvas->SetLogy(false);
 	}
+
+	hSlice->SetLineColor(color);
+	hSlice->SetLineWidth(2);
+
+	double leftEdge  = hist->GetXaxis()->GetBinLowEdge(j+1);
+	double rightEdge = hist->GetXaxis()->GetBinLowEdge(right+1);
+
+	if (leftEdge < 1.0 && leftEdge > 0.0)
+	  leftEdge *= 100;
+	if (rightEdge < 1.0 && rightEdge > 0.0)
+	  rightEdge *= 100;
+
+	hSlice->SetTitle(Form("%s #in [%d,%d);%s;A.U.",
+			      hist->GetTitle(),
+			      (int)leftEdge,(int)rightEdge,
+			      this->ytitle));
+
+	std::unique_ptr<TF1> dgaus_fit = std::unique_ptr<TF1>(create_dgaus_fit(hSlice.get(),true));
+	std::unique_ptr<TF1> sgaus_fit = std::unique_ptr<TF1>(create_sgaus_fit(hSlice.get()));
+
+	double perc_err = dgaus_fit->GetParError("Sigma1")/dgaus_fit->GetParameter("Sigma1");
+
+	if (perc_err < 0.10) {
+	  params->fillEach(j, dgaus_fit.get());
+	  slices_fits.push_back(std::move(dgaus_fit));
+	} else {
+	  params->fillGaus(j, sgaus_fit.get());
+	  slices_fits.push_back(std::move(sgaus_fit));
+	}
+	slices_hists.push_back(std::move(hSlice));
+
+	if (right == hist->GetNbinsX()+1)
+	  break;
       }
-      canvas->Print(Form("%s]",fname.Data()));
+
+      std::unique_ptr<TEfficiency> eff = std::make_unique<TEfficiency>(*this->eff_pass, *this->eff_total);
+      eff->SetStatisticOption(TEfficiency::kFNormal);
+      eff->SetTitle(Form("Efficiency vs %s (%s);%s;Efficiency", this->xtitle, this->times, this->xtitle));
+      eff->SetLineColor(myutl::colors[score_to_use]);
+      eff->SetLineWidth(2);
+      efficiency = std::move(eff);
+
+      this->setParamMaxes();
     }
 
     inline void printEfficiencyStats(ScoreType score) {
-      auto this_pass = eff_pass.at(score).get();
-      auto this_totl = eff_total.get();
       std::cout << "Efficiency for dt vs. " << this->xtitle << " ScoreType: " << toString(score) << std::endl;
-      for (int i=1; i<this_pass->GetNbinsX(); i++) {
-	double num_pass = this_pass->GetBinContent(i), num_totl = this_totl->GetBinContent(i);
-	std::cout << toString(score) << " " << xtitle
-		  << " in [" << this_pass->GetBinLowEdge(i) << ", "
-		  << this_pass->GetBinLowEdge(i+1) << ")" << std::endl;
+      for (int i=1; i<eff_pass->GetNbinsX(); i++) {
+	double num_pass = eff_pass->GetBinContent(i), num_total = eff_total->GetBinContent(i);
+	std::cout << toString(score) << " " << xtitle << " in [" << eff_pass->GetBinLowEdge(i) << ", " << eff_pass->GetBinLowEdge(i+1) << ")" << std::endl;
 	std::cout << "Num. Passing: " << num_pass << std::endl;
-	std::cout << "Num. Total  : " << num_totl << std::endl;
-	std::cout << "Num. Failing: " << num_totl - num_pass << std::endl;
+	std::cout << "Num. Total : " << num_total << std::endl;
+	std::cout << "Num. Failing: " << num_total - num_pass << std::endl;
       }
       std::cout << "--------------------------------------------------" << std::endl;
-      std::cout << "Total Num. Passing: " << this_pass->Integral() << std::endl;
-      std::cout << "Total Num. Failing: " << this_totl->Integral() - this_pass->Integral() << std::endl;
-      std::cout << "Overall Efficiency: " << this_pass->Integral()/this_totl->Integral() << std::endl;
+      std::cout << "Total Num. Passing: " << eff_pass->Integral() << std::endl;
+      std::cout << "Total Num. Failing: " << eff_total->Integral() - eff_pass->Integral() << std::endl;
+      std::cout << "Overall Efficiency: " << eff_pass->Integral()/eff_total->Integral() << std::endl;
       std::cout << "--------------------------------------------------" << std::endl;
     }
   };
@@ -830,7 +650,7 @@ namespace myutl {
     int truthvtx_idx = branch->track_to_truthvtx[idx]; // this is anything
     if (debug) std::cout << "Particle_idx: " << particle_idx << std::endl;
     if (debug) std::cout << "TruthVtx_idx: " << truthvtx_idx << std::endl;
-    double t_part;
+    double t_part, smear_res = res;
     if (particle_idx == -1) { // no particle link
       if (truthvtx_idx != -1) { // some valid truth link, smear that vertex time
         if (debug) std::cout << "PATH A" << std::endl;
@@ -844,7 +664,7 @@ namespace myutl {
       t_part = branch->particle_t[particle_idx];
     }
     if (debug) std::cout << "DONE" << std::endl;
-    return gRandom->Gaus(t_part,res);
+    return gRandom->Gaus(t_part,smear_res);
   }
 
   static bool passTrackVertexAssociation(int track_idx, int vertex_idx, BranchPointerWrapper *branch, double significance_cut) {
@@ -888,20 +708,24 @@ namespace myutl {
     std::vector<double> b_v = b.values;
     std::vector<double> b_s = b.sigmas;
 
+    std::vector<double> metric = {1.,-1.};
+
     if (a_v.size() != b_v.size())
       std::cout << "Uh ohhh" << std::endl;
+    // std::cout << "a_v.size(): " << a_v.size() << std::endl;
 
     std::vector<double> distances(a_v.size());
     for (int i=0; i < a_v.size(); i++) {
     
       double diff_i = (a_v.at(i) - b_v.at(i));
-      double denom_i = sqrt(a_s.at(i)*a_s.at(i) + b_s.at(i)*b_s.at(i));
+      double denom_i = std::sqrt(a_s.at(i)*a_s.at(i) + b_s.at(i)*b_s.at(i));
       distances.at(i) = diff_i/denom_i;
     }
 
     double dsqr = 0.0;
-    for (double d : distances){
-      dsqr += d*d;
+    for (int i=0; i < distances.size(); i++){
+      auto d = distances[i];
+      dsqr += metric.at(i)*d*d;
     }
     return sqrt(dsqr);
   }
@@ -942,8 +766,8 @@ namespace myutl {
 
     merged_cluster.scores[ScoreType::IDEAL] = merged_cluster.values.at(0);
 
-    if (merged_cluster.max_pt_cluster)
-      merged_cluster.scores[ScoreType::MAXPT] = 1e6;
+    // if (merged_cluster.max_pt_cluster)
+    //   merged_cluster.scores[ScoreType::MAXPT] = 1e6;
 
     return merged_cluster;
   }
@@ -957,7 +781,7 @@ namespace myutl {
     return num/denom;
   }
 
-  static std::vector<int> getAssociatedTracks(BranchPointerWrapper *branch, double min_trk_pt) {
+  static std::vector<int> getAssociatedTracks(BranchPointerWrapper *branch, double min_trk_pt, double max_trk_pt) {
     std::vector<int> good_tracks;
 
     for (int trk = 0; trk < branch->track_z0.GetSize(); ++trk) {
@@ -966,10 +790,11 @@ namespace myutl {
 	trk_pt  = branch->track_pt[trk],
 	trk_quality = branch->track_quality[trk];
 
-      if (std::abs(trk_eta) < min_hgtd_eta or std::abs(trk_eta) > max_hgtd_eta)
+      if (std::abs(trk_eta) < min_hgtd_eta or
+	  std::abs(trk_eta) > max_hgtd_eta)
         continue;
 
-      if (trk_pt < min_trk_pt)
+      if (trk_pt < min_trk_pt or trk_pt > max_trk_pt)
 	continue;
 
       if (not trk_quality)
@@ -987,8 +812,10 @@ namespace myutl {
     BranchPointerWrapper *branch,
     bool use_smeared_times,                         // if true, use smeared_times map
     const std::map<int, double>& smeared_times_map, // map of smeared times
+    const std::map<int, double>& smeared_timeRes_map, // map of resolution for smeared times if used
     double fixed_res,                               // fixed resolution for smeared times
-    bool check_time_valid                           // if true, apply branch->track_time_valid check
+    bool check_time_valid,                          // if true, apply branch->track_time_valid check
+    bool usez0
   ) {
     std::vector<Cluster> simpleClusters;
     for (auto idx: track_indices) {
@@ -997,28 +824,34 @@ namespace myutl {
 	double trk_res; 
 	if (use_smeared_times) {
 	  trk_time = smeared_times_map.at(idx);
-	  trk_res  = fixed_res;
+	  trk_res  = smeared_timeRes_map.at(idx);
 	} else {
 	  trk_time = branch->track_time[idx];   
 	  trk_res  = branch->track_time_res[idx];
 	}
 
 	double trk_pt = branch->track_pt[idx];
-	double z_significance = std::abs(branch->track_z0[idx] - branch->reco_vtx_z[0]) / std::sqrt(branch->track_var_z0[idx]);
+	double trk_z0 = branch->track_z0[idx];
+	double trk_res_z0 = branch->track_var_z0[idx];
+	double z_significance = std::abs(trk_z0 - branch->reco_vtx_z[0]) / trk_res_z0;
 
 	std::map<ScoreType,double> scores;
 	scores[ScoreType::HGTD] = 0; // do not use this
-	scores[ScoreType::SIG] = exp(-z_significance);
-	scores[ScoreType::MAXPT] = 0;
+	// scores[ScoreType::SIG] = exp(-z_significance);
+	// scores[ScoreType::MAXPT] = 0;
 	scores[ScoreType::TRKPT] = trk_pt;
 	scores[ScoreType::SUMPT2] = trk_pt*trk_pt;
-	scores[ScoreType::SIGTRKPT] = trk_pt*exp(-z_significance);
-	scores[ScoreType::MAXHS] = branch->track_to_truthvtx[idx] == 0 ? 1 : 0;
-	scores[ScoreType::JETPTDR] = branch->calc_jetpt_dr_score(idx);
-	scores[ScoreType::TRKPTDR] = branch->calc_trkpt_dr_score(idx);
-	scores[ScoreType::IDEAL] = trk_time;
+	// scores[ScoreType::SIGTRKPT] = trk_pt*exp(-z_significance);
+	// scores[ScoreType::MAXHS] = branch->track_to_truthvtx[idx] == 0 ? 1 : 0;
+	// scores[ScoreType::JETPTDR] = branch->calc_jetpt_dr_score(idx);
+	// scores[ScoreType::TRKPTDR] = branch->calc_trkpt_dr_score(idx);
+	// scores[ScoreType::IDEAL] = trk_time;
 
-	Cluster cluster = {{trk_time}, {trk_res}, {trk_time}, {idx}, scores};
+	Cluster cluster;
+	if (usez0)
+	  cluster = {{trk_time,trk_z0}, {trk_res,trk_res_z0}, {trk_time}, {idx}, scores};
+	else
+	  cluster = {{trk_time}, {trk_res}, {trk_time}, {idx}, scores};
 	simpleClusters.push_back(cluster);
       }
     }
@@ -1078,22 +911,90 @@ namespace myutl {
     } // While
   }
 
+  
+  static void doConeClustering(std::vector<Cluster> *collection, double dist_cut) {
+    if (debug) std::cout << "entering while loop" << std::endl;
+    while (collection->size() > 1) {
+      
+      // find seed
+      int i0 = -1;
+      double seed_value = -1.;
+      for (int i=0; i < collection->size(); ++i) {
+        if (collection->at(i).was_merged)
+	  continue;
+	Cluster check = collection->at(i);
+	double check_value = check.scores.at(TRKPT);
+	
+	if (seed_value < check_value) {
+	  seed_value = check_value;
+	  i0 = i;
+	}
+      }
+      if (i0 == -1) break;
+      
+      if (debug) std::cout << "Found Seed" << std::endl;
+
+      // find merge candidates
+      Cluster seed = collection->at(i0);
+      std::vector<int> to_merge;
+      for (int j = 0; j < collection->size(); ++j) {
+	if (j == i0) continue;
+	double d = getDistanceBetweenClusters(seed, collection->at(j));
+	if (d < dist_cut) {
+	  to_merge.push_back(j);
+	}
+      }
+      
+      if (debug) std::cout << "Found " << to_merge.size() << " merge candidates" << std::endl;
+
+      if (!to_merge.empty()) {
+	// 1) Build the merged cone without erasing yet
+	Cluster new_cluster = seed;
+	for (int idx : to_merge) {
+	  new_cluster = mergeClusters(new_cluster, collection->at(idx));
+	}
+
+	new_cluster.was_merged = true;
+
+	// 2) Erase seed + all candidates in descending order
+	to_merge.push_back(i0);
+	std::sort(to_merge.begin(), to_merge.end(), std::greater<int>());
+	for (int idx : to_merge) {
+	  collection->erase(collection->begin() + idx);
+	}
+
+	// 3) Push back the final cone
+	collection->push_back(new_cluster);
+      } else {
+	// no merges possible, seed is isolated → just move it to the back
+	Cluster seed_only = collection->at(i0);
+	seed_only.was_merged = true;
+	collection->erase(collection->begin() + i0);
+	collection->push_back(seed_only);
+      }
+    } // While
+    if (debug) std::cout << "Finished Clustering" << std::endl;
+  }
+
   static std::vector<Cluster> doConeClustering(
     std::vector<int> input_indices,             
     BranchPointerWrapper *branch,
     float nsigma_cut_val,                           // Size of window in t to use
     bool use_smeared_times,                         // if true, use smeared_times map
     const std::map<int, double>& smeared_times_map, // map of smeared times
+    const std::map<int, double>& smeared_timeRes_map, // map of smeared time ress
     double fixed_res,                               // fixed resolution for smeared times
-    bool check_time_valid                           // if true, apply branch->track_time_valid check
+    bool check_time_valid,                          // if true, apply branch->track_time_valid check
+    bool usez0
   ) {
     if (debug) std::cout << "Starting n-sigma cone clustering with " << input_indices.size() << " tracks" << std::endl;
 	
     std::vector<Cluster> clusters;
 
     if (input_indices.size() == 1) {
-      clusters = makeSimpleClusters(input_indices, branch, use_smeared_times, smeared_times_map,
-				    fixed_res, check_time_valid);
+      clusters = makeSimpleClusters(input_indices, branch, use_smeared_times,
+				    smeared_times_map, smeared_timeRes_map,
+				    fixed_res, check_time_valid, usez0);
       return clusters;
     }
     
@@ -1118,12 +1019,12 @@ namespace myutl {
       if (debug) std::cout << "Within loop" << std::endl;
       // Step 1: Find the highest-pt unprocessed track from the time-filtered list
       int max_pt_seed_idx = -1;
-      double max_pt_val = -1.0;
+      double max_pt_val = -1.;
 
       for (int idx : timefiltered_indices) {
 	if (processed_track_indices[idx]) continue; // Skip if already processed
 
-	double this_pt = branch->track_pt[idx];
+	double this_pt = std::abs(1/branch->track_qp[idx]);
 	if (this_pt > max_pt_val) {
 	  // std::cout << " pt:" << this_pt << std::endl;
 	  max_pt_val = this_pt;
@@ -1140,30 +1041,29 @@ namespace myutl {
       processed_track_indices[max_pt_seed_idx] = true; // Mark seed as processed
 
       // Determine seed time and resolution based on `use_smeared_times`
-      double seed_time;
-      double seed_time_res;
+      double seed_time, seed_z = branch->track_z0[max_pt_seed_idx];
+      double seed_time_res, seed_z_res = std::sqrt(branch->track_var_z0[max_pt_seed_idx]);
       
       if (use_smeared_times) {
 	seed_time = smeared_times_map.at(max_pt_seed_idx);
-	seed_time_res = fixed_res; // Use fixed_res for smeared times
+	seed_time_res = smeared_timeRes_map.at(max_pt_seed_idx);
       } else {
 	seed_time = branch->track_time[max_pt_seed_idx];
 	seed_time_res = branch->track_time_res[max_pt_seed_idx];
       }
 
-
       std::vector<int> tracks_to_merge_into_cluster = {max_pt_seed_idx};
-
+      
       for (int candidate_idx : timefiltered_indices) {
 	if (processed_track_indices[candidate_idx]) continue; // Skip if already processed
 
 	// Determine candidate time and resolution based on `use_smeared_times`
-	double candidate_time;
-	double candidate_time_res;
+	double candidate_time, candidate_z = branch->track_z0[max_pt_seed_idx];
+	double candidate_time_res, candidate_z_res = std::sqrt(branch->track_var_z0[max_pt_seed_idx]);
 
 	if (use_smeared_times) {
 	  candidate_time = smeared_times_map.at(candidate_idx);
-	  candidate_time_res = fixed_res; // Use fixed_res for smeared times
+	  candidate_time_res = smeared_timeRes_map.at(candidate_idx);
 	} else {
 	  candidate_time = branch->track_time[candidate_idx];
 	  candidate_time_res = branch->track_time_res[candidate_idx];
@@ -1173,17 +1073,38 @@ namespace myutl {
 	double dt_res_combined = std::sqrt(seed_time_res*seed_time_res + candidate_time_res*candidate_time_res);
 	double nsigma = dt_diff_abs / dt_res_combined;
 
+	if (usez0) {
+	  double dz_diff_abs = std::abs(seed_z - candidate_z);
+	  double dz_res_combined = std::sqrt(seed_z_res*seed_z_res + candidate_z_res*candidate_z_res);
+	  double nsigma_z = dz_diff_abs/dz_res_combined;
+	  nsigma = std::sqrt(nsigma*nsigma + 0.00*nsigma_z*nsigma_z);
+	}
+
 	if (nsigma < nsigma_cut_val) { // Use the passed nsigma_cut_val
 	  tracks_to_merge_into_cluster.push_back(candidate_idx);
 	  processed_track_indices[candidate_idx] = true; // Mark as processed
+
+	  // weighted average
+	  seed_time = (seed_time / (seed_time_res * seed_time_res) + candidate_time / (candidate_time_res * candidate_time_res)) / (1. / (seed_time_res * seed_time_res) + 1. / (candidate_time_res * candidate_time_res));
+	  seed_time_res = std::sqrt((candidate_time_res * seed_time_res) * (candidate_time_res * seed_time_res) / (candidate_time_res * candidate_time_res + seed_time_res * seed_time_res));
+	  
+	  seed_z = (seed_z / (seed_z_res * seed_z_res) + candidate_z / (candidate_z_res * candidate_z_res)) / (1. / (seed_z_res * seed_z_res) + 1. / (candidate_z_res * candidate_z_res));
+	  seed_z_res = std::sqrt((candidate_z_res * seed_z_res) * (candidate_z_res * seed_z_res) / (candidate_z_res * candidate_z_res + seed_z_res * seed_z_res));
+	  
+	  // unweighted average
+	  // seed_time = (seed_time + candidate_time) / 2.;
+	  // seed_time_res = std::sqrt((seed_time_res * seed_time_res) + (candidate_time_res * candidate_time_res));
+
+	  // seed_z = (seed_z + candidate_z) / 2.;
+	  // seed_z_res = std::sqrt((seed_z_res * seed_z_res) + (candidate_z_res * candidate_z_res));
 	}
       }
       
       if (debug) std::cout << "Found " << tracks_to_merge_into_cluster.size() << " tracks to merge" << std::endl;
       std::vector<Cluster> initial_simple_clusters_for_seed =
-	makeSimpleClusters(tracks_to_merge_into_cluster, branch,
-			   use_smeared_times, smeared_times_map,
-			   fixed_res, check_time_valid);
+	makeSimpleClusters(tracks_to_merge_into_cluster, branch, use_smeared_times,
+			   smeared_times_map, smeared_timeRes_map,
+			   fixed_res, check_time_valid, usez0);
 
       Cluster final_seed_cluster;
       final_seed_cluster = initial_simple_clusters_for_seed[0];
@@ -1207,38 +1128,81 @@ namespace myutl {
      double smear_res,       // fixed resolution for smeared times
      bool use_smeared_times, // for ideal cases
      bool check_time_valid,  // for ideal efficiency
-     bool isCone,
-     bool useNear
+     bool useCone,
+     bool usez0
   ) {
     if (track_indices.empty() && debug)
       std::cout << "EMPTY!!!!" << std::endl;
 
-    std::map<int,double> smeared_times_map;
+    std::map<int,double> smeared_times_map, smeared_timeRes_map;
 
     // if use smeared times, generated
     if (use_smeared_times) {
       for (auto idx: track_indices) {
+	double res = smear_res;
+	if (branch->track_time_valid[idx] == 1 and branch->track_hgtd_hits[idx] > 0 )
+	  res /= std::sqrt(branch->track_hgtd_hits[idx]);
 	if (!check_time_valid || branch->track_time_valid[idx] == 1) {
-	  double smeared_time = getSmearedTrackTime(idx, smear_res, branch);
+	  double smeared_time = getSmearedTrackTime(idx, res, branch);
 	  smeared_times_map.emplace(idx, smeared_time);
+	  smeared_timeRes_map.emplace(idx, res);
 	}
       }
     }
 
-    if (useNear) {
-      if (debug) std::cout << track_indices.size() << std::endl; 
-      track_indices = pileupRemoval(track_indices, branch, max_trk_vtx_sig);
-      if (debug) std::cout << track_indices.size() << std::endl; 
-    }
-    std::vector<Cluster> collection;
+    // std::sort(track_indices.begin(), track_indices.end(),
+    // 	      [&branch](int a, int b){return branch->track_pt[a] > branch->track_pt[b];});
+
+    std::vector<Cluster> collection = makeSimpleClusters(track_indices, branch, use_smeared_times,
+							 smeared_times_map, smeared_timeRes_map, smear_res, check_time_valid, usez0);
     
-    if (not isCone) {
-      collection = makeSimpleClusters(track_indices, branch, use_smeared_times, smeared_times_map, smear_res, check_time_valid);
+    if (not useCone) {
       doSimultaneousClustering(&collection, distance_cut);
     } else {
-      collection = doConeClustering(track_indices, branch, distance_cut, use_smeared_times, smeared_times_map, smear_res, check_time_valid);
+      doConeClustering(&collection, distance_cut);
+      // collection = doConeClustering(track_indices, branch, distance_cut, use_smeared_times, smeared_times_map, smear_res, check_time_valid, usez0);
     }
 
+    // if using z0, have to update the trkpt score:
+    if (usez0) {
+      for (Cluster& cluster: collection) {
+	double dz = std::abs(cluster.values.at(1)-branch->reco_vtx_z[0]);
+	auto oldscore = std::pow(cluster.scores.at(TRKPT),0.9);
+	cluster.scores[TRKPTZ] = oldscore*exp(-1.5*dz);
+	cluster.scores[DZ] = exp(-dz);
+      }
+    } else {
+      for (Cluster& cluster: collection) {
+	double znum=0., zden=0.;
+	double dnum=0., dden=0.;
+	// auto max_pt_idx = -1;
+	auto max_pt = -1.;
+	for (auto trk: cluster.track_indices) {
+	  auto
+	    trk_z = branch->track_z0[trk],
+	    trk_var_z = branch->track_var_z0[trk],
+	    trk_d0 = branch->track_d0[trk],
+	    trk_var_d0 = branch->track_var_d0[trk];
+	   // std::cout << "trk_z[" << trk << "] = " << trk_z << std::endl;
+	  // std::cout << "trk_var_z[" << trk << "] = " << trk_var_z << std::endl;
+	  znum += trk_z/(trk_var_z);
+	  zden += 1/(trk_var_z);
+	  dnum += trk_d0/(trk_var_d0);
+	  dden += 1/(trk_var_d0);
+	  if (branch->track_pt[trk] > max_pt)
+	    max_pt = branch->track_pt[trk];
+	}
+
+	double z = znum/zden, zsigma = 1/std::sqrt(zden);
+	double dz = std::abs(z-branch->reco_vtx_z[0]);
+	// std::cout << "dz: " << dz << std::endl;
+	// std::cout << "d0: " << dnum/dden << std::endl;
+	// std::cout << "sumpt: " << cluster.scores.at(TRKPT) << std::endl;
+	auto oldscore = std::pow(cluster.scores.at(TRKPT),0.9);
+	cluster.scores[TRKPTZ] = oldscore*exp(-1.5*dz);
+      }
+    }
+    
     for (Cluster& cluster: collection)
       cluster.purity = calc_pt_purity(cluster, branch);
     if (debug) std::cout << "Finished Clustering" << std::endl;
@@ -1258,181 +1222,322 @@ namespace myutl {
     return min_cluster;
   }
 
-  static Cluster chooseBestHGTDCluster(std::vector<Cluster> collection, BranchPointerWrapper *branch) {
-    double min_diff = 1e50, truth_time = branch->truth_vtx_time[0];
-    Cluster min_cluster;
-    for (Cluster cluster: collection) {
-      double this_diff = std::abs(cluster.values.at(0) - truth_time);
-      if (this_diff < min_diff) {
-	min_diff = this_diff;
-	min_cluster = cluster;
-      }
+  static double scoreCluster(
+    const Cluster &cluster,
+    BranchPointerWrapper *branch,
+    TMVA::Reader *tmva_reader,
+    Float_t *m_delta_z,
+    Float_t *m_z_sigma, 
+    Float_t *m_q_over_p, 
+    Float_t *m_q_over_p_sigma, 
+    Float_t *m_delta_z_resunits, 
+    Float_t *m_cluster_sumpt2, 
+    Float_t *m_d0, 
+    Float_t *m_d0_sigma
+  ) {
+    std::cout << "SCORING CLUSTER" << std::endl;
+    auto cluster_z_num = 0.0, cluster_z_den = 0.0;
+    for (auto trk: cluster.track_indices) {
+      auto trk_z = branch->track_z0[trk], trk_var_z = branch->track_var_z0[trk];
+      cluster_z_num += trk_z/(trk_var_z);
+      cluster_z_den += 1/(trk_var_z);
     }
-    return min_cluster;
-  }
-  
-  static std::map<ScoreType, Cluster> chooseCluster(std::vector<Cluster> collection, BranchPointerWrapper *branch) {
-    std::map<ScoreType,Cluster> output;
-  
-    for (ScoreType score: enum_vec) {
-      if (score == ScoreType::HGTD) {
-	continue;
-      }
-      
-      output[score] = collection[0]; // final time we are giving to the user
-      double max_score = score != ScoreType::IDEAL
-	? output[score].scores.at(score)
-	: std::abs(output[score].scores.at(score) - branch->truth_vtx_time[0]);
     
-      for (Cluster& cluster: collection) {
-	double comp_score = score != ScoreType::IDEAL
-	  ? cluster.scores[score]
-	  : std::abs(cluster.scores[score] - branch->truth_vtx_time[0]);
+    *m_delta_z = (cluster_z_num/cluster_z_den) - branch->reco_vtx_z[0];
+    *m_z_sigma = 1/std::sqrt(cluster_z_den);
 
-	bool query = score != ScoreType::IDEAL
-	  ? comp_score > max_score
-	  : comp_score < max_score;
-
-	if (query) {
-	  max_score = comp_score;
-	  output[score] = cluster;
-	}
-      }
+    auto cluster_qp_num = 0.0, cluster_qp_den = 0.0;
+    for (auto trk: cluster.track_indices) {
+      auto trk_qp = branch->track_qp[trk], trk_var_qp = branch->track_var_qp[trk];
+      cluster_qp_num += trk_qp/(trk_var_qp);
+      cluster_qp_den += 1/(trk_var_qp);
     }
-  
-    return output;
+    
+    *m_q_over_p = cluster_qp_num/cluster_qp_den;
+    *m_q_over_p_sigma = 1/std::sqrt(cluster_qp_den);
+
+    auto cluster_d0_num = 0.0, cluster_d0_den = 0.0;
+    for (auto trk: cluster.track_indices) {
+      auto trk_d0 = branch->track_d0[trk], trk_var_d0 = branch->track_var_d0[trk];
+      cluster_d0_num += trk_d0/(trk_var_d0);
+      cluster_d0_den += 1/(trk_var_d0);
+    }
+
+    *m_d0 = cluster_d0_num/cluster_d0_den;
+    *m_d0_sigma = 1/std::sqrt(cluster_d0_den);
+
+    *m_delta_z_resunits = (*m_delta_z) / (*m_z_sigma);
+    *m_cluster_sumpt2 = 0;
+    for (auto trk: cluster.track_indices) {
+      auto trk_pt = branch->track_pt[trk];
+      *m_cluster_sumpt2 += trk_pt*trk_pt;
+    }
+
+    
+    return tmva_reader->EvaluateMVA("BDT");
   }
 
   static bool passEfficiency(Cluster cluster, BranchPointerWrapper *branch) {
     if (cluster.values.size() == 0)
       return false;
 
+    // std::cout << "Event Num: " << branch->reader.GetCurrentEntry() << std::endl;
     double diff = std::abs(cluster.values.at(0)-branch->truth_vtx_time[0]);
+    // std::cout << "Diff: " << diff << std::endl;
     if (diff > 60)
       return false;
-    
-    else return true;
 
     int nHSTrack = 0;
     for (auto idx: cluster.track_indices) {
       if (branch->track_to_truthvtx[idx] == 0)
 	nHSTrack++;
     }
+    // std::cout << "nHSTrack: " << nHSTrack << std::endl;
 
     return nHSTrack > 0;
   }
+  
+  static std::map<ScoreType, Cluster> chooseCluster(std::vector<Cluster> collection, BranchPointerWrapper *branch) {
+    std::map<ScoreType,Cluster> output;
 
-  static void plot_money(const char* fname, TCanvas* canvas,
-			 const std::vector<PlotObj*> plots) {
-    // Plot Key Metrics for each of these PlotObjs on the same plot
-    canvas->Print(Form("%s[",fname));
-    double x_min = plots[0]->x_min, fold_max = plots[0]->fold_max;
-    const char * xtitle = plots[0]->xtitle;
-    int counter = 0;
+    // TMVA::Tools::Instance();
+    // Float_t m_delta_z, m_z_sigma, m_q_over_p, m_q_over_p_sigma, m_delta_z_resunits, m_cluster_sumpt2, m_d0, m_d0_sigma;
+    // TMVA::Reader* tmva_reader = new TMVA::Reader();
+    // tmva_reader->AddVariable("m_delta_z", &m_delta_z);
+    // tmva_reader->AddVariable("m_z_sigma", &m_z_sigma);
+    // tmva_reader->AddVariable("m_q_over_p", &m_q_over_p);
+    // tmva_reader->AddVariable("m_q_over_p_sigma", &m_q_over_p_sigma);
+    // tmva_reader->AddVariable("m_delta_z_resunits", &m_delta_z_resunits);
+    // tmva_reader->AddVariable("m_cluster_sumpt2", &m_cluster_sumpt2);
+    // tmva_reader->AddVariable("m_d0", &m_d0);
+    // tmva_reader->AddVariable("m_d0_sigma", &m_d0_sigma);
+    // tmva_reader->BookMVA("BDT", TString("./TMVA.VBFinv.mu200.Step3p1.8var.weights.xml"));
+  
+    for (ScoreType score: enum_vec) {
+      if (score == ScoreType::HGTD) {
+	continue;
+      }
+      
+      // final time we are giving to the user
+      double max_score = score != ScoreType::IDEAL
+	? -1 : 1e30;
+
+      if (score == ScoreType::PASS) {
+	if (debug) std::cout << "Choosing pass score" << std::endl;
+	for (Cluster& cluster: collection) {
+	  if (passEfficiency(cluster, branch))
+	    output[score] = cluster;
+	}
+	continue;
+      }
     
-    bool first = true;
-    double res_ymin = 0.0, res_ymax = 40;
-    TLegend* reslegend = new TLegend(0.65, 0.65, 0.9, 0.9);
-    for (const auto &plt: plots) {
-      const auto& params = plt->params;
-      for (auto score : enum_vec) {
-	if (score == HGTD and
-	    (plt->fname.Contains("ideal") or plt->fname.Contains("pur")))
+      for (Cluster& cluster: collection) {
+	if (debug) std::cout << "CLUSTER SIZE: " << cluster.n_constituents << std::endl;
+	if (cluster.n_constituents < 2)
 	  continue;
-	auto res = params.at(score).sigma_dist;
-	res->SetLineColor(colors[counter % colors.size()]);
-	reslegend->AddEntry(res, Form("%s: %s", toString(score), plt->times));
-	counter++;
-	if (first) {
-	  res->SetTitle(Form("Core #sigma vs %s",xtitle));
-	  res->GetYaxis()->SetRangeUser(res_ymin,res_ymax);
-	  res->Draw("E1");
-	  first = false;
-	} else
-	  res->Draw("E1 SAME");
-      }
-    }
-    reslegend->Draw("SAME");
-    canvas->Print(fname);
+	
+	// scoreCluster(cluster, branch, tmva_reader, &m_delta_z, &m_z_sigma, &m_q_over_p, &m_q_over_p_sigma, &m_delta_z_resunits, &m_cluster_sumpt2, &m_d0, &m_d0_sigma)
+	double comp_score = score != ScoreType::IDEAL
+	  ? cluster.scores.at(score)
+	  : std::abs(cluster.scores[score] - branch->truth_vtx_time[0]);
 
-    // Plot Efficiency
-    first = true;
-    double eff_ymin = 0.0, eff_ymax = 1.5;
-    counter = 0;
-    TLegend* efflegend = new TLegend(0.65, 0.65, 0.9, 0.9);
-    for (const auto plt: plots) {
-      const auto& efficiency = plt->efficiency;
-      for (auto score : enum_vec) {
-	if (score == HGTD and
-	    (plt->fname.Contains("ideal") or plt->fname.Contains("pur")))
-	  continue;
-	auto eff = efficiency.at(score).get();
-	eff->SetLineColor(colors[counter % colors.size()]);
-	efflegend->AddEntry(eff, Form("%s: %s", toString(score), plt->times));
-	counter++;
-	if (first) {
-	  eff->SetTitle(Form("Efficiency vs %s",xtitle));
-	  eff->Draw("AP");
-	  gPad->Update();  // Ensure painting
-	  eff->GetPaintedGraph()->GetYaxis()->SetRangeUser(eff_ymin, eff_ymax);
-	  eff->GetPaintedGraph()->GetXaxis()->SetLimits(x_min, fold_max);
-	  eff->GetPaintedGraph()->GetXaxis()->SetRangeUser(x_min, fold_max);
-	  eff->GetPaintedGraph()->GetXaxis()->SetNdivisions(510);
-	  gPad->Update();
-	  first = false;
-	} else
-	  eff->Draw("P SAME");
-      }
-    }
-    TLine *max_eff_line = new TLine(x_min, 0.99, fold_max, 0.99);
-    max_eff_line->SetLineColor(kRed);
-    max_eff_line->SetLineWidth(2);
-    max_eff_line->SetLineStyle(4);
-    efflegend->AddEntry(max_eff_line,"99% Efficiency");
-    max_eff_line->Draw("SAME");
-    efflegend->Draw("SAME");
-    canvas->Print(fname);
+	bool query = score != ScoreType::IDEAL
+	  ? comp_score > max_score
+	  : comp_score < max_score;
 
-    // Plot Purity
-    first = true;
-    counter = 0;
-    double pur_ymin = 0.0, pur_ymax = 1.5;
-    TLegend* purlegend = new TLegend(0.65, 0.65, 0.9, 0.9);
-    for (const auto plt: plots) {
-      const auto& purity = plt->purity;
-      for (auto score : enum_vec) {
-	if (score == HGTD and
-	    (plt->fname.Contains("ideal") or plt->fname.Contains("pur")))
-	  continue;
-	const auto& entry = purity.at(score).get();
-	auto pur = purity.at(score).get()->ProfileX();
-	pur->SetLineWidth(2);
-	pur->GetXaxis()->SetRangeUser(x_min, fold_max);
-	pur->GetYaxis()->SetRangeUser(pur_ymin, pur_ymax);
-	pur->SetLineColor(colors[counter % colors.size()]);
-	purlegend->AddEntry(pur, Form("%s: %s", toString(score), plt->times));
-	counter++;
-	if (first) {
-	  pur->SetTitle(Form("Avg. Cluster Purity vs. %s;%s;%s",
-			      entry->GetXaxis()->GetTitle(),
-			      entry->GetXaxis()->GetTitle(),"Purity"));
-	  pur->Draw("E1");  // 'E' to draw error bars
-	  first = false;
-	  
-	} else
-	  pur->Draw("E1 SAME");
+	if (debug) std::cout << "QUERY: " << query << std::endl;
+	
+	if (query) {
+	  if (debug) std::cout << "Query passed, changing" << std::endl;
+	  max_score = comp_score;
+	  output[score] = cluster;
+	}
       }
+
     }
-    TLine *max_pur_line = new TLine(x_min, 1.0, fold_max, 1.0);
-    max_pur_line->SetLineColor(kRed);
-    max_pur_line->SetLineWidth(2);
-    max_pur_line->SetLineStyle(4);
-    purlegend->AddEntry(max_pur_line,"100% Purity");
-    max_pur_line->Draw("SAME");
-    purlegend->Draw("SAME");
-    canvas->Print(fname);
-    canvas->Print(Form("%s]",fname));
+  
+    return output;
   }
+
+  using PlotScoreVec = std::vector<std::pair<PlotObj*, std::vector<ScoreType>>>;
+
+  static PlotScoreVec prep_for_money(
+    std::vector<PlotObj*> plts,
+    std::vector<std::vector<ScoreType>> scores
+  ) {
+    PlotScoreVec ret;
+    ret.reserve(plts.size());  // avoid reallocations
+    for (int i=0; i < plts.size(); ++i)
+      ret.emplace_back(plts[i], scores[i]);
+    return ret;
+  }
+
+  static void plot_money(
+    const char* fname,
+    TCanvas* canvas,
+    const PlotScoreVec& plots_with_scores
+  ) {
+    // Open multi-page PDF
+    canvas->Print(Form("%s[", fname));
+
+    double x_min    = plots_with_scores.front().first->x_min;
+    double fold_max = plots_with_scores.front().first->fold_max;
+    const char* xtitle = plots_with_scores.front().first->xtitle;
+
+    // ---------------------------
+    // 1) Core σ (FitParams::sigma_dist)
+    // ---------------------------
+    {
+      bool first = true;
+      int counter = 0;
+      double res_ymin = 0.0, res_ymax = 40.0;
+      TLegend* reslegend = new TLegend(0.65, 0.65, 0.9, 0.9);
+
+      for (const auto& [plt, scores] : plots_with_scores) {
+	const auto& params = plt->params;  // map<ScoreType, myutl::FitParams>
+	for (auto score : scores) {
+	  if (score == HGTD && !first) continue;
+
+	  auto it = params.get().find(score);
+	  if (it == params.end()) continue;
+
+	  auto* res = it->second.sigma_dist;  // pointer owned elsewhere
+	  res->SetLineColor(colors[counter % colors.size()]);
+	  reslegend->AddEntry(res, Form("%s: %s", toString(score), plt->times));
+	  counter++;
+
+	  if (first) {
+	    res->SetTitle(Form("Core #sigma vs %s", xtitle));
+	    res->GetYaxis()->SetRangeUser(res_ymin, res_ymax);
+	    res->Draw("E1");
+	    first = false;
+	  } else {
+	    res->Draw("E1 SAME");
+	  }
+	}
+      }
+      reslegend->Draw("SAME");
+      canvas->Print(fname);
+    }
+
+    // ---------------------------
+    // 2) Efficiency (TEfficiency with PaintedGraph axes)
+    // ---------------------------
+    {
+      bool first = true;
+      int counter = 0;
+      double eff_ymin = 0.0, eff_ymax = 1.5;
+      TLegend* efflegend = new TLegend(0.65, 0.65, 0.9, 0.9);
+
+      for (const auto& [plt, scores] : plots_with_scores) {
+	const auto& efficiency = plt->efficiency;  // map<ScoreType, unique_ptr<TEfficiency>>
+	for (auto score : scores) {
+	  if (score == HGTD && !first) continue;
+
+	  auto it = efficiency.find(score);
+	  if (it == efficiency.end()) continue;
+
+	  TEfficiency* eff = it->second.get();  // <-- only here we use .get()
+	  eff->SetLineColor(colors[counter % colors.size()]);
+	  efflegend->AddEntry(eff, Form("%s: %s", toString(score), plt->times));
+	  counter++;
+
+	  if (first) {
+	    eff->SetTitle(Form("Efficiency vs %s", xtitle));
+	    eff->Draw("AP");
+	    gPad->Update();  // make PaintedGraph
+	    if (auto* gr = eff->GetPaintedGraph()) {
+	      gr->GetYaxis()->SetRangeUser(eff_ymin, eff_ymax);
+	      gr->GetXaxis()->SetLimits(x_min, fold_max);
+	      gr->GetXaxis()->SetRangeUser(x_min, fold_max);
+	      gr->GetXaxis()->SetNdivisions(510);
+	    }
+	    gPad->Update();
+	    first = false;
+
+	    // overlay normalized total distribution scaled into the 0–0.2 band
+	    auto* total = (TH1D*)plt->eff_total->Clone();
+	    total->SetLineColor(colors[8]);
+	    total->SetLineWidth(2);
+	    if (total->Integral() != 0.0) {
+	      total->Scale(1.0 / total->Integral());
+	      const double count_max = total->GetMaximum();
+	      if (count_max > 0.0) {
+		const double scale = (0.2 - eff_ymin) / count_max;
+		total->Scale(scale);
+	      }
+	    }
+	    total->Draw("HIST SAME");
+	  } else {
+	    eff->Draw("P SAME");
+	  }
+	}
+      }
+
+      // 99% efficiency line
+      TLine* max_eff_line = new TLine(x_min, 0.99, fold_max, 0.99);
+      max_eff_line->SetLineColor(kRed);
+      max_eff_line->SetLineWidth(2);
+      max_eff_line->SetLineStyle(4);
+      efflegend->AddEntry(max_eff_line, "99% Efficiency");
+      max_eff_line->Draw("SAME");
+
+      efflegend->Draw("SAME");
+      canvas->Print(fname);
+    }
+
+    // ---------------------------
+    // 3) Purity (take ProfileX of stored 2D)
+    // ---------------------------
+    {
+      bool first = true;
+      int counter = 0;
+      double pur_ymin = 0.0, pur_ymax = 1.5;
+      TLegend* purlegend = new TLegend(0.65, 0.65, 0.9, 0.9);
+
+      for (const auto& [plt, scores] : plots_with_scores) {
+	const auto& purity = plt->purity;  // map<ScoreType, unique_ptr<TH2> (or similar)>
+	for (auto score : scores) {
+	  if (score == HGTD && !first) continue;
+
+	  auto it = purity.find(score);
+	  if (it == purity.end()) continue;
+
+	  auto* entry = it->second.get();
+	  auto* pur = entry->ProfileX();  // TProfile*
+	  pur->SetLineWidth(2);
+	  pur->GetXaxis()->SetRangeUser(x_min, fold_max);
+	  pur->GetYaxis()->SetRangeUser(pur_ymin, pur_ymax);
+	  pur->SetLineColor(colors[counter % colors.size()]);
+	  purlegend->AddEntry(pur, Form("%s: %s", toString(score), plt->times));
+	  counter++;
+
+	  if (first) {
+	    pur->SetTitle(Form("Avg. Cluster Purity vs. %s;%s;%s",
+			       entry->GetXaxis()->GetTitle(),
+			       entry->GetXaxis()->GetTitle(), "Purity"));
+	    pur->Draw("E1");
+	    first = false;
+	  } else {
+	    pur->Draw("E1 SAME");
+	  }
+	}
+      }
+
+      // 100% purity line
+      TLine* max_pur_line = new TLine(x_min, 1.0, fold_max, 1.0);
+      max_pur_line->SetLineColor(kRed);
+      max_pur_line->SetLineWidth(2);
+      max_pur_line->SetLineStyle(4);
+      purlegend->AddEntry(max_pur_line, "100% Purity");
+      max_pur_line->Draw("SAME");
+      purlegend->Draw("SAME");
+      canvas->Print(fname);
+    }
+
+    // Close the PDF
+    canvas->Print(Form("%s]", fname));
+}
 
   static void plot_inclusive(const char* fname, bool logscale, bool fixbkg, double x_min, double x_max,
 			     TCanvas *canvas, std::map<ScoreType,TH1D*> inclusive_resos) {
@@ -1516,7 +1621,8 @@ namespace myutl {
     BranchPointerWrapper *branch,
     bool use_smeared_times,
     bool check_valid_times,
-    bool use_near, // whether or not to use nearest vtx cut
+    bool use_z0, // whether or not to use nearest vtx cut
+    bool do_hgtd,
     std::map<ScoreType,TH1D*>& inclusive_resos,
     std::map<ScoreType,TH1D*>& inclusive_purity,
     PlotObj& fjet,
@@ -1533,15 +1639,17 @@ namespace myutl {
     if (not branch->pass_basic_cuts()) return std::make_pair(-1,1.);
 
     // check if there is one forward jet with pt > 30 GeV
-    if (not branch->pass_jet_pt_cut()) return std::make_pair(-1,1.);;
+    if (not branch->pass_jet_pt_cut()) return std::make_pair(-1,1.);
 
     int nForwardJet=0;
     branch->count_forward_jets(nForwardJet);
     
-    std::vector<int> tracks = getAssociatedTracks(branch, min_track_pt);
+    std::vector<int> tracks = getAssociatedTracks(branch, min_track_pt, max_track_pt);
 
     int nForwardTrack=0, nForwardTrack_HS=0, nForwardTrack_PU=0;
     branch->count_forward_tracks(nForwardTrack,nForwardTrack_HS,nForwardTrack_PU,tracks, check_valid_times);
+
+    if (not branch->pass_forward_hs_tracks(nForwardTrack_HS)) return std::make_pair(-1,1.);
 
     hs_pu_inclusive->Fill(nForwardTrack_HS,nForwardTrack_PU);
     
@@ -1564,7 +1672,7 @@ namespace myutl {
     }
     
     std::vector<Cluster> cluster =
-      clusterTracksInTime(tracks, branch, 3.0, 10.0, use_smeared_times, check_valid_times, true, use_near);
+      clusterTracksInTime(tracks, branch, 3.0, 30.0, use_smeared_times, check_valid_times, true, use_z0);
     
     fjet.eff_total->     Fill(eff_fill_val_fjet    );
     ftrack.eff_total->   Fill(eff_fill_val_track   );
@@ -1579,13 +1687,13 @@ namespace myutl {
 
 
     // run HGTD Clustering (simultaneous)
-    std::vector<Cluster> hgtd_clusters =
-      clusterTracksInTime(tracks, branch, 3.0, -1, false, true, false, false);
-
-    if (branch->reco_vtx_valid[0] == 1)
+    if (do_hgtd && branch->reco_vtx_valid[0] == 1) {
+      std::vector<Cluster> hgtd_clusters =
+	clusterTracksInTime(tracks, branch, 3.0, -1, false, true, false, false);
+      // std::cout << "Choosing HGTD" << std::endl;
       chosen[ScoreType::HGTD] = chooseHGTDCluster(hgtd_clusters, branch);
-
-    if (debug) std::cout << "Chose clusters" << std::endl;
+    }
+    if (debug) std::cout << "Chose clusters from " << cluster.size() << std::endl;
      
     // bool eventquery = (not passEfficiency(chosen[ScoreType::TRKPT], branch)) and cluster.size() != 0 and pu_ratio > 0.5;
 
@@ -1606,6 +1714,12 @@ namespace myutl {
       if (cluster.size() == 0 and score != HGTD)
 	continue;
 
+      if (score == HGTD and !do_hgtd)
+	continue;
+
+      if (!chosen.count(score) and score != HGTD)
+	continue;
+
       if (debug) std::cout << "Attempting to access chosen[" << toString(score) << "]" << std::endl;
       Cluster scored = chosen[score];
       if (debug) std::cout << "Attempting to access scores values, size: " << scored.values.size() << std::endl;
@@ -1615,6 +1729,9 @@ namespace myutl {
       if (debug) std::cout << "Purity: " << cluster_purity << std::endl;
       double diff = score_based_time - branch->truth_vtx_time[0];
       if (debug) std::cout << "Diff: " << diff << std::endl;
+
+      if (score == ScoreType::PASS)
+	return_val = score_based_time;
       
       inclusive_resos.at(score)->Fill(diff);
       inclusive_purity.at(score)->Fill(cluster_purity);
@@ -1625,9 +1742,8 @@ namespace myutl {
 	hs_track.eff_pass.at(score)-> Fill(eff_fill_val_hs_track);
 	pu_track.eff_pass.at(score)-> Fill(eff_fill_val_pu_track);
 	recovtx_z.eff_pass.at(score)->Fill(eff_fill_val_z       );
-	if (score == TRKPT) {
+	if (score == ScoreType::PASS) {
 	  return_code = 1;
-	  return_val = score_based_time;
 	}
       }
       
