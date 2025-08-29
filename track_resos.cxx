@@ -24,16 +24,14 @@
 
 #include <bits/types/struct_sched_param.h>
 #include <boost/filesystem.hpp>
-#include <algorithm>
 #include <cassert>
 #include <cmath>
-#include <cstddef>
 #include <iostream>
 #include <ostream>
 #include <utility>
 #include <vector>
 
-#include "./my_utilities.h"
+#include "./clustering_utilities.h"
 
 #define debug false
 
@@ -171,7 +169,7 @@ void track_resos() {
   // gPad->SetLeftMargin(0.1);
 
   TChain chain ("ntuple");
-  setup_chain(chain);
+  setup_chain(chain, "../ntuple-hgtd");
   TTreeReader reader(&chain);
   BranchPointerWrapper branch(reader);
 
@@ -363,7 +361,7 @@ void track_resos() {
 			    ytitle));
       
       // Perform Double Gaussian Fit
-      TF1* dgaus_fit = create_fit(hSlice,false);
+      TF1* dgaus_fit = create_dgaus_fit(hSlice,false);
       
       plots[i].params.fill_each(j, dgaus_fit);
       plots[i].slices.push_back(std::make_pair(dgaus_fit,hSlice));
@@ -482,7 +480,7 @@ void track_resos() {
   canvas->SetLogy(true);
   std::vector<std::tuple<TH1D*,TF1*,TLegend*>> hist_fit_vec;
   TH1D *hist = inclusive_resos;
-  TF1* fit = create_fit(hist,false);
+  TF1* fit = create_dgaus_fit(hist,false);
   TLegend* inclusive_legend = new TLegend(0.65, 0.75, 0.9, 0.9);
 
   inclusive_legend->AddEntry(hist,"Histogram");
