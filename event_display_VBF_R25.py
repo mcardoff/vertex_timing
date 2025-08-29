@@ -51,6 +51,7 @@ my_branches = tree.arrays([
     'Track_pt',
     'Track_eta',
     'Track_time',
+    'Track_timeRes',
     'Track_hasValidTime',
     'Track_qOverP',
     'Track_theta',
@@ -285,10 +286,10 @@ for idx in connected_tracks:
     nsigma_near = np.abs(my_branches.Track_nearestVtx_sig[event_num][idx])
     nearcut = not (near != vtxID and nsigma_near < 3.0)
 
-    if ((not nearcut) and isTruthHS):
-        status = 2
-    elif ((not nearcut) and (not isTruthHS)):
-        status = 3
+    # if ((not nearcut) and isTruthHS):
+    #     status = 2
+    # elif ((not nearcut) and (not isTruthHS)):
+    #     status = 3
     
     # if (nsigma_track < 3.0 and isTruthHS):
     if (np.abs(nsigma_track) < 3.0):
@@ -319,6 +320,8 @@ try:
                             text=True)
     current_block_idx = []
     current_block_times = []
+    print('STDOUT FROM MACRO: ')
+    print(result.stdout)
 
     for line in result.stdout.splitlines():
         line = line.strip()
@@ -329,6 +332,9 @@ try:
                 track_times.append(current_block_times)
                 current_block_idx = []
                 current_block_times = []
+            continue
+
+        if 'pass' in line:
             continue
 
         if "t:" in line:
@@ -356,87 +362,106 @@ except subprocess.CalledProcessError as e:
     print(f"Error executing root script: {e}")
     print(f"Stderr: {e.stderr}")
 
-flattened_track_indices = list(chain.from_iterable(track_clusters))
-flattened_track_times = [my_branches.Track_time[event_num][t] for i in track_clusters for t in i]
-
-def get_smeared_time(index_of_track,smear_res):
-    particle_idx = my_branches.Track_truthPart_idx[event_num][index_of_track]
-    truthvtx_idx = my_branches.Track_truthVtx_idx[event_num][index_of_track]
-    print(f'Track idx: {index_of_track}, Particle: {particle_idx}, TruthVtx: {truthvtx_idx}')
-    t_part = 0
-    if (particle_idx == -1):
-        if (truthvtx_idx != -1):
-            t_part = my_branches.TruthVtx_time[event_num][truthvtx_idx]
-        else:
-            t_part = random.gauss(my_branches.TruthVtx_time[event_num][0],175)
-    else:
-        t_part = my_branches.TruthPart_prodVtx_time[event_num][particle_idx]
-    final = random.gauss(t_part,smear_res)
-    print(f'Original time: {my_branches.Track_time[event_num][index_of_track]:.2f}')
-    print(f'Smeared time: {final:.2f}')
-    print(f'Particle time: {my_branches.TruthPart_prodVtx_time[event_num][particle_idx]:.2f}')
-    return final
+# flattened_track_indices = list(chain.from_iterable(track_clusters))
+# flattened_track_times = [my_branches.Track_time[event_num][t] for i in track_clusters for t in i]
 
 # Collect information for track time histogram
-hist_times = []; pt_wghts = []#; dR_wghts = []; jR_wghts = []; tR_wghts = []; sg_wghts = []; ps_wghts = []
-max_pt = -1
-max_pt_time = -1
-hard_scatter_times = []
+hist_times = []; time_errors = []
+pt_wghts = []#; dR_wghts = []; jR_wghts = []; tR_wghts = []; sg_wghts = []; ps_wghts = []
+hist_zs = []; z_errors = []
+max_pt = -1; max_pt_idx = -1; max_pt_time = -1
+hard_scatter_times = []; hard_scatter_zs = []
+cluster_zs = []
+cluster_z_uncertainties = []
 for (num1, cluster) in enumerate(track_clusters):
-    this_timecluster = []; this_ptw = []#; this_dRw = []; this_jRw = []; this_tRw = []; this_sgw = []; this_psw = [];
+    this_timecluster = []; this_timeerror = []
+    this_ptw = []#; this_dRw = []; this_jRw = []; this_tRw = []; this_sgw = []; this_psw = [];
+    this_zcluster = []; this_zerror = []
+
+    zbar_num = 0
+    zbar_den = 0
     for (num2,track) in enumerate(cluster):
         this_pt = my_branches.Track_pt[event_num][track]
+        this_z0 = my_branches.Track_z0[event_num][track]
+        this_var_z0 = my_branches.Track_var_z0[event_num][track]
         this_phi = my_branches.Track_phi[event_num][track]
         this_eta = my_branches.Track_eta[event_num][track]
         this_hasValidTime = my_branches.Track_hasValidTime[event_num][track]
 
         this_time = track_times[num1][num2]
+        this_timeres = my_branches.Track_timeRes[event_num][track]
+
+        zbar_num += this_z0/(this_var_z0)
+        zbar_den += 1/(this_var_z0)
         
         if this_pt > max_pt:
             max_pt = this_pt
-            # max_pt_time = hist_times[num1][num2]
+            max_pt_idx = track
             max_pt_time = this_time
-    
-        # mindR = 10000.0
-        # jetdR = 0.0
-        # for (jet,(j_eta,j_phi,j_pt)) in enumerate(zip(my_branches.AntiKt4EMTopoJets_eta[event_num],
-        #                                               my_branches.AntiKt4EMTopoJets_phi[event_num],
-        #                                               my_branches.AntiKt4EMTopoJets_pt[event_num])):
-        #     dphi = this_phi - j_phi
-        #     deta = this_eta - j_eta
-        #     dR = np.sqrt(dphi*dphi + deta*deta)
-        #     if dR < mindR:
-        #         mindR = dR
-        #         jetdR = j_pt*np.exp(-dR)
 
         if (my_branches.Track_truthVtx_idx[event_num][track] == 0):
             hard_scatter_times.append(this_time)
+            hard_scatter_zs.append(this_z0)
+            
                 
         # print(vtx_z + z0)
-        this_timecluster.append(this_time)
+        this_timecluster.append(this_time); this_timeerror.append(this_timeres)
         this_ptw.append(this_pt)
-        # this_dRw.append(np.exp(-mindR))
-        # this_jRw.append(jetdR)
-        # this_tRw.append(this_pt*np.exp(-mindR))
-        # this_psw.append(this_pt*np.exp(-abs(nsigma)))
-        # this_sgw.append(np.exp(-abs(nsigma)))
-    hist_times.append(this_timecluster)
+        this_zcluster.append(this_z0); this_zerror.append(np.sqrt(this_var_z0))
+    cluster_zs.append(zbar_num/zbar_den)
+    cluster_z_uncertainties.append(1/np.sqrt(zbar_den))
+    hist_times.append(this_timecluster); time_errors.append(this_timeerror)
+    hist_zs.append(this_zcluster); z_errors.append(this_zerror)
     pt_wghts.append(this_ptw);
-    # dR_wghts.append(this_dRw);
-    # jR_wghts.append(this_jRw);
-    # tR_wghts.append(this_tRw);
-    # ps_wghts.append(this_psw);
-    # sg_wghts.append(this_sgw);
 
 weight_cases = {
-    'Default counts': None,  # No weights, just counts
+    # 'Default counts': None,  # No weights, just counts
     'Track pT': pt_wghts,
+    '2': pt_wghts,
     # 'exp(-min(dR(track,jet)))': dR_wghts,
     # 'jet pT*exp(-min(dR(track,jet)))': jR_wghts,
     # 'trk pT*exp(-min(dR(track,jet)))': tR_wghts,
     # 'exp(-|s|)': sg_wghts,
     # 'trk pT*exp(-|s|)': ps_wghts,
 }
+
+print('--------------------')
+print(f'Cluster times: {cluster_times}')
+print('--------------------')
+
+print('--------------------')
+print(f'Cluster zs: {cluster_zs}')
+print(f'Cluster z uncs: {cluster_z_uncertainties}')
+
+print('Cluster dzs:')
+for (z,s_z,zs) in zip(cluster_zs,cluster_z_uncertainties,hist_zs):
+    regdz = np.abs(reco_hs_z-np.mean(zs))
+    print(f'Delta z (mm): {regdz:.2f}')
+    
+    dz = np.abs(reco_hs_z-z)
+    dzres = dz/s_z
+    print(f'Delta z (mm, waverage): {dz:.2f}')
+    print(f'Delta z (res, waverage): {dzres:.2f}')
+print('--------------------')
+
+
+print('--------------------')
+print(f'Hard Scatter Track Times: {hard_scatter_times}')
+print('--------------------')
+
+print(f"MAX PT IDX: {max_pt_idx}, PT: {max_pt}, Z0: {my_branches.Track_z0[event_num][max_pt_idx]}")
+# find nearest vertex to maxpt track in z
+# nearest = 0
+# dzNearest = np.abs(my_branches.Track_z0[event_num][max_pt_idx]-my_branches.RecoVtx_z[event_num][nearest])
+# for (ivtx, z) in enumerate(my_branches.RecoVtx_z[event_num]):
+#     dz = np.abs(my_branches.Track_z0[event_num][max_pt_idx]-z)
+#     if dz < dzNearest:
+#         nearest=ivtx
+#         dzNearest = dz
+# nearestz = my_branches.RecoVtx_z[event_num][nearest]
+
+# print(f"NEAREST: {nearest}, nsigma: {dzNearest/np.sqrt(my_branches.Track_var_z0[event_num][max_pt_idx]):.2f}")
+# print(f"HARD SCATTER: {0}, nsigma: {np.abs(my_branches.Track_z0[event_num][max_pt_idx]-my_branches.RecoVtx_z[event_num][0])/np.sqrt(my_branches.Track_var_z0[event_num][max_pt_idx]):.2f}")
     
 ################### Draw Time Histogram #######################
 min_time, max_time = min([reco_hs_t, truth_hs_t] + list(chain.from_iterable(hist_times))), max([reco_hs_t, truth_hs_t] + list(chain.from_iterable(hist_times)))
@@ -444,7 +469,12 @@ trange = max_time - min_time;
 extended_min_time = min_time - 0.05 * trange;
 extended_max_time = max_time + 0.05 * trange;
 
-filename = f'./figs/eventdisplays/pur_degrades/event_display_PUR_{file_num}_{event_num:04d}_{vtxID}.pdf'
+min_z, max_z = min([reco_hs_z, truth_hs_z] + list(chain.from_iterable(hist_zs))), max([reco_hs_z, truth_hs_z] + list(chain.from_iterable(hist_zs)))
+zrange = max_z - min_z;
+extended_min_z = min_z - 0.05 * zrange;
+extended_max_z = max_z + 0.05 * zrange;
+
+filename = f'./figs/nohs/event_display_{file_num}_{event_num:04d}_{vtxID}.pdf'
 
 colors = [
     "#e41a1c",  # red
@@ -470,108 +500,139 @@ colors = [
 cluster_colors = colors[:len(track_clusters)]
 print(cluster_colors)
 
+flattened_hist_times = list(chain.from_iterable(hist_times))
+flattened_hist_zs = list(chain.from_iterable(hist_zs))
+
 with PdfPages(filename) as pdf:
     for label, weights in weight_cases.items():
+        flattened_weights = list(chain.from_iterable(weights))
         figs, axs = plt.subplots(2,1,figsize=(12, 12))
         time_histo = axs[1]
         event_display = axs[0]
-                
-        # Plot histogram with or without weights
-        histvals, bin_edges, patches = time_histo.hist(
-            hist_times, bins=50, stacked=True, range=(extended_min_time, extended_max_time),
-            weights=weights, label='Track Time', lw=1.5, alpha=1.0, color=cluster_colors
-        )
 
-        highlight_patch = None
-        n_bins = len(bin_edges) - 1
+        if '2' in label:
+             # Plot histogram with or without weights
+            histvals, bin_edges, patches = time_histo.hist(
+                hist_times, bins=50, stacked=True, range=(extended_min_time, extended_max_time),
+                weights=weights, label='Track Time', lw=1.5, alpha=1.0, color=cluster_colors
+            )
+
+            highlight_patch = None
+            n_bins = len(bin_edges) - 1
         
-        # We'll look for the bin containing max_pt_time
-        for bin_idx, (x_left, x_right) in enumerate(zip(bin_edges[:-1], bin_edges[1:])):
-            if x_left <= max_pt_time < x_right:
-                if hasattr(histvals, '__len__') and len(histvals) > 0 and hasattr(histvals[0], '__len__'):
-                    for container in patches:  # all clusters
-                        patch = container.patches[bin_idx]
+            # We'll look for the bin containing max_pt_time
+            for bin_idx, (x_left, x_right) in enumerate(zip(bin_edges[:-1], bin_edges[1:])):
+                if x_left <= max_pt_time < x_right:
+                    if hasattr(histvals, '__len__') and len(histvals) > 0 and hasattr(histvals[0], '__len__'):
+                        for container in patches:  # all clusters
+                            patch = container.patches[bin_idx]
+                            patch.set_hatch('///')
+                            patch.set_linewidth(1.5)
+                            # Create the legend patch with matching color
+                            highlight_patch = mpatches.Patch(
+                                facecolor='none',
+                                edgecolor='black',
+                                hatch='///',
+                                linewidth=1.5,
+                                label='Max $p_T$ Bin'
+                            )
+                            break
+                    else:
+                        patch = patches[bin_idx]
                         patch.set_hatch('///')
                         patch.set_linewidth(1.5)
-                        # Create the legend patch with matching color
-                    highlight_patch = mpatches.Patch(
-                        facecolor='none',
-                        edgecolor='black',
-                        hatch='///',
-                        linewidth=1.5,
-                        label='Max $p_T$ Bin'
-                    )
-                    break
-                else:
-                    patch = patches[bin_idx]
-                    patch.set_hatch('///')
-                    patch.set_linewidth(1.5)
-                    highlight_patch = mpatches.Patch(
-                        facecolor='none',
-                        edgecolor='black',
-                        hatch='///',
-                        linewidth=1.5,
-                        label='Max $p_T$ Bin'
-                    )
-                    break
+                        highlight_patch = mpatches.Patch(
+                            facecolor='none',
+                            edgecolor='black',
+                            hatch='///',
+                            linewidth=1.5,
+                            label='Max $p_T$ Bin'
+                        )
+                        break
             
-        maxval = -1
-        if hasattr(histvals, '__len__') and len(histvals) > 0 and hasattr(histvals[0], '__len__'):
-            maxval = max(chain.from_iterable(histvals))
-        else:
-            maxval = histvals.max()
+            maxval = -1
+            if hasattr(histvals, '__len__') and len(histvals) > 0 and hasattr(histvals[0], '__len__'):
+                maxval = max(chain.from_iterable(histvals))
+            else:
+                maxval = histvals.max()
 
-        time_histo.set_ylim(0, 1.1 * maxval)
+            time_histo.set_ylim(0, 1.1 * maxval)
+            truth_text_y = 0.1*maxval
+            reco_text_y = 0.1*maxval
+            ylabel = 'Track pT'
+            cluster_ypoints = [0.1*maxval]*len(cluster_times)
+            hist_midpoint = (extended_max_time + extended_min_time) / 2.0
+            # Get bin indices where hard scatter times fall
+            hs_bin_indices = np.digitize(hard_scatter_times, bin_edges) - 1
+            hs_bin_set = set(hs_bin_indices)
         
-        hist_midpoint = (extended_max_time + extended_min_time) / 2.0
-        arrow_gap = 0.05 * (time_histo.get_ylim()[1] - time_histo.get_ylim()[0])
+            # Compute bin centers
+            hs_bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
+
+            # Optional: add a marker or text at each bin center
+            for i in hs_bin_set:
+                center = hs_bin_centers[i]
+                time_histo.text(center, 0, '/', ha='center', va='top', fontsize=20, color='blue')
+        else:
+            for (times, errtime, zs, errz, color) in zip(hist_times, time_errors, hist_zs, z_errors, cluster_colors):
+                histvals = time_histo.errorbar(
+                    times, zs, fmt='.',
+                    xerr=errtime, yerr=errz,
+                    lw=1.5, alpha=1.0, color=color,
+                    zorder=3
+                )
+            
+            truth_text_y = truth_hs_z
+            reco_text_y = reco_hs_z
+            cluster_ypoints = cluster_zs
+            ylabel = 'Z (mm)'
+            time_histo.scatter(hard_scatter_times, hard_scatter_zs,
+                               s=20, color='blue', marker='o',label='Hard Scatter Tracks', zorder=10)
+            time_histo.plot([time_histo.get_xlim()[0],time_histo.get_xlim()[1]], [reco_hs_z,reco_hs_z],
+                            label='Reco Vertex Z', color='black', lw=2, linestyle='--')            
+            
+        min_y_step = (time_histo.get_ylim()[1] - time_histo.get_ylim()[0])/25
+        min_x_step = (time_histo.get_xlim()[1] - time_histo.get_xlim()[0])/50
+
+        time_histo.scatter(cluster_times, cluster_ypoints, marker="*", edgecolors='black',
+                           s=500, c=cluster_colors, label='Cluster Positions', zorder=2)
+            
+        time_histo.annotate("Truth HS Time",
+                            xytext=(truth_hs_t-2.5*min_x_step, time_histo.get_ylim()[0]-2*min_y_step),
+                            xy=(truth_hs_t, truth_text_y), xycoords='data',
+                            ha='left', va='top', color='blue',
+                            arrowprops=dict(arrowstyle="->", color='blue',lw=2))
 
         if (my_branches.RecoVtx_hasValidTime[event_num][0] == 1):
             time_histo.annotate("Reco HS Time",
-                                xytext=(reco_hs_t, -2*arrow_gap),
-                                xy=(reco_hs_t, 0.1*maxval), xycoords='data',
-                                ha='left', va='top', 
-                                color='black',
+                                xytext=(reco_hs_t-2.5*min_x_step, time_histo.get_ylim()[0]-3*min_y_step),
+                                xy=(reco_hs_t, reco_text_y), xycoords='data',
+                                ha='left', va='top', color='black',
                                 arrowprops=dict(arrowstyle="->",color='black',lw=2))
-
-        time_histo.annotate("Truth HS Time",
-                            xytext=(truth_hs_t, -3*arrow_gap),
-                            xy=(truth_hs_t, 0.1*maxval), xycoords='data',
-                            ha='left', va='top',
-                            color='blue',
-                            arrowprops=dict(arrowstyle="->", color='blue',lw=2))
+        
         if args.extra_time:
-            # print("!!!!!!!!!!!!!!!!!!!!PLOTTING EXTRA TIME")
             time_histo.annotate("My Time",
-                            xytext=(args.extra_time, -4*arrow_gap),
-                            xy=(args.extra_time, 0.1*maxval),
+                            xytext=(args.extra_time-2.5*min_x_step, time_histo.get_ylim()[0]-4*min_y_step),
+                            xy=(args.extra_time, reco_text_y),
                             ha='left', va='top', 
                             color='black',
                             arrowprops=dict(arrowstyle="->", color='black',lw=2))
-            # time_histo.plot([args.extra_time, args.extra_time], [0, maxval], 'blue', label='Time From Smearing')
-            
-        # Add any additional lines or markers
-        time_histo.scatter(cluster_times,[0.1*maxval]*len(cluster_times), marker="*", edgecolors='black', s=500,c=cluster_colors)
-        time_histo.axvspan(time_histo.get_xlim()[0], guess_time-3*90, color='grey', alpha=0.2, zorder=-1,
+        
+        # # Add any additional lines or markers
+        time_histo.axvspan(time_histo.get_xlim()[0], guess_time-3*90, color='grey', alpha=0.2, zorder=1,
                            label=f'Calo Time Exclusion\n[{guess_time-3*90:.2f},{guess_time+3*90:.2f}]')
-        time_histo.axvspan(time_histo.get_xlim()[1], guess_time+3*90, color='grey', alpha=0.2, zorder=-1)
+        time_histo.axvspan(time_histo.get_xlim()[1], guess_time+3*90, color='grey', alpha=0.2, zorder=1)
 
         # Grab the existing handles and labels
         handles, labels = time_histo.get_legend_handles_labels()
-        handles.insert(1,highlight_patch)
-        labels.insert(1,'Max p_T Entry')  # optional, since patch has label, this line can be omitted
 
         # Calculate weight sums per cluster
-        if weights is not None:
-            # Flattened weights list needed if weights is nested like pt_wghts, etc.
-            weight_sums = [sum(w) for w in weights]
-        else:
-            weight_sums = [len(cluster) for cluster in hist_times]
+        weight_sums = [len(cluster) for cluster in hist_times] if weights is None else [sum(w) for w in weights]
 
         # Create dummy legend entries for cluster weight totals
         weight_legend_patches = []
         for i, (color, total_weight) in enumerate(zip(cluster_colors, weight_sums)):
-            this_label = f"Cluster {i}: Σw = {total_weight:.1f}"
+            this_label = f"Σpt = {total_weight:.2f}\ndz={np.abs(reco_hs_z-cluster_zs[i]):.2f}\nt={cluster_times[i]:.2f}"
             patch = mpatches.Patch(facecolor=color, label=this_label)
             weight_legend_patches.append(patch)
 
@@ -579,34 +640,20 @@ with PdfPages(filename) as pdf:
         second_legend = time_histo.legend(
             handles=weight_legend_patches,
             loc='upper right',
-            # bbox_to_anchor=(1, 0.4),
             title="Cluster Weights",
             fontsize='small',
-            title_fontsize='small'
+            title_fontsize='small',
         )
         
         # Add the second legend manually so both show up
         time_histo.add_artist(second_legend)
-        # Legend including the orange patch
         time_histo.legend(handles=handles, labels=labels, loc='upper left')
         
         time_histo.set_xlim(extended_min_time, extended_max_time)
-        time_histo.set_xlabel('Time')
-        time_histo.set_ylabel('Counts' if weights is None else 'Weighted Counts')
-        time_histo.set_title(f'Histogram weighted by: {label}')
-
-        # Get bin indices where hard scatter times fall
-        hs_bin_indices = np.digitize(hard_scatter_times, bin_edges) - 1
-        hs_bin_set = set(hs_bin_indices)
+        time_histo.set_xlabel('Time (ps)')
+        time_histo.set_ylabel(ylabel)
+        time_histo.set_title('Z-T Event Display')
         
-        # Compute bin centers
-        hs_bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
-
-        # Optional: add a marker or text at each bin center
-        for i in hs_bin_set:
-            center = hs_bin_centers[i]
-            time_histo.text(center, 0, '/', ha='center', va='top', fontsize=20, color='blue')
-
         ################### Draw Tracks ###############################
 
         for track in track_info:
