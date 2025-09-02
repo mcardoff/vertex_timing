@@ -1,9 +1,10 @@
-#include "clustering_includes.h"
-#include "event_processing.h"
+#include "src/clustering_functions.h"
+#include "src/event_processing.h"
+#include <TRandom.h>
 
 using namespace myutl;
 
-void runHGTD_Clustering(std::string Number, Long64_t event_num, bool smear_times, bool use_near) {
+void runHGTD_Clustering(std::string Number, Long64_t event_num) {
   // Initialize TChain to read the ntuple files
   TChain chain("ntuple");
   // Setup the chain using the utility function from clustering_utilities.h
@@ -16,11 +17,12 @@ void runHGTD_Clustering(std::string Number, Long64_t event_num, bool smear_times
   std::vector<int> tracks = getAssociatedTracks(&branch, min_track_pt,max_track_pt);
 
   bool
-    use_smear_times = false,
+    use_smear_times = true,
     use_valid_times_only = true,
     use_cone_clustering = true,
     use_z0 = false;
-  
+
+  gRandom->SetSeed(21);
 
   std::vector<Cluster> clusters =
     clusterTracksInTime(tracks, &branch, 3.0, 30.0,
@@ -29,20 +31,24 @@ void runHGTD_Clustering(std::string Number, Long64_t event_num, bool smear_times
 			use_cone_clustering,
 			use_z0);
 
-  // auto clustermerge = mergeClusters(clusters[0], clusters[2]);
+  // auto clustermerge = mergeClusters(clusters[0], clusters[1]);
+  // clustermerge = mergeClusters(clustermerge, clusters[2]);
+  // clusters = {clustermerge};
   // clusters.push_back(clustermerge);
   // clusters.erase(clusters.begin()+0);
   // clusters.erase(clusters.begin()+1);
 
   for (int j = 0; j < clusters.size(); j++) {
     auto cluster = clusters.at(j);
-    auto score = cluster.scores.at(TRKPT);
+    auto score = cluster.scores.at(TRKPTZ);
+    if (cluster.values.at(0) > 2000) continue;
     std::cout << "---------\n";
     std::cout << "t: " << cluster.values.at(0) << "\n";
     if (cluster.values.size() > 1) std::cout << "z: " << cluster.values.at(1) << "\n";
     std::cout << "score: " << score << "\n";
     for (int i=0; i < cluster.track_indices.size(); i++) {
       std::cout << cluster.track_indices[i] << "," << cluster.all_times[i] << "\n";
+      
     }
     std::cout << "passes? " << cluster.passEfficiency(&branch) << std::endl;
     std::cout << "---------\n";

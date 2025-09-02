@@ -13,7 +13,7 @@ namespace myutl {
   static TF1 *sgaus_fitfunc = new TF1("sgaus", "[0]*TMath::Exp(-0.5 * ((x - [1]) / [2])^2)");
 
   static TF1* create_dgaus_fit(
-    TH1D *hist, bool fixbkg
+    TH1D* hist, bool fixbkg
   ) {
     dgaus_fitfunc->SetParNames("Mean", "Norm1", "Norm2", "Sigma1", "Sigma2");
     TF1* fit = new TF1("dgaus_fit", "dgaus", hist->GetXaxis()->GetXmin(), hist->GetXaxis()->GetXmax());
@@ -34,7 +34,7 @@ namespace myutl {
   }
 
   static TF1* create_sgaus_fit(
-    TH1D *hist
+    TH1D* hist
   ) {
     TF1* fit = new TF1("gaus_fit", "sgaus", hist->GetXaxis()->GetXmin(), hist->GetXaxis()->GetXmax());
     fit->SetParameters(hist->GetMaximum(), 0, 30);
@@ -525,15 +525,15 @@ namespace myutl {
     bool logscale, bool fixbkg,
     double x_min, double x_max,
     TCanvas *canvas,
-    std::map<ScoreType,TH1D*> inclusive_resos
+    const std::vector<AnalysisObj*>& plts
   ) {
     TLatex latex;
     latex.SetTextSize(0.04);
     latex.SetTextAlign(13); 
     canvas->Print(Form("%s[",fname));
     canvas->SetLogy(logscale);
-    for (auto pair: inclusive_resos) {
-      TH1D *hist = pair.second;
+    for (const auto& plt: plts) {
+      TH1D* hist = (TH1D*)plt->inclusive_reso->Clone();
       TF1* fit1 = create_dgaus_fit(hist,fixbkg);
       TLegend* inclusive_legend = new TLegend(0.65, 0.75, 0.9, 0.9);
 

@@ -7,13 +7,15 @@
 #include "clustering_functions.h"
 #include "plotting_utilities.h"
 
+using boost::filesystem::directory_iterator;
+
 namespace myutl {
 
   static void setup_chain(
     TChain &chain, const char* ntuple_dir
   ) {
     // VBF H->Invisible sample
-    for (const auto& entry : boost::filesystem::directory_iterator(ntuple_dir)) {
+    for (const auto& entry : directory_iterator(ntuple_dir)) {
       if (entry.is_directory()) continue;
       if(debug) {std::cout << "Adding file: " << entry.path() << std::endl;}
       chain.Add(entry.path().c_str());
@@ -173,6 +175,8 @@ namespace myutl {
       chosen[ScoreType::HGTD] = chooseHGTDCluster(hgtd_clusters, branch);
 
     if (debug) std::cout << "Chose clusters" << std::endl;
+
+    bool passes_hgtd = false, passes_mine = false;
     
     for (auto& [score, analysis] : analyses) {
       if (debug) std::cout << "Filling Scores: " << toString(score) << std::endl;
@@ -195,7 +199,7 @@ namespace myutl {
       double diff = score_based_time - branch->truth_vtx_time[0];
       if (debug) std::cout << "Diff: " << diff << std::endl;
 
-      if (score == ScoreType::TRKPTZ and branch->reco_vtx_valid[0] == 1)
+      if (score == ScoreType::TRKPTZ)
 	return_val = score_based_time;
       
       analysis.inclusive_reso->Fill(diff);
@@ -206,8 +210,10 @@ namespace myutl {
 	analysis["pu_frac"]->  FillPass(eff_fill_val_pu_ratio);
 	analysis["hs_track"]-> FillPass(eff_fill_val_hs_track);
 	analysis["pu_track"]-> FillPass(eff_fill_val_pu_track);
-	if (nForwardTrack_HS == 0 and score == PASS)
-	  return_code = 1;
+	if (score == HGTD)
+	  passes_hgtd = true;
+	if (score == TRKPTZ)
+	  passes_mine = true;
       }
       
       // fill diff hists
@@ -224,6 +230,13 @@ namespace myutl {
       analysis["hs_track"]-> FillPurity(nForwardTrack_HS, cluster_purity);
       analysis["pu_track"]-> FillPurity(nForwardTrack_PU, cluster_purity);
     }
+    if ((not passes_hgtd) and passes_mine)
+      return_code = 2;
+    else if (passes_mine)
+      return_code = 1;
+
+    if (not passes_mine) return_code = 0;
+    
     return std::make_pair(return_code, return_val);
   }
 }

@@ -289,7 +289,7 @@ namespace myutl {
 	  nHSTrack++;
       }
 
-      return nHSTrack > 1;
+      return nHSTrack > 0;
     }
   };
   

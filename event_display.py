@@ -26,6 +26,10 @@ args = parser.parse_args()
 
 event_num, file_num = args.event_num, args.file_num
 
+IDEALEFF = False
+filename = f'./figs/mine_fail_res_pass/event_display_{file_num}_{event_num:04d}.pdf'
+colors = ["#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#a65628", "#f781bf", "#999999"]
+
 ANA_FILE = f'../ntuple-hgtd/user.mcardiff.45809429.Output._{file_num}.SuperNtuple.root'
 tree = uproot.open(ANA_FILE)["ntuple"]
 
@@ -49,6 +53,7 @@ branch = tree.arrays([
     'Track_timeRes'     ,
     'Track_qOverP'      , 
     'Track_quality'     ,
+    'Track_nHGTDHits'   ,
     'Track_hasValidTime',
     'Track_truthVtx_idx',
     # reco jet properties
@@ -69,6 +74,8 @@ connected_tracks = []
 for (idx, eta) in enumerate(branch.Track_eta[event_num]):
     in_hgtd = abs(eta) > 2.38 and abs(eta) < 4.0
     time_valid = branch.Track_hasValidTime[event_num][idx] == 1
+    if IDEALEFF:
+        time_valid = True
     track_quality = branch.Track_quality[event_num][idx] == 1
     dz = branch.Track_z0[event_num][idx] - branch.RecoVtx_z[event_num][0]
     nsigma = abs(dz / np.sqrt(branch.Track_var_z0[event_num][idx]))
@@ -115,6 +122,8 @@ try:
     MACRO_CALL = f'runHGTD_Clustering.cxx("{file_num}",{event_num})'
     result = subprocess.run(['root', '-l', '-q', '-b', MACRO_CALL],
                             check=True, capture_output=True, text=True)
+
+    print(result.stdout)
     track_clusters = []
     cluster_times, cluster_zs = [], []
     track_times = []
@@ -150,8 +159,8 @@ except subprocess.CalledProcessError as e:
 
 # --- Data for Histograms and Plotting ---
 hist_times, time_errors = [], []
-hist_zs   , z_errors    = [], []
 hs_times  , hs_zs       = [], []
+hist_zs   , z_errors    = [], []
 pt_wghts = []
 
 for i_trk, cluster in enumerate(track_clusters):
@@ -161,12 +170,28 @@ for i_trk, cluster in enumerate(track_clusters):
     zbar_num = np.sum(np.array(this_zcluster) / np.array(this_var_z0))
     zbar_den = np.sum(1 / np.array(this_var_z0))
 
+    hs_times.extend(track_times[i_trk][j_trk]
+                    for (j_trk,idx) in enumerate(cluster)
+                    if branch.Track_truthVtx_idx[event_num][idx] == 0)
+    hs_zs.extend(branch.Track_z0[event_num][idx]
+                 for idx in cluster
+                 if branch.Track_truthVtx_idx[event_num][idx] == 0)
+
     hist_times.append(track_times[i_trk])
     hist_zs.append(this_zcluster)
-    time_errors.append([branch.Track_timeRes[event_num][idx] for idx in cluster])
+
+    if IDEALEFF:
+        time_errors.append([branch.Track_timeRes[event_num][idx]/np.sqrt(branch.Track_nHGTDHits[event_num][idx])
+                            if branch.Track_hasValidTime[event_num][idx]==1 and branch.Track_nHGTDHits[event_num][idx] > 0 else 30
+                            for idx in cluster])
+    else:
+        time_errors.append([branch.Track_timeRes[event_num][idx] for idx in cluster])
     z_errors.append(np.sqrt(this_var_z0))
     cluster_zs.append(zbar_num / zbar_den)
     pt_wghts.append([branch.Track_pt[event_num][idx] for idx in cluster])
+
+print(hs_times)
+print(hs_zs)
 
 # --- Plotting Functions and Generation ---
 def draw_eta_reference_lines(ax, z_pos=reco_hs_z, eta_ref=2.4, line_length=50):
@@ -262,8 +287,6 @@ def add_annotation(ax, truth_text_y, reco_text_y):
                     ha='left', va='top', color='black',
                     arrowprops={'arrowstyle':'->','color':'black','lw':2})
 
-filename = f'./figs/nohs/event_display_{file_num}_{event_num:04d}.pdf'
-colors = ["#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#a65628", "#f781bf", "#999999"]
 cluster_colors = colors[:len(track_clusters)]
 
 random.seed(42069)
@@ -304,7 +327,7 @@ with PdfPages(filename) as pdf:
 
     # Hard Scatter times
     time_histo1.scatter(hs_times, hs_zs, marker='o', edgecolors='black',
-                       s=50, color='blue', label='Hard Scatter Tracks', zorder=10)
+                        s=50, color='blue', label='Hard Scatter Tracks', zorder=15)
 
     # Add Reco Vertex Z
     time_histo1.plot(list(time_histo1.get_xlim()), [reco_hs_z]*2,
@@ -369,8 +392,7 @@ with PdfPages(filename) as pdf:
 
     # Hard Scatter times
     for t in hs_times:
-        time_histo2.text(t, 0, '/', ha='center', va='top',
-                         fontsize=20, color='blue')
+        time_histo2.text(t, 0, '/', ha='center', va='top', fontsize=20, color='blue')
 
     # Hatch the bin for the highest pT track
     max_pt_idx = np.argmax(flat_pt)
