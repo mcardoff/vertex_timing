@@ -9,3 +9,4 @@
 /.clang-format
 /figs/
 /build/
+/.cache/

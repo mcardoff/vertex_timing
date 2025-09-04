@@ -2,6 +2,7 @@
 #define CLUSTERING_INCLUDES_H
 
 #include <Rtypes.h>
+#include <RtypesCore.h>
 #include <TRandom1.h>
 #include <TCanvas.h>
 #include <TChain.h>

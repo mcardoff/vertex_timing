@@ -1,6 +1,8 @@
 -/eventdisplays/*
 -/ntuple
 -/ntuple_ttbar
+-/build/
+-/old/
 -*.root
 -*.pdf
 -*.bak

@@ -1,55 +1,50 @@
 #ifndef CLUSTERING_FUNCTIONS_H
 #define CLUSTERING_FUNCTIONS_H
 
-#include "clustering_includes.h"
+#include <cmath>
+
 #include "clustering_constants.h"
 #include "clustering_structs.h"
 
-namespace myutl {
+namespace MyUtl {
 
-  static double getSmearedTrackTime(
+  auto getSmearedTrackTime(
     int idx, double res, BranchPointerWrapper *branch
-  ) {
-    int particle_idx = branch->track_to_particle[idx]; // this is anything
-    int truthvtx_idx = branch->track_to_truthvtx[idx]; // this is anything
-    if (debug) std::cout << "Particle_idx: " << particle_idx << std::endl;
-    if (debug) std::cout << "TruthVtx_idx: " << truthvtx_idx << std::endl;
-    double t_part, smear_res = res;
-    if (particle_idx == -1) { // no particle link
-      if (truthvtx_idx != -1) { // some valid truth link, smear that vertex time
-        if (debug) std::cout << "PATH A" << std::endl;
-        t_part = branch->truth_vtx_time[truthvtx_idx];
+  ) -> double {
+    int particleIdx = branch->trackToParticle[idx]; // this is anything
+    int truthvtxIdx = branch->trackToTruthvtx[idx]; // this is anything
+    double tPart = NAN;
+    double smearRes = res;
+    if (particleIdx == -1) { // no particle link
+      if (truthvtxIdx != -1) { // some valid truth link, smear that vertex time
+        tPart = branch->truthVtxTime[truthvtxIdx];
       } else { // some random pileup, assume
-        if (debug) std::cout << "PATH B" << std::endl;
-        t_part = gRandom->Gaus(branch->truth_vtx_time[0],175);
+        tPart = gRandom->Gaus(branch->truthVtxTime[0],PILEUP_SMEAR);
       }
     } else {
-      if (debug) std::cout << "PATH C" << std::endl;
-      t_part = branch->particle_t[particle_idx];
+      tPart = branch->particleT[particleIdx];
     }
-    if (debug) std::cout << "DONE" << std::endl;
-    return gRandom->Gaus(t_part,smear_res);
+    return gRandom->Gaus(tPart,smearRes);
   }
   
-  static double getDistanceBetweenClusters(
-    Cluster a, Cluster b
-  ) {
-    std::vector<double> a_v = a.values;
-    std::vector<double> a_s = a.sigmas;
-    std::vector<double> b_v = b.values;
-    std::vector<double> b_s = b.sigmas;
+  auto getDistanceBetweenClusters(
+    const Cluster& a, const Cluster& b
+  ) -> double {
+    std::vector<double> aVal = a.values;
+    std::vector<double> aSig = a.sigmas;
+    std::vector<double> bVal = b.values;
+    std::vector<double> bSig = b.sigmas;
 
     std::vector<double> metric = {1.,-1.};
 
-    if (a_v.size() != b_v.size())
-      std::cout << "Uh ohhh" << std::endl;
+    if (aVal.size() != bVal.size()) { std::cout << "Uh ohhh\n"; }
 
-    std::vector<double> distances(a_v.size());
-    for (int i=0; i < a_v.size(); i++) {
+    std::vector<double> distances(aVal.size());
+    for (int i=0; i < aVal.size(); i++) {
     
-      double diff_i = (a_v.at(i) - b_v.at(i));
-      double denom_i = sqrt(a_s.at(i)*a_s.at(i) + b_s.at(i)*b_s.at(i));
-      distances.at(i) = diff_i/denom_i;
+      double diffI = (aVal.at(i) - bVal.at(i));
+      double denomI = sqrt(aSig.at(i)*aSig.at(i) + bSig.at(i)*bSig.at(i));
+      distances.at(i) = diffI/denomI;
     }
 
     double dsqr = 0.0;
@@ -60,11 +55,11 @@ namespace myutl {
     return sqrt(dsqr);
   }
 
-  static Cluster mergeClusters(
+  auto mergeClusters(
     Cluster a, Cluster b
-  ) {
-    Cluster merged_cluster;
-    merged_cluster.was_merged = true;
+  ) -> Cluster {
+    Cluster mergedCluster;
+    mergedCluster.wasMerged = true;
   
     for (size_t i = 0; i < a.values.size(); i++) {
       double v1 = a.values.at(i);
@@ -72,92 +67,76 @@ namespace myutl {
       double s1 = a.sigmas.at(i);
       double s2 = b.sigmas.at(i);
 
-      double new_cluster_value =
+      double newClusterValue =
         (v1 / (s1 * s1) + v2 / (s2 * s2)) / (1. / (s1 * s1) + 1. / (s2 * s2));
-      double new_cluster_sigma =
+      double newClusterSigma =
 	sqrt((s2 * s1) * (s2 * s1) / (s2 * s2 + s1 * s1));
-      merged_cluster.values.push_back(new_cluster_value);
-      merged_cluster.sigmas.push_back(new_cluster_sigma);
+      mergedCluster.values.push_back(newClusterValue);
+      mergedCluster.sigmas.push_back(newClusterSigma);
     }
 
-    for (auto t: a.all_times)
-      merged_cluster.all_times.push_back(t);
-    for (auto t: b.all_times)
-      merged_cluster.all_times.push_back(t);
+    for (auto time: a.allTimes)
+      mergedCluster.allTimes.push_back(time);
+    for (auto time: b.allTimes)
+      mergedCluster.allTimes.push_back(time);
+      
+    for (auto idx: a.trackIndices)
+      mergedCluster.trackIndices.push_back(idx);
+    for (auto idx: b.trackIndices)
+      mergedCluster.trackIndices.push_back(idx);
+    
+    mergedCluster.nConstituents = a.nConstituents+b.nConstituents;
+    mergedCluster.maxPtCluster = a.maxPtCluster || b.maxPtCluster;
 
-    for (auto i: a.track_indices)
-      merged_cluster.track_indices.push_back(i);
-    for (auto i: b.track_indices)
-      merged_cluster.track_indices.push_back(i);
+    for (Score score : ENUM_VEC) {
+      mergedCluster.scores[score] = a.scores[score]+b.scores[score];
+    }
 
-    merged_cluster.n_constituents = a.n_constituents+b.n_constituents;
-    merged_cluster.max_pt_cluster = a.max_pt_cluster || b.max_pt_cluster;
-
-    for (ScoreType score: enum_vec)
-      merged_cluster.scores[score] = a.scores[score]+b.scores[score];
-
-    merged_cluster.scores[ScoreType::IDEAL] = merged_cluster.values.at(0);
-
-    // if (merged_cluster.max_pt_cluster)
-    //   merged_cluster.scores[ScoreType::MAXPT] = 1e6;
-
-    return merged_cluster;
+    return mergedCluster;
   }
 
-  static std::vector<Cluster> makeSimpleClusters(
-    std::vector<int> track_indices,
+  auto makeSimpleClusters(
+    const std::vector<int>& trackIndices,
     BranchPointerWrapper *branch,
-    bool use_smeared_times,                         // if true, use smeared_times map
-    const std::map<int, double>& smeared_times_map, // map of smeared times
-    const std::map<int, double>& smeared_timeRes_map, // map of resolution for smeared times if used
-    double fixed_res,                               // fixed resolution for smeared times
-    bool check_time_valid,                          // if true, apply branch->track_time_valid check
+    bool useSmearedTimes,                         // if true, use smeared_times map
+    const std::map<int, double>& smearedTimesMap, // map of smeared times
+    const std::map<int, double>& smearedTimeResMap, // map of resolution for smeared times if used
+    bool checkTimeValid,                          // if true, apply branch->track_time_valid check
     bool usez0
-
-  ) {
+  ) -> std::vector<Cluster> {
     std::vector<Cluster> simpleClusters;
-    for (auto idx: track_indices) {
-      if (!check_time_valid || branch->track_time_valid[idx] == 1) {
-	double trk_time;
-	double trk_res; 
-	if (use_smeared_times) {
-	  trk_time = smeared_times_map.at(idx);
-	  trk_res  = smeared_timeRes_map.at(idx);
+    for (auto idx: trackIndices) {
+      if (!checkTimeValid || branch->trackTimeValid[idx] == 1) {
+	double trkTime = NAN;
+	double trkRes = NAN; 
+	if (useSmearedTimes) {
+	  trkTime = smearedTimesMap.at(idx);
+	  trkRes  = smearedTimeResMap.at(idx);
 	} else {
-	  trk_time = branch->track_time[idx];   
-	  trk_res  = branch->track_time_res[idx];
+	  trkTime = branch->trackTime[idx];   
+	  trkRes  = branch->trackTimeRes[idx];
 	}
 
-	double trk_pt = branch->track_pt[idx];
-	double trk_z0 = branch->track_z0[idx];
-	double trk_res_z0 = branch->track_var_z0[idx];
-	double z_significance = std::abs(trk_z0 - branch->reco_vtx_z[0]) / trk_res_z0;
+	double trkPt = branch->trackPt[idx];
+	double trkZ0 = branch->trackZ0[idx];
+	double trkResZ0 = branch->trackVarZ0[idx];
+	double zSignificance = std::abs(trkZ0 - branch->recoVtxZ[0]) / trkResZ0;
 
-	std::map<ScoreType,double> scores;
-	scores[ScoreType::HGTD] = 0; // do not use this
-	// scores[ScoreType::SIG] = exp(-z_significance);
-	// scores[ScoreType::MAXPT] = 0;
-	scores[ScoreType::TRKPT] = trk_pt;
-	scores[ScoreType::SUMPT2] = trk_pt*trk_pt;
-	// scores[ScoreType::SIGTRKPT] = trk_pt*exp(-z_significance);
-	// scores[ScoreType::MAXHS] = branch->track_to_truthvtx[idx] == 0 ? 1 : 0;
-	// scores[ScoreType::JETPTDR] = branch->calc_jetpt_dr_score(idx);
-	// scores[ScoreType::TRKPTDR] = branch->calc_trkpt_dr_score(idx);
-	// scores[ScoreType::IDEAL] = trk_time;
+	std::map<Score,double> scores;
+	scores[Score::HGTD] = 0;
+	scores[Score::TRKPT] = trkPt;
 
 	Cluster cluster;
-	if (usez0)
-	  cluster = {{trk_time,trk_z0}, {trk_res,trk_res_z0}, {trk_time}, {idx}, scores};
-	else
-	  cluster = {{trk_time}, {trk_res}, {trk_time}, {idx}, scores};
+	if (usez0) cluster = {{trkTime,trkZ0}, {trkRes,trkResZ0}, {trkTime}, {idx}, scores};
+	else cluster = {{trkTime}, {trkRes}, {trkTime}, {idx}, scores};
 	simpleClusters.push_back(cluster);
       }
     }
     return simpleClusters;
   }
 
-  static void doSimultaneousClustering(
-    std::vector<Cluster> *collection, double dist_cut
+  void doSimultaneousClustering(
+    std::vector<Cluster> *collection, double distCut
   ) {
     double distance = 1.e30;
     while (collection->size() > 1) {
@@ -168,18 +147,18 @@ namespace myutl {
 
       distance = getDistanceBetweenClusters(collection->at(0), collection->at(1));
 
-      for (size_t i = 0; i < collection->size(); i++) {
-	for (size_t j = i + 1; j < collection->size(); j++) {
-	  Cluster a = collection->at(i);
-	  Cluster b = collection->at(j);
+      for (int i = 0; i < collection->size(); i++) {
+	for (int j = i + 1; j < collection->size(); j++) {
+	  const Cluster& a = collection->at(i);
+	  const Cluster& b = collection->at(j);
 
-	  if (a.was_merged or b.was_merged)
+	  if (a.wasMerged or b.wasMerged)
 	    continue;
 	
-	  double current_distance =
+	  double currentDistance =
 	    getDistanceBetweenClusters(a, b);
-	  if (current_distance <= distance) {
-	    distance = current_distance;
+	  if (currentDistance <= distance) {
+	    distance = currentDistance;
 	    i0 = i;
 	    j0 = j;
 	  }
@@ -187,242 +166,214 @@ namespace myutl {
       } // i loop
 
       // fuse closest two vertices
-      if (distance < dist_cut and i0 != j0) {
-	Cluster new_cluster = mergeClusters(collection->at(i0),collection->at(j0));
+      if (distance < distCut and i0 != j0) {
+	Cluster newCluster = mergeClusters(collection->at(i0),collection->at(j0));
 	collection->erase(collection->begin()+j0);
 	if (i0 < j0)
 	  collection->erase(collection->begin()+i0);
 	else
 	  collection->erase(collection->begin()+(i0-1));
-
-	collection->push_back(new_cluster);
+	collection->push_back(newCluster);
       } else {
 	if (std::find_if(collection->begin(), collection->end(),
-			 [](Cluster a) {return a.was_merged;}) != collection->end()) {
-	  for (int idx=0; idx < collection->size(); ++idx) {
-	    collection->at(idx).was_merged = false;
-	  }
-	
-	} else {
+			 [](const Cluster& a) {return a.wasMerged;}) != collection->end()) {
+	  for (auto & idx : *collection)
+	    idx.wasMerged = false;
+	} else
 	  break;
-	}
       }
       // break;
     } // While
   }
 
-  static void doConeClustering(
-    std::vector<Cluster> *collection, double dist_cut
+  void doConeClustering(
+    std::vector<Cluster> *collection, double distCut
   ) {
-    if (debug) std::cout << "entering while loop" << std::endl;
+    if (DEBUG) { std::cout << "entering while loop\n"; }
     while (collection->size() > 1) {
-      
       // find seed
       int i0 = -1;
-      double seed_value = -1.;
+      double seedValue = -1.;
       for (int i=0; i < collection->size(); ++i) {
-        if (collection->at(i).was_merged)
-	  continue;
-	Cluster check = collection->at(i);
-	double check_value = check.scores.at(TRKPT);
+        if (collection->at(i).wasMerged) { continue; }
+	const Cluster& check = collection->at(i);
+	double checkValue = check.scores.at(Score::TRKPT);
 	
-	if (seed_value < check_value) {
-	  seed_value = check_value;
+	if (seedValue < checkValue) {
+	  seedValue = checkValue;
 	  i0 = i;
 	}
       }
-      if (i0 == -1) break;
+      if (i0 == -1) { break; }
       
-      if (debug) std::cout << "Found Seed" << std::endl;
+      if (DEBUG) std::cout << "Found Seed\n";
 
       // find merge candidates
       Cluster seed = collection->at(i0);
-      std::vector<int> to_merge;
+      std::vector<int> toMerge;
       for (int j = 0; j < collection->size(); ++j) {
-	if (j == i0) continue;
-	double d = getDistanceBetweenClusters(seed, collection->at(j));
-	if (d < dist_cut) {
-	  to_merge.push_back(j);
+	if (j == i0) { continue; }
+	double clusterDistance = getDistanceBetweenClusters(seed, collection->at(j));
+	if (clusterDistance < distCut) {
+	  toMerge.push_back(j);
 	}
       }
       
-      if (debug) std::cout << "Found " << to_merge.size() << " merge candidates" << std::endl;
+      if (DEBUG) std::cout << "Found " << toMerge.size() << " merge candidates\n";
 
-      if (!to_merge.empty()) {
-	// 1) Build the merged cone without erasing yet
-	Cluster new_cluster = seed;
-	for (int idx : to_merge) {
-	  new_cluster = mergeClusters(new_cluster, collection->at(idx));
-	}
+      if (!toMerge.empty()) {
+	Cluster newCluster = seed;
+	for (int idx : toMerge)
+	  newCluster = mergeClusters(newCluster, collection->at(idx));
 
-	new_cluster.was_merged = true;
-
-	// 2) Erase seed + all candidates in descending order
-	to_merge.push_back(i0);
-	std::sort(to_merge.begin(), to_merge.end(), std::greater<int>());
-	for (int idx : to_merge) {
+	newCluster.wasMerged = true;
+	toMerge.push_back(i0);
+	std::sort(toMerge.begin(), toMerge.end(), std::greater<int>());
+	for (int idx : toMerge) {
 	  collection->erase(collection->begin() + idx);
 	}
-
-	// 3) Push back the final cone
-	collection->push_back(new_cluster);
+	collection->push_back(newCluster);
       } else {
-	// no merges possible, seed is isolated → just move it to the back
-	Cluster seed_only = collection->at(i0);
-	seed_only.was_merged = true;
+	Cluster seedOnly = collection->at(i0);
+	seedOnly.wasMerged = true;
 	collection->erase(collection->begin() + i0);
-	collection->push_back(seed_only);
+	collection->push_back(seedOnly);
       }
     } // While
-    if (debug) std::cout << "Finished Clustering" << std::endl;
+    if (DEBUG) std::cout << "Finished Clustering\n";
   }
 
-  static std::vector<Cluster> clusterTracksInTime(
-     std::vector<int> track_indices,
+  auto clusterTracksInTime(
+     const std::vector<int>& trackIndices,
      BranchPointerWrapper *branch,
-     double distance_cut,    // Cone size/distance cut
-     double smear_res,       // fixed resolution for smeared times
-     bool use_smeared_times, // for ideal cases
-     bool check_time_valid,  // for ideal efficiency
+     double distanceCut,    // Cone size/distance cut
+     bool useSmearedTimes, // for ideal cases
+     bool checkTimeValid,  // for ideal efficiency
+     double smearRes,       // fixed resolution for smeared times
      bool useCone,
      bool usez0
-  ) {
-    if (track_indices.empty() && debug)
-      std::cout << "EMPTY!!!!" << std::endl;
+  ) -> std::vector<Cluster> {
+    if (trackIndices.empty() && DEBUG)
+      std::cout << "EMPTY!!!!\n";
 
-    std::map<int,double> smeared_times_map, smeared_timeRes_map;
+    std::map<int,double> smearedTimesMap;
+    std::map<int,double> smearedTimeResMap;
 
     // if use smeared times, generated
-    if (use_smeared_times) {
-      for (auto idx: track_indices) {
-	double res = smear_res;
-	if (branch->track_time_valid[idx] == 1 and branch->track_hgtd_hits[idx] > 0 )
-	  res /= std::sqrt(branch->track_hgtd_hits[idx]);
-	if (!check_time_valid || branch->track_time_valid[idx] == 1) {
-	  double smeared_time = getSmearedTrackTime(idx, res, branch);
-	  smeared_times_map.emplace(idx, smeared_time);
-	  smeared_timeRes_map.emplace(idx, res);
+    if (useSmearedTimes) {
+      for (auto idx: trackIndices) {
+	double res = smearRes;
+	bool timeQuery = branch->trackTimeValid[idx] == 1 and branch->trackHgtdHits[idx] > 0;
+	if (timeQuery) { res /= std::sqrt(branch->trackHgtdHits[idx]); }
+	if (!checkTimeValid || branch->trackTimeValid[idx] == 1) {
+	  double smearedTime = getSmearedTrackTime(idx, res, branch);
+	  smearedTimesMap.emplace(idx, smearedTime);
+	  smearedTimeResMap.emplace(idx, res);
 	}
       }
     }
 
-    // std::sort(track_indices.begin(), track_indices.end(),
-    // 	      [&branch](int a, int b){return branch->track_pt[a] > branch->track_pt[b];});
-
-    std::vector<Cluster> collection = makeSimpleClusters(track_indices, branch, use_smeared_times,
-							 smeared_times_map, smeared_timeRes_map, smear_res, check_time_valid, usez0);
+    std::vector<Cluster> collection =
+      makeSimpleClusters(trackIndices, branch, useSmearedTimes,
+			 smearedTimesMap, smearedTimeResMap, checkTimeValid, usez0);
     
-    if (not useCone) {
-      doSimultaneousClustering(&collection, distance_cut);
-    } else {
-      doConeClustering(&collection, distance_cut);
-      // collection = doConeClustering(track_indices, branch, distance_cut, use_smeared_times, smeared_times_map, smear_res, check_time_valid, usez0);
-    }
-
-    // if using z0, have to update the trkpt score:
-    if (usez0) {
-      for (Cluster& cluster: collection) {
-	double dz = std::abs(cluster.values.at(1)-branch->reco_vtx_z[0]);
-	auto oldscore = std::pow(cluster.scores.at(TRKPT),0.9);
-	cluster.scores[TRKPTZ] = oldscore*exp(-1.5*dz);
-	cluster.scores[DZ] = exp(-dz);
-      }
-    } else {
-      for (Cluster& cluster: collection) {
-	double znum=0., zden=0.;
-	double dnum=0., dden=0.;
-	// auto max_pt_idx = -1;
-	auto max_pt = -1.;
-	for (auto trk: cluster.track_indices) {
-	  auto
-	    trk_z = branch->track_z0[trk],
-	    trk_var_z = branch->track_var_z0[trk],
-	    trk_d0 = branch->track_d0[trk],
-	    trk_var_d0 = branch->track_var_d0[trk];
-	   // std::cout << "trk_z[" << trk << "] = " << trk_z << std::endl;
-	  // std::cout << "trk_var_z[" << trk << "] = " << trk_var_z << std::endl;
-	  znum += trk_z/(trk_var_z);
-	  zden += 1/(trk_var_z);
-	  dnum += trk_d0/(trk_var_d0);
-	  dden += 1/(trk_var_d0);
-	  if (branch->track_pt[trk] > max_pt)
-	    max_pt = branch->track_pt[trk];
-	}
-
-	double z = znum/zden, zsigma = 1/std::sqrt(zden);
-	double dz = std::abs(z-branch->reco_vtx_z[0]);
-	// std::cout << "dz: " << dz << std::endl;
-	// std::cout << "d0: " << dnum/dden << std::endl;
-	// std::cout << "sumpt: " << cluster.scores.at(TRKPT) << std::endl;
-	auto oldscore = std::pow(cluster.scores.at(TRKPT),0.9);
-	cluster.scores[TRKPTZ] = oldscore*exp(-1.5*dz);
-      }
-    }
-    
-    for (Cluster& cluster: collection)
+    if (not useCone)
+      doSimultaneousClustering(&collection, distanceCut);
+    else
+      doConeClustering(&collection, distanceCut);
+        
+    for (Cluster& cluster: collection) {
       cluster.calcPurity(branch);
-    if (debug) std::cout << "Finished Clustering" << std::endl;
+      cluster.updateScores(branch);
+    }
+    
+    if (DEBUG) std::cout << "Finished Clustering\n";
     return collection;
   }
 
-  static Cluster chooseHGTDCluster(
-    std::vector<Cluster> collection,
+  auto chooseHGTDCluster(
+    const std::vector<Cluster>& collection,
     BranchPointerWrapper *branch
-  ) {
-    double min_diff = 1e50, reco_time = branch->reco_vtx_time[0];
-    Cluster min_cluster;
+  ) -> Cluster {
+    double minDiff = 1e50;
+    double recoTime = branch->recoVtxTime[0];
+    Cluster minCluster;
     for (Cluster cluster: collection) {
-      double this_diff = std::abs(cluster.values.at(0) - reco_time);
-      if (this_diff < min_diff) {
-	min_diff = this_diff;
-	min_cluster = cluster;
+      double thisDiff = std::abs(cluster.values.at(0) - recoTime);
+      if (thisDiff < minDiff) {
+	minDiff = thisDiff;
+	minCluster = cluster;
       }
     }
-    return min_cluster;
+    return minCluster;
   }
   
-  static std::map<ScoreType, Cluster> chooseCluster(
+  auto chooseCluster(
     std::vector<Cluster> collection,
     BranchPointerWrapper *branch
-  ) {
-    std::map<ScoreType,Cluster> output;
-    if (debug) std::cout << "Choosing score" << std::endl;
-    for (ScoreType score: enum_vec) {
-      if (debug) std::cout << "SCORE: " << toString(score)<< std::endl;
-      if (score == ScoreType::HGTD) {
-	continue;
-      }
+  ) -> std::map<Score, Cluster> {
+    std::map<Score,Cluster> output;
+    if (DEBUG) std::cout << "Choosing score\n";
 
-      if (score == ScoreType::PASS) {
-	if (debug) std::cout << "Choosing pass score" << std::endl;
-	for (Cluster& cluster: collection) {
-	  if (cluster.passEfficiency(branch))
-	    output[score] = cluster;
-	}
+    double caloTime90, caloTime60;
+    if(std::find(ENUM_VEC.begin(), ENUM_VEC.end(), CALO90)!=ENUM_VEC.end())
+      caloTime90 = gRandom->Gaus(branch->truthVtxTime[0],90);
+
+    if(std::find(ENUM_VEC.begin(), ENUM_VEC.end(), CALO60)!=ENUM_VEC.end())
+      caloTime60 = gRandom->Gaus(branch->truthVtxTime[0],60);
+      
+    for (Score score: ENUM_VEC) {
+      if (DEBUG) std::cout << "SCORE: " << toString(score) << '\n';
+      if (score == Score::HGTD)
+	continue;
+
+      if (score == Score::JUST60) {
+	output[score] = {{caloTime60}, {60.0}, {}, {-1}, {}};
 	continue;
       }
       
+      if (score == Score::JUST90) {
+	output[score] = {{caloTime90}, {90.0}, {}, {-1}, {}};
+	continue;
+      }
+      
+      if (score == Score::PASS) {
+	if (DEBUG) std::cout << "Choosing pass score\n";
+	for (Cluster& cluster: collection)
+	  if (cluster.passEfficiency(branch))
+	    output[score] = cluster;
+	continue;
+      }
+
       output[score] = collection[0]; // final time we are giving to the user
-      double max_score = score != ScoreType::IDEAL
-	? output[score].scores.at(score)
-	: std::abs(output[score].scores.at(score) - branch->truth_vtx_time[0]);
+      double maxScore = output[score].scores.at(score);
     
       for (Cluster& cluster: collection) {
-	double comp_score = score != ScoreType::IDEAL
-	  ? cluster.scores[score]
-	  : std::abs(cluster.scores[score] - branch->truth_vtx_time[0]);
+	double compScore = cluster.scores[score];
+	bool query = compScore > maxScore;
 
-	bool query = score != ScoreType::IDEAL
-	  ? comp_score > max_score
-	  : comp_score < max_score;
+	if (score == Score::CALO90) {
+	  double caloDiff = std::abs(cluster.values.at(0)-caloTime90);
+	  double caloSigma = std::hypot(cluster.sigmas.at(0), 90);
+	  double nsigma = caloDiff/caloSigma;
+	  if (nsigma > 2.0)
+	    continue;
+	}
 
+	if (score == Score::CALO60) {
+	  double caloDiff = std::abs(cluster.values.at(0)-caloTime60);
+	  double caloSigma = std::hypot(cluster.sigmas.at(0), 60);
+	  double nsigma = caloDiff/caloSigma;
+	  if (nsigma > 2.0)
+	    continue;
+	}
+	
 	if (query) {
-	  max_score = comp_score;
+	  maxScore = compScore;
 	  output[score] = cluster;
 	}
       }
     }
-  
     return output;
   }
 }

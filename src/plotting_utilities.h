@@ -3,29 +3,27 @@
 
 #include "clustering_includes.h"
 #include "clustering_constants.h"
-#include "clustering_structs.h"
-#include <algorithm>
+#include <TEfficiency.h>
+#include <iostream>
 #include <memory>
 
-namespace myutl {
+namespace MyUtl {
 
-  static TF1 *dgaus_fitfunc = new TF1("dgaus", "[1]*TMath::Exp(-0.5 * ((x - [0]) / [3])^2) + [2]*TMath::Exp(-0.5 * ((x - [0]) / [4])^2)");
-  static TF1 *sgaus_fitfunc = new TF1("sgaus", "[0]*TMath::Exp(-0.5 * ((x - [1]) / [2])^2)");
+  TF1 *dgausFitFunc = new TF1("dgaus", "[1]*TMath::Exp(-0.5 * ((x - [0]) / [3])^2) + [2]*TMath::Exp(-0.5 * ((x - [0]) / [4])^2)");
+  TF1 *sgausFitFunc = new TF1("sgaus", "[0]*TMath::Exp(-0.5 * ((x - [1]) / [2])^2)");
 
-  static TF1* create_dgaus_fit(
+  auto createDblFit(
     TH1D* hist, bool fixbkg
-  ) {
-    dgaus_fitfunc->SetParNames("Mean", "Norm1", "Norm2", "Sigma1", "Sigma2");
+  ) -> TF1* {
+    dgausFitFunc->SetParNames("Mean", "Norm1", "Norm2", "Sigma1", "Sigma2");
     TF1* fit = new TF1("dgaus_fit", "dgaus", hist->GetXaxis()->GetXmin(), hist->GetXaxis()->GetXmax());
     fit->SetParameters(0, 0.8*hist->GetMaximum(), 1e-2*hist->GetMaximum(), 26.0, 175.0);
     fit->FixParameter(0, 0);
     fit->SetParLimits(1, 0, 1.E6); // can only be positive
     fit->SetParLimits(2, 0, 1.E6); // can only be positive
     fit->SetParLimits(3, 0.1, 1.E6); // can only be positive
-    if (fixbkg)
-      fit->FixParameter(4, 175);
-    else
-      fit->SetParLimits(4, 0, 1.E6); // realistic values
+    if (fixbkg) { fit->FixParameter(4, PILEUP_SMEAR); }
+    else { fit->SetParLimits(4, 0, 1.E6); } // realistic values
     fit->SetLineColor(kRed);
     fit->SetLineWidth(2);
     fit->SetNpx(1000);
@@ -33,9 +31,9 @@ namespace myutl {
     return fit;
   }
 
-  static TF1* create_sgaus_fit(
+  auto createSngFit(
     TH1D* hist
-  ) {
+  ) -> TF1* {
     TF1* fit = new TF1("gaus_fit", "sgaus", hist->GetXaxis()->GetXmin(), hist->GetXaxis()->GetXmax());
     fit->SetParameters(hist->GetMaximum(), 0, 30);
     fit->SetParLimits(0, 0, hist->GetMaximum()); // can only be positive
@@ -50,154 +48,158 @@ namespace myutl {
   }
   
   struct FitParams {
-    TH1D* mean_dist;
-    TH1D* sigma_dist;
-    TH1D* core_amp_dist;
-    TH1D* back_amp_dist;
-    TH1D* amp_ratio_dist;
+    TH1D* meanDist;
+    TH1D* sigmaDist;
+    TH1D* coreAmpDist;
+    TH1D* backAmpDist;
+    TH1D* ampRatioDist;
 
     FitParams(const char* title, const char* times, const char* name, 
-	      double x_min, double fold_val, double fold_max,
-	      double x_width, int color) {
-      auto full_title = Form("%%s vs %s (%s);%s;%%s", title, times, title);
-      int nbins = (int)((fold_max - x_min) / x_width);
-      mean_dist      = new TH1D(Form("mean_dist_%s", name),
-				Form(full_title, "Common #mu", "#mu"),
-				nbins, x_min, fold_max);
+	      double xMin, double foldVal, double foldMax,
+	      double xWidth, int color) {
+      auto fullTitle = Form("%%s vs %s (%s);%s;%%s", title, times, title);
+      int nbins = (int)((foldMax - xMin) / xWidth);
+      meanDist      = new TH1D(Form("mean_dist_%s", name),
+			       Form(fullTitle, "Common #mu", "#mu"),
+			       nbins, xMin, foldMax);
 
-      sigma_dist     = new TH1D(Form("sigma_dist_%s", name),
-				Form(full_title, "Core #sigma", "Core #sigma"),
-				nbins, x_min, fold_max);
+      sigmaDist     = new TH1D(Form("sigma_dist_%s", name),
+			       Form(fullTitle, "Core #sigma", "Core #sigma"),
+			       nbins, xMin, foldMax);
 
-      core_amp_dist  = new TH1D(Form("amp1_dist_%s", name),
-				Form(full_title, "Core Amplitude", "Amplitude"),
-				nbins, x_min, fold_max);
+      coreAmpDist  = new TH1D(Form("amp1_dist_%s", name),
+			      Form(fullTitle, "Core Amplitude", "Amplitude"),
+			      nbins, xMin, foldMax);
 
-      back_amp_dist  = new TH1D(Form("amp2_dist_%s", name),
-				Form(full_title, "Bkg Amplitude", "Amplitude"),
-				nbins, x_min, fold_max);
+      backAmpDist  = new TH1D(Form("amp2_dist_%s", name),
+			      Form(fullTitle, "Bkg Amplitude", "Amplitude"),
+			      nbins, xMin, foldMax);
 
-      amp_ratio_dist = new TH1D(Form("ampratio_dist_%s", name),
-				Form(full_title, "Core Amp/Bkg Amp", "A.U."),
-				nbins, x_min, fold_max);
+      ampRatioDist = new TH1D(Form("ampratio_dist_%s", name),
+			      Form(fullTitle, "Core Amp/Bkg Amp", "A.U."),
+			      nbins, xMin, foldMax);
 
-      for (const auto& hist: {mean_dist, sigma_dist, core_amp_dist, back_amp_dist, amp_ratio_dist}) {
+      for (const auto& hist: {meanDist, sigmaDist, coreAmpDist, backAmpDist, ampRatioDist}) {
 	hist->SetLineWidth(2);
 	hist->SetLineColor(color);
       }
     }
 
-    void fillEach(int idx, TF1* fit) {
+    void fillEach(int idx, TF1* fit) const {
       double sigma1 = fit->GetParameter("Sigma1");
       
-      sigma_dist->SetBinContent(idx+1,sigma1);
-      sigma_dist->SetBinError(idx+1,fit->GetParError("Sigma1"));
+      sigmaDist->SetBinContent(idx+1,sigma1);
+      sigmaDist->SetBinError(idx+1,fit->GetParError("Sigma1"));
     
-      double amp1     = fit->GetParameter("Norm1"), amp2     = fit->GetParameter("Norm2");
-      double amp1_err = fit->GetParError ("Norm1"), amp2_err = fit->GetParError ("Norm2");
-      double ampratio     = amp1/amp2;
-      double ampratio_err = std::sqrt(pow((1.0/amp2)*amp1_err,2)+pow(-amp2_err*ampratio/amp2,2));
+      double amp1     = fit->GetParameter("Norm1");
+      double amp2     = fit->GetParameter("Norm2");
+      double amp1Err  = fit->GetParError ("Norm1");
+      double amp2Err  = fit->GetParError ("Norm2");
+      double ampRatio = amp1/amp2;
+      double ampRatioErr = std::sqrt(pow((1.0/amp2)*amp1Err,2)+pow(-amp2Err*ampRatio/amp2,2));
 
-      core_amp_dist->SetBinContent(idx+1,amp1);   
-      core_amp_dist->SetBinError(idx+1,amp1_err); 
+      coreAmpDist->SetBinContent(idx+1,amp1);   
+      coreAmpDist->SetBinError(idx+1,amp1Err); 
     
-      back_amp_dist->SetBinContent(idx+1,amp2);   
-      back_amp_dist->SetBinError(idx+1,amp2_err); 
+      backAmpDist->SetBinContent(idx+1,amp2);   
+      backAmpDist->SetBinError(idx+1,amp2Err); 
 
-      amp_ratio_dist->SetBinContent(idx+1,ampratio);   
-      amp_ratio_dist->SetBinError(idx+1,ampratio_err); 
+      ampRatioDist->SetBinContent(idx+1,ampRatio);
+      ampRatioDist->SetBinError(idx+1,ampRatioErr); 
     }
 
-    void fillGaus(int idx, TF1* fit) {
+    void fillGaus(int idx, TF1* fit) const {
       double sigma = fit->GetParameter(2);
 
-      sigma_dist->SetBinContent(idx+1,sigma);
-      sigma_dist->SetBinError(idx+1,fit->GetParError(2));
+      sigmaDist->SetBinContent(idx+1,sigma);
+      sigmaDist->SetBinError(idx+1,fit->GetParError(2));
 
-      double amp2     = fit->GetParameter(0);
-      double amp2_err = fit->GetParError (0);
+      double amp2    = fit->GetParameter(0);
+      double amp2Err = fit->GetParError (0);
     
-      back_amp_dist->SetBinContent(idx+1,amp2);   
-      back_amp_dist->SetBinError(idx+1,amp2_err); 
+      backAmpDist->SetBinContent(idx+1,amp2);   
+      backAmpDist->SetBinError(idx+1,amp2Err); 
     }
 
-    TH1D* fromEnum(FitParamFields fit) {
+    auto fromEnum(FitParamFields fit) const -> TH1D* {
       switch (fit) {
-      case FitParamFields::MEAN:  return mean_dist;
-      case FitParamFields::SIGMA: return sigma_dist;
-      case FitParamFields::CORE:  return core_amp_dist;
-      case FitParamFields::BKG:   return back_amp_dist;
-      case FitParamFields::RATIO: return amp_ratio_dist;
+      case FitParamFields::MEAN:  return meanDist;
+      case FitParamFields::SIGMA: return sigmaDist;
+      case FitParamFields::CORE:  return coreAmpDist;
+      case FitParamFields::BKG:   return backAmpDist;
+      case FitParamFields::RATIO: return ampRatioDist;
       default:                    return nullptr;
       }
     }
   };
 
   struct PlotObj {
-    ScoreType score_to_use;
-    double bin_width;
-    double fold_value, fold_max;
+    Score scoreToUse;
+    double binWidth;
+    double foldValue, foldMax;
     TString fname;
     const char* xtitle;
     const char* ytitle;
     const char* times;
-    double x_min, x_max, x_wid;
-    double y_min, y_max, y_wid;
+    double xMin, xMax, xWid;
+    double yMin, yMax, yWid;
     std::unique_ptr<FitParams> params;
-    std::unique_ptr<TH1D> eff_total;
-    std::unique_ptr<TH1D> eff_pass;
+    std::unique_ptr<TH1D> effTotal;
+    std::unique_ptr<TH1D> effPass;
     std::unique_ptr<TEfficiency> efficiency;
     std::unique_ptr<TH2D> hist;
     std::unique_ptr<TH2D> purity;
-    std::vector<std::unique_ptr<TH1D>> slices_hists;
-    std::vector<std::unique_ptr<TF1>> slices_fits;
+    std::vector<std::unique_ptr<TH1D>> slicesHists;
+    std::vector<std::unique_ptr<TF1>> slicesFits;
 
   PlotObj(const char* title, const char* times,
-	  const char* fname, ScoreType score,
-	  double x_min, double x_max, double x_wid,
-	  double y_min, double y_max, double y_wid,
-	  double p_min, double p_max, double p_wid,
-	  double fold_val, double fold_max)
-    : bin_width(x_wid), fname(fname), score_to_use(score),
+	  const char* fname, Score score,
+	  double xMin, double xMax, double xWid,
+	  double yMin, double yMax, double yWid,
+	  double pMin, double pMax, double pWid,
+	  double foldVal, double foldMax)
+    : binWidth(xWid), fname(fname), scoreToUse(score),
       xtitle(title), ytitle("#Delta t[ps]"), times(times),
-      x_min(x_min), x_max(x_max), x_wid(x_wid),
-      y_min(y_min), y_max(y_max), y_wid(y_wid),
-      fold_value(fold_val), fold_max(fold_max)
+      xMin(xMin), xMax(xMax), xWid(xWid),
+      yMin(yMin), yMax(yMax), yWid(yWid),
+      foldValue(foldVal), foldMax(foldMax)
     {
       TString name(title);
-      name.ReplaceAll(" ", "");
-      int xbins = (int)((x_max - x_min) / x_wid);
-      int ybins = (int)((y_max - y_min) / y_wid);
-      int pbins = (int)((p_max - p_min) / p_wid);
-      int fbins = (int)((fold_max - x_min) / x_wid);
+      name.ReplaceAll(" ", "_");
+      name.ReplaceAll("{", "");
+      name.ReplaceAll("}", "");
+      int xbins = (int)((xMax - xMin) / xWid);
+      int ybins = (int)((yMax - yMin) / yWid);
+      int pbins = (int)((pMax - pMin) / pWid);
+      int fbins = (int)((foldMax - xMin) / xWid);
       hist = std::make_unique<TH2D>(
         Form("%s_%s_%s", name.Data(), toString(score),times),
 	Form("%s t_{0} - TruthVtx t_{0} vs %s (%s);%s;#Delta t[ps]",
 	toString(score), title, times, title),
-	xbins, x_min, x_max, ybins, y_min, y_max);
+	xbins, xMin, xMax, ybins, yMin, yMax);
 
-      eff_pass = std::make_unique<TH1D>(
+      effPass = std::make_unique<TH1D>(
         Form("good_%s_%s_%s", name.Data(), toString(score), times),
 	Form("%s Eff. Events Count vs %s (%s);Entries;%s", 
 	     toString(score), title, times, title),
-	fbins, x_min, fold_max);
+	fbins, xMin, foldMax);
       
-      eff_total = std::make_unique<TH1D>(
+      effTotal = std::make_unique<TH1D>(
         Form("flat_%s_%s_%s", name.Data(), toString(score), times),
 	Form("%s Eff. Events Count vs %s (%s);Entries;%s", 
 	     toString(score), title, times, title),
-	fbins, x_min, fold_max);
+	fbins, xMin, foldMax);
       
       params = std::make_unique<FitParams>(
         title, times, Form("%s_%s_%s", name.Data(), toString(score),times),
-	x_min, fold_val, fold_max, x_wid,colors[score]);
+	xMin, foldVal, foldMax, xWid,COLORS[score]);
       
       purity = std::make_unique<TH2D>(
         Form("cluster_purity_%s_%s_%s", name.Data(), toString(score),times),
 	Form("%s Cluster Purity vs %s (%s);%s;Cluster Purity",
 	     toString(score), title, times, title),
-	xbins, x_min, x_max, pbins, p_min, p_max);
-      purity->SetLineColor(colors[score]);
+	xbins, xMin, xMax, pbins, pMin, pMax);
+      purity->SetLineColor(COLORS[score]);
     }
 
     PlotObj(const PlotObj&) = delete;
@@ -206,45 +208,45 @@ namespace myutl {
     PlotObj& operator=(PlotObj&& other) noexcept = default;
     ~PlotObj() {}
 
-    void FillPurity(double& x, double&y) { this->purity->Fill(x,y); }
-    void FillPurity(int& x, double&y) { this->purity->Fill(x,y); }
+    void fillPurity(double& x, double&y) { this->purity->Fill(x,y); }
+    void fillPurity(int& x, double&y) { this->purity->Fill(x,y); }
 
-    void FillDiff(double& x, double&y) { this->hist->Fill(x,y); }
-    void FillDiff(int& x, double&y) { this->hist->Fill(x,y); }
+    void fillDiff(double& x, double&y) { this->hist->Fill(x,y); }
+    void fillDiff(int& x, double&y) { this->hist->Fill(x,y); }
 
-    void FillPass(double& val) { this->eff_pass->Fill(val); }
-    void FillPass(int& val) { this->eff_pass->Fill(val); }
+    void fillPass(double& val) { this->effPass->Fill(val); }
+    void fillPass(int& val) { this->effPass->Fill(val); }
 
-    void FillTotal(double& val) { this->eff_total->Fill(val); }
-    void FillTotal(int& val) { this->eff_total->Fill(val); }
+    void fillTotal(double& val) { this->effTotal->Fill(val); }
+    void fillTotal(int& val) { this->effTotal->Fill(val); }
     
     inline void setParamMaxes() {
-      double max_val = -10, min_val = 1e60;
-      for (auto key: fitparam_vec) {
+      double maxVal = -10, minVal = 1e60;
+      for (auto key: FITPARAM_VEC) {
 	TH1D *hist = params->fromEnum(key);
 	hist->GetXaxis()->SetNdivisions(510);
-	double this_max = hist->GetMaximum();
-	if (this_max > max_val)
-	  max_val = this_max;
+	double thisMax = hist->GetMaximum();
+	if (thisMax > maxVal)
+	  maxVal = thisMax;
 
-	double this_min = hist->GetMinimum();
-	if (this_min < min_val)
-	  min_val = this_min;
+	double thisMin = hist->GetMinimum();
+	if (thisMin < minVal)
+	  minVal = thisMin;
 
 	if (key == FitParamFields::SIGMA)
-	  max_val = 40.0, min_val = 10;
+	  maxVal = 40.0, minVal = 10;
 
-	double pad = 0.5*(1-0.75) * (max_val-min_val);
-	params->fromEnum(key)->GetYaxis()->SetRangeUser(min_val-pad, max_val+pad);
+	double pad = 0.5*(1-0.75) * (maxVal-minVal);
+	params->fromEnum(key)->GetYaxis()->SetRangeUser(minVal-pad, maxVal+pad);
       }
     }
 
     inline void plotPostProcessing() {
       for(int j = 0; j < hist->GetNbinsX(); ++j) {
-	auto color = colors[j % colors.size()];
+	auto color = COLORS[j % COLORS.size()];
 	auto name = Form("%s_slice%d",hist->GetName(),j);
 
-	int right = hist->GetXaxis()->GetBinLowEdge(j+1) >= fold_value
+	int right = hist->GetXaxis()->GetBinLowEdge(j+1) >= foldValue
 	  ? hist->GetNbinsX()+1 : j+1;
 
 	std::unique_ptr<TH1D> hSlice = std::unique_ptr<TH1D>((TH1D*)hist->ProjectionY(name, j+1, right)->Clone());
@@ -269,28 +271,28 @@ namespace myutl {
 			      (int)leftEdge,(int)rightEdge,
 			      this->ytitle));
 
-	std::unique_ptr<TF1> dgaus_fit = std::unique_ptr<TF1>(create_dgaus_fit(hSlice.get(),true));
-	std::unique_ptr<TF1> sgaus_fit = std::unique_ptr<TF1>(create_sgaus_fit(hSlice.get()));
+	std::unique_ptr<TF1> dgausFit = std::unique_ptr<TF1>(createDblFit(hSlice.get(),true));
+	std::unique_ptr<TF1> sgausFit = std::unique_ptr<TF1>(createSngFit(hSlice.get()));
 
-	double perc_err = dgaus_fit->GetParError("Sigma1")/dgaus_fit->GetParameter("Sigma1");
+	double percErr = dgausFit->GetParError("Sigma1")/dgausFit->GetParameter("Sigma1");
 
-	if (perc_err < 0.10) {
-	  params->fillEach(j, dgaus_fit.get());
-	  slices_fits.push_back(std::move(dgaus_fit));
+	if (percErr < 0.10) {
+	  params->fillEach(j, dgausFit.get());
+	  slicesFits.push_back(std::move(dgausFit));
 	} else {
-	  params->fillGaus(j, sgaus_fit.get());
-	  slices_fits.push_back(std::move(sgaus_fit));
+	  params->fillGaus(j, sgausFit.get());
+	  slicesFits.push_back(std::move(sgausFit));
 	}
-	slices_hists.push_back(std::move(hSlice));
+	slicesHists.push_back(std::move(hSlice));
 
 	if (right == hist->GetNbinsX()+1)
 	  break;
       }
 
-      std::unique_ptr<TEfficiency> eff = std::make_unique<TEfficiency>(*this->eff_pass, *this->eff_total);
+      std::unique_ptr<TEfficiency> eff = std::make_unique<TEfficiency>(*this->effPass, *this->effTotal);
       eff->SetStatisticOption(TEfficiency::kFNormal);
       eff->SetTitle(Form("Efficiency vs %s (%s);%s;Efficiency", this->xtitle, this->times, this->xtitle));
-      eff->SetLineColor(myutl::colors[score_to_use]);
+      eff->SetLineColor(MyUtl::COLORS[this->scoreToUse]);
       eff->SetLineWidth(2);
       efficiency = std::move(eff);
 
@@ -298,232 +300,192 @@ namespace myutl {
     }
 
     inline void printEfficiencyStats() {
-      std::cout << this->times << " Efficiency for dt vs. " << this->xtitle << " ScoreType: " << toString(this->score_to_use) << std::endl;
-      for (int i=1; i<eff_pass->GetNbinsX(); i++) {
-	double num_pass = eff_pass->GetBinContent(i), num_total = eff_total->GetBinContent(i);
-	std::cout << toString(this->score_to_use) << " "
-		  << xtitle << " in [" << eff_pass->GetBinLowEdge(i)
-		  << ", " << eff_pass->GetBinLowEdge(i+1) << ")" << std::endl;
-	std::cout << "Num. Passing: " << num_pass << std::endl;
-	std::cout << "Num. Total : " << num_total << std::endl;
-	std::cout << "Num. Failing: " << num_total - num_pass << std::endl;
+      std::cout << this->times << " Efficiency for dt vs. " << this->xtitle << " ScoreType: " << toString(this->scoreToUse) << '\n';
+      for (int i=1; i<effPass->GetNbinsX(); i++) {
+	double numPass = effPass->GetBinContent(i), numTotal = effTotal->GetBinContent(i);
+	std::cout << toString(this->scoreToUse) << " "
+		  << xtitle << " in [" << effPass->GetBinLowEdge(i)
+		  << ", " << effPass->GetBinLowEdge(i+1) << ")" << '\n';
+	std::cout << "Num. Passing: " << numPass << '\n';
+	std::cout << "Num. Total : " << numTotal << '\n';
+	std::cout << "Num. Failing: " << numTotal - numPass << '\n';
       }
-      std::cout << "--------------------------------------------------" << std::endl;
-      std::cout << "Total Num. Passing: " << eff_pass->Integral() << std::endl;
-      std::cout << "Total Num. Failing: " << eff_total->Integral() - eff_pass->Integral() << std::endl;
-      std::cout << "Overall Efficiency: " << eff_pass->Integral()/eff_total->Integral() << std::endl;
-      std::cout << "--------------------------------------------------" << std::endl;
+      std::cout << "--------------------------------------------------\n";
+      std::cout << "Total Num. Passing: " << effPass->Integral() << '\n';
+      std::cout << "Total Num. Failing: " << effTotal->Integral() - effPass->Integral() << '\n';
+      std::cout << "Overall Efficiency: " << effPass->Integral()/effTotal->Integral() << '\n';
+      std::cout << "--------------------------------------------------\n";
     }
   };
 
   struct AnalysisObj {
     // PlotObjs which store histograms vs event-level variables
-    std::map<std::string, std::unique_ptr<PlotObj>> data_objects;
+    std::map<std::string, std::unique_ptr<PlotObj>> dataObjects;
     // inclusive resolution for the scoretype provided
-    std::unique_ptr<TH1D> inclusive_reso;
-    std::unique_ptr<TH1D> inclusive_purity;
+    std::unique_ptr<TH1D> inclusiveReso;
+    std::unique_ptr<TH1D> inclusivePurity;
     
     // Non-const version for modification
     std::unique_ptr<PlotObj>& operator[](const std::string& key) {
-      return data_objects[key];
+      return dataObjects[key];
     }
 
     const std::unique_ptr<PlotObj>& operator[](const std::string& key) const {
-      auto it = data_objects.find(key);
-      if (it == data_objects.end())
+      auto it = dataObjects.find(key);
+      if (it == dataObjects.end())
         throw std::out_of_range("Key not found in AnalysisObj");
       return it->second;
     }
 
     const std::unique_ptr<PlotObj>& get(const std::string& key) const {
-        return data_objects.at(key);
+        return dataObjects.at(key);
     }
     
     AnalysisObj(
-      const char* filename_ider, // hgtdtimes v idealres, 
-      const char* timetype_ider, // HGTD Times v Ideal Res. HGTD
-      ScoreType score
+      const char* filenameIDer, // hgtdtimes v idealres, 
+      const char* timetypeIDer, // HGTD Times v Ideal Res. HGTD
+      Score score
     ) {
-      data_objects["fjet"] = std::make_unique<PlotObj>(
-        "n Forward Jets", timetype_ider,
-	Form("figs/%s_nfjet.pdf",filename_ider),
+      dataObjects["fjet"] = std::make_unique<PlotObj>(
+        "n Forward Jets", timetypeIDer,
+	Form("figs/%s_nfjet.pdf",filenameIDer),
 	score,
-	fjet_min  , fjet_max  , fjet_width  ,
-	diff_min  , diff_max  , diff_width  ,
-	purity_min, purity_max, purity_width,
-	fold_fjet, fold_fjet+fjet_width     );
+	FJET_MIN  , FJET_MAX  , FJET_WIDTH  ,
+	DIFF_MIN  , DIFF_MAX  , DIFF_WIDTH  ,
+	PURITY_MIN, PURITY_MAX, PURITY_WIDTH,
+	FOLD_FJET, FOLD_FJET+FJET_WIDTH     );
   
-      data_objects["ftrack"] = std::make_unique<PlotObj>(
-        "n Forward Tracks", timetype_ider,
-	Form("figs/%s_ntrack.pdf",filename_ider),
+      dataObjects["ftrack"] = std::make_unique<PlotObj>(
+        "n Forward Tracks", timetypeIDer,
+	Form("figs/%s_ntrack.pdf",filenameIDer),
 	score,
-	track_min , track_max , track_width ,
-	diff_min  , diff_max  , diff_width  ,
-	purity_min, purity_max, purity_width,
-	fold_track, fold_track+track_width  );
+	TRACK_MIN , TRACK_MAX , TRACK_WIDTH ,
+	DIFF_MIN  , DIFF_MAX  , DIFF_WIDTH  ,
+	PURITY_MIN, PURITY_MAX, PURITY_WIDTH,
+	FOLD_TRACK, FOLD_TRACK+TRACK_WIDTH  );
   
-      data_objects["pu_frac"] = std::make_unique<PlotObj>(
-        "Pile Up Fraction", timetype_ider, 
-        Form("figs/%s_pufrac.pdf",filename_ider),
+      dataObjects["pu_frac"] = std::make_unique<PlotObj>(
+        "Pile Up Fraction", timetypeIDer, 
+        Form("figs/%s_pufrac.pdf",filenameIDer),
 	score,
-	pu_frac_min, pu_frac_max, pu_frac_width,
-	diff_min   , diff_max   , diff_width   ,
-	purity_min , purity_max , purity_width ,
-	fold_pu_frac, pu_frac_max              );
+	PU_FRAC_MIN, PU_FRAC_MAX, PU_FRAC_WIDTH,
+	DIFF_MIN   , DIFF_MAX   , DIFF_WIDTH   ,
+	PURITY_MIN , PURITY_MAX , PURITY_WIDTH ,
+	FOLD_PU_FRAC, PU_FRAC_MAX              );
   
-      data_objects["hs_track"] = std::make_unique<PlotObj>(
-        "n Forward HS Tracks", timetype_ider, 
-	Form("figs/%s_nhstrack.pdf",filename_ider),
+      dataObjects["hs_track"] = std::make_unique<PlotObj>(
+        "n Forward HS Tracks", timetypeIDer, 
+	Form("figs/%s_nhstrack.pdf",filenameIDer),
 	score,
-	hs_track_min, hs_track_max, hs_track_width ,
-	diff_min    , diff_max    , diff_width     ,
-	purity_min  , purity_max  , purity_width   ,
-	fold_hs_track, fold_hs_track+hs_track_width);
+	HS_TRACK_MIN, HS_TRACK_MAX, HS_TRACK_WIDTH ,
+	DIFF_MIN    , DIFF_MAX    , DIFF_WIDTH     ,
+	PURITY_MIN  , PURITY_MAX  , PURITY_WIDTH   ,
+	FOLD_HS_TRACK, FOLD_HS_TRACK+HS_TRACK_WIDTH);
   
-      data_objects["pu_track"] = std::make_unique<PlotObj>(
-        "n Forward PU Tracks", timetype_ider, 
-	Form("figs/%s_nputrack.pdf",filename_ider),
+      dataObjects["pu_track"] = std::make_unique<PlotObj>(
+        "n Forward PU Tracks", timetypeIDer, 
+	Form("figs/%s_nputrack.pdf",filenameIDer),
 	score,
-	pu_track_min, pu_track_max, pu_track_width ,
-	diff_min    , diff_max    , diff_width     ,
-	purity_min  , purity_max  , purity_width   ,
-	fold_pu_track, fold_pu_track+pu_track_width);
+	PU_TRACK_MIN, PU_TRACK_MAX, PU_TRACK_WIDTH ,
+	DIFF_MIN    , DIFF_MAX    , DIFF_WIDTH     ,
+	PURITY_MIN  , PURITY_MAX  , PURITY_WIDTH   ,
+	FOLD_PU_TRACK, FOLD_PU_TRACK+PU_TRACK_WIDTH);
 
-      inclusive_reso = std::make_unique<TH1D>(
-        Form("%s_reso_%s",toString(score), filename_ider),
+      inclusiveReso = std::make_unique<TH1D>(
+        Form("%s_reso_%s",toString(score), filenameIDer),
 	Form("Inclusive %s t_{0} - TruthVtx t_{0} (%s);#Delta t[ps];Entries",
-	     toString(score), timetype_ider),
-	(int)((diff_max-diff_min)/diff_width), diff_min, diff_max);
+	     toString(score), timetypeIDer),
+	(int)((DIFF_MAX-DIFF_MIN)/DIFF_WIDTH), DIFF_MIN, DIFF_MAX);
 
-      inclusive_purity = std::make_unique<TH1D>(
-        Form("%s_purity_%s", toString(score), filename_ider),
-	Form("%s Purity (%s);Purity;Entries", toString(score), timetype_ider),
-	(int)((purity_max-purity_min)/purity_width), purity_min, purity_max);
+      inclusivePurity = std::make_unique<TH1D>(
+        Form("%s_purity_%s", toString(score), filenameIDer),
+	Form("%s Purity (%s);Purity;Entries", toString(score), timetypeIDer),
+	(int)((PURITY_MAX-PURITY_MIN)/PURITY_WIDTH), PURITY_MIN, PURITY_MAX);
     }
 
     inline void postProcessing() {
-      for (auto &[str, plt]: this->data_objects)
+      for (auto &[str, plt]: this->dataObjects)
 	plt->plotPostProcessing();
     }
   };
-  
-  static void moneyPlot(
-    const char* fname,
-    const std::string key,
-    TCanvas* canvas,
-    const std::vector<AnalysisObj*>& plts // these are by score now
-  ) {
-    if (plts.size() == 0)
-      return;
 
-    // Plot Key Metrics for each of these PlotObjs on the same plot
-    canvas->Print(Form("%s[",fname));
-    double
-      x_min = plts[0]->get(key)->x_min,
-      fold_max = plts[0]->get(key)->fold_max;
-    const char * xtitle = plts[0]->get(key)->xtitle;
-    int counter = 0;
-    
-    bool first = true;
-    double res_ymin = 0.0, res_ymax = 40;
-    TLegend* reslegend = new TLegend(0.65, 0.65, 0.9, 0.9);
-    for (const auto &ana: plts) {
-      const auto& plt = ana->get(key);
-      const auto& params = plt->params;
-      auto res = params->sigma_dist;
-      res->SetLineColor(colors[counter % colors.size()]);
-      reslegend->AddEntry(res, Form("%s: %s", toString(plt->score_to_use), plt->times));
-      counter++;
-      if (first) {
-	res->SetTitle(Form("Core #sigma vs %s",xtitle));
-	res->GetYaxis()->SetRangeUser(res_ymin,res_ymax);
-	res->Draw("E1");
-	first = false;
-      } else
-	res->Draw("E1 SAME");
-    }
-    reslegend->Draw("SAME");
+  void moneyPlot(
+    const char* fname,
+    const std::string& key,
+    TCanvas* canvas,
+    const std::vector<AnalysisObj*>& plts
+  ) {
+    if (plts.empty()) return;
+
+    double xMin = plts[0]->get(key)->xMin;
+    double xMax = plts[0]->get(key)->foldMax;
+
+    auto plotWithLegend = [&](
+        auto getter, const char* title,
+	double yMin, double yMax, double
+	refVal = -1, const char* refLabel = nullptr
+    ) {
+      TLegend* legend = new TLegend(0.55, 0.65, 0.9, 0.9);
+      bool first = true;
+      int counter = 0;
+
+      for (const auto& ana : plts) {
+	const auto& plt = ana->get(key);
+	auto obj = getter(plt);
+	obj->SetLineColor(COLORS[counter++ % COLORS.size()]);
+	legend->AddEntry(obj, Form("%s: %s", toString(plt->scoreToUse), plt->times));
+
+	if (first) {
+	  obj->SetTitle(Form("%s vs %s", title, plt->xtitle));
+	  obj->Draw("E1");
+	  if constexpr (std::is_same_v<decltype(obj), TEfficiency*> || std::is_same_v<decltype(obj), std::shared_ptr<TEfficiency>>) {
+	    std::cout << "DOING EFFICIENCY STUFF" << std::endl;
+	    gPad->Update();
+	    obj->GetPaintedGraph()->GetYaxis()->SetRangeUser(yMin, yMax);
+	    obj->GetPaintedGraph()->GetXaxis()->SetRangeUser(xMin, xMax);
+	  }
+	  first = false;
+	} else
+	  obj->Draw("E1 SAME");
+      }
+
+      if (refVal != -1) {
+	TLine* refLine = new TLine(xMin, refVal, xMax, refVal);
+	refLine->SetLineColor(kRed);
+	refLine->SetLineWidth(2);
+	refLine->SetLineStyle(4);
+	legend->AddEntry(refLine, refLabel);
+	refLine->Draw("SAME");
+      }
+
+      legend->Draw("SAME");
+      gPad->Update();
+    };
+
+    canvas->Print(Form("%s[", fname));
+
+    // Plot Resolution
+    plotWithLegend(
+        [](auto& plt) { return plt->params->sigmaDist; },
+	"Core #sigma", RES_YMIN, RES_YMAX,
+	15.0, "15ps");
     canvas->Print(fname);
 
     // Plot Efficiency
-    first = true;
-    double eff_ymin = 0.0, eff_ymax = 1.5;
-    counter = 0;
-    TLegend* efflegend = new TLegend(0.65, 0.65, 0.9, 0.9);
-    for (const auto& ana: plts) {
-      const auto& plt = ana->get(key);
-      const auto& efficiency = plt->efficiency;	
-	efficiency->SetLineColor(colors[counter % colors.size()]);
-	efflegend->AddEntry(efficiency.get(), Form("%s: %s", toString(plt->score_to_use), plt->times));
-	counter++;
-	if (first) {
-	  efficiency->SetTitle(Form("Efficiency vs %s",xtitle));
-	  efficiency->Draw("AP");
-	  gPad->Update();  // Ensure painting
-	  efficiency->GetPaintedGraph()->GetYaxis()->SetRangeUser(eff_ymin, eff_ymax);
-	  efficiency->GetPaintedGraph()->GetXaxis()->SetLimits(x_min, fold_max);
-	  efficiency->GetPaintedGraph()->GetXaxis()->SetRangeUser(x_min, fold_max);
-	  efficiency->GetPaintedGraph()->GetXaxis()->SetNdivisions(510);
-	  auto* total = (TH1D*)plt->eff_total->Clone();
-	  total->SetLineColor(colors[8]);
-	  total->SetLineWidth(2);
-	  total->Scale(1.0 / total->Integral());
-	  total->Scale((0.2 - eff_ymin) / total->GetMaximum());
-	  total->Draw("HIST SAME"); 
-	  gPad->Update();
-	  first = false;
-	} else
-	  efficiency->Draw("P SAME");
-    }
+    plotWithLegend(
+        [](auto& plt) { return plt->efficiency.get(); },
+	"Efficiency", EFF_YMIN, EFF_YMAX,
+	0.99, "99% Efficiency");
 
-    TLine *max_eff_line = new TLine(x_min, 0.99, fold_max, 0.99);
-    max_eff_line->SetLineColor(kRed);
-    max_eff_line->SetLineWidth(2);
-    max_eff_line->SetLineStyle(4);
-    efflegend->AddEntry(max_eff_line,"99% Efficiency");
-    max_eff_line->Draw("SAME");
-    efflegend->Draw("SAME");
     canvas->Print(fname);
-
-    // Plot Purity
-    first = true;
-    counter = 0;
-    double pur_ymin = 0.0, pur_ymax = 1.5;
-    TLegend* purlegend = new TLegend(0.65, 0.65, 0.9, 0.9);
-    for (const auto& ana: plts) {
-      const auto& plt = ana->get(key);
-      const auto& purity = plt->purity;
-      auto pur = purity->ProfileX();
-      pur->SetLineWidth(2);
-      pur->GetXaxis()->SetRangeUser(x_min, fold_max);
-      pur->GetYaxis()->SetRangeUser(pur_ymin, pur_ymax);
-      pur->SetLineColor(colors[counter % colors.size()]);
-      purlegend->AddEntry(pur, Form("%s: %s", toString(plt->score_to_use), plt->times));
-      counter++;
-      if (first) {
-	pur->SetTitle(Form("Avg. Cluster Purity vs. %s;%s;%s",
-			   purity->GetXaxis()->GetTitle(),
-			   purity->GetXaxis()->GetTitle(),"Purity"));
-	pur->Draw("E1");  // 'E' to draw error bars
-	first = false;
-      } else
-	pur->Draw("E1 SAME");
-    }
-    TLine *max_pur_line = new TLine(x_min, 1.0, fold_max, 1.0);
-    max_pur_line->SetLineColor(kRed);
-    max_pur_line->SetLineWidth(2);
-    max_pur_line->SetLineStyle(4);
-    purlegend->AddEntry(max_pur_line,"100% Purity");
-    max_pur_line->Draw("SAME");
-    purlegend->Draw("SAME");
-    canvas->Print(fname);
-    canvas->Print(Form("%s]",fname));
+    canvas->Print(Form("%s]", fname));
   }
 
-  static void inclusivePlot(
+
+  void inclusivePlot(
     const char* fname,
-    bool logscale, bool fixbkg,
-    double x_min, double x_max,
+    bool logScale, bool fixBkg,
+    double xMin, double xMax,
     TCanvas *canvas,
     const std::vector<AnalysisObj*>& plts
   ) {
@@ -531,41 +493,41 @@ namespace myutl {
     latex.SetTextSize(0.04);
     latex.SetTextAlign(13); 
     canvas->Print(Form("%s[",fname));
-    canvas->SetLogy(logscale);
+    canvas->SetLogy(logScale);
     for (const auto& plt: plts) {
-      TH1D* hist = (TH1D*)plt->inclusive_reso->Clone();
-      TF1* fit1 = create_dgaus_fit(hist,fixbkg);
-      TLegend* inclusive_legend = new TLegend(0.65, 0.75, 0.9, 0.9);
+      TH1D* hist = (TH1D*)plt->inclusiveReso->Clone();
+      TF1* fit1 = createDblFit(hist,fixBkg);
+      TLegend* inclusiveLegend = new TLegend(0.65, 0.75, 0.9, 0.9);
 
-      inclusive_legend->AddEntry(hist,"Histogram");
-      inclusive_legend->AddEntry(fit1,"Double Gaussian Fit");
+      inclusiveLegend->AddEntry(hist,"Histogram");
+      inclusiveLegend->AddEntry(fit1,"Double Gaussian Fit");
     
-      hist->GetXaxis()->SetRangeUser(x_min, x_max);
+      hist->GetXaxis()->SetRangeUser(xMin, xMax);
       hist->Draw("HIST");
       fit1->Draw("SAME");
-      inclusive_legend->Draw("SAME");
+      inclusiveLegend->Draw("SAME");
     
-      double dg_sigma = fit1->GetParameter(3);
-      latex.DrawLatexNDC(0.18, 0.90,Form("#sigma_{1}^{dgaus}=%.2f",dg_sigma));
+      double dgSigma = fit1->GetParameter(3);
+      latex.DrawLatexNDC(0.18, 0.90,Form("#sigma_{1}^{dgaus}=%.2f",dgSigma));
       canvas->Print(fname);
     }
     canvas->Print(Form("%s]",fname));
   }
 
-  static void purityPlot(
+  void purityPlot(
     const char* fname,
     bool logscale,
     TCanvas* canvas,
     TLegend* legend,
-    std::map<ScoreType,TH1D*> purity_map
+    const std::map<Score,TH1D*>& purityMap
   ) {
     canvas->Print(Form("%s[",fname));
     double maxval = 0.4;
     bool first = true;
     canvas->SetLogy(logscale);
-    for (auto pair: purity_map) {
+    for (auto pair: purityMap) {
       TH1D *hist = pair.second;
-      hist->SetLineColor(colors[pair.first % colors.size()]);
+      hist->SetLineColor(COLORS[pair.first % COLORS.size()]);
       hist->SetLineWidth(2);
       hist->SetBinContent(hist->GetNbinsX(), 
 			  hist->GetBinContent(hist->GetNbinsX()) + hist->GetBinContent(hist->GetNbinsX()+1));

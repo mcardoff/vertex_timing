@@ -1,0 +1,49 @@
+Checks: >
+  readability-identifier-naming,
+  # Performance
+  performance-unnecessary-value-param,
+  performance-for-range-copy,
+  performance-move-const-arg,
+  performance-inefficient-string-concatenation,
+  performance-noexcept-move-constructor,
+  # Modernization & readability
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-loop-convert,
+  readability-const-return-type,
+  readability-const-qualifier,
+  readability-delete-null-pointer,
+  # Bugprone
+  bugprone-sizeof-expression,
+  bugprone-integer-division,
+  bugprone-macro-parentheses,
+  # Disabled noisy ones
+  -clang-diagnostic-unused-includes,
+  -llvm-include-order
+
+WarningsAsErrors: ''   # keep warnings as warnings
+HeaderFilterRegex: '.*'
+FormatStyle: none
+
+CheckOptions:
+  # --- Naming Conventions (ATLAS style) ---
+  - key: readability-identifier-naming.NamespaceCase
+    value: CamelCase
+  - key: readability-identifier-naming.ClassCase
+    value: CamelCase
+  - key: readability-identifier-naming.StructCase
+    value: CamelCase
+  - key: readability-identifier-naming.EnumCase
+    value: CamelCase
+  - key: readability-identifier-naming.FunctionCase
+    value: camelBack
+  - key: readability-identifier-naming.VariableCase
+    value: camelBack
+  - key: readability-identifier-naming.ParameterCase
+    value: camelBack
+  - key: readability-identifier-naming.MemberCase
+    value: camelBack
+  - key: readability-identifier-naming.ConstantCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.MacroDefinitionCase
+    value: UPPER_CASE

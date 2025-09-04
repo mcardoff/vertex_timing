@@ -17,12 +17,12 @@ void runHGTD_Clustering(std::string Number, Long64_t event_num) {
   std::vector<int> tracks = getAssociatedTracks(&branch, min_track_pt,max_track_pt);
 
   bool
-    use_smear_times = true,
+    use_smear_times = false,
     use_valid_times_only = true,
     use_cone_clustering = true,
     use_z0 = false;
 
-  gRandom->SetSeed(21);
+  // gRandom->SetSeed(21);
 
   std::vector<Cluster> clusters =
     clusterTracksInTime(tracks, &branch, 3.0, 30.0,
@@ -41,7 +41,6 @@ void runHGTD_Clustering(std::string Number, Long64_t event_num) {
   for (int j = 0; j < clusters.size(); j++) {
     auto cluster = clusters.at(j);
     auto score = cluster.scores.at(TRKPTZ);
-    if (cluster.values.at(0) > 2000) continue;
     std::cout << "---------\n";
     std::cout << "t: " << cluster.values.at(0) << "\n";
     if (cluster.values.size() > 1) std::cout << "z: " << cluster.values.at(1) << "\n";

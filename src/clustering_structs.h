@@ -3,217 +3,218 @@
 
 #include "clustering_includes.h"
 #include "clustering_constants.h"
-#include <functional>
+#include <cstdlib>
 
-namespace myutl {
+namespace MyUtl {
 
   struct BranchPointerWrapper {
     TTreeReader& reader;
 
     TTreeReaderValue<float> weight;
 
-    TTreeReaderArray<float> track_z0;
-    TTreeReaderArray<float> track_d0;
-    TTreeReaderArray<float> track_pt;
-    TTreeReaderArray<float> track_qp;
-    TTreeReaderArray<float> track_eta;
-    TTreeReaderArray<float> track_phi;
-    TTreeReaderArray<float> track_theta;
-    TTreeReaderArray<float> track_var_z0;
-    TTreeReaderArray<float> track_var_d0;
-    TTreeReaderArray<float> track_var_qp;
-    TTreeReaderArray<float> track_var_theta;
-    TTreeReaderArray<float> track_time;
-    TTreeReaderArray<float> track_time_res;
-    TTreeReaderArray<int>   track_time_valid;
-    TTreeReaderArray<int>   track_to_truthvtx;
-    TTreeReaderArray<int>   track_to_particle;
-    TTreeReaderArray<bool>  track_quality;
-    TTreeReaderArray<int>   track_hgtd_hits;
-    TTreeReaderArray<int>   track_prim_hits;
-    TTreeReaderArray<float> track_near_idx;
-    TTreeReaderArray<float> track_near_z0sin;
-    TTreeReaderArray<float> track_near_z0sin_unc;
-    TTreeReaderArray<float> track_near_sig;
+    TTreeReaderArray<float> trackZ0;
+    TTreeReaderArray<float> trackD0;
+    TTreeReaderArray<float> trackPt;
+    TTreeReaderArray<float> trackQP;
+    TTreeReaderArray<float> trackEta;
+    TTreeReaderArray<float> trackPhi;
+    TTreeReaderArray<float> trackTheta;
+    TTreeReaderArray<float> trackVarZ0;
+    TTreeReaderArray<float> trackVarD0;
+    TTreeReaderArray<float> trackVarQp;
+    TTreeReaderArray<float> trackVarTheta;
+    TTreeReaderArray<float> trackTime;
+    TTreeReaderArray<float> trackTimeRes;
+    TTreeReaderArray<int>   trackTimeValid;
+    TTreeReaderArray<int>   trackToTruthvtx;
+    TTreeReaderArray<int>   trackToParticle;
+    TTreeReaderArray<bool>  trackQuality;
+    TTreeReaderArray<int>   trackHgtdHits;
+    TTreeReaderArray<int>   trackPrimHits;
+    TTreeReaderArray<float> trackNearIdx;
+    TTreeReaderArray<float> trackNearZ0sin;
+    TTreeReaderArray<float> trackNearZ0sinUnc;
+    TTreeReaderArray<float> trackNearSig;
 
-    TTreeReaderArray<float> truth_vtx_z;
-    TTreeReaderArray<float> truth_vtx_time;
-    TTreeReaderArray<bool>  truth_vtx_ishs;
+    TTreeReaderArray<float> truthVtxZ;
+    TTreeReaderArray<float> truthVtxTime;
+    TTreeReaderArray<bool>  truthVtxIshs;
 
-    TTreeReaderArray<float> reco_vtx_z;
-    TTreeReaderArray<float> reco_vtx_time;
-    TTreeReaderArray<float> reco_vtx_timeRes;
-    TTreeReaderArray<int>   reco_vtx_valid;
+    TTreeReaderArray<float> recoVtxZ;
+    TTreeReaderArray<float> recoVtxTime;
+    TTreeReaderArray<float> recoVtxTimeRes;
+    TTreeReaderArray<int>   recoVtxValid;
 
-    TTreeReaderArray<float> topojet_pt;
-    TTreeReaderArray<float> topojet_eta;
-    TTreeReaderArray<float> topojet_phi;
+    TTreeReaderArray<float> topoJetPt;
+    TTreeReaderArray<float> topoJetEta;
+    TTreeReaderArray<float> topoJetPhi;
 
-    TTreeReaderArray<float> truthhsjet_pt;
-    TTreeReaderArray<float> truthhsjet_eta;
+    TTreeReaderArray<float> truthHSJetPt;
+    TTreeReaderArray<float> truthHSJetEta;
 
-    TTreeReaderArray<float> particle_t;
+    TTreeReaderArray<float> particleT;
 
   BranchPointerWrapper(TTreeReader& r)
     : reader (r),
       weight (r, "weight"),
-      track_d0 (r, "Track_d0"),
-      track_z0 (r, "Track_z0"),
-      track_pt (r, "Track_pt"),
-      track_eta (r, "Track_eta"),
-      track_qp (r, "Track_qOverP"),
-      track_theta (r, "Track_theta"),
-      track_phi (r, "Track_phi"),
-      track_var_d0 (r, "Track_var_d0"),
-      track_var_z0 (r, "Track_var_z0"),
-      track_var_qp (r, "Track_var_qOverP"),
-      track_var_theta (r, "Track_var_theta"),
-      track_time (r, "Track_time"),
-      track_time_res (r, "Track_timeRes"),
-      track_time_valid (r, "Track_hasValidTime"),
-      track_quality (r, "Track_quality"),
-      track_to_truthvtx (r, "Track_truthVtx_idx"),
-      track_to_particle (r, "Track_truthPart_idx"),
-      track_hgtd_hits (r, "Track_nHGTDHits"),
-      track_prim_hits (r, "Track_nHGTDPrimaryHits"),
-      track_near_idx (r, "Track_nearestVtx_idx"),
-      track_near_z0sin (r, "Track_nearestVtx_z0SinTheta"),
-      track_near_z0sin_unc (r, "Track_nearestVtx_z0SinThetaUncertainty"),
-      track_near_sig (r, "Track_nearestVtx_sig"),
-      truth_vtx_z (r, "TruthVtx_z"),
-      truth_vtx_time (r, "TruthVtx_time"),
-      truth_vtx_ishs (r, "TruthVtx_isHS"),
-      reco_vtx_z (r, "RecoVtx_z"),
-      reco_vtx_time (r, "RecoVtx_time"),
-      reco_vtx_timeRes (r, "RecoVtx_timeRes"),
-      reco_vtx_valid (r, "RecoVtx_hasValidTime"),
-      topojet_pt (r, "AntiKt4EMTopoJets_pt"),
-      topojet_eta (r, "AntiKt4EMTopoJets_eta"),
-      topojet_phi (r, "AntiKt4EMTopoJets_phi"),
-      truthhsjet_pt (r, "TruthHSJet_pt"),
-      truthhsjet_eta (r, "TruthHSJet_eta"),
-      particle_t (r, "TruthPart_prodVtx_time")
+      trackD0 (r, "Track_d0"),
+      trackZ0 (r, "Track_z0"),
+      trackPt (r, "Track_pt"),
+      trackEta (r, "Track_eta"),
+      trackQP (r, "Track_qOverP"),
+      trackTheta (r, "Track_theta"),
+      trackPhi (r, "Track_phi"),
+      trackVarD0 (r, "Track_var_d0"),
+      trackVarZ0 (r, "Track_var_z0"),
+      trackVarQp (r, "Track_var_qOverP"),
+      trackVarTheta (r, "Track_var_theta"),
+      trackTime (r, "Track_time"),
+      trackTimeRes (r, "Track_timeRes"),
+      trackTimeValid (r, "Track_hasValidTime"),
+      trackQuality (r, "Track_quality"),
+      trackToTruthvtx (r, "Track_truthVtx_idx"),
+      trackToParticle (r, "Track_truthPart_idx"),
+      trackHgtdHits (r, "Track_nHGTDHits"),
+      trackPrimHits (r, "Track_nHGTDPrimaryHits"),
+      trackNearIdx (r, "Track_nearestVtx_idx"),
+      trackNearZ0sin (r, "Track_nearestVtx_z0SinTheta"),
+      trackNearZ0sinUnc (r, "Track_nearestVtx_z0SinThetaUncertainty"),
+      trackNearSig (r, "Track_nearestVtx_sig"),
+      truthVtxZ (r, "TruthVtx_z"),
+      truthVtxTime (r, "TruthVtx_time"),
+      truthVtxIshs (r, "TruthVtx_isHS"),
+      recoVtxZ (r, "RecoVtx_z"),
+      recoVtxTime (r, "RecoVtx_time"),
+      recoVtxTimeRes (r, "RecoVtx_timeRes"),
+      recoVtxValid (r, "RecoVtx_hasValidTime"),
+      topoJetPt (r, "AntiKt4EMTopoJets_pt"),
+      topoJetEta (r, "AntiKt4EMTopoJets_eta"),
+      topoJetPhi (r, "AntiKt4EMTopoJets_phi"),
+      truthHSJetPt (r, "TruthHSJet_pt"),
+      truthHSJetEta (r, "TruthHSJet_eta"),
+      particleT (r, "TruthPart_prodVtx_time")
     {}
 
-    bool pass_basic_cuts() {
-      if (this->truthhsjet_pt.GetSize() < min_jets or
-	  this->topojet_pt.GetSize() < min_jets) {
-	if (debug) std::cout << "Skipping low jet event" << std::endl;
+    bool passBasicCuts() {
+      if (this->truthHSJetPt.GetSize() < MIN_JETS or
+	  this->topoJetPt.GetSize() < MIN_JETS) {
+	if (DEBUG) std::cout << "Skipping low jet event\n";
         return false;
       }
     
       // check reco HS vertex is with 2mm of truth HS vertex
-      if(std::abs(truth_vtx_z[0] - reco_vtx_z[0]) > max_vtx_dz) {
-	if(debug) std::cout << "Skipping event due to incorrect HS vertex" << std::endl;
+      if(std::abs(truthVtxZ[0] - recoVtxZ[0]) > MAX_VTX_DZ) {
+	if(DEBUG) std::cout << "Skipping event due to incorrect HS vertex\n";
 	return false;
       }
       
       return true;
     }
 
-    bool pass_jet_pt_cut() { 
+    bool passJetPtCut() { 
       int passptcount = 0, passptetacount = 0;
-      for(int jet_idx = 0; jet_idx < this->topojet_eta.GetSize(); ++jet_idx) {
+      for(int jetIdx = 0; jetIdx < this->topoJetEta.GetSize(); ++jetIdx) {
 	float
-	  eta = topojet_eta[jet_idx],
-	  pt = truthhsjet_pt[jet_idx];
-	if (debug) std::cout << "pt, eta: " << pt << ", " << eta << std::endl;
-	bool passpt = pt > min_jetpt;
-	bool passpteta = pt > min_jetpt and std::abs(eta) > min_abs_eta_jet;
+	  eta = topoJetEta[jetIdx],
+	  pt = truthHSJetPt[jetIdx];
+	if (DEBUG) std::cout << "pt, eta: " << pt << ", " << eta << '\n';
+	bool passpt = pt > MIN_JETPT;
+	bool passpteta = pt > MIN_JETPT and std::abs(eta) > MIN_ABS_ETA_JET;
 	passptcount += passpt ? 1 : 0;
 	passptetacount += passpteta ? 1 : 0;
       }
-      bool pass_a = passptcount >= min_passpt_jets;
-      bool pass_b = passptetacount >= min_passeta_jets;
-      return pass_a and pass_b;
+      bool aPasses = passptcount >= MIN_PASSPT_JETS;
+      bool bPasses = passptetacount >= MIN_PASSETA_JETS;
+      return aPasses and bPasses;
     }
 
-    bool pass_forward_hs_tracks(int& nForwardHSTrack) {
+    bool passForwardHsTracks(int& nForwardHSTrack) {
       return
-	max_nhs_track >= nForwardHSTrack and
-	nForwardHSTrack >= min_nhs_track;
+	MAX_NHS_TRACK >= nForwardHSTrack and
+	nForwardHSTrack >= MIN_NHS_TRACK;
     }
 
-    void count_forward_jets(int& nForwardJet) {
+    void countForwardJets(int& nForwardJet) {
     nForwardJet = 0;
-    for(int jet_idx = 0; jet_idx < this->topojet_eta.GetSize(); ++jet_idx) {
+    for(int jetIdx = 0; jetIdx < this->topoJetEta.GetSize(); ++jetIdx) {
       float
-	jet_eta = this->topojet_eta[jet_idx],
-	jet_pt = this->topojet_pt[jet_idx];
-      if (std::abs(jet_eta) > min_abs_eta_jet and
-	  jet_pt > min_jetpt)
+	jetEta = std::abs(this->topoJetEta[jetIdx]),
+	jetPt = this->topoJetPt[jetIdx];
+      if (jetEta > MIN_ABS_ETA_JET and jetPt > MIN_JETPT)
 	nForwardJet++;
     }
   }
     
-    void count_forward_tracks(int& nFTrack, int& nFTrack_HS, int& nFTrack_PU,
-			      std::vector<int> tracks, bool check_time_valid) {
-      nFTrack = 0; nFTrack_HS = 0; nFTrack_PU = 0;
-      for(auto trk_idx: tracks) {
-	double eta = this->track_eta[trk_idx];
-	double pt = this->track_pt[trk_idx];
-	int  truthvtx = this->track_to_truthvtx[trk_idx];
-	bool quality = this->track_quality[trk_idx] == true;
-	bool check_query = (this->track_time_valid[trk_idx] == 1);
+    void countForwardTracks(
+      int& nFTrack, int& nFTrackHS, int& nFTrackPU,
+      const std::vector<int>& tracks, bool checkTimeValid
+    ) {
+      nFTrack = 0; nFTrackHS = 0; nFTrackPU = 0;
+      for(auto trkIdx: tracks) {
+	double eta = std::abs(this->trackEta[trkIdx]);
+	double pt = this->trackPt[trkIdx];
+	int  truthVtx = this->trackToTruthvtx[trkIdx];
+	bool quality = this->trackQuality[trkIdx] == true;
+	bool checkQuery = this->trackTimeValid[trkIdx] == 1;
 	// already know these pass association
-	if (std::abs(eta) > min_abs_eta_track and
-	    pt > min_track_pt and pt < max_track_pt and
-	    quality and check_query) {
+	if (eta > MIN_ABS_ETA_TRACK and
+	    pt > MIN_TRACK_PT and pt < MAX_TRACK_PT and
+	    quality and checkQuery) {
 	  nFTrack++;
-	  if (truthvtx != -1 and this->truth_vtx_ishs[truthvtx])
-	    nFTrack_HS++;
+	  if (truthVtx != -1 and this->truthVtxIshs[truthVtx])
+	    nFTrackHS++;
 	  else
-	    nFTrack_PU++;
+	    nFTrackPU++;
 	}
       }
     }
 
-    double calc_jetpt_dr_score(int trk_idx) {
+    double calcJetptDRScore(int trkIdx) {
       double
-	trk_eta = this->track_eta[trk_idx],
-	trk_phi = this->track_phi[trk_idx];
+	trkEta = this->trackEta[trkIdx],
+	trkPhi = this->trackPhi[trkIdx];
 
-      double min_dR = 1e6;
-      int min_idx = -1;
-      for (int jet_idx=0; jet_idx < this->topojet_eta.GetSize(); ++jet_idx) {
+      double minDR = 1e6;
+      int minIdx = -1;
+      for (int jetIdx=0; jetIdx < this->topoJetEta.GetSize(); ++jetIdx) {
 	double
-	  jet_eta = this->topojet_eta[jet_idx],
-	  jet_phi = this->topojet_phi[jet_idx];
+	  jetEta = this->topoJetEta[jetIdx],
+	  jetPhi = this->topoJetPhi[jetIdx];
 	double
-	  deta = jet_eta-trk_eta,
-	  dphi = TVector2::Phi_mpi_pi(jet_phi - trk_phi);
-	double this_dR = std::hypot(deta, dphi);
-	if (this_dR < min_dR) {
-	  min_dR = this_dR;
-	  min_idx = jet_idx;
+	  deta = jetEta-trkEta,
+	  dphi = TVector2::Phi_mpi_pi(jetPhi - trkPhi);
+	double thisDR = std::hypot(deta, dphi);
+	if (thisDR < minDR) {
+	  minDR = thisDR;
+	  minIdx = jetIdx;
 	}
       }
-      double returnScore = this->topojet_pt[min_idx]*std::exp(-min_dR);
+      double returnScore = this->topoJetPt[minIdx]*std::exp(-minDR);
       return returnScore;
     }
 
-    double calc_trkpt_dr_score(int trk_idx) {
+    double calcTrkptDRScore(int trkIdx) {
       double
-	trk_eta = this->track_eta[trk_idx],
-	trk_phi = this->track_phi[trk_idx];
+	trkEta = this->trackEta[trkIdx],
+	trkPhi = this->trackPhi[trkIdx];
 
 
-      double min_dR = 1e6;
-      for (int jet_idx=0; jet_idx < this->topojet_eta.GetSize(); ++jet_idx) {
+      double minDR = 1e6;
+      for (int jetIdx = 0; this->topoJetEta.GetSize() > jetIdx; ++jetIdx) {
+        double
+	  jetEta = this->topoJetEta[jetIdx],
+	  jetPhi = this->topoJetPhi[jetIdx];
+
 	double
-	  jet_eta = this->topojet_eta[jet_idx],
-	  jet_phi = this->topojet_phi[jet_idx];
+	  deta = jetEta-trkEta,
+	  dphi = TVector2::Phi_mpi_pi(jetPhi - trkPhi);
 
-	double
-	  deta = jet_eta-trk_eta,
-	  dphi = TVector2::Phi_mpi_pi(jet_phi - trk_phi);
-
-	double this_dR = std::sqrt(deta*deta + dphi*dphi);
-	if (this_dR < min_dR) {
-	  min_dR = this_dR;
+	double thisDR = std::sqrt(deta*deta + dphi*dphi);
+	if (thisDR < minDR) {
+	  minDR = thisDR;
 	}
       }
-      double returnScore = this->track_pt[trk_idx]*std::exp(-min_dR);
+      double returnScore = this->trackPt[trkIdx]*std::exp(-minDR);
       return returnScore;
     }
   };
@@ -221,20 +222,20 @@ namespace myutl {
   struct Cluster {
     std::vector<double> values;
     std::vector<double> sigmas;
-    std::vector<double> all_times;
-    std::vector<int> track_indices;
-    std::map<ScoreType,double> scores;
+    std::vector<double> allTimes;
+    std::vector<int> trackIndices;
+    std::map<Score,double> scores;
     double purity = 0.0;
-    bool max_pt_cluster = false;
-    bool was_merged = false;
-    int n_constituents=1;
+    bool maxPtCluster = false;
+    bool wasMerged = false;
+    int nConstituents=1;
 
     bool operator==(const Cluster& other) {
-      bool same_values = values.at(0) == other.values.at(0);
-      bool same_sigmas = sigmas.at(0) == other.sigmas.at(0);
-      bool same_consts = n_constituents == other.n_constituents;
+      bool sameValues = values.at(0) == other.values.at(0);
+      bool sameSigmas = sigmas.at(0) == other.sigmas.at(0);
+      bool sameConsts = nConstituents == other.nConstituents;
       // this SHOULD be sufficient
-      return same_consts and same_sigmas and same_values;
+      return sameConsts and sameSigmas and sameValues;
     }
 
     bool operator!=(const Cluster& other) {
@@ -243,49 +244,75 @@ namespace myutl {
 
     void calcPurity(BranchPointerWrapper *branch) {
       double num = 0.0, denom = 0.0;
-      for (auto trk: this->track_indices) {
-	if (branch->track_to_truthvtx[trk] == 0) num += branch->track_pt[trk];
-	denom += branch->track_pt[trk];
+      for (auto trk: this->trackIndices) {
+	if (branch->trackToTruthvtx[trk] == 0) num += branch->trackPt[trk];
+	denom += branch->trackPt[trk];
       }
       this->purity = num/denom;
     }
 
-    double spread_t() {
+    void updateScores(BranchPointerWrapper *branch) {
+      // Assign TRKPTZ, CALO90, CALO60 Scores
+
+      if (this->values.size() > 1) {
+	double dz = std::abs(this->values.at(1)-branch->recoVtxZ[0]);
+	auto oldscore = std::pow(this->scores.at(Score::TRKPT),0.9);
+        this->scores[Score::TRKPTZ] = oldscore*exp(-1.5*dz);
+      } else {
+	double znum=0., zden=0.;
+	for (auto trk: this->trackIndices) {
+	  auto
+	    trkZ = branch->trackZ0[trk],
+	    trkVarZ = branch->trackVarZ0[trk];
+	  znum += trkZ/(trkVarZ);
+	  zden += 1/(trkVarZ);
+	}
+
+	double z = znum/zden, zsigma = 1/std::sqrt(zden);
+	double dz = std::abs(z-branch->recoVtxZ[0]);
+        this->scores[Score::TRKPTZ] = this->scores.at(Score::TRKPT)*exp(-1.5*dz);
+      }
+      
+      this->scores[Score::CALO90] = this->scores.at(Score::TRKPTZ);
+      this->scores[Score::CALO60] = this->scores.at(Score::TRKPTZ);
+    }
+    
+    double timeSpread() {
       // calculate stdev of times
-      auto avg = std::accumulate(all_times.begin(),all_times.end(),0.0)/this->all_times.size();
+      auto avg = std::accumulate(allTimes.begin(),allTimes.end(),0.0)/this->allTimes.size();
       auto ssd = 0.0;
-      for (auto t: all_times) {
+      for (auto t: allTimes) {
 	ssd += (avg - t)*(avg - t);
       }
 
-      return std::sqrt(ssd/this->all_times.size());
+      return std::sqrt(ssd/this->allTimes.size());
     }
 
-    double spread_z(BranchPointerWrapper *bpw) {
+    double zSpread(BranchPointerWrapper *bpw) {
       // calculate stdev of times
       auto avg = 0.0;
-      for (auto trk: track_indices)
-	avg += bpw->track_z0[trk];
-      avg *= 1./this->track_indices.size();
+      for (auto trk: trackIndices)
+	avg += bpw->trackZ0[trk];
+      avg *= 1./this->trackIndices.size();
       auto ssd = 0.0;
-      for (auto t: track_indices) {
-	ssd += (avg - bpw->track_z0[t])*(avg - bpw->track_z0[t]);
+      for (auto t: trackIndices) {
+	ssd += (avg - bpw->trackZ0[t])*(avg - bpw->trackZ0[t]);
       }
-      return std::sqrt(ssd/this->track_indices.size());
+      return std::sqrt(ssd/this->trackIndices.size());
     }
 
     bool passEfficiency(BranchPointerWrapper *branch) {
-      if (debug) std::cout << "Choosing pass score" << std::endl;
+      if (DEBUG) std::cout << "Choosing pass score\n";
       if (this->values.size() == 0)
 	return false;
 
-      double diff = std::abs(this->values.at(0)-branch->truth_vtx_time[0]);
+      double diff = std::abs(this->values.at(0)-branch->truthVtxTime[0]);
       if (diff > 60)
 	return false;
 
       int nHSTrack = 0;
-      for (auto idx: this->track_indices) {
-	if (branch->track_to_truthvtx[idx] == 0)
+      for (auto idx: this->trackIndices) {
+	if (idx == -1 or branch->trackToTruthvtx[idx] == 0)
 	  nHSTrack++;
       }
 

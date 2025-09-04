@@ -9,62 +9,62 @@
 
 using boost::filesystem::directory_iterator;
 
-namespace myutl {
+namespace MyUtl {
 
-  static void setup_chain(
-    TChain &chain, const char* ntuple_dir
+  void setupChain(
+    TChain &chain, const char* ntupleDir
   ) {
     // VBF H->Invisible sample
-    for (const auto& entry : directory_iterator(ntuple_dir)) {
+    for (const auto& entry : directory_iterator(ntupleDir)) {
       if (entry.is_directory()) continue;
-      if(debug) {std::cout << "Adding file: " << entry.path() << std::endl;}
+      if(DEBUG) {std::cout << "Adding file: " << entry.path() << '\n';}
       chain.Add(entry.path().c_str());
       // break;
     }
   
     if (chain.GetEntries() == 0) {
-      std::cerr << "No ROOT files found in directory: " << std::endl;
+      std::cerr << "No ROOT files found in directory\n";
       return;
     }
   }
 
-  static void setup_chain(
-    TChain &chain, std::string Number
+  void setupChain(
+    TChain &chain, const std::string& number
   ) {
-    chain.Add(Form("../ntuple-hgtd/user.mcardiff.45809429.Output._%s.SuperNtuple.root", Number.c_str()));
+    chain.Add(Form("../ntuple-hgtd/user.mcardiff.45809429.Output._%s.SuperNtuple.root", number.c_str()));
   }
 
-  static bool passTrackVertexAssociation(
-    int track_idx, int vertex_idx, 
+  bool passTrackVertexAssociation(
+    int trackIdx, int vertexIdx, 
     BranchPointerWrapper *branch,
-    double significance_cut
+    double significanceCut
   ) {
     double
-      trk_z0    = branch->track_z0[track_idx],
-      trk_z_var = branch->track_var_z0[track_idx],
-      vx_z      = branch->reco_vtx_z[vertex_idx],
-      vx_z_var  = 0.0;
+      trkZ0    = branch->trackZ0[trackIdx],
+      trkZVar = branch->trackVarZ0[trackIdx],
+      vxZ      = branch->recoVtxZ[vertexIdx],
+      vxZVar  = 0.0;
     
-    double nsigma_prim = std::abs(trk_z0 - vx_z) / std::sqrt(trk_z_var + vx_z_var);
-    return nsigma_prim < significance_cut;
+    double nsigmaPrim = std::abs(trkZ0 - vxZ) / std::sqrt(trkZVar + vxZVar);
+    return nsigmaPrim < significanceCut;
   }
 
-  static std::vector<int> pileupRemoval(
-    std::vector<int> tracks, 
+  std::vector<int> pileupRemoval(
+    const std::vector<int>& tracks, 
     BranchPointerWrapper *branch,
-    double significance_cut
+    double significanceCut
   ) {
     std::vector<int> output;
     for (const auto& trk: tracks) {
-       int near = (int)branch->track_near_idx[trk];
-       double near_z0 = branch->track_near_z0sin[trk] / std::sin(branch->track_theta[trk]);
-       double near_var_z0 = (pow(branch->track_near_z0sin_unc[trk],2)-pow(near_z0*std::cos(branch->track_theta[trk])*branch->track_var_theta[trk],2))/std::sin(branch->track_theta[trk])*std::sin(branch->track_theta[trk]);
+       int near = (int)branch->trackNearIdx[trk];
+       double nearZ0 = branch->trackNearZ0sin[trk] / std::sin(branch->trackTheta[trk]);
+       double nearVarZ0 = (pow(branch->trackNearZ0sinUnc[trk],2)-pow(nearZ0*std::cos(branch->trackTheta[trk])*branch->trackVarTheta[trk],2))/std::sin(branch->trackTheta[trk])*std::sin(branch->trackTheta[trk]);
 
-       double sig_near = std::abs(near_z0 - branch->reco_vtx_z[near]) / std::sqrt(near_var_z0);
-       double sig_prim = std::abs(branch->track_z0[trk] - branch->reco_vtx_z[0]) / std::sqrt(branch->track_var_z0[trk]);
+       double sigNear = std::abs(nearZ0 - branch->recoVtxZ[near]) / std::sqrt(nearVarZ0);
+       double sigPrim = std::abs(branch->trackZ0[trk] - branch->recoVtxZ[0]) / std::sqrt(branch->trackVarZ0[trk]);
 
        // if (near != 0 && sig_near < sig_prim && sig_near < significance_cut)
-       if (near != 0 && sig_near < significance_cut)
+       if (near != 0 && sigNear < significanceCut)
 	 continue;
 
        output.push_back(trk);
@@ -72,172 +72,171 @@ namespace myutl {
     return output;
   }
 
-  static std::vector<int> getAssociatedTracks(
+  std::vector<int> getAssociatedTracks(
     BranchPointerWrapper *branch,
-    double min_trk_pt, double max_trk_pt
+    double minTrkPt, double maxTrkPt
   ) {
-    std::vector<int> good_tracks;
+    std::vector<int> goodTracks;
 
-    for (int trk = 0; trk < branch->track_z0.GetSize(); ++trk) {
+    for (int trk = 0; trk < branch->trackZ0.GetSize(); ++trk) {
       double
-	trk_eta = branch->track_eta[trk],
-	trk_pt  = branch->track_pt[trk],
-	trk_quality = branch->track_quality[trk];
+	trkEta = branch->trackEta[trk],
+	trkPt  = branch->trackPt[trk],
+	trkQuality = branch->trackQuality[trk];
 
-      if (std::abs(trk_eta) < min_hgtd_eta or
-	  std::abs(trk_eta) > max_hgtd_eta)
+      if (std::abs(trkEta) < MIN_HGTD_ETA or
+	  std::abs(trkEta) > MAX_HGTD_ETA)
         continue;
 
-      if (trk_pt < min_trk_pt or trk_pt > max_trk_pt)
+      if (trkPt < minTrkPt or trkPt > maxTrkPt)
 	continue;
 
-      if (not trk_quality)
+      if (not trkQuality)
 	continue;
 
       if (passTrackVertexAssociation(trk, 0, branch, 3.0))
-	good_tracks.push_back(trk);
+	goodTracks.push_back(trk);
     }
     
-    return good_tracks;
+    return goodTracks;
   }
 
-  static std::pair<int,double> process_event_data(
+  std::pair<int,double> processEventData(
     BranchPointerWrapper *branch,
-    bool use_smeared_times,
-    bool check_valid_times,
-    bool use_z0, // whether or not to use 2D Clustering
-    std::map<ScoreType,AnalysisObj>& analyses
+    bool useSmearedTimes,
+    bool checkValidTimes,
+    bool useZ0, // whether or not to use 2D Clustering
+    std::map<Score,AnalysisObj>& analyses
   ) {
-    int return_code = 0;
-    double return_val = -1.;
+    int returnCode = 0;
+    double returnVal = -1.;
     // check if vertex selection is correct & number of jets
-    if (not branch->pass_basic_cuts()) return std::make_pair(-1,1.);
+    if (not branch->passBasicCuts()) return std::make_pair(-1,1.);
 
     // check if there is one forward jet with pt > 30 GeV
-    if (not branch->pass_jet_pt_cut()) return std::make_pair(-1,1.);;
+    if (not branch->passJetPtCut()) return std::make_pair(-1,1.);;
 
     int nForwardJet=0;
-    branch->count_forward_jets(nForwardJet);
+    branch->countForwardJets(nForwardJet);
     
-    std::vector<int> tracks = getAssociatedTracks(branch, min_track_pt, max_track_pt);
+    std::vector<int> tracks = getAssociatedTracks(branch, MIN_TRACK_PT, MAX_TRACK_PT);
 
-    int nForwardTrack=0, nForwardTrack_HS=0, nForwardTrack_PU=0;
-    branch->count_forward_tracks(nForwardTrack,nForwardTrack_HS,nForwardTrack_PU,tracks, check_valid_times);
+    int nForwardTrack=0, nForwardTrackHS=0, nForwardTrackPU=0;
+    branch->countForwardTracks(nForwardTrack,nForwardTrackHS,nForwardTrackPU,tracks, checkValidTimes);
 
     // if (not branch->pass_forward_hs_tracks(nForwardTrack_HS)) return std::make_pair(-1,1.);
     
-    double pu_ratio = (double)nForwardTrack_PU / (double)nForwardTrack;
-    double reco_z = branch->reco_vtx_z[0];
+    double puRatio = (double)nForwardTrackPU / (double)nForwardTrack;
+    double recoZ = branch->recoVtxZ[0];
 
-    auto eff_fill_val_fjet     = folded(nForwardJet     , (int)fold_fjet) ;
-    auto eff_fill_val_track    = folded(nForwardTrack   , (int)fold_track);
-    auto eff_fill_val_hs_track = folded(nForwardTrack_HS, (int)fold_hs_track);
-    auto eff_fill_val_pu_track = folded(nForwardTrack_PU, (int)fold_pu_track);
-    auto eff_fill_val_pu_ratio = pu_ratio;
+    auto effFillValFjet    = folded(nForwardJet    , (int)FOLD_FJET) ;
+    auto effFillValTrack   = folded(nForwardTrack  , (int)FOLD_TRACK);
+    auto effFillValHSTrack = folded(nForwardTrackHS, (int)FOLD_HS_TRACK);
+    auto effFillValPUTrack = folded(nForwardTrackPU, (int)FOLD_PU_TRACK);
+    auto effFillValPURatio = puRatio;
 
-    if (debug) {
-      std::cout << "nForwardJet = " << nForwardJet << std::endl;
-      std::cout << "nForwardTrack = " << nForwardTrack << std::endl;
-      std::cout << "nForwardTrack_HS = " << nForwardTrack_HS << std::endl;
-      std::cout << "nForwardTrack_PU = " << nForwardTrack_PU << std::endl;
-      std::cout << "Vertex_z = " << reco_z << std::endl;
+    if (DEBUG) {
+      std::cout << "nForwardJet = " << nForwardJet << '\n';
+      std::cout << "nForwardTrack = " << nForwardTrack << '\n';
+      std::cout << "nForwardTrack_HS = " << nForwardTrackHS << '\n';
+      std::cout << "nForwardTrack_PU = " << nForwardTrackPU << '\n';
+      std::cout << "Vertex_z = " << recoZ << '\n';
     }
     
     std::vector<Cluster> clusters =
-      clusterTracksInTime(tracks, branch, 3.0, 30.0,
-			  use_smeared_times, check_valid_times, true, use_z0);
+      clusterTracksInTime(tracks, branch, 3.0,
+			  useSmearedTimes, checkValidTimes, 30.0,
+			  true, useZ0);
 
-    if (debug) std::cout << "LEFT CLUSTERING" << std::endl;
+    if (DEBUG) std::cout << "LEFT CLUSTERING\n";
     for (auto& [score,analysis]: analyses) {
-      if (debug) std::cout << "SCORE: " << toString(score) << std::endl;
-      if (debug) std::cout << "ACCESSING FJET" << std::endl;
-      analysis["fjet"]->     FillTotal(eff_fill_val_fjet    );
-      if (debug) std::cout << "ACCESSING FTRK" << std::endl;
-      analysis["ftrack"]->   FillTotal(eff_fill_val_track   );
-      if (debug) std::cout << "ACCESSING PUFRAC" << std::endl;
-      analysis["pu_frac"]->  FillTotal(eff_fill_val_pu_ratio);
-      if (debug) std::cout << "ACCESSING HS TRK" << std::endl;
-      analysis["hs_track"]-> FillTotal(eff_fill_val_hs_track);
-      if (debug) std::cout << "ACCESSING PU TRK" << std::endl;
-      analysis["pu_track"]-> FillTotal(eff_fill_val_pu_track);
+      if (DEBUG) std::cout << "SCORE: " << toString(score) << '\n';
+      if (DEBUG) std::cout << "ACCESSING FJET\n";
+      analysis["fjet"]->     fillTotal(effFillValFjet    );
+      if (DEBUG) std::cout << "ACCESSING FTRK\n";
+      analysis["ftrack"]->   fillTotal(effFillValTrack   );
+      if (DEBUG) std::cout << "ACCESSING PUFRAC\n";
+      analysis["pu_frac"]->  fillTotal(effFillValPURatio);
+      if (DEBUG) std::cout << "ACCESSING HS TRK\n";
+      analysis["hs_track"]-> fillTotal(effFillValHSTrack);
+      if (DEBUG) std::cout << "ACCESSING PU TRK\n";
+      analysis["pu_track"]-> fillTotal(effFillValPUTrack);
     }
     
-    std::map<ScoreType,Cluster> chosen;
+    std::map<Score,Cluster> chosen;
     if (clusters.size() != 0)
       chosen = chooseCluster(clusters, branch);
-    if (debug) std::cout << "Chose My Clusters" << std::endl;
+    if (DEBUG) std::cout << "Chose My Clusters\n";
 
     // run HGTD Clustering (simultaneous)
-    std::vector<Cluster> hgtd_clusters =
+    std::vector<Cluster> clustersHGTD =
       clusterTracksInTime(tracks, branch, 3.0, -1, false, true, false, false);
 
-    if (branch->reco_vtx_valid[0] == 1 and analyses.count(ScoreType::HGTD))
-      chosen[ScoreType::HGTD] = chooseHGTDCluster(hgtd_clusters, branch);
+    if (branch->recoVtxValid[0] == 1 and analyses.count(Score::HGTD))
+      chosen[Score::HGTD] = chooseHGTDCluster(clustersHGTD, branch);
 
-    if (debug) std::cout << "Chose clusters" << std::endl;
+    if (DEBUG) std::cout << "Chose clusters\n";
 
-    bool passes_hgtd = false, passes_mine = false;
+    bool passesHgtd = false, passesMine = false;
     
     for (auto& [score, analysis] : analyses) {
-      if (debug) std::cout << "Filling Scores: " << toString(score) << std::endl;
-      if (branch->reco_vtx_valid[0] == 0 and score == HGTD)
+      if (DEBUG) std::cout << "Filling Scores: " << toString(score) << '\n';
+      if (branch->recoVtxValid[0] == 0 and score == Score::HGTD)
 	continue;
 
-      if (clusters.size() == 0 and score != HGTD)
+      if (clusters.size() == 0 and score != Score::HGTD)
 	continue;
 
-      if (!chosen.count(score) and score != HGTD)
+      if (!chosen.count(score) and score != Score::HGTD)
 	continue;
       
-      if (debug) std::cout << "Attempting to access chosen[" << toString(score) << "]" << std::endl;
+      if (DEBUG) std::cout << "Attempting to access chosen[" << toString(score) << "]\n";
       Cluster scored = chosen[score];
-      if (debug) std::cout << "Attempting to access scores values, size: " << scored.values.size() << std::endl;
-      double score_based_time = score == HGTD ? branch->reco_vtx_time[0] : scored.values.at(0);
-      if (debug) std::cout << "Attempting to access purity" << std::endl;
-      double cluster_purity = clusters.size() != 0 ? scored.purity : 0;
-      if (debug) std::cout << "Purity: " << cluster_purity << std::endl;
-      double diff = score_based_time - branch->truth_vtx_time[0];
-      if (debug) std::cout << "Diff: " << diff << std::endl;
+      if (DEBUG) std::cout << "Attempting to access scores values, size: " << scored.values.size() << '\n';
+      double scoreBasedTime = score == Score::HGTD ? branch->recoVtxTime[0] : scored.values.at(0);
+      if (DEBUG) std::cout << "Attempting to access purity\n";
+      double clusterPurity = clusters.size() != 0 ? scored.purity : 0;
+      if (DEBUG) std::cout << "Purity: " << clusterPurity << '\n';
+      double diff = scoreBasedTime - branch->truthVtxTime[0];
+      if (DEBUG) std::cout << "Diff: " << diff << '\n';
 
-      if (score == ScoreType::TRKPTZ)
-	return_val = score_based_time;
+      if (score == Score::TRKPTZ)
+	returnVal = scoreBasedTime;
       
-      analysis.inclusive_reso->Fill(diff);
-      analysis.inclusive_purity->Fill(cluster_purity);
+      analysis.inclusiveReso->Fill(diff);
+      analysis.inclusivePurity->Fill(clusterPurity);
       if (scored.passEfficiency(branch)) {
-	analysis["fjet"]->     FillPass(eff_fill_val_fjet    );
-	analysis["ftrack"]->   FillPass(eff_fill_val_track   );
-	analysis["pu_frac"]->  FillPass(eff_fill_val_pu_ratio);
-	analysis["hs_track"]-> FillPass(eff_fill_val_hs_track);
-	analysis["pu_track"]-> FillPass(eff_fill_val_pu_track);
-	if (score == HGTD)
-	  passes_hgtd = true;
-	if (score == TRKPTZ)
-	  passes_mine = true;
+	analysis["fjet"]->     fillPass(effFillValFjet   );
+	analysis["ftrack"]->   fillPass(effFillValTrack  );
+	analysis["pu_frac"]->  fillPass(effFillValPURatio);
+	analysis["hs_track"]-> fillPass(effFillValHSTrack);
+	analysis["pu_track"]-> fillPass(effFillValPUTrack);
+	if (score == Score::HGTD)
+	  passesHgtd = true;
+	if (score == Score::TRKPTZ)
+	  passesMine = true;
       }
       
       // fill diff hists
-      analysis["fjet"]->     FillDiff(nForwardJet     , diff);
-      analysis["ftrack"]->   FillDiff(nForwardTrack   , diff);
-      analysis["pu_frac"]->  FillDiff(pu_ratio        , diff);
-      analysis["hs_track"]-> FillDiff(nForwardTrack_HS, diff);
-      analysis["pu_track"]-> FillDiff(nForwardTrack_PU, diff);
+      analysis["fjet"]->     fillDiff(nForwardJet     , diff);
+      analysis["ftrack"]->   fillDiff(nForwardTrack   , diff);
+      analysis["pu_frac"]->  fillDiff(puRatio        , diff);
+      analysis["hs_track"]-> fillDiff(nForwardTrackHS, diff);
+      analysis["pu_track"]-> fillDiff(nForwardTrackPU, diff);
       
       // fill purities
-      analysis["fjet"]->     FillPurity(nForwardJet     , cluster_purity);
-      analysis["ftrack"]->   FillPurity(nForwardTrack   , cluster_purity);
-      analysis["pu_frac"]->  FillPurity(pu_ratio        , cluster_purity);
-      analysis["hs_track"]-> FillPurity(nForwardTrack_HS, cluster_purity);
-      analysis["pu_track"]-> FillPurity(nForwardTrack_PU, cluster_purity);
+      analysis["fjet"]->     fillPurity(nForwardJet    , clusterPurity);
+      analysis["ftrack"]->   fillPurity(nForwardTrack  , clusterPurity);
+      analysis["pu_frac"]->  fillPurity(puRatio        , clusterPurity);
+      analysis["hs_track"]-> fillPurity(nForwardTrackHS, clusterPurity);
+      analysis["pu_track"]-> fillPurity(nForwardTrackPU, clusterPurity);
     }
-    if ((not passes_hgtd) and passes_mine)
-      return_code = 2;
-    else if (passes_mine)
-      return_code = 1;
+    if ((not passesHgtd) and passesMine) returnCode = 2;
+    else if (passesMine) returnCode = 1;
 
-    if (not passes_mine) return_code = 0;
+    if (not passesMine) returnCode = 0;
     
-    return std::make_pair(return_code, return_val);
+    return std::make_pair(returnCode, returnVal);
   }
 }
 #endif // EVENT_PROCESSING_H
