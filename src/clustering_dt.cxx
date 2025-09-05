@@ -21,24 +21,27 @@ auto main() -> int {
 
   // HGTD Times
   std::map<Score, AnalysisObj> hgtdtimesMap;
-  hgtdtimesMap.emplace(Score::HGTD  , AnalysisObj("hgtdtimes", "HGTD Times", Score::HGTD)  );
-  hgtdtimesMap.emplace(Score::TRKPTZ, AnalysisObj("hgtdtimes", "HGTD Times", Score::TRKPTZ));
-  hgtdtimesMap.emplace(Score::CALO60, AnalysisObj("hgtdtimes", "HGTD Times", Score::CALO60));
-  hgtdtimesMap.emplace(Score::CALO90, AnalysisObj("hgtdtimes", "HGTD Times", Score::CALO90));
-  hgtdtimesMap.emplace(Score::JUST60, AnalysisObj("hgtdtimes", "HGTD Times", Score::JUST60));
-  hgtdtimesMap.emplace(Score::JUST90, AnalysisObj("hgtdtimes", "HGTD Times", Score::JUST90));
+  hgtdtimesMap.emplace(HGTD,    AnalysisObj("HGTD Times", HGTD)  );
+  hgtdtimesMap.emplace(TRKPTZ,  AnalysisObj("HGTD Times", TRKPTZ));
+  hgtdtimesMap.emplace(CALO60,  AnalysisObj("HGTD Times", CALO60));
+  hgtdtimesMap.emplace(CALO90,  AnalysisObj("HGTD Times", CALO90));
+  hgtdtimesMap.emplace(FILT60,  AnalysisObj("HGTD Times", FILT60));
+  hgtdtimesMap.emplace(FILT90,  AnalysisObj("HGTD Times", FILT90));
+  hgtdtimesMap.emplace(FILTJET, AnalysisObj("HGTD Times", FILTJET));
+  // hgtdtimesMap.emplace(Score::JUST60, AnalysisObj("hgtdtimes", "HGTD Times", Score::JUST60));
+  // hgtdtimesMap.emplace(Score::JUST90, AnalysisObj("hgtdtimes", "HGTD Times", Score::JUST90));
   // hgtdtimes_map.emplace(PASS  , AnalysisObj("hgtdtimes", "HGTD Times", PASS)  );
 
-  std::map<Score, AnalysisObj> idealresMap;
-  idealresMap.emplace(Score::TRKPTZ, AnalysisObj("idealres", "Ideal Res. HGTD", Score::TRKPTZ));
-  idealresMap.emplace(Score::CALO60, AnalysisObj("idealres", "Ideal Res. HGTD", Score::CALO60));
-  idealresMap.emplace(Score::CALO90, AnalysisObj("idealres", "Ideal Res. HGTD", Score::CALO90));
+  // std::map<Score, AnalysisObj> idealresMap;
+  // idealresMap.emplace(Score::TRKPTZ, AnalysisObj("idealres", "Ideal Res. HGTD", Score::TRKPTZ));
+  // idealresMap.emplace(Score::CALO60, AnalysisObj("idealres", "Ideal Res. HGTD", Score::CALO60));
+  // idealresMap.emplace(Score::CALO90, AnalysisObj("idealres", "Ideal Res. HGTD", Score::CALO90));
   // idealresMap.emplace(PASS  , AnalysisObj("idealres", "Ideal Res. HGTD", PASS)  );
 
-  std::map<Score, AnalysisObj> idealeffMap;
-  idealeffMap.emplace(Score::TRKPTZ, AnalysisObj("idealeff", "Ideal Eff.+Res. HGTD", Score::TRKPTZ));
-  idealeffMap.emplace(Score::CALO90, AnalysisObj("idealeff", "Ideal Eff.+Res. HGTD", Score::CALO90));
-  idealeffMap.emplace(Score::CALO60, AnalysisObj("idealeff", "Ideal Eff.+Res. HGTD", Score::CALO60));
+  // std::map<Score, AnalysisObj> idealeffMap;
+  // idealeffMap.emplace(Score::TRKPTZ, AnalysisObj("idealeff", "Ideal Eff.+Res. HGTD", Score::TRKPTZ));
+  // idealeffMap.emplace(Score::CALO90, AnalysisObj("idealeff", "Ideal Eff.+Res. HGTD", Score::CALO90));
+  // idealeffMap.emplace(Score::CALO60, AnalysisObj("idealeff", "Ideal Eff.+Res. HGTD", Score::CALO60));
   // idealeffMap.emplace(PASS  , AnalysisObj("idealeff", "Ideal Eff.+Res. HGTD", PASS)  );
     
   std::vector<TString> passMineFailHgtd, passIdealresFailHgtd, passIdealeffFailIdealres;
@@ -63,8 +66,8 @@ auto main() -> int {
     // if ((!a) and (!b) and (!c)) break;
 
     auto passHgtd = processEventData(&branch, false, true, false, hgtdtimesMap);
-    auto passIdealres = processEventData(&branch, true, true, false, idealresMap);
-    auto passIdealeff = processEventData(&branch, true, false, false, idealeffMap);
+    // auto passIdealres = processEventData(&branch, true, true, false, idealresMap);
+    // auto passIdealeff = processEventData(&branch, true, false, false, idealeffMap);
 
     // fileName = (branch.reader.GetTree()->GetCurrentFile()->GetName());
     // file = fileName(49,6);
@@ -82,16 +85,17 @@ auto main() -> int {
     //   passIdealeffFailIdealres.push_back(Form(eventdisplay, file.Data(), this_evnt, pass_idealeff.second));
   }
 
-  auto maps = {&hgtdtimesMap, &idealresMap, &idealeffMap};
+  // auto maps = {&hgtdtimesMap, &idealresMap, &idealeffMap};
+  auto maps = {&hgtdtimesMap};
 
   for (auto &map: maps) {
     for (auto &[k, analysis] : *map) {
       analysis.postProcessing();
     }
   }
-  // for (auto &map: maps)
-  //   for (auto &[k, analysis] : *map)
-  //     analysis["hs_track"]->printEfficiencyStats();
+  for (auto &map: maps)
+    for (auto &[k, analysis] : *map)
+      analysis["hs_track"]->printEfficiencyStats();
 
   std::cout << "FINISHED PROCESSING\n";
 
@@ -105,10 +109,13 @@ auto main() -> int {
     // 	       &hgtdtimesMap.at(CALO90),
     // 	      });
 
-    // moneyPlot(Form("../figs/hgtd_trkptz_%s.pdf", KEY), KEY, canvas,
-    // 	      {&hgtdtimesMap.at(HGTD),
-    // 	       &hgtdtimesMap.at(TRKPTZ),
-    // 	      });
+    moneyPlot(Form("../figs/hgtd_trkptz_%s.pdf", KEY), KEY, canvas,
+	      { &hgtdtimesMap.at(HGTD), &hgtdtimesMap.at(TRKPTZ) });
+
+    moneyPlot(Form("../figs/filtering_%s.pdf", KEY), KEY, canvas,
+	      { &hgtdtimesMap.at(HGTD), &hgtdtimesMap.at(TRKPTZ),
+		&hgtdtimesMap.at(FILT60), &hgtdtimesMap.at(FILT90),
+		&hgtdtimesMap.at(FILTJET) });
 
     // moneyPlot(Form("../figs/idealres_calocomp60_%s.pdf", KEY), KEY, canvas,
     // 	      {&hgtdtimesMap.at(HGTD),
@@ -126,20 +133,18 @@ auto main() -> int {
     // 	       &idealresMap.at(CALO90),
     // 	      });
 
-    moneyPlot(Form("../figs/idealeff_calocomp60_%s.pdf", KEY), KEY, canvas,
-	      {&hgtdtimesMap.at(HGTD),
-	       &hgtdtimesMap.at(TRKPTZ),
-	       &idealeffMap.at(TRKPTZ),
-	       &hgtdtimesMap.at(CALO60),
-	       &idealeffMap.at(CALO60),
-	      });
+    // moneyPlot(Form("../figs/idealeff_calocomp60_%s.pdf", KEY), KEY, canvas,
+    // 	      {&hgtdtimesMap.at(HGTD),
+    // 	       &hgtdtimesMap.at(TRKPTZ),
+    // 	       &idealeffMap.at(TRKPTZ),
+    // 	       &hgtdtimesMap.at(CALO60),
+    // 	       &idealeffMap.at(CALO60),
+    // 	      });
 
     // moneyPlot(Form("../figs/idealeff_calocomp90_%s.pdf", KEY), KEY, canvas,
     // 	      {&hgtdtimesMap.at(HGTD),
     // 	       &hgtdtimesMap.at(TRKPTZ),
-    // 	       &idealeffMap.at(TRKPTZ),
     // 	       &hgtdtimesMap.at(CALO90),
-    // 	       &idealeffMap.at(CALO90),
     // 	      });
 
     // moneyPlot(Form("../figs/idealres_calocomp_%s.pdf", KEY), KEY, canvas,

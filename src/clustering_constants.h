@@ -15,7 +15,8 @@ namespace MyUtl {
   const Color_t C08 = kP10Green ;
   const Color_t C09 = kP10Ash   ;
   const Color_t C10 = kP10Cyan  ;
-  const std::vector<Color_t> COLORS = {C01, C02, C03, C04, C05, C06, C07, C08, C09, C10};
+  const Color_t C11 = kP6Blue   ;
+  const std::vector<Color_t> COLORS = {C01, C02, C03, C04, C05, C06, C07, C08, C09, C10, C11};
 
   // cut variables
   const int    MIN_JETS          = 1;    // min number of jets
@@ -68,26 +69,34 @@ namespace MyUtl {
   enum Score {
     HGTD   = 0, TRKPT  = 1, TRKPTZ = 2, PASS   = 3,
     CALO90 = 4, CALO60 = 5, JUST90 = 6, JUST60 = 7,
+    FILT90 = 8, FILT60 = 9, FILTJET = 10,
   };
 
   const std::vector<Score> ENUM_VEC = {
-    Score::HGTD, Score::TRKPT, Score::TRKPTZ, Score::CALO90, Score::CALO60,
-    Score::JUST60, Score::JUST90, Score::PASS, 
+    Score::HGTD  ,
+    Score::TRKPT , Score::TRKPTZ,
+    // Score::CALO90, Score::CALO60,
+    // Score::JUST60, Score::JUST90, Score::PASS,
+    // Score::FILT90, Score::FILT60, Score::FILTJET,
+    
   }; // valid values
 
   auto toString(
     MyUtl::Score score
   ) -> const char* {
     switch (score) {
-    case Score::HGTD:     return "HGTD Algorithm";
-    case Score::TRKPTZ:   return "Track p_{T}exp(-|#Deltaz|)";
-    case Score::TRKPT:    return "Track p_{T}";
-    case Score::CALO90:   return "Calo Time Exclusion (90 ps)";
-    case Score::CALO60:   return "Calo Time Exclusion (60 ps)";
-    case Score::JUST90:   return "Calo Time (90 ps)";
-    case Score::JUST60:   return "Calo Time (60 ps)";
-    case Score::PASS:     return "Pass Cluster";
-    default:                  return "INVALID";
+    case Score::HGTD:    return "HGTD Algorithm";
+    case Score::TRKPTZ:  return "Track p_{T}exp(-|#Deltaz|)";
+    case Score::TRKPT:   return "Track p_{T}";
+    case Score::CALO90:  return "Calo Time Exclusion (90 ps)";
+    case Score::CALO60:  return "Calo Time Exclusion (60 ps)";
+    case Score::JUST90:  return "Calo Time (90 ps)";
+    case Score::JUST60:  return "Calo Time (60 ps)";
+    case Score::PASS:    return "Pass Cluster";
+    case Score::FILT90:  return "90 ps Track Filter";
+    case Score::FILT60:  return "60 ps Track Filter";
+    case Score::FILTJET: return "Only Tracks in Jets";
+    default:             return "INVALID";
     }
   }
 

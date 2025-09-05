@@ -120,7 +120,6 @@ namespace MyUtl {
 	double trkPt = branch->trackPt[idx];
 	double trkZ0 = branch->trackZ0[idx];
 	double trkResZ0 = branch->trackVarZ0[idx];
-	double zSignificance = std::abs(trkZ0 - branch->recoVtxZ[0]) / trkResZ0;
 
 	std::map<Score,double> scores;
 	scores[Score::HGTD] = 0;
@@ -309,7 +308,7 @@ namespace MyUtl {
   }
   
   auto chooseCluster(
-    std::vector<Cluster> collection,
+    std::vector<Cluster>& collection,
     BranchPointerWrapper *branch
   ) -> std::map<Score, Cluster> {
     std::map<Score,Cluster> output;
@@ -324,7 +323,7 @@ namespace MyUtl {
       
     for (Score score: ENUM_VEC) {
       if (DEBUG) std::cout << "SCORE: " << toString(score) << '\n';
-      if (score == Score::HGTD)
+      if (score == HGTD)
 	continue;
 
       if (score == Score::JUST60) {
@@ -372,6 +371,32 @@ namespace MyUtl {
 	  maxScore = compScore;
 	  output[score] = cluster;
 	}
+      }
+    }
+    return output;
+  }
+
+  auto chooseCluster(
+    std::vector<Cluster>& collection,
+    Score score
+  ) -> Cluster {
+    if (DEBUG) std::cout << "Choosing score\n";
+
+    if (score >= 3) {
+      std::cout << "DONT CALL LIKE THIS\n";
+      return {};
+    }
+
+    Cluster output = collection[0]; // final time we are giving to the user
+    double maxScore = output.scores.at(score);
+    
+    for (Cluster& cluster: collection) {
+      double compScore = cluster.scores[score];
+      bool query = compScore > maxScore;
+	
+      if (query) {
+	maxScore = compScore;
+	output = cluster;
       }
     }
     return output;

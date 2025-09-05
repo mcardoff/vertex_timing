@@ -342,13 +342,16 @@ namespace MyUtl {
     }
     
     AnalysisObj(
-      const char* filenameIDer, // hgtdtimes v idealres, 
       const char* timetypeIDer, // HGTD Times v Ideal Res. HGTD
       Score score
     ) {
+      TString filenameIDer(timetypeIDer);
+      filenameIDer.ReplaceAll(" ", "");
+      filenameIDer.ReplaceAll(".", "");
+      filenameIDer.ToLower();
       dataObjects["fjet"] = std::make_unique<PlotObj>(
         "n Forward Jets", timetypeIDer,
-	Form("figs/%s_nfjet.pdf",filenameIDer),
+	Form("figs/%s_nfjet.pdf",filenameIDer.Data()),
 	score,
 	FJET_MIN  , FJET_MAX  , FJET_WIDTH  ,
 	DIFF_MIN  , DIFF_MAX  , DIFF_WIDTH  ,
@@ -357,7 +360,7 @@ namespace MyUtl {
   
       dataObjects["ftrack"] = std::make_unique<PlotObj>(
         "n Forward Tracks", timetypeIDer,
-	Form("figs/%s_ntrack.pdf",filenameIDer),
+	Form("figs/%s_ntrack.pdf",filenameIDer.Data()),
 	score,
 	TRACK_MIN , TRACK_MAX , TRACK_WIDTH ,
 	DIFF_MIN  , DIFF_MAX  , DIFF_WIDTH  ,
@@ -366,7 +369,7 @@ namespace MyUtl {
   
       dataObjects["pu_frac"] = std::make_unique<PlotObj>(
         "Pile Up Fraction", timetypeIDer, 
-        Form("figs/%s_pufrac.pdf",filenameIDer),
+        Form("figs/%s_pufrac.pdf",filenameIDer.Data()),
 	score,
 	PU_FRAC_MIN, PU_FRAC_MAX, PU_FRAC_WIDTH,
 	DIFF_MIN   , DIFF_MAX   , DIFF_WIDTH   ,
@@ -375,7 +378,7 @@ namespace MyUtl {
   
       dataObjects["hs_track"] = std::make_unique<PlotObj>(
         "n Forward HS Tracks", timetypeIDer, 
-	Form("figs/%s_nhstrack.pdf",filenameIDer),
+	Form("figs/%s_nhstrack.pdf",filenameIDer.Data()),
 	score,
 	HS_TRACK_MIN, HS_TRACK_MAX, HS_TRACK_WIDTH ,
 	DIFF_MIN    , DIFF_MAX    , DIFF_WIDTH     ,
@@ -384,7 +387,7 @@ namespace MyUtl {
   
       dataObjects["pu_track"] = std::make_unique<PlotObj>(
         "n Forward PU Tracks", timetypeIDer, 
-	Form("figs/%s_nputrack.pdf",filenameIDer),
+	Form("figs/%s_nputrack.pdf",filenameIDer.Data()),
 	score,
 	PU_TRACK_MIN, PU_TRACK_MAX, PU_TRACK_WIDTH ,
 	DIFF_MIN    , DIFF_MAX    , DIFF_WIDTH     ,
@@ -392,13 +395,13 @@ namespace MyUtl {
 	FOLD_PU_TRACK, FOLD_PU_TRACK+PU_TRACK_WIDTH);
 
       inclusiveReso = std::make_unique<TH1D>(
-        Form("%s_reso_%s",toString(score), filenameIDer),
+        Form("%s_reso_%s",toString(score), filenameIDer.Data()),
 	Form("Inclusive %s t_{0} - TruthVtx t_{0} (%s);#Delta t[ps];Entries",
 	     toString(score), timetypeIDer),
 	(int)((DIFF_MAX-DIFF_MIN)/DIFF_WIDTH), DIFF_MIN, DIFF_MAX);
 
       inclusivePurity = std::make_unique<TH1D>(
-        Form("%s_purity_%s", toString(score), filenameIDer),
+        Form("%s_purity_%s", toString(score), filenameIDer.Data()),
 	Form("%s Purity (%s);Purity;Entries", toString(score), timetypeIDer),
 	(int)((PURITY_MAX-PURITY_MIN)/PURITY_WIDTH), PURITY_MIN, PURITY_MAX);
     }

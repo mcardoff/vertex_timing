@@ -56,29 +56,81 @@ namespace MyUtl {
   ) {
     std::vector<int> output;
     for (const auto& trk: tracks) {
-       int near = (int)branch->trackNearIdx[trk];
-       double nearZ0 = branch->trackNearZ0sin[trk] / std::sin(branch->trackTheta[trk]);
-       double nearVarZ0 = (pow(branch->trackNearZ0sinUnc[trk],2)-pow(nearZ0*std::cos(branch->trackTheta[trk])*branch->trackVarTheta[trk],2))/std::sin(branch->trackTheta[trk])*std::sin(branch->trackTheta[trk]);
+      int near = (int)branch->trackNearIdx[trk];
+      double nearZ0 = branch->trackNearZ0sin[trk] / std::sin(branch->trackTheta[trk]);
+      double nearVarZ0 = (pow(branch->trackNearZ0sinUnc[trk],2)-pow(nearZ0*std::cos(branch->trackTheta[trk])*branch->trackVarTheta[trk],2))/std::sin(branch->trackTheta[trk])*std::sin(branch->trackTheta[trk]);
 
-       double sigNear = std::abs(nearZ0 - branch->recoVtxZ[near]) / std::sqrt(nearVarZ0);
-       double sigPrim = std::abs(branch->trackZ0[trk] - branch->recoVtxZ[0]) / std::sqrt(branch->trackVarZ0[trk]);
+      double sigNear = std::abs(nearZ0 - branch->recoVtxZ[near]) / std::sqrt(nearVarZ0);
 
-       // if (near != 0 && sig_near < sig_prim && sig_near < significance_cut)
-       if (near != 0 && sigNear < significanceCut)
-	 continue;
+      // if (near != 0 && sig_near < sig_prim && sig_near < significance_cut)
+      if (near != 0 && sigNear < significanceCut)
+	continue;
 
-       output.push_back(trk);
+      output.push_back(trk);
     }
     return output;
   }
 
+  std::vector<int> filterCaloTracks(
+    const std::vector<int>& tracks, 
+    BranchPointerWrapper *branch,
+    double caloRes,
+    double signficanceCut
+  ) {
+    std::vector<int> output;
+    double caloTime = gRandom->Gaus(branch->truthVtxTime[0], caloRes);
+    for (const auto& trk: tracks) {
+      double trkTime = branch->trackTime[trk];
+      double trkTimeRes = branch->trackTimeRes[trk];
+      double caloDiff = std::abs(trkTime-caloTime);
+      double caloSigma = std::hypot(trkTimeRes, caloRes);
+      double nsigma = caloDiff/caloSigma;
+      if (nsigma > signficanceCut)
+	continue;
+      
+      output.push_back(trk);
+    }
+    return output;
+  }
+
+  std::vector<int> filterTracksInJets(
+    const std::vector<int>& tracks, 
+    BranchPointerWrapper *branch,
+    double minDRCut
+  ) {
+    std::vector<int> output;
+    for (const auto& trk: tracks) {
+      double
+	trkEta = branch->trackEta[trk],
+	trkPhi = branch->trackPhi[trk];
+      double minDR = 1e6;
+      for (size_t jetIdx=0; jetIdx < branch->topoJetEta.GetSize(); ++jetIdx) {
+	if (branch->topoJetPt[jetIdx] < MIN_JETPT) continue;
+	double
+	  jetEta = branch->topoJetEta[jetIdx],
+	  jetPhi = branch->topoJetPhi[jetIdx];
+	double
+	  deta = jetEta-trkEta,
+	  dphi = TVector2::Phi_mpi_pi(jetPhi - trkPhi);
+	double thisDR = std::hypot(deta, dphi);
+	if (thisDR < minDR)
+	  minDR = thisDR;
+      }
+      if (minDR > minDRCut)
+	continue;
+      
+      output.push_back(trk);
+    }
+    return output;
+  }
+  
   std::vector<int> getAssociatedTracks(
     BranchPointerWrapper *branch,
     double minTrkPt, double maxTrkPt
   ) {
     std::vector<int> goodTracks;
 
-    for (int trk = 0; trk < branch->trackZ0.GetSize(); ++trk) {
+    for (size_t trk = 0; trk < branch->trackZ0.GetSize(); ++trk) {
       double
 	trkEta = branch->trackEta[trk],
 	trkPt  = branch->trackPt[trk],
@@ -144,22 +196,46 @@ namespace MyUtl {
     }
     
     std::vector<Cluster> clusters =
-      clusterTracksInTime(tracks, branch, 3.0,
-			  useSmearedTimes, checkValidTimes, 30.0,
-			  true, useZ0);
+      clusterTracksInTime(
+        tracks, branch, 3.0,
+	useSmearedTimes, checkValidTimes, 30.0,
+	true, useZ0);
+
+    std::vector<Cluster> filt60Clusters, filt90Clusters, filtjetClusters;
+
+    if (analyses.count(Score::FILT60)) {
+      std::vector<int> filteredTracks = filterCaloTracks(tracks, branch, 60, 2.0);
+      filt60Clusters =
+	clusterTracksInTime(
+          filteredTracks, branch, 3.0,
+          useSmearedTimes, checkValidTimes, 30.0,
+	  true, useZ0);
+    }
+
+    if (analyses.count(Score::FILT90)) {
+      std::vector<int> filteredTracks = filterCaloTracks(tracks, branch, 90, 2.0);
+      filt90Clusters =
+	clusterTracksInTime(
+          filteredTracks, branch, 3.0,
+          useSmearedTimes, checkValidTimes, 30.0,
+	  true, useZ0);
+    }
+
+    if (analyses.count(Score::FILTJET)) {
+      std::vector<int> filteredTracks = filterTracksInJets(tracks, branch, 0.3);
+      filtjetClusters =
+	clusterTracksInTime(
+          filteredTracks, branch, 3.0,
+          useSmearedTimes, checkValidTimes, 30.0,
+	  true, useZ0);
+    }
 
     if (DEBUG) std::cout << "LEFT CLUSTERING\n";
     for (auto& [score,analysis]: analyses) {
-      if (DEBUG) std::cout << "SCORE: " << toString(score) << '\n';
-      if (DEBUG) std::cout << "ACCESSING FJET\n";
-      analysis["fjet"]->     fillTotal(effFillValFjet    );
-      if (DEBUG) std::cout << "ACCESSING FTRK\n";
-      analysis["ftrack"]->   fillTotal(effFillValTrack   );
-      if (DEBUG) std::cout << "ACCESSING PUFRAC\n";
+      analysis["fjet"]->     fillTotal(effFillValFjet   );
+      analysis["ftrack"]->   fillTotal(effFillValTrack  );
       analysis["pu_frac"]->  fillTotal(effFillValPURatio);
-      if (DEBUG) std::cout << "ACCESSING HS TRK\n";
       analysis["hs_track"]-> fillTotal(effFillValHSTrack);
-      if (DEBUG) std::cout << "ACCESSING PU TRK\n";
       analysis["pu_track"]-> fillTotal(effFillValPUTrack);
     }
     
@@ -168,16 +244,25 @@ namespace MyUtl {
       chosen = chooseCluster(clusters, branch);
     if (DEBUG) std::cout << "Chose My Clusters\n";
 
+    if (not filt60Clusters.empty())
+      chosen[FILT60] = chooseCluster(filt60Clusters, TRKPTZ);
+
+    if (not filt90Clusters.empty())
+      chosen[FILT90] = chooseCluster(filt90Clusters, TRKPTZ);
+
+    if (not filtjetClusters.empty())
+      chosen[FILTJET] = chooseCluster(filtjetClusters, TRKPTZ);
+
     // run HGTD Clustering (simultaneous)
     std::vector<Cluster> clustersHGTD =
-      clusterTracksInTime(tracks, branch, 3.0, -1, false, true, false, false);
+      clusterTracksInTime(tracks, branch, 3.0, false, true , -1, false, false);
 
     if (branch->recoVtxValid[0] == 1 and analyses.count(Score::HGTD))
-      chosen[Score::HGTD] = chooseHGTDCluster(clustersHGTD, branch);
+      chosen[HGTD] = chooseHGTDCluster(clustersHGTD, branch);
 
     if (DEBUG) std::cout << "Chose clusters\n";
 
-    bool passesHgtd = false, passesMine = false;
+    bool passesHGTD = false, passesMine = false;
     
     for (auto& [score, analysis] : analyses) {
       if (DEBUG) std::cout << "Filling Scores: " << toString(score) << '\n';
@@ -211,12 +296,13 @@ namespace MyUtl {
 	analysis["pu_frac"]->  fillPass(effFillValPURatio);
 	analysis["hs_track"]-> fillPass(effFillValHSTrack);
 	analysis["pu_track"]-> fillPass(effFillValPUTrack);
-	if (score == Score::HGTD)
-	  passesHgtd = true;
+	if (score == Score::HGTD) {
+	  passesHGTD = true;
+	}
 	if (score == Score::TRKPTZ)
 	  passesMine = true;
       }
-      
+
       // fill diff hists
       analysis["fjet"]->     fillDiff(nForwardJet     , diff);
       analysis["ftrack"]->   fillDiff(nForwardTrack   , diff);
@@ -231,7 +317,7 @@ namespace MyUtl {
       analysis["hs_track"]-> fillPurity(nForwardTrackHS, clusterPurity);
       analysis["pu_track"]-> fillPurity(nForwardTrackPU, clusterPurity);
     }
-    if ((not passesHgtd) and passesMine) returnCode = 2;
+    if ((not passesHGTD) and passesMine) returnCode = 2;
     else if (passesMine) returnCode = 1;
 
     if (not passesMine) returnCode = 0;
