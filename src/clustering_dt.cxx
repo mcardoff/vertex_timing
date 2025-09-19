@@ -20,29 +20,39 @@ auto main() -> int {
   canvas->SetLeftMargin(0.15);
 
   // HGTD Times
-  std::map<Score, AnalysisObj> hgtdtimesMap;
-  hgtdtimesMap.emplace(HGTD,    AnalysisObj("HGTD Times", HGTD)  );
-  hgtdtimesMap.emplace(TRKPTZ,  AnalysisObj("HGTD Times", TRKPTZ));
-  hgtdtimesMap.emplace(CALO60,  AnalysisObj("HGTD Times", CALO60));
-  hgtdtimesMap.emplace(CALO90,  AnalysisObj("HGTD Times", CALO90));
-  hgtdtimesMap.emplace(FILT60,  AnalysisObj("HGTD Times", FILT60));
-  hgtdtimesMap.emplace(FILT90,  AnalysisObj("HGTD Times", FILT90));
-  hgtdtimesMap.emplace(FILTJET, AnalysisObj("HGTD Times", FILTJET));
-  // hgtdtimesMap.emplace(Score::JUST60, AnalysisObj("hgtdtimes", "HGTD Times", Score::JUST60));
-  // hgtdtimesMap.emplace(Score::JUST90, AnalysisObj("hgtdtimes", "HGTD Times", Score::JUST90));
-  // hgtdtimes_map.emplace(PASS  , AnalysisObj("hgtdtimes", "HGTD Times", PASS)  );
+  std::map<Score, AnalysisObj> mapHGTD;
+  mapHGTD.emplace(HGTD,   AnalysisObj("HGTD Times", HGTD   ));
+  mapHGTD.emplace(TRKPTZ, AnalysisObj("HGTD Times", TRKPTZ ));
+  mapHGTD.emplace(CALO60, AnalysisObj("HGTD Times", CALO60 ));
+  mapHGTD.emplace(CALO90, AnalysisObj("HGTD Times", CALO90 ));
+  mapHGTD.emplace(JUST60, AnalysisObj("HGTD Times", JUST60 ));
+  mapHGTD.emplace(JUST90, AnalysisObj("HGTD Times", JUST90 ));
+  mapHGTD.emplace(FILT60, AnalysisObj("HGTD Times", FILT60 ));
+  mapHGTD.emplace(FILT90, AnalysisObj("HGTD Times", FILT90 ));
+  mapHGTD.emplace(FILTJET,AnalysisObj("HGTD Times", FILTJET));
+  mapHGTD.emplace(PASS  , AnalysisObj("HGTD Times", PASS   ));
 
-  // std::map<Score, AnalysisObj> idealresMap;
-  // idealresMap.emplace(Score::TRKPTZ, AnalysisObj("idealres", "Ideal Res. HGTD", Score::TRKPTZ));
-  // idealresMap.emplace(Score::CALO60, AnalysisObj("idealres", "Ideal Res. HGTD", Score::CALO60));
-  // idealresMap.emplace(Score::CALO90, AnalysisObj("idealres", "Ideal Res. HGTD", Score::CALO90));
-  // idealresMap.emplace(PASS  , AnalysisObj("idealres", "Ideal Res. HGTD", PASS)  );
+  // std::map<Score, AnalysisObj> mapIdealRes;
+  // mapIdealRes.emplace(TRKPTZ , AnalysisObj("Ideal Res. HGTD", TRKPTZ ));
+  // mapIdealRes.emplace(CALO60 , AnalysisObj("Ideal Res. HGTD", CALO60 ));
+  // mapIdealRes.emplace(CALO90 , AnalysisObj("Ideal Res. HGTD", CALO90 ));
+  // mapIdealRes.emplace(JUST60 , AnalysisObj("Ideal Res. HGTD", JUST60 ));
+  // mapIdealRes.emplace(JUST90 , AnalysisObj("Ideal Res. HGTD", JUST90 ));
+  // mapIdealRes.emplace(FILT60 , AnalysisObj("Ideal Res. HGTD", FILT60 ));
+  // mapIdealRes.emplace(FILT90 , AnalysisObj("Ideal Res. HGTD", FILT90 ));
+  // mapIdealRes.emplace(FILTJET, AnalysisObj("Ideal Res. HGTD", FILTJET));
+  // mapIdealRes.emplace(PASS   , AnalysisObj("Ideal Res. HGTD", PASS   ));
 
-  // std::map<Score, AnalysisObj> idealeffMap;
-  // idealeffMap.emplace(Score::TRKPTZ, AnalysisObj("idealeff", "Ideal Eff.+Res. HGTD", Score::TRKPTZ));
-  // idealeffMap.emplace(Score::CALO90, AnalysisObj("idealeff", "Ideal Eff.+Res. HGTD", Score::CALO90));
-  // idealeffMap.emplace(Score::CALO60, AnalysisObj("idealeff", "Ideal Eff.+Res. HGTD", Score::CALO60));
-  // idealeffMap.emplace(PASS  , AnalysisObj("idealeff", "Ideal Eff.+Res. HGTD", PASS)  );
+  // std::map<Score, AnalysisObj> mapIdealEff;
+  // mapIdealEff.emplace(TRKPTZ , AnalysisObj("Ideal Res.+Eff. HGTD", TRKPTZ ));
+  // mapIdealEff.emplace(CALO60 , AnalysisObj("Ideal Res.+Eff. HGTD", CALO60 ));
+  // mapIdealEff.emplace(CALO90 , AnalysisObj("Ideal Res.+Eff. HGTD", CALO90 ));
+  // mapIdealEff.emplace(JUST60 , AnalysisObj("Ideal Res.+Eff. HGTD", JUST60 ));
+  // mapIdealEff.emplace(JUST90 , AnalysisObj("Ideal Res.+Eff. HGTD", JUST90 ));
+  // mapIdealEff.emplace(FILT60 , AnalysisObj("Ideal Res.+Eff. HGTD", FILT60 ));
+  // mapIdealEff.emplace(FILT90 , AnalysisObj("Ideal Res.+Eff. HGTD", FILT90 ));
+  // mapIdealEff.emplace(FILTJET, AnalysisObj("Ideal Res.+Eff. HGTD", FILTJET));
+  // mapIdealEff.emplace(PASS   , AnalysisObj("Ideal Res.+Eff. HGTD", PASS   ));
     
   std::vector<TString> passMineFailHgtd, passIdealresFailHgtd, passIdealeffFailIdealres;
   gErrorIgnoreLevel = kWarning;
@@ -50,7 +60,7 @@ auto main() -> int {
   bool progress = true;
   TString fileName, file, eventdisplay="python event_display.py --file_num %s --event_num %lld --extra_time %.2f";
   Long64_t nEvent = chain.GetEntries();
-  Long64_t evtMax = nEvent+1;
+  Long64_t evtMax = 10e3;
   while (reader.Next()) {
     std::string filename = chain.GetFile()->GetName(); // file we're in
     Long64_t thisEvnt = chain.GetReadEntry() - chain.GetChainOffset(); // +1 bc its 0 indexed
@@ -59,15 +69,15 @@ auto main() -> int {
       std::cout << "Progress: " << readNum << "/" << nEvent << "\n";
 
     // bool
-    //   a = hgtdtimesMap.at(Score::CALO60).get("pu_frac")->effPass->Integral() < evtMax,
-    //   b = idealresMap.at(Score::CALO60).get("pu_frac")->effPass->Integral() < evtMax,
-    //   c = idealeffMap.at(Score::CALO60).get("pu_frac")->effPass->Integral() < evtMax;
+    //   a = mapHGTD.at(Score::CALO60).get("pu_frac")->effPass->Integral() < evtMax,
+    //   b = mapIdealRes.at(Score::CALO60).get("pu_frac")->effPass->Integral() < evtMax,
+    //   c = mapIdealEff.at(Score::CALO60).get("pu_frac")->effPass->Integral() < evtMax;
     
     // if ((!a) and (!b) and (!c)) break;
 
-    auto passHgtd = processEventData(&branch, false, true, false, hgtdtimesMap);
-    // auto passIdealres = processEventData(&branch, true, true, false, idealresMap);
-    // auto passIdealeff = processEventData(&branch, true, false, false, idealeffMap);
+    auto passHgtd = processEventData(&branch, false, true, false, mapHGTD);
+    // auto passIdealRes = processEventData(&branch, true, true, false, mapIdealRes);
+    // auto passIdealEff = processEventData(&branch, true, false, false, mapIdealEff);
 
     // fileName = (branch.reader.GetTree()->GetCurrentFile()->GetName());
     // file = fileName(49,6);
@@ -85,110 +95,97 @@ auto main() -> int {
     //   passIdealeffFailIdealres.push_back(Form(eventdisplay, file.Data(), this_evnt, pass_idealeff.second));
   }
 
-  // auto maps = {&hgtdtimesMap, &idealresMap, &idealeffMap};
-  auto maps = {&hgtdtimesMap};
+  // auto maps = {&mapHGTD, &mapIdealRes, &mapIdealEff};
+  auto maps = {&mapHGTD};
 
-  for (auto &map: maps) {
-    for (auto &[k, analysis] : *map) {
+  for (auto &map: maps)
+    for (auto &[k, analysis] : *map)
       analysis.postProcessing();
-    }
-  }
+
+      
   for (auto &map: maps)
     for (auto &[k, analysis] : *map)
       analysis["hs_track"]->printEfficiencyStats();
 
   std::cout << "FINISHED PROCESSING\n";
 
-  for (const auto *const KEY: {"fjet", "ftrack", "pu_frac", "hs_track", "pu_track"}) {
-    // moneyPlot(Form("../figs/fullcomparison_%s.pdf", KEY), KEY, canvas,
-    // 	      {&hgtdtimesMap.at(HGTD),
-    // 	       &hgtdtimesMap.at(TRKPTZ),
-    // 	       &idealresMap.at(TRKPTZ),
-    // 	       &idealeffMap.at(TRKPTZ),
-    // 	       &idealeffMap.at(PASS),
-    // 	       &hgtdtimesMap.at(CALO90),
-    // 	      });
-
+  for (const auto *const KEY: {"pu_frac", "hs_track"}) {
+    // Comparison between my algo and HGTD algo
+    std::cout << "HGTD TRKPTZ" << std::endl;
     moneyPlot(Form("../figs/hgtd_trkptz_%s.pdf", KEY), KEY, canvas,
-	      { &hgtdtimesMap.at(HGTD), &hgtdtimesMap.at(TRKPTZ) });
+	      { &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ) });
 
-    moneyPlot(Form("../figs/filtering_%s.pdf", KEY), KEY, canvas,
-	      { &hgtdtimesMap.at(HGTD), &hgtdtimesMap.at(TRKPTZ),
-		&hgtdtimesMap.at(FILT60), &hgtdtimesMap.at(FILT90),
-		&hgtdtimesMap.at(FILTJET) });
+    // Comparing those same two with calo exclusion
+    std::cout << "CALO EXCLUSION COMP" << std::endl;
+    moneyPlot(Form("../figs/calo_comp_%s.pdf", KEY), KEY, canvas,
+	      { &mapHGTD.at(HGTD)  , &mapHGTD.at(TRKPTZ),
+		&mapHGTD.at(CALO60), &mapHGTD.at(CALO90), });
 
-    // moneyPlot(Form("../figs/idealres_calocomp60_%s.pdf", KEY), KEY, canvas,
-    // 	      {&hgtdtimesMap.at(HGTD),
-    // 	       &hgtdtimesMap.at(TRKPTZ),
-    // 	       &idealresMap.at(TRKPTZ),
-    // 	       &hgtdtimesMap.at(CALO60),
-    // 	       &idealresMap.at(CALO60),
-    // 	      });
+    // Filtering out various types of track
+    std::cout << "FILTER COMP" << std::endl;
+    moneyPlot(Form("../figs/filter_comp_%s.pdf", KEY), KEY, canvas,
+	      { &mapHGTD.at(HGTD)  ,
+		&mapHGTD.at(TRKPTZ),
+		&mapHGTD.at(FILT60),
+		&mapHGTD.at(FILT90),
+		&mapHGTD.at(FILTJET) });
 
-    // moneyPlot(Form("../figs/idealres_calocomp90_%s.pdf", KEY), KEY, canvas,
-    // 	      {&hgtdtimesMap.at(HGTD),
-    // 	       &hgtdtimesMap.at(TRKPTZ),
-    // 	       &idealresMap.at(TRKPTZ),
-    // 	       &hgtdtimesMap.at(CALO90),
-    // 	       &idealresMap.at(CALO90),
-    // 	      });
+    // Compare calo exclusion with only calo time and filtering (60ps)
+    std::cout << "60ps CASES" << std::endl;
+    moneyPlot(Form("../figs/calo_comp_60_%s.pdf", KEY), KEY, canvas,
+	      { &mapHGTD.at(HGTD)  ,
+		&mapHGTD.at(TRKPTZ),
+	        &mapHGTD.at(CALO60),
+		&mapHGTD.at(JUST60),
+		&mapHGTD.at(FILT60), });
 
-    // moneyPlot(Form("../figs/idealeff_calocomp60_%s.pdf", KEY), KEY, canvas,
-    // 	      {&hgtdtimesMap.at(HGTD),
-    // 	       &hgtdtimesMap.at(TRKPTZ),
-    // 	       &idealeffMap.at(TRKPTZ),
-    // 	       &hgtdtimesMap.at(CALO60),
-    // 	       &idealeffMap.at(CALO60),
-    // 	      });
+    // Compare calo exclusion with only calo time and filtering (90ps)
+    std::cout << "90ps CASES" << std::endl;
+    moneyPlot(Form("../figs/calo_comp_90_%s.pdf", KEY), KEY, canvas,
+	      { &mapHGTD.at(HGTD)  ,
+		&mapHGTD.at(TRKPTZ),
+	        &mapHGTD.at(CALO90),
+		&mapHGTD.at(JUST90),
+		&mapHGTD.at(FILT90), });
 
-    // moneyPlot(Form("../figs/idealeff_calocomp90_%s.pdf", KEY), KEY, canvas,
-    // 	      {&hgtdtimesMap.at(HGTD),
-    // 	       &hgtdtimesMap.at(TRKPTZ),
-    // 	       &hgtdtimesMap.at(CALO90),
-    // 	      });
+    moneyPlot(Form("../figs/filt_pass_comp_%s.pdf", KEY), KEY, canvas,
+	      { &mapHGTD.at(HGTD)  , &mapHGTD.at(TRKPTZ) ,
+		&mapHGTD.at(FILT60), &mapHGTD.at(FILTJET),
+		&mapHGTD.at(PASS) });
 
-    // moneyPlot(Form("../figs/idealres_calocomp_%s.pdf", KEY), KEY, canvas,
-    // 	      {&hgtdtimesMap.at(HGTD),
-    // 	       &hgtdtimesMap.at(TRKPTZ),
-    // 	       &idealresMap.at(TRKPTZ),
-    // 	       &idealresMap.at(CALO60),
-    // 	       &idealresMap.at(CALO90),
-    // 	      });
 
-    // moneyPlot(Form("../figs/idealeff_calocomp_%s.pdf", KEY), KEY, canvas,
-    // 	      {&hgtdtimesMap.at(HGTD),
-    // 	       &hgtdtimesMap.at(TRKPTZ),
-    // 	       &idealeffMap.at(TRKPTZ),
-    // 	       &idealeffMap.at(CALO60),
-    // 	       &idealeffMap.at(CALO90),
-    // 	      });
-    // std::cout << "MONEY\n";
-    // moneyPlot(Form("../figs/justcalo_%s.pdf", KEY), KEY, canvas,
-    // 	      {&hgtdtimesMap.at(Score::HGTD),
-    // 	       &hgtdtimesMap.at(Score::JUST60),
-    // 	       &hgtdtimesMap.at(Score::JUST90),
-    // 	      });
+    // Compare filtering between ideal cases
+    // std::cout << "IDEALRES FILTERING" << std::endl;
+    // moneyPlot(Form("../figs/filter_idealres_%s.pdf", KEY), KEY, canvas,
+    // 	      { &mapHGTD.at(TRKPTZ),
+    // 		&mapIdealRes.at(FILT60),
+    // 		&mapIdealRes.at(FILT90),
+    // 		&mapIdealRes.at(FILTJET) });
 
-    // moneyPlot(Form("../figs/idealres_comp_%s.pdf", KEY), KEY, canvas,
-    // 	      {&hgtdtimesMap.at(HGTD),
-    // 	       &hgtdtimesMap.at(TRKPTZ),
-    // 	       &idealresMap.at(TRKPTZ),
-    // 	       // &idealresMap.at(PASS),
-    // 	      });
-
+    // std::cout << "IDEALEFF FILTERING" << std::endl;
+    // moneyPlot(Form("../figs/filter_idealeff_%s.pdf", KEY), KEY, canvas,
+    // 	      { &mapHGTD.at(TRKPTZ),
+    // 		&mapIdealEff.at(FILT60),
+    // 		&mapIdealEff.at(FILT90),
+    // 		&mapIdealEff.at(FILTJET) });
+    
   }
 
-  // inclusivePlot(Form("../figs/inclusivereso_logscale.pdf"), true, true,
-  // 		-400, 400, canvas,
-  // 		{&hgtdtimesMap.at(HGTD), &hgtdtimesMap.at(TRKPTZ),
-  // 		 &idealresMap.at(TRKPTZ),
-  // 		 &idealeffMap.at(TRKPTZ), &idealeffMap.at(PASS)});
+  inclusivePlot(Form("../figs/inclusivereso_logscale.pdf"), true, false,
+		-400, 400, canvas,
+	        {&mapHGTD.at(HGTD),   &mapHGTD.at(TRKPTZ),
+		 &mapHGTD.at(FILT60), &mapHGTD.at(FILT90),
+		 &mapHGTD.at(CALO60), &mapHGTD.at(CALO90),
+		 &mapHGTD.at(FILTJET),
+		 &mapHGTD.at(JUST60), &mapHGTD.at(JUST90)});
 
-  // inclusivePlot(Form("../figs/inclusivereso_linscale.pdf"), false, true,
-  // 		-200, 200, canvas,
-  // 		{&hgtdtimesMap.at(HGTD), &hgtdtimesMap.at(TRKPTZ),
-  // 		 &idealresMap.at(TRKPTZ),
-  // 		 &idealeffMap.at(TRKPTZ), &idealeffMap.at(PASS)});
+  inclusivePlot(Form("../figs/inclusivereso_linscale.pdf"), false, false,
+		-200, 200, canvas,
+	        {&mapHGTD.at(HGTD),   &mapHGTD.at(TRKPTZ),
+		 &mapHGTD.at(FILT60), &mapHGTD.at(FILT90),
+		 &mapHGTD.at(CALO60), &mapHGTD.at(CALO90),
+		 &mapHGTD.at(FILTJET),
+		 &mapHGTD.at(JUST60), &mapHGTD.at(JUST90)});
   
   std::cout << "FINISHED PLOT PRINTING\n";
 

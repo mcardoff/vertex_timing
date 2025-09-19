@@ -220,27 +220,6 @@ namespace MyUtl {
     void fillTotal(double& val) { this->effTotal->Fill(val); }
     void fillTotal(int& val) { this->effTotal->Fill(val); }
     
-    inline void setParamMaxes() {
-      double maxVal = -10, minVal = 1e60;
-      for (auto key: FITPARAM_VEC) {
-	TH1D *hist = params->fromEnum(key);
-	hist->GetXaxis()->SetNdivisions(510);
-	double thisMax = hist->GetMaximum();
-	if (thisMax > maxVal)
-	  maxVal = thisMax;
-
-	double thisMin = hist->GetMinimum();
-	if (thisMin < minVal)
-	  minVal = thisMin;
-
-	if (key == FitParamFields::SIGMA)
-	  maxVal = 40.0, minVal = 10;
-
-	double pad = 0.5*(1-0.75) * (maxVal-minVal);
-	params->fromEnum(key)->GetYaxis()->SetRangeUser(minVal-pad, maxVal+pad);
-      }
-    }
-
     inline void plotPostProcessing() {
       for(int j = 0; j < hist->GetNbinsX(); ++j) {
 	auto color = COLORS[j % COLORS.size()];
@@ -296,7 +275,6 @@ namespace MyUtl {
       eff->SetLineWidth(2);
       efficiency = std::move(eff);
 
-      this->setParamMaxes();
     }
 
     inline void printEfficiencyStats() {
@@ -431,7 +409,7 @@ namespace MyUtl {
       TLegend* legend = new TLegend(0.55, 0.65, 0.9, 0.9);
       bool first = true;
       int counter = 0;
-
+      bool isEfficiency = false;
       for (const auto& ana : plts) {
 	const auto& plt = ana->get(key);
 	auto obj = getter(plt);
@@ -442,15 +420,25 @@ namespace MyUtl {
 	  obj->SetTitle(Form("%s vs %s", title, plt->xtitle));
 	  obj->Draw("E1");
 	  if constexpr (std::is_same_v<decltype(obj), TEfficiency*> || std::is_same_v<decltype(obj), std::shared_ptr<TEfficiency>>) {
-	    std::cout << "DOING EFFICIENCY STUFF" << std::endl;
 	    gPad->Update();
-	    obj->GetPaintedGraph()->GetYaxis()->SetRangeUser(yMin, yMax);
 	    obj->GetPaintedGraph()->GetXaxis()->SetRangeUser(xMin, xMax);
+	    obj->GetPaintedGraph()->GetYaxis()->SetRangeUser(yMin, yMax);
+	  } else {
+	    obj->GetXaxis()->SetRangeUser(xMin, xMax);
+	    obj->GetYaxis()->SetRangeUser(yMin, yMax);
 	  }
 	  first = false;
 	} else
 	  obj->Draw("E1 SAME");
       }
+
+      auto* total = (TH1D*)plts[0]->get(key)->effTotal->Clone();
+      total->SetLineColorAlpha(COLORS[8],0.5);
+      total->SetFillColorAlpha(COLORS[8],0.5);
+      total->SetLineWidth(2);
+      total->Scale(1.0 / total->Integral());
+      total->Scale((0.2*yMax - yMin) / total->GetMaximum());
+      total->Draw("HIST SAME"); 
 
       if (refVal != -1) {
 	TLine* refLine = new TLine(xMin, refVal, xMax, refVal);

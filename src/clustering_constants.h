@@ -32,6 +32,7 @@ namespace MyUtl {
   const double MAX_VTX_DZ        = 2.0;  // max error for reco HS vertex z
   const double MAX_NSIGMA        = 3.0;  // how close a track can be to PV
   const double MAX_TRK_VTX_SIG   = 3.0;  // How close a track can be to another vertex
+  const double PASS_SIGMA = 20.0;
   const double PILEUP_SMEAR = 175.0;
 
   const double MIN_HGTD_ETA = 2.38;
@@ -73,11 +74,11 @@ namespace MyUtl {
   };
 
   const std::vector<Score> ENUM_VEC = {
-    Score::HGTD  ,
+    Score::HGTD  , Score::PASS,
     Score::TRKPT , Score::TRKPTZ,
-    // Score::CALO90, Score::CALO60,
-    // Score::JUST60, Score::JUST90, Score::PASS,
-    // Score::FILT90, Score::FILT60, Score::FILTJET,
+    Score::CALO60, Score::CALO90,
+    Score::JUST60, Score::JUST90,
+    Score::FILT90, Score::FILT60, Score::FILTJET,
     
   }; // valid values
 

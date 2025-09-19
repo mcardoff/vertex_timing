@@ -116,10 +116,8 @@ namespace MyUtl {
 	if (thisDR < minDR)
 	  minDR = thisDR;
       }
-      if (minDR > minDRCut)
-	continue;
-      
-      output.push_back(trk);
+      if (minDR < minDRCut)
+	output.push_back(trk);
     }
     return output;
   }
@@ -222,7 +220,7 @@ namespace MyUtl {
     }
 
     if (analyses.count(Score::FILTJET)) {
-      std::vector<int> filteredTracks = filterTracksInJets(tracks, branch, 0.3);
+      std::vector<int> filteredTracks = filterTracksInJets(tracks, branch, 0.4);
       filtjetClusters =
 	clusterTracksInTime(
           filteredTracks, branch, 3.0,

@@ -307,7 +307,7 @@ namespace MyUtl {
 	return false;
 
       double diff = std::abs(this->values.at(0)-branch->truthVtxTime[0]);
-      if (diff > 60)
+      if (diff > 3*PASS_SIGMA)
 	return false;
 
       int nHSTrack = 0;

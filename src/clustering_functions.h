@@ -88,8 +88,15 @@ namespace MyUtl {
     mergedCluster.nConstituents = a.nConstituents+b.nConstituents;
     mergedCluster.maxPtCluster = a.maxPtCluster || b.maxPtCluster;
 
-    for (Score score : ENUM_VEC) {
-      mergedCluster.scores[score] = a.scores[score]+b.scores[score];
+    for (auto [k,v] : a.scores) {
+      mergedCluster.scores[k] = v;
+    }
+
+    for (auto [k,v] : b.scores) {
+      if (mergedCluster.scores.count(k))
+	mergedCluster.scores[k] += v;
+      else
+	mergedCluster.scores[k] = v;
     }
 
     return mergedCluster;
@@ -324,6 +331,10 @@ namespace MyUtl {
     for (Score score: ENUM_VEC) {
       if (DEBUG) std::cout << "SCORE: " << toString(score) << '\n';
       if (score == HGTD)
+	continue;
+
+      // skip filtered tracks, they use a different collection
+      if (score == FILTJET or score == FILT60 or score == FILT90)
 	continue;
 
       if (score == Score::JUST60) {
