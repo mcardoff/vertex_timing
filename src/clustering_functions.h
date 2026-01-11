@@ -35,7 +35,7 @@ namespace MyUtl {
     std::vector<double> bVal = b.values;
     std::vector<double> bSig = b.sigmas;
 
-    std::vector<double> metric = {1.,-1.};
+    // std::vector<double> metric = {1.,-1.};
 
     if (aVal.size() != bVal.size()) { std::cout << "Uh ohhh\n"; }
 
@@ -50,7 +50,7 @@ namespace MyUtl {
     double dsqr = 0.0;
     for (int i=0; i < distances.size(); i++){
       auto d = distances[i];
-      dsqr += metric.at(i)*d*d;
+      dsqr += d*d;
     }
     return sqrt(dsqr);
   }
@@ -126,7 +126,7 @@ namespace MyUtl {
 
 	double trkPt = branch->trackPt[idx];
 	double trkZ0 = branch->trackZ0[idx];
-	double trkResZ0 = branch->trackVarZ0[idx];
+	double trkResZ0 = std::sqrt(branch->trackVarZ0[idx]);
 
 	std::map<Score,double> scores;
 	scores[Score::HGTD] = 0;
@@ -163,6 +163,7 @@ namespace MyUtl {
 	
 	  double currentDistance =
 	    getDistanceBetweenClusters(a, b);
+	  // std::cout << currentDistance << std::endl;
 	  if (currentDistance <= distance) {
 	    distance = currentDistance;
 	    i0 = i;

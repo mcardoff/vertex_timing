@@ -184,13 +184,13 @@ namespace MyUtl {
     auto effFillValHSTrack = folded(nForwardTrackHS, (int)FOLD_HS_TRACK);
     auto effFillValPUTrack = folded(nForwardTrackPU, (int)FOLD_PU_TRACK);
     auto effFillValPURatio = puRatio;
+    double effFillValVtxDz   = std::abs(branch->recoVtxZ[0] - branch->truthVtxZ[0]);
 
     if (DEBUG) {
       std::cout << "nForwardJet = " << nForwardJet << '\n';
       std::cout << "nForwardTrack = " << nForwardTrack << '\n';
       std::cout << "nForwardTrack_HS = " << nForwardTrackHS << '\n';
       std::cout << "nForwardTrack_PU = " << nForwardTrackPU << '\n';
-      std::cout << "Vertex_z = " << recoZ << '\n';
     }
     
     std::vector<Cluster> clusters =
@@ -231,6 +231,7 @@ namespace MyUtl {
     if (DEBUG) std::cout << "LEFT CLUSTERING\n";
     for (auto& [score,analysis]: analyses) {
       analysis["fjet"]->     fillTotal(effFillValFjet   );
+      analysis["vtx_dz"]->   fillTotal(effFillValVtxDz  );
       analysis["ftrack"]->   fillTotal(effFillValTrack  );
       analysis["pu_frac"]->  fillTotal(effFillValPURatio);
       analysis["hs_track"]-> fillTotal(effFillValHSTrack);
@@ -260,7 +261,7 @@ namespace MyUtl {
 
     if (DEBUG) std::cout << "Chose clusters\n";
 
-    bool passesHGTD = false, passesMine = false;
+    bool hasPassingCluster = false, passesMine = false;
     
     for (auto& [score, analysis] : analyses) {
       if (DEBUG) std::cout << "Filling Scores: " << toString(score) << '\n';
@@ -290,35 +291,38 @@ namespace MyUtl {
       analysis.inclusivePurity->Fill(clusterPurity);
       if (scored.passEfficiency(branch)) {
 	analysis["fjet"]->     fillPass(effFillValFjet   );
+	analysis["vtx_dz"]->   fillPass(effFillValVtxDz  );
 	analysis["ftrack"]->   fillPass(effFillValTrack  );
 	analysis["pu_frac"]->  fillPass(effFillValPURatio);
 	analysis["hs_track"]-> fillPass(effFillValHSTrack);
 	analysis["pu_track"]-> fillPass(effFillValPUTrack);
-	if (score == Score::HGTD) {
-	  passesHGTD = true;
+	if (score == Score::PASS) {
+	  hasPassingCluster = true;
 	}
 	if (score == Score::TRKPTZ)
 	  passesMine = true;
       }
 
       // fill diff hists
-      analysis["fjet"]->     fillDiff(nForwardJet     , diff);
-      analysis["ftrack"]->   fillDiff(nForwardTrack   , diff);
+      analysis["fjet"]->     fillDiff(nForwardJet    , diff);
+      analysis["vtx_dz"]->   fillDiff(effFillValVtxDz, diff);
+      analysis["ftrack"]->   fillDiff(nForwardTrack  , diff);
       analysis["pu_frac"]->  fillDiff(puRatio        , diff);
       analysis["hs_track"]-> fillDiff(nForwardTrackHS, diff);
       analysis["pu_track"]-> fillDiff(nForwardTrackPU, diff);
       
       // fill purities
       analysis["fjet"]->     fillPurity(nForwardJet    , clusterPurity);
+      analysis["vtx_dz"]->   fillPurity(effFillValVtxDz, clusterPurity);
       analysis["ftrack"]->   fillPurity(nForwardTrack  , clusterPurity);
       analysis["pu_frac"]->  fillPurity(puRatio        , clusterPurity);
       analysis["hs_track"]-> fillPurity(nForwardTrackHS, clusterPurity);
       analysis["pu_track"]-> fillPurity(nForwardTrackPU, clusterPurity);
     }
-    if ((not passesHGTD) and passesMine) returnCode = 2;
-    else if (passesMine) returnCode = 1;
+    if (hasPassingCluster and (not passesMine)) returnCode = 2;
+    // else if (passesMine) returnCode = 1;
 
-    if (not passesMine) returnCode = 0;
+    // if (not passesMine) returnCode = 0;
     
     return std::make_pair(returnCode, returnVal);
   }

@@ -26,10 +26,12 @@ namespace MyUtl {
   const int    MAX_NHS_TRACK     = 6;    // testing only
   const double MIN_JETPT         = 30.0; // self explanatory
   const double MIN_ABS_ETA_JET   = 2.38; // min eta for a jet to be considered "forward"
+  const double MAX_ABS_ETA_JET   = 4.00; // max eta for a jet to be considered "forward"
   const double MIN_ABS_ETA_TRACK = 2.38; // min eta for a track to be considered "forward"
+  const double MAX_ABS_ETA_TRACK = 4.00; // max eta for a track to be considered "forward"
   const double MIN_TRACK_PT      = 1.0;  // track_pt > 1.0 GeV
   const double MAX_TRACK_PT      = 30.0; // track_pt < 30.0 GeV
-  const double MAX_VTX_DZ        = 2.0;  // max error for reco HS vertex z
+  const double MAX_VTX_DZ        = 5.0;  // max error for reco HS vertex z
   const double MAX_NSIGMA        = 3.0;  // how close a track can be to PV
   const double MAX_TRK_VTX_SIG   = 3.0;  // How close a track can be to another vertex
   const double PASS_SIGMA = 20.0;
@@ -46,6 +48,9 @@ namespace MyUtl {
 
   const double FJET_MIN = 0, FJET_MAX = 31, FOLD_FJET = 5;
   const double FJET_WIDTH = 1.0;
+
+  const double VTX_DZ_MIN = 0, VTX_DZ_MAX = 5.0, FOLD_VTX_DZ = 2.0;
+  const double VTX_DZ_WIDTH = 0.1;
 
   const double TRACK_MIN = 0, TRACK_MAX = 100, FOLD_TRACK = 20;
   const double TRACK_WIDTH = 1.0;
@@ -87,7 +92,7 @@ namespace MyUtl {
   ) -> const char* {
     switch (score) {
     case Score::HGTD:    return "HGTD Algorithm";
-    case Score::TRKPTZ:  return "Track p_{T}exp(-|#Deltaz|)";
+    case Score::TRKPTZ:  return "Track p_{T} exp(-|#Delta z|)";
     case Score::TRKPT:   return "Track p_{T}";
     case Score::CALO90:  return "Calo Time Exclusion (90 ps)";
     case Score::CALO60:  return "Calo Time Exclusion (60 ps)";
@@ -102,16 +107,17 @@ namespace MyUtl {
   }
 
   enum FitParamFields {
-    MEAN = 0, SIGMA = 1, CORE = 2, BKG = 3, RATIO = 4
+    MEAN = 0, SIGMA = 1, CORE = 2, BKG = 3, RATIO = 4, BSIGMA = 5,
   };
   const std::vector<FitParamFields> FITPARAM_VEC =
-    { FitParamFields::SIGMA, FitParamFields::CORE, FitParamFields::BKG, FitParamFields::RATIO, FitParamFields::MEAN };
+    { FitParamFields::SIGMA, FitParamFields::BSIGMA, FitParamFields::CORE, FitParamFields::BKG, FitParamFields::RATIO, FitParamFields::MEAN };
 
   auto toString(
     FitParamFields key
   ) -> const char* {
     switch (key) {
     case FitParamFields::SIGMA: return "SIGMA";
+    case FitParamFields::BSIGMA: return "BSIGMA";
     case FitParamFields::CORE:  return "CORE";
     case FitParamFields::BKG:   return "BKG";
     case FitParamFields::RATIO: return "RATIO";

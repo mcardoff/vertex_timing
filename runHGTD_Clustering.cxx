@@ -2,34 +2,35 @@
 #include "src/event_processing.h"
 #include <TRandom.h>
 
-using namespace myutl;
+using namespace MyUtl;
 
-void runHGTD_Clustering(std::string Number, Long64_t event_num) {
+void runHGTD_Clustering(std::string number, Long64_t eventNum) {
   // Initialize TChain to read the ntuple files
   TChain chain("ntuple");
   // Setup the chain using the utility function from clustering_utilities.h
-  setup_chain(chain, Number);
+  setupChain(chain, number);
   TTreeReader reader(&chain);
   BranchPointerWrapper branch(reader);
 
-  reader.SetEntry(event_num);
+  reader.SetEntry(eventNum);
   
-  std::vector<int> tracks = getAssociatedTracks(&branch, min_track_pt,max_track_pt);
+  std::vector<int> tracks = getAssociatedTracks(&branch, MIN_TRACK_PT,MAX_TRACK_PT);
 
   bool
-    use_smear_times = false,
-    use_valid_times_only = true,
-    use_cone_clustering = true,
-    use_z0 = false;
+    useSmearTimes = false,
+    useValidTimesOnly = true,
+    useConeClustering = true,
+    useZ0 = false;
 
   // gRandom->SetSeed(21);
 
   std::vector<Cluster> clusters =
-    clusterTracksInTime(tracks, &branch, 3.0, 30.0,
-			use_smear_times,
-			use_valid_times_only,
-			use_cone_clustering,
-			use_z0);
+    clusterTracksInTime(tracks, &branch, 3.0,
+			useSmearTimes,
+			useValidTimesOnly,
+			30.0,
+			useConeClustering,
+			useZ0);
 
   // auto clustermerge = mergeClusters(clusters[0], clusters[1]);
   // clustermerge = mergeClusters(clustermerge, clusters[2]);
@@ -45,8 +46,8 @@ void runHGTD_Clustering(std::string Number, Long64_t event_num) {
     std::cout << "t: " << cluster.values.at(0) << "\n";
     if (cluster.values.size() > 1) std::cout << "z: " << cluster.values.at(1) << "\n";
     std::cout << "score: " << score << "\n";
-    for (int i=0; i < cluster.track_indices.size(); i++) {
-      std::cout << cluster.track_indices[i] << "," << cluster.all_times[i] << "\n";
+    for (int i=0; i < cluster.trackIndices.size(); i++) {
+      std::cout << cluster.trackIndices[i] << "," << cluster.allTimes[i] << "\n";
       
     }
     std::cout << "passes? " << cluster.passEfficiency(&branch) << std::endl;

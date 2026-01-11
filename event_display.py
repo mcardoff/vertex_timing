@@ -7,7 +7,6 @@ MODIFIED FOR USE BY: mcardiff@brandeis.edu
 import argparse
 import random
 import subprocess
-from operator import __sub__
 from itertools import chain
 
 import uproot
@@ -27,7 +26,7 @@ args = parser.parse_args()
 event_num, file_num = args.event_num, args.file_num
 
 IDEALEFF = False
-filename = f'./figs/mine_fail_res_pass/event_display_{file_num}_{event_num:04d}.pdf'
+filename = f'./figs/mlbad/event_display_{file_num}_{event_num:04d}.pdf'
 colors = ["#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#a65628", "#f781bf", "#999999"]
 
 ANA_FILE = f'../ntuple-hgtd/user.mcardiff.45809429.Output._{file_num}.SuperNtuple.root'
@@ -73,9 +72,7 @@ truth_hs_t = branch.TruthVtx_time[event_num][0]
 connected_tracks = []
 for (idx, eta) in enumerate(branch.Track_eta[event_num]):
     in_hgtd = abs(eta) > 2.38 and abs(eta) < 4.0
-    time_valid = branch.Track_hasValidTime[event_num][idx] == 1
-    if IDEALEFF:
-        time_valid = True
+    time_valid = True if IDEALEFF else branch.Track_hasValidTime[event_num][idx] == 1
     track_quality = branch.Track_quality[event_num][idx] == 1
     dz = branch.Track_z0[event_num][idx] - branch.RecoVtx_z[event_num][0]
     nsigma = abs(dz / np.sqrt(branch.Track_var_z0[event_num][idx]))
@@ -140,13 +137,18 @@ try:
                 current_block_times = []
             continue
         if "t:" in line:
-            cluster_times.append(float(line[2:]))
+            cl_time = float(line[2:])
+            if np.abs(cl_time-truth_hs_t) < 1000:
+                cluster_times.append(cl_time)
+            else:
+                continue
         try:
             tup = line.split(",")
             trk_idx = int(tup[0])
             trk_time = float(tup[1])
-            current_block_idx.append(trk_idx)
-            current_block_times.append(trk_time)
+            if np.abs(trk_time-truth_hs_t) < 1000:
+                current_block_idx.append(trk_idx)
+                current_block_times.append(trk_time)
         except (ValueError, IndexError):
             continue
     if current_block_idx:
@@ -270,16 +272,18 @@ def add_annotation(ax, truth_text_y, reco_text_y):
     x_min, x_max = ax.get_xlim()
     x_step = np.abs(x_max-x_min)/50
     ax.annotate("Truth HS Time",
-                xytext=(truth_hs_t-2.5*x_step, y_min-2*y_step),
+                xytext=(truth_hs_t-5*x_step, y_min+8*y_step),
                 xy=(truth_hs_t, truth_text_y), xycoords='data',
                 ha='left', va='top', color='blue',
                 arrowprops={'arrowstyle':'->','color':'blue','lw':2})
+    ax.axvline(x=truth_hs_t, ymin=y_min, ymax=y_max, color='blue', lw=2)
 
     if branch.RecoVtx_hasValidTime[event_num][0] == 1:
-        ax.annotate("Reco HS Time", xytext=(reco_hs_t-2.5*x_step, y_min-4*y_step),
+        ax.annotate("HGTD Time", xytext=(reco_hs_t-5*x_step, y_min-2*y_step),
                     xy=(reco_hs_t, reco_text_y), xycoords='data',
                     ha='left', va='top', color='black',
                     arrowprops={'arrowstyle':'->','color':'black','lw':2})
+        ax.axvline(x=reco_hs_t, ymin=y_min, ymax=y_max, color='black', lw=2)
 
     if args.extra_time:
         ax.annotate("My Time", xytext=(args.extra_time-2.5*x_step, y_min-6*y_step),

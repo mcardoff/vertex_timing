@@ -103,7 +103,7 @@ namespace MyUtl {
       }
     
       // check reco HS vertex is with 2mm of truth HS vertex
-      if(std::abs(truthVtxZ[0] - recoVtxZ[0]) > MAX_VTX_DZ) {
+      if(std::abs(this->truthVtxZ[0] - this->recoVtxZ[0]) > MAX_VTX_DZ) {
 	if(DEBUG) std::cout << "Skipping event due to incorrect HS vertex\n";
 	return false;
       }
@@ -115,11 +115,11 @@ namespace MyUtl {
       int passptcount = 0, passptetacount = 0;
       for(int jetIdx = 0; jetIdx < this->topoJetEta.GetSize(); ++jetIdx) {
 	float
-	  eta = topoJetEta[jetIdx],
+	  eta = std::abs(topoJetEta[jetIdx]),
 	  pt = truthHSJetPt[jetIdx];
 	if (DEBUG) std::cout << "pt, eta: " << pt << ", " << eta << '\n';
 	bool passpt = pt > MIN_JETPT;
-	bool passpteta = pt > MIN_JETPT and std::abs(eta) > MIN_ABS_ETA_JET;
+	bool passpteta = passpt and eta > MIN_ABS_ETA_JET and eta < MAX_ABS_ETA_JET;
 	passptcount += passpt ? 1 : 0;
 	passptetacount += passpteta ? 1 : 0;
       }
@@ -140,7 +140,7 @@ namespace MyUtl {
       float
 	jetEta = std::abs(this->topoJetEta[jetIdx]),
 	jetPt = this->topoJetPt[jetIdx];
-      if (jetEta > MIN_ABS_ETA_JET and jetPt > MIN_JETPT)
+      if (jetEta > MIN_ABS_ETA_JET and jetEta < MAX_ABS_ETA_JET and jetPt > MIN_JETPT)
 	nForwardJet++;
     }
   }
@@ -310,13 +310,14 @@ namespace MyUtl {
       if (diff > 3*PASS_SIGMA)
 	return false;
 
-      int nHSTrack = 0;
-      for (auto idx: this->trackIndices) {
-	if (idx == -1 or branch->trackToTruthvtx[idx] == 0)
-	  nHSTrack++;
-      }
+      return true;
+      // int nHSTrack = 0;
+      // for (auto idx: this->trackIndices) {
+      // 	if (idx == -1 or branch->trackToTruthvtx[idx] == 0)
+      // 	  nHSTrack++;
+      // }
 
-      return nHSTrack > 0;
+      // return nHSTrack > 0;
     }
   };
   
