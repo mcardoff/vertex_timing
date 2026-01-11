@@ -1,7 +1,6 @@
 ./eventdisplays
 ./ntuple_ttbar
 *.pdf
-*.txt
 /event_examples/
 *.jpg
 /.ipynb_checkpoints/
