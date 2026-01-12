@@ -4,6 +4,11 @@ cmake_minimum_required(VERSION 3.10)
 # Define the project name
 project(ClusteringProject CXX)
 
+# Set the C++ standard to 17
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 # Find the ROOT and Boost libraries
 # Assumes ROOT and Boost are installed and discoverable by find_package
 find_package(ROOT REQUIRED COMPONENTS RIO Core Gpad Graf Hist Tree)

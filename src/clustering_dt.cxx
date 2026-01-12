@@ -29,7 +29,7 @@ auto main() -> int {
   // mapHGTD.emplace(JUST90, AnalysisObj("HGTD Times", JUST90 ));
   // mapHGTD.emplace(FILT60, AnalysisObj("HGTD Times", FILT60 ));
   // mapHGTD.emplace(FILT90, AnalysisObj("HGTD Times", FILT90 ));
-  mapHGTD.emplace(FILTJET,AnalysisObj("HGTD Times", FILTJET));
+  // mapHGTD.emplace(FILTJET,AnalysisObj("HGTD Times", FILTJET));
   mapHGTD.emplace(PASS  , AnalysisObj("HGTD Times", PASS   ));
 
   std::map<Score, AnalysisObj> mapIdealRes;
@@ -40,7 +40,7 @@ auto main() -> int {
   // mapIdealRes.emplace(JUST90 , AnalysisObj("Ideal Res. HGTD", JUST90 ));
   // mapIdealRes.emplace(FILT60 , AnalysisObj("Ideal Res. HGTD", FILT60 ));
   // mapIdealRes.emplace(FILT90 , AnalysisObj("Ideal Res. HGTD", FILT90 ));
-  mapIdealRes.emplace(FILTJET, AnalysisObj("Ideal Res. HGTD", FILTJET));
+  // mapIdealRes.emplace(FILTJET, AnalysisObj("Ideal Res. HGTD", FILTJET));
   mapIdealRes.emplace(PASS   , AnalysisObj("Ideal Res. HGTD", PASS   ));
 
   std::map<Score, AnalysisObj> mapIdealEff;
@@ -51,7 +51,7 @@ auto main() -> int {
   // mapIdealEff.emplace(JUST90 , AnalysisObj("Ideal Res.+Eff. HGTD", JUST90 ));
   // mapIdealEff.emplace(FILT60 , AnalysisObj("Ideal Res.+Eff. HGTD", FILT60 ));
   // mapIdealEff.emplace(FILT90 , AnalysisObj("Ideal Res.+Eff. HGTD", FILT90 ));
-  mapIdealEff.emplace(FILTJET, AnalysisObj("Ideal Res.+Eff. HGTD", FILTJET));
+  // mapIdealEff.emplace(FILTJET, AnalysisObj("Ideal Res.+Eff. HGTD", FILTJET));
   mapIdealEff.emplace(PASS   , AnalysisObj("Ideal Res.+Eff. HGTD", PASS   ));
 
   std::vector<TString> hasPassingClusterButFailsHGTD, hasPassingClusterButFailsIdealRes, hasPassingClusterButFailsIdealEff;
