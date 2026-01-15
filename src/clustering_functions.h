@@ -5,6 +5,7 @@
 
 #include "clustering_constants.h"
 #include "clustering_structs.h"
+#include "ml_model.h"
 
 namespace MyUtl {
 
@@ -288,10 +289,18 @@ namespace MyUtl {
       doSimultaneousClustering(&collection, distanceCut);
     else
       doConeClustering(&collection, distanceCut);
-        
+
+    // Load ML model only once using static initialization (lazy evaluation)
+    static MLModel ml_model = []() {
+        MLModel m;
+        m.load_weights("../share/models/model_weights.json");
+        std::cout << "✓ ML model loaded (one-time initialization)" << std::endl;
+        return m;
+    }();
+
     for (Cluster& cluster: collection) {
       cluster.calcPurity(branch);
-      cluster.updateScores(branch);
+      cluster.updateScores(branch, &ml_model);
     }
     
     if (DEBUG) std::cout << "Finished Clustering\n";
@@ -323,21 +332,21 @@ namespace MyUtl {
     if (DEBUG) std::cout << "Choosing score\n";
 
     double caloTime90, caloTime60;
-    if(std::find(ENUM_VEC.begin(), ENUM_VEC.end(), CALO90)!=ENUM_VEC.end())
+    if (std::find(ENUM_VEC.begin(), ENUM_VEC.end(), CALO90) != ENUM_VEC.end())      
       caloTime90 = gRandom->Gaus(branch->truthVtxTime[0],90);
 
-    if(std::find(ENUM_VEC.begin(), ENUM_VEC.end(), CALO60)!=ENUM_VEC.end())
+    if (std::find(ENUM_VEC.begin(), ENUM_VEC.end(), CALO60) != ENUM_VEC.end())      
       caloTime60 = gRandom->Gaus(branch->truthVtxTime[0],60);
-      
+    
     for (Score score: ENUM_VEC) {
-      if (DEBUG) std::cout << "SCORE: " << toString(score) << '\n';
+      if (DEBUG)
+        std::cout << "SCORE: " << toString(score) << '\n';
       if (score == HGTD)
 	continue;
 
       // skip filtered tracks, they use a different collection
       if (score == FILTJET or score == FILT60 or score == FILT90)
 	continue;
-
       if (score == Score::JUST60) {
 	output[score] = {{caloTime60}, {60.0}, {}, {-1}, {}};
 	continue;
@@ -347,17 +356,18 @@ namespace MyUtl {
 	output[score] = {{caloTime90}, {90.0}, {}, {-1}, {}};
 	continue;
       }
-      
-      if (score == Score::PASS) {
+
+      if (score == Score::PASS) {        
 	if (DEBUG) std::cout << "Choosing pass score\n";
-	for (Cluster& cluster: collection)
-	  if (cluster.passEfficiency(branch))
+        for (Cluster &cluster : collection)
+          if (cluster.passEfficiency(branch))            
 	    output[score] = cluster;
 	continue;
       }
 
       output[score] = collection[0]; // final time we are giving to the user
       double maxScore = output[score].scores.at(score);
+      // std::cout << ""<< maxScore << '\n';
     
       for (Cluster& cluster: collection) {
 	double compScore = cluster.scores[score];
@@ -394,10 +404,10 @@ namespace MyUtl {
   ) -> Cluster {
     if (DEBUG) std::cout << "Choosing score\n";
 
-    if (score >= 3) {
-      std::cout << "DONT CALL LIKE THIS\n";
-      return {};
-    }
+    // if (score >= 3) {
+      // std::cout << "DONT CALL LIKE THIS\n";
+      // return {};
+    // }
 
     Cluster output = collection[0]; // final time we are giving to the user
     double maxScore = output.scores.at(score);

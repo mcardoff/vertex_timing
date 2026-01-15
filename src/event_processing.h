@@ -240,7 +240,7 @@ namespace MyUtl {
     
     std::map<Score,Cluster> chosen;
     if (clusters.size() != 0)
-      chosen = chooseCluster(clusters, branch);
+      chosen = chooseCluster(clusters, branch);    
     if (DEBUG) std::cout << "Chose My Clusters\n";
 
     if (not filt60Clusters.empty())
@@ -264,7 +264,8 @@ namespace MyUtl {
     bool hasPassingCluster = false, passesMine = false;
     
     for (auto& [score, analysis] : analyses) {
-      if (DEBUG) std::cout << "Filling Scores: " << toString(score) << '\n';
+      if (DEBUG)
+        std::cout << "Filling Scores: " << toString(score) << '\n';
       if (branch->recoVtxValid[0] == 0 and score == Score::HGTD)
 	continue;
 
@@ -273,16 +274,21 @@ namespace MyUtl {
 
       if (!chosen.count(score) and score != Score::HGTD)
 	continue;
-      
-      if (DEBUG) std::cout << "Attempting to access chosen[" << toString(score) << "]\n";
+
+      if (DEBUG)
+        std::cout << "Attempting to access chosen[" << toString(score) << "]\n";
       Cluster scored = chosen[score];
-      if (DEBUG) std::cout << "Attempting to access scores values, size: " << scored.values.size() << '\n';
+      if (DEBUG)
+        std::cout << "Attempting to access scores values, size: " << scored.values.size() << '\n';
       double scoreBasedTime = score == Score::HGTD ? branch->recoVtxTime[0] : scored.values.at(0);
-      if (DEBUG) std::cout << "Attempting to access purity\n";
+      if (DEBUG)
+        std::cout << "Attempting to access purity\n";
       double clusterPurity = clusters.size() != 0 ? scored.purity : 0;
-      if (DEBUG) std::cout << "Purity: " << clusterPurity << '\n';
+      if (DEBUG)
+        std::cout << "Purity: " << clusterPurity << '\n';
       double diff = scoreBasedTime - branch->truthVtxTime[0];
-      if (DEBUG) std::cout << "Diff: " << diff << '\n';
+      if (DEBUG)
+        std::cout << "Diff: " << diff << '\n';
 
       if (score == Score::TRKPTZ)
 	returnVal = scoreBasedTime;

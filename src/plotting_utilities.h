@@ -47,7 +47,7 @@ namespace MyUtl {
   ) -> TF1* {
     dgausFitFunc->SetParNames("Mean", "Norm1", "Norm2", "Sigma1", "Sigma2");
     // TF1* fit = new TF1("dgaus_fit", "dgaus", hist->GetXaxis()->GetXmin(), hist->GetXaxis()->GetXmax());
-    TF1* fit = new TF1("dgaus_fit", "dgaus", -100, 100);
+    TF1* fit = new TF1("dgaus_fit", "dgaus", hist->GetXaxis()->GetXmin(), hist->GetXaxis()->GetXmax());
     fit->SetParameters(0, 0.8*hist->GetMaximum(), 1e-2*hist->GetMaximum(), 26.0, 175.0);
     fit->FixParameter(0, 0);
     fit->SetParLimits(1, 0, 1.E6); // can only be positive
@@ -300,7 +300,7 @@ namespace MyUtl {
 			      (int)leftEdge,(int)rightEdge,
 			      this->ytitle));
 	
-	std::unique_ptr<TF1> dgausFit = std::unique_ptr<TF1>(createDblFit(hSlice.get(),false)); // varied bg
+	std::unique_ptr<TF1> dgausFit = std::unique_ptr<TF1>(createDblFit(hSlice.get(),true)); // varied bg
 	// std::unique_ptr<TF1> dgausFit = std::unique_ptr<TF1>(createTrpFit(hSlice.get())); // TRIPLE GAUS :O
 	std::unique_ptr<TF1> sgausFit = std::unique_ptr<TF1>(createSngFit(hSlice.get()));
 
@@ -721,7 +721,7 @@ namespace MyUtl {
     canvas->SetLogy(logScale);
     for (const auto& plt: plts) {
       TH1D* hist = (TH1D*)plt->inclusiveReso->Clone();
-      TF1* fit1 = createTrpFit(hist);
+      TF1* fit1 = createDblFit(hist,true);
       TLegend* inclusiveLegend = new TLegend(0.65, 0.75, 0.9, 0.9);
 
       inclusiveLegend->AddEntry(hist,"Histogram");

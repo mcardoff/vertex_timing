@@ -22,7 +22,8 @@ auto main() -> int {
   // HGTD Times
   std::map<Score, AnalysisObj> mapHGTD;
   mapHGTD.emplace(HGTD,   AnalysisObj("HGTD Times", HGTD   ));
-  mapHGTD.emplace(TRKPTZ, AnalysisObj("HGTD Times", TRKPTZ ));
+  mapHGTD.emplace(TRKPTZ, AnalysisObj("HGTD Times", TRKPTZ));
+  mapHGTD.emplace(TESTML, AnalysisObj("HGTD Times", TESTML ));  
   // mapHGTD.emplace(CALO60, AnalysisObj("HGTD Times", CALO60 ));
   // mapHGTD.emplace(CALO90, AnalysisObj("HGTD Times", CALO90 ));
   // mapHGTD.emplace(JUST60, AnalysisObj("HGTD Times", JUST60 ));
@@ -120,6 +121,18 @@ auto main() -> int {
     moneyPlot(Form("../figs/hgtd_trkptz_%s.pdf", KEY), KEY, canvas,
 	      { &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ) });
 
+    moneyPlot(Form("../figs/trkptz_dnn_%s.pdf", KEY), KEY, canvas,
+              { &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ), &mapHGTD.at(TESTML) });
+
+    moneyPlot(Form("../figs/fixed_assoc_%s.pdf", KEY), KEY, canvas,
+	      { &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ), &mapIdealRes.at(TRKPTZ), &mapIdealEff.at(TRKPTZ) });
+
+    moneyPlot(Form("../figs/fixed_selection_%s.pdf", KEY), KEY, canvas,
+	      { &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ), &mapHGTD.at(PASS) });
+
+    moneyPlot(Form("../figs/fixed_all_%s.pdf", KEY), KEY, canvas,
+	      { &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ), &mapIdealEff.at(PASS) });
+    
     // HGTD Only
     // std::cout << "HGTD" << std::endl;
     // moneyPlot(Form("../figs/hgtd_%s.pdf", KEY), KEY, canvas,
@@ -163,14 +176,15 @@ auto main() -> int {
     // 		&mapHGTD.at(FILT60), &mapHGTD.at(FILTJET),
     // 		&mapHGTD.at(PASS) });
 
-    moneyPlot(Form("../figs/ideal_comp_%s.pdf", KEY), KEY, canvas,
-	      { &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ), &mapIdealRes.at(TRKPTZ), &mapIdealEff.at(TRKPTZ), //&mapIdealEff.at(PASS),
-	      });
+    // moneyPlot(Form("../figs/ideal_comp_%s.pdf", KEY), KEY, canvas,
+    // 	      { &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ), &mapIdealRes.at(TRKPTZ), &mapIdealEff.at(TRKPTZ), //&mapIdealEff.at(PASS),
+    // 	      });
 
-    moneyPlot(Form("../figs/pass_comp_%s.pdf", KEY), KEY, canvas,
-	      { &mapHGTD.at(HGTD), &mapHGTD.at(PASS), &mapIdealRes.at(PASS), &mapIdealEff.at(PASS),
-	      });
+    // moneyPlot(Form("../figs/pass_comp_%s.pdf", KEY), KEY, canvas,
+    // 	      { &mapHGTD.at(HGTD), &mapHGTD.at(PASS), &mapIdealRes.at(PASS), &mapIdealEff.at(PASS),
+    // 	      });
 
+    
     // moneyPlot(Form("../figs/filt_jet_comp_%s.pdf", KEY), KEY, canvas,
     // 	      { &mapHGTD.at(HGTD)    ,
     // 		&mapHGTD.at(FILTJET) , &mapIdealRes.at(FILTJET), &mapIdealEff.at(FILTJET),

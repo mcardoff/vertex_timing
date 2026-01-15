@@ -73,18 +73,24 @@ namespace MyUtl {
 
   /// enums and utilities for them
   enum Score {
-    HGTD   = 0, TRKPT  = 1, TRKPTZ = 2, PASS   = 3,
-    CALO90 = 4, CALO60 = 5, JUST90 = 6, JUST60 = 7,
-    FILT90 = 8, FILT60 = 9, FILTJET = 10,
+    HGTD = 0,
+    TRKPT = 1,
+    TRKPTZ = 2,
+    PASS = 3,
+    CALO90 = 4,
+    CALO60 = 5,
+    JUST90 = 6,
+    JUST60 = 7,
+    FILT90 = 8,
+    FILT60 = 9,
+    FILTJET = 10,
+    TESTML = 11,    
   };
 
   const std::vector<Score> ENUM_VEC = {
-    Score::HGTD  , Score::PASS,
-    Score::TRKPT , Score::TRKPTZ,
-    Score::CALO60, Score::CALO90,
-    Score::JUST60, Score::JUST90,
-    Score::FILT90, Score::FILT60, Score::FILTJET,
-    
+    Score::HGTD, Score::PASS, Score::TRKPT, Score::TRKPTZ, Score::CALO60,
+    Score::CALO90, Score::JUST60, Score::JUST90, Score::FILT90, Score::FILT60,
+    Score::FILTJET, Score::TESTML,      
   }; // valid values
 
   auto toString(
@@ -102,6 +108,7 @@ namespace MyUtl {
     case Score::FILT90:  return "90 ps Track Filter";
     case Score::FILT60:  return "60 ps Track Filter";
     case Score::FILTJET: return "Only Tracks in Jets";
+    case Score::TESTML:  return "DNN";
     default:             return "INVALID";
     }
   }

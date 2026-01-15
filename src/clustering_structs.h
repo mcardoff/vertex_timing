@@ -3,6 +3,7 @@
 
 #include "clustering_includes.h"
 #include "clustering_constants.h"
+#include "ml_model.h"
 #include <cstdlib>
 
 namespace MyUtl {
@@ -155,11 +156,11 @@ namespace MyUtl {
 	double pt = this->trackPt[trkIdx];
 	int  truthVtx = this->trackToTruthvtx[trkIdx];
 	bool quality = this->trackQuality[trkIdx] == true;
-	bool checkQuery = this->trackTimeValid[trkIdx] == 1;
+	bool hasValidTime = checkTimeValid ? (this->trackTimeValid[trkIdx] == 1) : true;
 	// already know these pass association
-	if (eta > MIN_ABS_ETA_TRACK and
+	if (eta > MIN_ABS_ETA_TRACK and eta < MAX_ABS_ETA_TRACK and
 	    pt > MIN_TRACK_PT and pt < MAX_TRACK_PT and
-	    quality and checkQuery) {
+	    quality and hasValidTime) {
 	  nFTrack++;
 	  if (truthVtx != -1 and this->truthVtxIshs[truthVtx])
 	    nFTrackHS++;
@@ -251,8 +252,8 @@ namespace MyUtl {
       this->purity = num/denom;
     }
 
-    void updateScores(BranchPointerWrapper *branch) {
-      // Assign TRKPTZ, CALO90, CALO60 Scores
+    void updateScores(BranchPointerWrapper *branch, MLModel *ml_model) {
+      // Assign TRKPTZ, CALO90, CALO60, TESTML Scores
 
       if (this->values.size() > 1) {
 	double dz = std::abs(this->values.at(1)-branch->recoVtxZ[0]);
@@ -272,6 +273,10 @@ namespace MyUtl {
 	double dz = std::abs(z-branch->recoVtxZ[0]);
         this->scores[Score::TRKPTZ] = this->scores.at(Score::TRKPT)*exp(-1.5*dz);
       }
+
+      // have to load model, calculate parameters, and update value in map
+      std::vector<float> features = this->calcFeatures(branch);
+      this->scores[TESTML] = ml_model->predict(features);
       
       this->scores[Score::CALO90] = this->scores.at(Score::TRKPTZ);
       this->scores[Score::CALO60] = this->scores.at(Score::TRKPTZ);
@@ -318,6 +323,91 @@ namespace MyUtl {
       // }
 
       // return nHSTrack > 0;
+    }
+
+    std::vector<float> calcFeatures(BranchPointerWrapper *branch) {
+      float znum  = 0., zden  = 0.;
+      float dnum  = 0., dden  = 0.;
+      float qpnum = 0., qpden = 0.;
+      float sumpt = 0.;
+      for (auto trk: trackIndices) {
+        auto
+            trk_z = branch->trackZ0[trk], trk_var_z = branch->trackVarZ0[trk],
+	    trk_d = branch->trackD0[trk], trk_var_d = branch->trackVarD0[trk],
+	    trk_q = branch->trackQP[trk], trk_var_q = branch->trackVarQp[trk],
+	    trk_pt = branch->trackPt[trk];
+
+        znum += trk_z / (trk_var_z);
+        zden += 1 / (trk_var_z);
+
+        dnum += trk_d / (trk_var_d);
+        dden += 1 / (trk_var_d);
+
+	qpnum += trk_q / (trk_var_q);
+        qpden += 1 / (trk_var_q);
+
+	sumpt += trk_pt;
+      }
+
+      // Calculate cluster properties
+      float cluster_z = znum / zden;
+      float cluster_z_sigma = 1.0f / std::sqrt(zden);
+      float cluster_d0 = dnum / dden;
+      float cluster_d0_sigma = 1.0f / std::sqrt(dden);
+      float cluster_qOverP = qpnum / qpden;
+      float cluster_qOverP_sigma = 1.0f / std::sqrt(qpden);
+
+      // Reference vertex (primary vertex)
+      float ref_vtx_z = branch->recoVtxZ[0];
+
+      // Calculate delta_z and delta_z in resolution units
+      float delta_z = cluster_z - ref_vtx_z;
+      float delta_z_resunits = delta_z / cluster_z_sigma;
+
+      // Return features in training order
+      std::vector<float> features = {
+          delta_z,              // Feature 0
+          delta_z_resunits,     // Feature 1
+          cluster_z_sigma,      // Feature 2
+          cluster_d0,           // Feature 3
+          cluster_d0_sigma,     // Feature 4
+          cluster_qOverP,       // Feature 5
+          cluster_qOverP_sigma, // Feature 6
+          sumpt                 // Feature 7
+      };
+
+      const std::vector<float> means = {
+	// Your scaler.mean_ values in order
+	0.6658103458145465,     // delta_z mean
+	1.4062413922431898,     // delta_z_resunits mean
+	0.4384938254278939,     // cluster_z_sigma mean
+	-0.0006795810095683315, // cluster_d0 mean
+	0.03825910434563131,    // cluster_d0_sigma mean
+	2.5463849668322525e-07, // cluster_qOverP mean
+	2.249843783028648e-06,  // cluster_qOverP_sigma mean
+	36.363541536390116      // cluster_sumpt mean
+      };
+      
+
+      const std::vector<float> stds = {
+          // Your scaler.scale_ values in order
+          1.0862063628195677,     // delta_z std
+          1.0457992632101616,     // delta_z_resunits std
+          0.5121707999068104,     // cluster_z_sigma std
+          0.16671231081127164,    // cluster_d0 std
+          0.034856748414000265,   // cluster_d0_sigma std
+          2.33339973420475e-05,   // cluster_qOverP std
+          2.0502623770486916e-06, // cluster_qOverP_sigma std
+          33.386926190214176      // cluster_sumpt std
+      };
+      
+    
+    // Normalize features
+    for (size_t i = 0; i < features.size(); i++) {
+      features[i] = (features[i] - means[i]) / stds[i];
+    }
+
+      return features;
     }
   };
   
