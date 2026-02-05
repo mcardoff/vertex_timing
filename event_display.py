@@ -26,7 +26,7 @@ args = parser.parse_args()
 event_num, file_num = args.event_num, args.file_num
 
 IDEALEFF = False
-filename = f'./VDT_TALK_2/event_display_{file_num}_{event_num:04d}.pdf'
+filename = f'./event_displays/PUR_PERF_event_display_{file_num}_{event_num:04d}.pdf'
 colors = ["#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#a65628", "#f781bf", "#999999"]
 
 ANA_FILE = f'../ntuple-hgtd/user.mcardiff.45809429.Output._{file_num}.SuperNtuple.root'
@@ -92,10 +92,10 @@ for idx in connected_tracks:
     pz = track_pT * np.sinh(track_eta)
     signX = np.sign(track_eta) if track_eta != 0 else 1
     signY = np.sign(np.sin(track_phi)) if np.sin(track_phi) != 0 else 1
-    theta = np.atan(track_pT / abs(pz))
+    theta = np.arctan(track_pT / abs(pz))
     x = (track_pT / 2) * np.cos(theta) * signX
     y = (track_pT / 2) * np.sin(theta) * signY
-    track_info.append({'z0':track_z0, 'x':x, 'y':y, 'stat':status})
+    track_info.append({'z0':track_z0, 'x':x, 'y':y, 'stat':status, 'idx':idx})
 
 jet_info = []
 for jet_pt in branch.AntiKt4EMTopoJets_pt[event_num]:
@@ -114,9 +114,11 @@ for jet_pt in branch.AntiKt4EMTopoJets_pt[event_num]:
     y_jet = (jet_pt / 40) * np.sin(theta) * signY
     jet_info.append({'pt':jet_pt, 'eta':jet_eta, 'phi':jet_phi, 'isHS':isHS, 'x':x_jet, 'y':y_jet})
 
+
 # --- ROOT Macro Execution and Clustering ---
 try:
     MACRO_CALL = f'runHGTD_Clustering.cxx("{file_num}",{event_num})'
+    print(MACRO_CALL)
     result = subprocess.run(['root', '-l', '-q', '-b', MACRO_CALL],
                             check=True, capture_output=True, text=True)
 
@@ -195,6 +197,26 @@ for i_trk, cluster in enumerate(track_clusters):
 print(hs_times)
 print(hs_zs)
 
+### NEW STUFF
+pu_removed_tracks = []
+for idx_trk in connected_tracks:
+    z0_trk = branch.Track_z0[event_num][idx_trk]
+    var_z0_trk = branch.Track_var_z0[event_num][idx_trk]
+
+    closest_nsigma = np.inf
+    closest_reco_vtx = -1
+    for (idx_vtx, z_vtx) in enumerate(branch.RecoVtx_z[event_num]):
+        nsigma = np.abs(z_vtx - z0_trk)/np.sqrt(var_z0_trk)
+        if nsigma < closest_nsigma:
+            closest_nsigma = nsigma
+            closest_reco_vtx = idx_vtx
+            
+    if closest_reco_vtx != 0:
+        pu_removed_tracks.append(idx_trk)
+
+print(f'REMOVED TRACKS ', pu_removed_tracks)
+### END NEW STUFF
+
 # --- Plotting Functions and Generation ---
 def draw_eta_reference_lines(ax, z_pos=reco_hs_z, eta_ref=2.4, line_length=50):
     """Draw Lines corresponding to |eta| = eta_ref wrt provided z position"""
@@ -211,7 +233,8 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
     # Plot event display (z vs R)
     for track in track_info_list:
         ax.plot([track['z0'], track['z0'] + track['x']],[0, track['y']],
-                color='blue' if track['stat'] == 1 else 'red')
+                color='blue' if track['stat'] == 1 else 'red',
+                linestyle='dashed' if track['idx'] in pu_removed_tracks else 'solid')
 
     for (jet_i, jet_tup) in enumerate(jet_info_list):
         jet_color = 'green' if jet_tup['isHS'] >= 1 else 'grey'
