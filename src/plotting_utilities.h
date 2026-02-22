@@ -6,8 +6,10 @@
 #include <TEfficiency.h>
 #include <TGraph.h>
 #include <TGraphErrors.h>
+#include <iomanip>
 #include <iostream>
 #include <memory>
+#include <sstream>
 
 namespace MyUtl {
 
@@ -433,21 +435,64 @@ namespace MyUtl {
     }
 
     inline void printEfficiencyStats() {
-      std::cout << this->times << " Efficiency for dt vs. " << this->xtitle << " ScoreType: " << toString(this->scoreToUse) << '\n';
-      for (int i=1; i<effPass->GetNbinsX(); i++) {
-	double numPass = effPass->GetBinContent(i), numTotal = effTotal->GetBinContent(i);
-	std::cout << toString(this->scoreToUse) << " "
-		  << xtitle << " in [" << effPass->GetBinLowEdge(i)
-		  << ", " << effPass->GetBinLowEdge(i+1) << ")" << '\n';
-	std::cout << "Num. Passing: " << numPass << '\n';
-	std::cout << "Num. Total : " << numTotal << '\n';
-	std::cout << "Num. Failing: " << numTotal - numPass << '\n';
+      const int w_bin  = 22;
+      const int w_col  = 10;
+      const std::string sep(w_bin + w_col * 4 + 2, '-');
+
+      // Header
+      std::cout << '\n' << sep << '\n';
+      std::string headerLabel = std::string(this->times) + "  " + toStringShort(this->scoreToUse);
+      // The data columns ("Pass", "Total", "Fail", "Eff (%)") are each w_col wide
+      // and must end at the same position as the separator (w_bin + w_col*4).
+      // Compute the width of the first column header field so it starts right
+      // after the label and the whole row still aligns with the separator.
+      int firstColW = (w_bin + w_col) - (int)headerLabel.size();
+      if (firstColW < 1) firstColW = 1;
+      std::cout << headerLabel
+                << std::right
+                << std::setw(firstColW) << "Pass"
+                << std::setw(w_col) << "Total"
+                << std::setw(w_col) << "Fail"
+                << std::setw(w_col) << "Eff (%)"
+                << '\n';
+      std::cout << std::left << std::setw(w_bin) << (std::string("  dt vs. ") + this->xtitle)
+                << '\n';
+      std::cout << sep << '\n';
+
+      // Per-bin rows
+      for (int i = 1; i < effPass->GetNbinsX(); i++) {
+        double numPass  = effPass->GetBinContent(i);
+        double numTotal = effTotal->GetBinContent(i);
+        double numFail  = numTotal - numPass;
+        double eff      = (numTotal > 0) ? 100.0 * numPass / numTotal : 0.0;
+
+        std::ostringstream binLabel;
+        binLabel << std::fixed << std::setprecision(2)
+                 << "[" << effPass->GetBinLowEdge(i)
+                 << ", " << effPass->GetBinLowEdge(i + 1) << ")";
+
+        std::cout << std::left  << std::setw(w_bin) << binLabel.str()
+                  << std::right << std::fixed << std::setprecision(1)
+                  << std::setw(w_col) << numPass
+                  << std::setw(w_col) << numTotal
+                  << std::setw(w_col) << numFail
+                  << std::setw(w_col) << eff
+                  << '\n';
       }
-      std::cout << "--------------------------------------------------\n";
-      std::cout << "Total Num. Passing: " << effPass->Integral() << '\n';
-      std::cout << "Total Num. Failing: " << effTotal->Integral() - effPass->Integral() << '\n';
-      std::cout << "Overall Efficiency: " << effPass->Integral()/effTotal->Integral() << '\n';
-      std::cout << "--------------------------------------------------\n";
+
+      // Summary footer
+      double totalPass = effPass->Integral();
+      double totalAll  = effTotal->Integral();
+      double overallEff = (totalAll > 0) ? 100.0 * totalPass / totalAll : 0.0;
+      std::cout << sep << '\n';
+      std::cout << std::left  << std::setw(w_bin) << "Total"
+                << std::right << std::fixed << std::setprecision(1)
+                << std::setw(w_col) << totalPass
+                << std::setw(w_col) << totalAll
+                << std::setw(w_col) << (totalAll - totalPass)
+                << std::setw(w_col) << overallEff
+                << '\n';
+      std::cout << sep << '\n';
     }
   };
 
@@ -573,6 +618,10 @@ namespace MyUtl {
     inline void fullPlotting(TCanvas *canvas) {
       for (const auto& [str, plt]: this->dataObjects)
 	plt->plotLogic(canvas);
+    }
+
+    inline void printEfficiencyStats(std::string key) {
+      dataObjects[key]->printEfficiencyStats();
     }
   };
 

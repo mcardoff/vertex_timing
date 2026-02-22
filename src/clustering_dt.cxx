@@ -12,14 +12,14 @@ using namespace MyUtl;
 // ---------------------------------------------------------------------------
 
 // Output directory for saved plots
-static const char* SAVE_DIR = "../figs-2sigma";
+static const char* SAVE_DIR = "../figs";
 
 // Event display command template (filled with file number, event number, extra time)
 static const char* EVTDISPLAY_FMT =
   "python3 event_display.py --file_num %s --event_num %lld --extra_time %.2f";
 
 // Set to true to print event display commands to stdout after the event loop.
-static constexpr bool PRINT_EVENT_DISPLAYS = true;
+static constexpr bool PRINT_EVENT_DISPLAYS = false;
 
 // ---------------------------------------------------------------------------
 // Helper: build one analysis map for a given scenario label.
@@ -33,8 +33,8 @@ auto buildAnalysisMap(Scenario scenario) -> std::map<Score, AnalysisObj> {
   const char* label = [&]() -> const char* {
     switch (scenario) {
       case Scenario::HGTD:     return "HGTD Times";
-      case Scenario::IdealRes: return "Ideal Res. HGTD";
-      case Scenario::IdealEff: return "Ideal Res.+Eff. HGTD";
+      case Scenario::IdealRes: return "Ideal Res"; // "Ideal Res. HGTD";
+      case Scenario::IdealEff: return "Ideal R/E"; // "Ideal Res.+Eff. HGTD"
     }
     return "";
   }();
@@ -210,6 +210,10 @@ auto main() -> int {
       for (auto& [k, analysis] : *m)
         analysis.fullPlotting(canvas);
   }
+
+  for (auto* m : allMaps)
+      for (auto& [k, analysis] : *m)
+        analysis.printEfficiencyStats("hs_track");
 
   // Shut down the thread pool before any ROOT object cleanup runs.
   // Without this, worker threads still hold references to TEfficiency objects

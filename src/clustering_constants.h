@@ -31,7 +31,7 @@ namespace MyUtl {
   const double MAX_ABS_ETA_JET    = 4.00;  // max eta for a "forward" jet
   const double MIN_ABS_ETA_TRACK  = 2.38;  // min eta for a "forward" track 
   const double MAX_ABS_ETA_TRACK  = 4.00;  // max eta for a "forward" track
-  const double MIN_TRACK_PT       = 0.5;   // clustered track_pt > 0.5 GeV
+  const double MIN_TRACK_PT       = 1.0;   // clustered track_pt > 0.5 GeV
   const double MAX_TRACK_PT       = 30.0;  // clustered track_pt < 30.0 GeV
   const double MIN_TRACK_PT_COUNT = 1.0;   // track_pt > 1.0 GeV for counting purposes
   const double MAX_VTX_DZ         = 2.0;   // max error for reco HS vertex z
@@ -114,6 +114,27 @@ namespace MyUtl {
     case Score::FILTJET: return "Only Tracks in Jets";
     case Score::TESTML:     return "DNN";
     case Score::TEST_MISCL: return "TRKPTZ (pure clusters)";
+    default:                return "INVALID";
+    }
+  }
+
+  auto toStringShort(
+    MyUtl::Score score
+  ) -> const char* {
+    switch (score) {
+    case Score::HGTD:       return "HGTD";
+    case Score::TRKPTZ:     return "TRKPTZ";
+    case Score::TRKPT:      return "TRKPT";
+    case Score::CALO90:     return "CALO90";
+    case Score::CALO60:     return "CALO60";
+    case Score::PASS:       return "PASS";
+    case Score::JUST90:     return "JUST90";
+    case Score::JUST60:     return "JUST60";
+    case Score::FILT90:     return "FILT90";
+    case Score::FILT60:     return "FILT60";
+    case Score::FILTJET:    return "FILTJET";
+    case Score::TESTML:     return "TESTML";
+    case Score::TEST_MISCL: return "MISCL";
     default:                return "INVALID";
     }
   }
