@@ -46,10 +46,10 @@
 using namespace MyUtl;
 
 // ── Sweep configuration ───────────────────────────────────────────────────────
-static constexpr Long64_t MAX_EVENTS = 10000; // -1 = full sample
+static constexpr Long64_t MAX_EVENTS = -1; // -1 = full sample
 static constexpr double   DIST_MIN   = 0.2;
 static constexpr double   DIST_MAX   = 4.0;
-static constexpr double   DIST_STEP  = 0.2;
+static constexpr double   DIST_STEP  = 0.1;
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Residual histogram range and bin width (ps)
