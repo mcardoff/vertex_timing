@@ -11,3 +11,7 @@
 /.cache/
 */.DS_Store
 /.DS_Store
+*.csv
+*.pdf
+*/.DS_Store
+*.png
