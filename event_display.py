@@ -26,8 +26,21 @@ args = parser.parse_args()
 event_num, file_num = args.event_num, args.file_num
 
 IDEALEFF = False
-filename = f'./event_displays/PUR_PERF_event_display_{file_num}_{event_num:04d}.pdf'
-colors = ["#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#a65628", "#f781bf", "#999999"]
+filename = f'event_displays/pure_clust_fails/event_display_{file_num}_{event_num:04d}.pdf'
+
+def generate_cluster_colors(n):
+    """Generate n perceptually distinct colors using golden-ratio HSV spacing."""
+    import colorsys
+    golden_ratio = 0.618033988749895
+    hue = 0.0
+    colors = []
+    for _ in range(n):
+        rgb = colorsys.hsv_to_rgb(hue, 0.75, 0.92)
+        colors.append('#{:02x}{:02x}{:02x}'.format(
+            int(rgb[0] * 255), int(rgb[1] * 255), int(rgb[2] * 255)
+        ))
+        hue = (hue + golden_ratio) % 1.0
+    return colors
 
 ANA_FILE = f'../ntuple-hgtd/user.mcardiff.45809429.Output._{file_num}.SuperNtuple.root'
 tree = uproot.open(ANA_FILE)["ntuple"]
@@ -234,7 +247,7 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
     for track in track_info_list:
         ax.plot([track['z0'], track['z0'] + track['x']],[0, track['y']],
                 color='blue' if track['stat'] == 1 else 'red',
-                linestyle='dashed' if track['idx'] in pu_removed_tracks else 'solid')
+                linestyle='solid')
 
     for (jet_i, jet_tup) in enumerate(jet_info_list):
         jet_color = 'green' if jet_tup['isHS'] >= 1 else 'grey'
@@ -314,7 +327,7 @@ def add_annotation(ax, truth_text_y, reco_text_y):
                     ha='left', va='top', color='black',
                     arrowprops={'arrowstyle':'->','color':'black','lw':2})
 
-cluster_colors = colors[:len(track_clusters)]
+cluster_colors = generate_cluster_colors(len(track_clusters))
 
 random.seed(42069)
 calo_time = random.gauss(truth_hs_t,90)
@@ -325,13 +338,34 @@ all_times = [reco_hs_t, truth_hs_t] + list(chain.from_iterable(hist_times))
 extended_min_time = min(all_times) - 0.05 * (max(all_times) - min(all_times))
 extended_max_time = max(all_times) + 0.05 * (max(all_times) - min(all_times))
 
+# Compute per-cluster scores and find the indices to show in the legend.
+# Score: sum(pt) * exp(-dz), same quantities already used for labels below.
+cluster_scores = [
+    sum(pt_wghts[i]) * np.exp(-np.abs(reco_hs_z - cluster_zs[i]))
+    for i in range(len(pt_wghts))
+]
+
+# Top 4 by score (descending)
+ranked_indices = sorted(range(len(cluster_scores)), key=lambda i: cluster_scores[i], reverse=True)
+legend_indices = ranked_indices[:4]
+
+# Always include the cluster whose time is closest to the truth HS vertex time
+truth_closest_idx = min(range(len(cluster_times)), key=lambda i: np.abs(cluster_times[i] - truth_hs_t))
+if truth_closest_idx not in legend_indices:
+    legend_indices.append(truth_closest_idx)
+
+legend_index_set = set(legend_indices)
+
 weight_legend_patches = []
 for i_cluster, weights in enumerate(pt_wghts):
+    if i_cluster not in legend_index_set:
+        continue
     total_weight = sum(weights)
     pt_label = f'Σpt = {total_weight:.2f}'
     dz_label = f'dz={np.abs(reco_hs_z-cluster_zs[i_cluster]):.2f}'
     t_label  = f't={cluster_times[i_cluster]:.2f}'
-    FULL_LABEL = f'{pt_label}\n{dz_label}\n{t_label}'
+    suffix   = ' [ΔT closest]' if i_cluster == truth_closest_idx and truth_closest_idx not in ranked_indices[:4] else ''
+    FULL_LABEL = f'{pt_label}\n{dz_label}\n{t_label}{suffix}'
     patch = mpatches.Patch(facecolor=cluster_colors[i_cluster], label=FULL_LABEL)
     weight_legend_patches.append(patch)
 

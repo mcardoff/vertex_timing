@@ -164,17 +164,48 @@ int main() {
 				     10, 0.5, 10.5);
 
   TH1D *h_score_ratio = new TH1D("h_score_ratio",
-				 "Score Ratio (2nd/1st);Score_{2nd}/Score_{1st};Events",
-				 50, 0, 1.5);
+				 "Score Gap (TRKPTZ);(Score_{1st} - Score_{2nd}) / Score_{1st} [%];Fraction of Events",
+				 50, 0, 100);
 
   // Score distributions for different methods
   std::map<Score, TH1D*> h_score_hs;
   std::map<Score, TH1D*> h_score_pu;
 
-  h_score_hs[TRKPT] = new TH1D("h_score_hs_trkpt", "HS Cluster Score (TRKPT);Score;Clusters", 50, 0, 200);
-  h_score_pu[TRKPT] = new TH1D("h_score_pu_trkpt", "PU Cluster Score (TRKPT);Score;Clusters", 50, 0, 200);
+  h_score_hs[TRKPT]  = new TH1D("h_score_hs_trkpt",  "HS Cluster Score (TRKPT);Score;Clusters",  50, 0, 200);
+  h_score_pu[TRKPT]  = new TH1D("h_score_pu_trkpt",  "PU Cluster Score (TRKPT);Score;Clusters",  50, 0, 200);
   h_score_hs[TRKPTZ] = new TH1D("h_score_hs_trkptz", "HS Cluster Score (TRKPTZ);Score;Clusters", 50, 0, 200);
   h_score_pu[TRKPTZ] = new TH1D("h_score_pu_trkptz", "PU Cluster Score (TRKPTZ);Score;Clusters", 50, 0, 200);
+  h_score_hs[TESTML] = new TH1D("h_score_hs_dnn",    "HS Cluster Score (DNN);DNN Score;Clusters", 50, 0, 1);
+  h_score_pu[TESTML] = new TH1D("h_score_pu_dnn",    "PU Cluster Score (DNN);DNN Score;Clusters", 50, 0, 1);
+
+  // DNN-based HS cluster ranking and score ratio (parallel to existing TRKPTZ quantities)
+  TH1D *h_hs_cluster_rank_dnn = new TH1D("h_hs_cluster_rank_dnn",
+    "HS Cluster Rank by DNN Score;Rank;Fraction of Events",
+    10, 0.5, 10.5);
+
+  TH1D *h_score_ratio_dnn = new TH1D("h_score_ratio_dnn",
+    "Score Gap (DNN);(Score_{1st} - Score_{2nd}) / Score_{1st} [%];Fraction of Events",
+    50, 0, 100);
+
+  // DNN time-based outcome (parallel to h_time_outcome which uses TRKPTZ)
+  TH1D *h_time_outcome_dnn = new TH1D("h_time_outcome_dnn",
+    "Time-Based Outcome (DNN);Outcome;Events",
+    3, 0, 3);
+  h_time_outcome_dnn->GetXaxis()->SetBinLabel(1, "Pass (<60ps)");
+  h_time_outcome_dnn->GetXaxis()->SetBinLabel(2, "Fail (>60ps)");
+  h_time_outcome_dnn->GetXaxis()->SetBinLabel(3, "No clusters");
+
+  // DNN selection summary for extract_error_metrics.cxx
+  // bin 1: DNN selects HS cluster correctly (pure selection check)
+  // bin 2: DNN selects wrong cluster (HS exists but not chosen)
+  // bin 3: events with wrong selection where HS ranked 1st by DNN
+  TH1D *h_dnn_selection_outcome = new TH1D("h_dnn_selection_outcome",
+    "DNN Cluster Selection Outcome;Outcome;Events",
+    4, 0, 4);
+  h_dnn_selection_outcome->GetXaxis()->SetBinLabel(1, "Correct HS");
+  h_dnn_selection_outcome->GetXaxis()->SetBinLabel(2, "Wrong (HS exists)");
+  h_dnn_selection_outcome->GetXaxis()->SetBinLabel(3, "No clusters");
+  h_dnn_selection_outcome->GetXaxis()->SetBinLabel(4, "HS absent");
 
   // 2.2 Selection Confusion Matrix
   int n_tp = 0, n_fp = 0, n_fn = 0, n_tn = 0;  // True/False Positive/Negative
@@ -314,6 +345,58 @@ int main() {
 					       20, 0, 20);
 
   // ========================================
+  // MISCLUSTERING STUDY: TESTML vs TEST_MISCL
+  // ========================================
+  // Quantifies the impact of misclustering on DNN efficiency by comparing:
+  //   (1) TESTML: DNN score > 0.5 AND |Δt| < 60 ps  (overall DNN efficiency)
+  //   (2) TEST_MISCL: same as (1) AND cluster purity > 0.75  (DNN efficiency with well-formed clusters)
+  // The gap between the two curves = fraction of events misclustered but still passing time cut.
+
+  // Summary counts (filled into h_misclustering for extract_error_metrics.cxx)
+  //   bin 1: events where DNN passes time cut (TESTML)
+  //   bin 2: events where DNN passes time cut AND purity > 0.75 (TEST_MISCL)
+  //   bin 3: events where DNN selected cluster has purity > 0.75 (regardless of time)
+  //   bin 4: total events entering this analysis (denominator)
+  TH1D *h_misclustering = new TH1D("h_misclustering",
+    "Misclustering Study;Metric;Events",
+    4, 0, 4);
+  h_misclustering->GetXaxis()->SetBinLabel(1, "DNN passes time");
+  h_misclustering->GetXaxis()->SetBinLabel(2, "DNN+purity passes time");
+  h_misclustering->GetXaxis()->SetBinLabel(3, "DNN selects pure cluster");
+  h_misclustering->GetXaxis()->SetBinLabel(4, "Total events");
+
+  // Purity distribution of the DNN-selected cluster
+  TH1D *h_dnn_selected_purity = new TH1D("h_dnn_selected_purity",
+    "Purity of DNN-Selected Cluster;Purity (HS p_{T} fraction);Events",
+    50, 0, 1.05);
+
+  // DNN score of the selected cluster (for both HS and PU selected clusters)
+  TH1D *h_dnn_score_pure   = new TH1D("h_dnn_score_pure",
+    "DNN Score (Pure Clusters, purity>0.75);DNN Score;Clusters",
+    50, 0, 1);
+  TH1D *h_dnn_score_impure = new TH1D("h_dnn_score_impure",
+    "DNN Score (Impure Clusters, purity<0.75);DNN Score;Clusters",
+    50, 0, 1);
+
+  // Time resolution for DNN-selected clusters, split by purity
+  TH1D *h_dnn_reso_pure   = new TH1D("h_dnn_reso_pure",
+    "#Deltat_{vtx} (DNN, purity>0.75);#Deltat [ps];Events",
+    100, -200, 200);
+  TH1D *h_dnn_reso_impure = new TH1D("h_dnn_reso_impure",
+    "#Deltat_{vtx} (DNN, purity<0.75);#Deltat [ps];Events",
+    100, -200, 200);
+
+  // Efficiency vs forward jet count for both DNN scenarios
+  TH1D *h_dnn_eff_fjet_pass   = new TH1D("h_dnn_eff_fjet_pass",   "", 31, 0, 31);
+  TH1D *h_dnn_eff_fjet_total  = new TH1D("h_dnn_eff_fjet_total",  "", 31, 0, 31);
+  TH1D *h_miscl_eff_fjet_pass = new TH1D("h_miscl_eff_fjet_pass", "", 31, 0, 31);
+
+  // Efficiency vs PU fraction for both DNN scenarios
+  TH1D *h_dnn_eff_pufrac_pass   = new TH1D("h_dnn_eff_pufrac_pass",   "", 20, 0, 1);
+  TH1D *h_dnn_eff_pufrac_total  = new TH1D("h_dnn_eff_pufrac_total",  "", 20, 0, 1);
+  TH1D *h_miscl_eff_pufrac_pass = new TH1D("h_miscl_eff_pufrac_pass", "", 20, 0, 1);
+
+  // ========================================
   // ERROR SOURCE 4: HS TRACK FRAGMENTATION
   // ========================================
 
@@ -405,9 +488,11 @@ int main() {
     // ERROR SOURCE 2 & 3: CLUSTERING ANALYSIS
     // ========================================
 
-    // Get tracks passing selection
-    std::vector<int> tracks = getAssociatedTracks(&branch, MIN_TRACK_PT, MAX_TRACK_PT);
-    tracks = pileupRemoval(tracks, &branch, MAX_TRK_VTX_SIG);
+    // Track selection matching event_processing.h exactly:
+    //   - 3.0σ cut used for counting (nForwardTrack* stats, consistent with processEventData)
+    //   - MAX_NSIGMA (2.0) cut used for clustering, no separate pileupRemoval step
+    std::vector<int> tracks_count = getAssociatedTracks(&branch, MIN_TRACK_PT, MAX_TRACK_PT, 3.0);
+    std::vector<int> tracks       = getAssociatedTracks(&branch, MIN_TRACK_PT, MAX_TRACK_PT, MAX_NSIGMA);
 
     // ========================================
     // ERROR SOURCE 1: TRACK TIME RESIDUALS
@@ -495,9 +580,9 @@ int main() {
       h_avg_hs_residual->Fill(avg_hs_residual);
     }
 
-    // Count forward tracks using same method as main algorithm
+    // Count forward tracks using the 3.0σ track set, matching processEventData's counting step
     int n_forward_total = 0, n_forward_hs_total = 0, n_forward_pu_total = 0;
-    branch.countForwardTracks(n_forward_total, n_forward_hs_total, n_forward_pu_total, tracks, true);
+    branch.countForwardTracks(n_forward_total, n_forward_hs_total, n_forward_pu_total, tracks_count, true);
     int n_forward_hs_valid_total = n_forward_hs_total;  // With checkValidTimes=true, these are the same
 
     // Track loss waterfall
@@ -645,16 +730,19 @@ int main() {
 	h_cluster_size_pu->Fill(cluster.trackIndices.size());
       }
 
-      // Fill score distributions
-      double score_trkpt = cluster.scores[TRKPT];
+      // Fill score distributions (TRKPT, TRKPTZ, and DNN)
+      double score_trkpt  = cluster.scores[TRKPT];
       double score_trkptz = cluster.scores[TRKPTZ];
+      double score_dnn    = cluster.scores[TESTML];
 
       if (is_hs_cluster) {
 	h_score_hs[TRKPT]->Fill(score_trkpt);
 	h_score_hs[TRKPTZ]->Fill(score_trkptz);
+	h_score_hs[TESTML]->Fill(score_dnn);
       } else {
 	h_score_pu[TRKPT]->Fill(score_trkpt);
 	h_score_pu[TRKPTZ]->Fill(score_trkptz);
+	h_score_pu[TESTML]->Fill(score_dnn);
       }
     }
 
@@ -681,13 +769,63 @@ int main() {
     bool correct_selection = (selected_idx == hs_cluster_idx);
     bool hs_exists = (hs_cluster_idx != -1);
 
-    // Fill time-based outcome histogram
+    // Fill time-based outcome histogram (TRKPTZ)
     if (n_clusters == 0) {
       h_time_outcome->Fill(2);  // No clusters
     } else if (passes_time_cut) {
       h_time_outcome->Fill(0);  // Pass
     } else {
       h_time_outcome->Fill(1);  // Fail
+    }
+
+    // -------------------------------------------------------
+    // DNN (TESTML) parallel selection for Error Source 2
+    // -------------------------------------------------------
+    Cluster dnn_selected_cluster = chooseCluster(clusters, TESTML);
+    int dnn_selected_idx = -1;
+    for (int ic = 0; ic < (int)clusters.size(); ic++) {
+      if (clusters[ic] == dnn_selected_cluster) { dnn_selected_idx = ic; break; }
+    }
+    double dnn_sel_time     = (dnn_selected_cluster.values.size() > 0) ? dnn_selected_cluster.values[0] : -999.0;
+    double dnn_sel_residual = dnn_sel_time - vtx_time_truth;
+    bool   dnn_passes_time  = (dnn_selected_cluster.values.size() > 0) &&
+                              (std::abs(dnn_sel_residual) <= PASS_THRESHOLD);
+    bool   dnn_correct      = (dnn_selected_idx == hs_cluster_idx);
+
+    // Time-based outcome for DNN
+    if (n_clusters == 0) {
+      h_time_outcome_dnn->Fill(2);
+    } else if (dnn_passes_time) {
+      h_time_outcome_dnn->Fill(0);
+    } else {
+      h_time_outcome_dnn->Fill(1);
+    }
+
+    // DNN selection outcome (HS identity check)
+    if (hs_exists) {
+      h_dnn_selection_outcome->Fill(dnn_correct ? 0 : 1);
+    } else {
+      h_dnn_selection_outcome->Fill(3);  // HS absent
+    }
+
+    // HS cluster rank by DNN score + score ratio
+    if (hs_exists) {
+      std::vector<std::pair<double, int>> dnn_ranking;
+      for (int ic = 0; ic < (int)clusters.size(); ic++)
+        dnn_ranking.push_back({clusters[ic].scores[TESTML], ic});
+      std::sort(dnn_ranking.begin(), dnn_ranking.end(), std::greater<>());
+
+      int dnn_rank = 1;
+      for (auto [sc, idx] : dnn_ranking) {
+        if (idx == hs_cluster_idx) { h_hs_cluster_rank_dnn->Fill(dnn_rank); break; }
+        dnn_rank++;
+      }
+      if (dnn_ranking.size() >= 2) {
+        double s1 = dnn_ranking[0].first;
+        double s2 = dnn_ranking[1].first;
+        double dnn_gap_pct = 100.0 * (s1 - s2) / (s1 + 1e-9);
+        h_score_ratio_dnn->Fill(dnn_gap_pct);
+      }
     }
 
     // ========================================
@@ -778,6 +916,66 @@ int main() {
 	  n_fail_efficiency_only++;
 	}
 	// If neither ideal scenario rescues it, it's truly irredeemable
+      }
+    }
+
+    // ========================================
+    // MISCLUSTERING STUDY: TESTML vs TEST_MISCL
+    // ========================================
+    // Re-run cluster selection with the DNN score (TESTML) and evaluate purity of the
+    // selected cluster.  This is the direct per-event analogue of the TEST_MISCL score
+    // added to the main analysis: same cluster set, same DNN selection, purity check here.
+
+    const double PURITY_THRESHOLD = 0.75;  // must match TEST_MISCL in event_processing.h
+    const double DNN_SCORE_CUT    = 0.5;   // must match TESTML cut in event_processing.h
+
+    int nForwardJetMiscl = 0;
+    branch.countForwardJets(nForwardJetMiscl);
+    double pu_frac_miscl = (n_forward_total > 0) ?
+      (double)n_forward_pu_total / n_forward_total : 0.0;
+
+    h_misclustering->Fill(3);   // denominator: every event that reaches this point
+
+    if (n_clusters > 0) {
+      // updateScores sets TESTML (and TEST_MISCL) on every cluster; calcPurity is
+      // already called in the cluster-identity loop above.
+      // chooseCluster with TESTML picks the cluster with the highest DNN score.
+      Cluster dnn_cluster = chooseCluster(clusters, TESTML);
+
+      double dnn_score    = dnn_cluster.scores.at(TESTML);
+      double dnn_purity   = dnn_cluster.purity;
+      double dnn_time     = (dnn_cluster.values.size() > 0) ? dnn_cluster.values[0] : -999.0;
+      double dnn_diff     = dnn_time - vtx_time_truth;
+      bool dnn_passes_time = (dnn_cluster.values.size() > 0) &&
+                             (std::abs(dnn_diff) <= PASS_THRESHOLD) &&
+                             (dnn_score > DNN_SCORE_CUT);
+      bool dnn_passes_purity = dnn_purity > PURITY_THRESHOLD;
+
+      // Fill purity and score distributions
+      h_dnn_selected_purity->Fill(dnn_purity);
+      if (dnn_passes_purity) {
+        h_dnn_score_pure->Fill(dnn_score);
+        h_dnn_reso_pure->Fill(dnn_diff);
+        h_misclustering->Fill(2);   // DNN selects a pure cluster
+      } else {
+        h_dnn_score_impure->Fill(dnn_score);
+        h_dnn_reso_impure->Fill(dnn_diff);
+      }
+
+      // Event-level efficiency counters
+      h_dnn_eff_fjet_total->Fill(nForwardJetMiscl);
+      h_dnn_eff_pufrac_total->Fill(pu_frac_miscl);
+
+      if (dnn_passes_time) {
+        h_misclustering->Fill(0);   // TESTML: DNN passes time cut
+        h_dnn_eff_fjet_pass->Fill(nForwardJetMiscl);
+        h_dnn_eff_pufrac_pass->Fill(pu_frac_miscl);
+
+        if (dnn_passes_purity) {
+          h_misclustering->Fill(1); // TEST_MISCL: DNN+purity passes time cut
+          h_miscl_eff_fjet_pass->Fill(nForwardJetMiscl);
+          h_miscl_eff_pufrac_pass->Fill(pu_frac_miscl);
+        }
       }
     }
 
@@ -975,10 +1173,13 @@ int main() {
 	rank++;
       }
 
-      // Score ratio
+      // Percentage gap between 1st and 2nd score: 100*(S1-S2)/S1
+      // High value means the top cluster is clearly dominant; low value means ambiguous
       if (score_ranking.size() >= 2) {
-	double ratio = score_ranking[1].first / score_ranking[0].first;
-	h_score_ratio->Fill(ratio);
+        double s1 = score_ranking[0].first;
+        double s2 = score_ranking[1].first;
+        double gap_pct = 100.0 * (s1 - s2) / (s1 + 1e-9);
+        h_score_ratio->Fill(gap_pct);
       }
     }
 
@@ -1282,9 +1483,9 @@ int main() {
 
   c3->SaveAs("error_analysis_plots/plot3_resolution_vs_matching.pdf");
 
-  // Plot 2.1: Cluster Score Distributions
-  TCanvas *c4 = new TCanvas("c4", "Cluster Scores", 1200, 600);
-  c4->Divide(2, 1);
+  // Plot 2.1: Cluster Score Distributions (TRKPT, TRKPTZ, DNN)
+  TCanvas *c4 = new TCanvas("c4", "Cluster Scores", 1800, 600);
+  c4->Divide(3, 1);
 
   c4->cd(1);
   gPad->SetLogy();
@@ -1316,7 +1517,82 @@ int main() {
   h_score_pu[TRKPTZ]->Draw("HIST SAME");
   leg4->Draw();
 
+  c4->cd(3);
+  gPad->SetLogy();
+  h_score_hs[TESTML]->SetLineColor(C01);
+  h_score_hs[TESTML]->SetFillColorAlpha(C01, 0.3);
+  h_score_hs[TESTML]->SetLineWidth(2);
+  h_score_hs[TESTML]->Draw("HIST");
+
+  h_score_pu[TESTML]->SetLineColor(C02);
+  h_score_pu[TESTML]->SetFillColorAlpha(C02, 0.3);
+  h_score_pu[TESTML]->SetLineWidth(2);
+  h_score_pu[TESTML]->Draw("HIST SAME");
+  leg4->Draw();
+
   c4->SaveAs("error_analysis_plots/plot4_cluster_scores.pdf");
+
+  // Plot 2.1b: DNN vs TRKPTZ comparison — rank, score ratio, time outcome
+  TCanvas *c4b = new TCanvas("c4b", "DNN vs TRKPTZ Selection", 1800, 600);
+  c4b->Divide(3, 1);
+
+  // Panel 1: HS cluster rank comparison (TRKPTZ vs DNN)
+  c4b->cd(1);
+  double rank_total_trkptz = h_hs_cluster_rank->Integral();
+  double rank_total_dnn    = h_hs_cluster_rank_dnn->Integral();
+  TH1D *h_hs_rank_trkptz_norm = (TH1D*)h_hs_cluster_rank->Clone("h_hs_rank_trkptz_norm");
+  TH1D *h_hs_rank_dnn_norm    = (TH1D*)h_hs_cluster_rank_dnn->Clone("h_hs_rank_dnn_norm");
+  if (rank_total_trkptz > 0) h_hs_rank_trkptz_norm->Scale(1.0 / rank_total_trkptz);
+  if (rank_total_dnn    > 0) h_hs_rank_dnn_norm->Scale(1.0 / rank_total_dnn);
+  h_hs_rank_trkptz_norm->SetLineColor(C01);
+  h_hs_rank_trkptz_norm->SetLineWidth(2);
+  h_hs_rank_trkptz_norm->SetTitle("HS Cluster Rank;Rank;Fraction of Events");
+  h_hs_rank_trkptz_norm->Draw("HIST");
+  h_hs_rank_dnn_norm->SetLineColor(C02);
+  h_hs_rank_dnn_norm->SetLineWidth(2);
+  h_hs_rank_dnn_norm->SetLineStyle(2);
+  h_hs_rank_dnn_norm->Draw("HIST SAME");
+  TLegend *leg4b = new TLegend(0.45, 0.65, 0.88, 0.88);
+  leg4b->AddEntry(h_hs_rank_trkptz_norm, "TRKPTZ", "l");
+  leg4b->AddEntry(h_hs_rank_dnn_norm,    "DNN",    "l");
+  leg4b->Draw();
+
+  // Panel 2: Score gap comparison — large gap means the selector is confident
+  c4b->cd(2);
+  if (h_score_ratio->Integral() > 0)     h_score_ratio->Scale(1.0 / h_score_ratio->Integral());
+  if (h_score_ratio_dnn->Integral() > 0) h_score_ratio_dnn->Scale(1.0 / h_score_ratio_dnn->Integral());
+  h_score_ratio->SetLineColor(C01);
+  h_score_ratio->SetLineWidth(2);
+  h_score_ratio->SetTitle("Score Gap (1st vs 2nd);(Score_{1st} - Score_{2nd}) / Score_{1st} [%];Fraction of Events");
+  h_score_ratio->Draw("HIST");
+  h_score_ratio_dnn->SetLineColor(C02);
+  h_score_ratio_dnn->SetLineWidth(2);
+  h_score_ratio_dnn->SetLineStyle(2);
+  h_score_ratio_dnn->Draw("HIST SAME");
+  leg4b->Draw();
+
+  // Panel 3: Time-based outcome comparison (TRKPTZ vs DNN) — shows efficiency difference
+  c4b->cd(3);
+  TH1D *h_to_trkptz_norm = (TH1D*)h_time_outcome->Clone("h_to_trkptz_norm");
+  TH1D *h_to_dnn_norm    = (TH1D*)h_time_outcome_dnn->Clone("h_to_dnn_norm");
+  if (h_to_trkptz_norm->Integral() > 0) h_to_trkptz_norm->Scale(1.0 / h_to_trkptz_norm->Integral());
+  if (h_to_dnn_norm->Integral()    > 0) h_to_dnn_norm->Scale(1.0 / h_to_dnn_norm->Integral());
+  h_to_trkptz_norm->SetLineColor(C01);
+  h_to_trkptz_norm->SetLineWidth(2);
+  h_to_trkptz_norm->SetBarWidth(0.4);
+  h_to_trkptz_norm->SetBarOffset(0.1);
+  h_to_trkptz_norm->SetTitle("Time-Based Outcome (TRKPTZ vs DNN);Outcome;Fraction");
+  h_to_trkptz_norm->SetFillColorAlpha(C01, 0.4);
+  h_to_trkptz_norm->Draw("BAR");
+  h_to_dnn_norm->SetLineColor(C02);
+  h_to_dnn_norm->SetLineWidth(2);
+  h_to_dnn_norm->SetBarWidth(0.4);
+  h_to_dnn_norm->SetBarOffset(0.5);
+  h_to_dnn_norm->SetFillColorAlpha(C02, 0.4);
+  h_to_dnn_norm->Draw("BAR SAME");
+  leg4b->Draw();
+
+  c4b->SaveAs("error_analysis_plots/plot4b_dnn_vs_trkptz_selection.pdf");
 
   // Plot 2.2: Selection Efficiency vs Event Properties
   TCanvas *c5 = new TCanvas("c5", "Selection Efficiency", 1800, 1200);
@@ -1491,6 +1767,7 @@ int main() {
   h_hs_cluster_rank->Draw("HIST");
 
   c11->cd(3);
+  h_score_ratio->SetTitle("Score Gap (TRKPTZ);(Score_{1st} - Score_{2nd}) / Score_{1st} [%];Fraction of Events");
   h_score_ratio->SetLineColor(C01);
   h_score_ratio->SetFillColorAlpha(C01, 0.3);
   h_score_ratio->Draw("HIST");
@@ -1549,6 +1826,110 @@ int main() {
   gPad->SetGridy();
 
   c13->SaveAs("error_analysis_plots/plot13_efficiency_vs_fragmentation.pdf");
+
+  // Plot MC: Misclustering Study (TESTML vs TEST_MISCL)
+  // Plot MC.1: DNN-selected cluster purity and score distributions
+  TCanvas *cMC1 = new TCanvas("cMC1", "Misclustering: Purity & DNN Score", 1800, 600);
+  cMC1->Divide(3, 1);
+
+  cMC1->cd(1);
+  h_dnn_selected_purity->SetLineColor(C01);
+  h_dnn_selected_purity->SetFillColorAlpha(C01, 0.3);
+  h_dnn_selected_purity->SetLineWidth(2);
+  h_dnn_selected_purity->GetXaxis()->SetTitle("Purity of DNN-selected cluster");
+  h_dnn_selected_purity->Draw("HIST");
+  // Draw purity threshold line
+  TLine *purity_line = new TLine(0.75, 0, 0.75, h_dnn_selected_purity->GetMaximum());
+  purity_line->SetLineColor(C02);
+  purity_line->SetLineWidth(2);
+  purity_line->SetLineStyle(2);
+  purity_line->Draw("SAME");
+  TLegend *legMC1 = new TLegend(0.15, 0.75, 0.55, 0.88);
+  legMC1->AddEntry(h_dnn_selected_purity, "DNN-selected cluster", "f");
+  legMC1->AddEntry(purity_line, "Purity threshold (0.75)", "l");
+  legMC1->Draw();
+
+  cMC1->cd(2);
+  gPad->SetLogy();
+  h_dnn_score_pure->SetLineColor(C08);
+  h_dnn_score_pure->SetFillColorAlpha(C08, 0.3);
+  h_dnn_score_pure->SetLineWidth(2);
+  h_dnn_score_pure->Draw("HIST");
+  h_dnn_score_impure->SetLineColor(C02);
+  h_dnn_score_impure->SetFillColorAlpha(C02, 0.3);
+  h_dnn_score_impure->SetLineWidth(2);
+  h_dnn_score_impure->Draw("HIST SAME");
+  TLegend *legMC2 = new TLegend(0.15, 0.75, 0.6, 0.88);
+  legMC2->AddEntry(h_dnn_score_pure,   "Pure clusters (purity>0.75)",   "f");
+  legMC2->AddEntry(h_dnn_score_impure, "Impure clusters (purity<0.75)", "f");
+  legMC2->Draw();
+
+  cMC1->cd(3);
+  h_dnn_reso_pure->SetLineColor(C08);
+  h_dnn_reso_pure->SetFillColorAlpha(C08, 0.3);
+  h_dnn_reso_pure->SetLineWidth(2);
+  h_dnn_reso_pure->Draw("HIST");
+  h_dnn_reso_impure->SetLineColor(C02);
+  h_dnn_reso_impure->SetFillColorAlpha(C02, 0.3);
+  h_dnn_reso_impure->SetLineWidth(2);
+  h_dnn_reso_impure->Draw("HIST SAME");
+  legMC2->Draw();
+
+  cMC1->SaveAs("error_analysis_plots/plotMC1_misclustering_purity.pdf");
+
+  // Plot MC.2: Efficiency comparison (TESTML vs TEST_MISCL) vs forward jets and PU fraction
+  TCanvas *cMC2 = new TCanvas("cMC2", "Misclustering: Efficiency Comparison", 1200, 600);
+  cMC2->Divide(2, 1);
+
+  // Build TEfficiency objects from pass/total histograms
+  TEfficiency *eff_dnn_fjet   = new TEfficiency(*h_dnn_eff_fjet_pass,   *h_dnn_eff_fjet_total);
+  TEfficiency *eff_miscl_fjet = new TEfficiency(*h_miscl_eff_fjet_pass, *h_dnn_eff_fjet_total);
+  eff_dnn_fjet->SetName("eff_dnn_vs_fjet");
+  eff_dnn_fjet->SetTitle("DNN Efficiency vs N_{forward jets};N_{forward jets};Efficiency");
+  eff_miscl_fjet->SetName("eff_miscl_vs_fjet");
+  eff_miscl_fjet->SetTitle("DNN+Purity Efficiency vs N_{forward jets};N_{forward jets};Efficiency");
+
+  TEfficiency *eff_dnn_pufrac   = new TEfficiency(*h_dnn_eff_pufrac_pass,   *h_dnn_eff_pufrac_total);
+  TEfficiency *eff_miscl_pufrac = new TEfficiency(*h_miscl_eff_pufrac_pass, *h_dnn_eff_pufrac_total);
+  eff_dnn_pufrac->SetName("eff_dnn_vs_pufrac");
+  eff_miscl_pufrac->SetName("eff_miscl_vs_pufrac");
+
+  cMC2->cd(1);
+  eff_dnn_fjet->SetMarkerStyle(20);
+  eff_dnn_fjet->SetMarkerColor(C01);
+  eff_dnn_fjet->SetLineColor(C01);
+  eff_dnn_fjet->Draw("APE");
+  gPad->Update();
+  eff_dnn_fjet->GetPaintedGraph()->SetMinimum(0);
+  eff_dnn_fjet->GetPaintedGraph()->SetMaximum(1.1);
+  gPad->Update();
+  eff_miscl_fjet->SetMarkerStyle(24);
+  eff_miscl_fjet->SetMarkerColor(C02);
+  eff_miscl_fjet->SetLineColor(C02);
+  eff_miscl_fjet->Draw("PE SAME");
+  gPad->SetGridy();
+  TLegend *legMC3 = new TLegend(0.35, 0.15, 0.88, 0.35);
+  legMC3->AddEntry(eff_dnn_fjet,   "DNN (TESTML)", "pe");
+  legMC3->AddEntry(eff_miscl_fjet, "DNN + purity>0.75 (TEST_MISCL)", "pe");
+  legMC3->Draw();
+
+  cMC2->cd(2);
+  eff_dnn_pufrac->SetMarkerStyle(20);
+  eff_dnn_pufrac->SetMarkerColor(C01);
+  eff_dnn_pufrac->SetLineColor(C01);
+  eff_dnn_pufrac->Draw("APE");
+  gPad->Update();
+  eff_dnn_pufrac->GetPaintedGraph()->SetMinimum(0);
+  eff_dnn_pufrac->GetPaintedGraph()->SetMaximum(1.1);
+  gPad->Update();
+  eff_miscl_pufrac->SetMarkerStyle(24);
+  eff_miscl_pufrac->SetMarkerColor(C02);
+  eff_miscl_pufrac->SetLineColor(C02);
+  eff_miscl_pufrac->Draw("PE SAME");
+  gPad->SetGridy();
+  legMC3->Draw();
+
+  cMC2->SaveAs("error_analysis_plots/plotMC2_misclustering_efficiency.pdf");
 
   // Fill failure mode histogram
   h_failure_modes->SetBinContent(1, n_fail_wrong_selection);

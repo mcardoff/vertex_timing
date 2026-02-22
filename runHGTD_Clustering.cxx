@@ -18,18 +18,40 @@ void runHGTD_Clustering(std::string number, Long64_t eventNum) {
 
   reader.SetEntry(eventNum);
   
-  std::vector<int> tracks = getAssociatedTracks(&branch, MIN_TRACK_PT,MAX_TRACK_PT);
+  std::vector<int> tracks = getAssociatedTracks(&branch, MIN_TRACK_PT,MAX_TRACK_PT, 3.0);
 
-  bool
-    useSmearTimes = false,
-    useValidTimesOnly = true,
-    useConeClustering = true,
-    useZ0 = false;
+  bool useSmearTimes = false, useValidTimesOnly = true,
+       useConeClustering = true, useZ0 = false, usePURemoval = false;
+
+  if (usePURemoval) {
+    std::vector<int> pu_filtered_tracks;
+    for (auto trk : tracks) {
+      // auto z0_trk = branch.trackZ0[trk];
+      // auto var_z0_trk = branch.trackVarZ0[trk];
+      // double closest_nsigma = 1.0e6;
+      int closest_reco_vtx = branch.trackToTruthvtx[trk];
+      
+      // for (int i_vtx = 0; i_vtx < branch.recoVtxZ.GetSize(); ++i_vtx) {
+      // 	double z_vtx = branch.recoVtxZ[i_vtx];
+      //   double nsigma = std::abs(z_vtx - z0_trk) / std::sqrt(var_z0_trk);
+      //   if (nsigma < closest_nsigma) {
+      //     closest_nsigma = nsigma;
+      // 	  closest_reco_vtx = i_vtx;
+      // 	}
+      // }
+
+      if (closest_reco_vtx == 0) {
+	pu_filtered_tracks.push_back(trk);
+      }
+    }
+
+    tracks = pu_filtered_tracks;
+  }
 
   // gRandom->SetSeed(21);
 
   std::vector<Cluster> clusters =
-    clusterTracksInTime(tracks, &branch, 3.0,
+    clusterTracksInTime(tracks, &branch, 2.0,
 			useSmearTimes,
 			useValidTimesOnly,
 			30.0,

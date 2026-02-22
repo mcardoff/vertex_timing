@@ -3,219 +3,242 @@
 #include "clustering_constants.h"
 #include "event_processing.h"
 #include "plotting_utilities.h"
+#include "suppress_stdout.h"
 
 using namespace MyUtl;
 
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+
+// Output directory for saved plots
+static const char* SAVE_DIR = "../figs-2sigma";
+
+// Event display command template (filled with file number, event number, extra time)
+static const char* EVTDISPLAY_FMT =
+  "python3 event_display.py --file_num %s --event_num %lld --extra_time %.2f";
+
+// Set to true to print event display commands to stdout after the event loop.
+static constexpr bool PRINT_EVENT_DISPLAYS = true;
+
+// ---------------------------------------------------------------------------
+// Helper: build one analysis map for a given scenario label.
+//   The active scores are listed explicitly so adding/removing a score
+//   only requires changing this one function.
+// ---------------------------------------------------------------------------
+
+enum class Scenario { HGTD, IdealRes, IdealEff };
+
+auto buildAnalysisMap(Scenario scenario) -> std::map<Score, AnalysisObj> {
+  const char* label = [&]() -> const char* {
+    switch (scenario) {
+      case Scenario::HGTD:     return "HGTD Times";
+      case Scenario::IdealRes: return "Ideal Res. HGTD";
+      case Scenario::IdealEff: return "Ideal Res.+Eff. HGTD";
+    }
+    return "";
+  }();
+
+  std::map<Score, AnalysisObj> m;
+
+  // Scores active in all scenarios
+  m.emplace(TRKPTZ, AnalysisObj(label, TRKPTZ));
+  m.emplace(TESTML, AnalysisObj(label, TESTML));
+  m.emplace(PASS,   AnalysisObj(label, PASS  ));
+  m.emplace(TEST_MISCL, AnalysisObj(label, TEST_MISCL));
+
+  // Scores active only in the real-HGTD scenario
+  if (scenario == Scenario::HGTD) {
+    m.emplace(HGTD,       AnalysisObj(label, HGTD      ));
+    // Uncomment to re-enable additional algorithms:
+    // m.emplace(CALO60,  AnalysisObj(label, CALO60 ));
+    // m.emplace(CALO90,  AnalysisObj(label, CALO90 ));
+    // m.emplace(JUST60,  AnalysisObj(label, JUST60 ));
+    // m.emplace(JUST90,  AnalysisObj(label, JUST90 ));
+    // m.emplace(FILT60,  AnalysisObj(label, FILT60 ));
+    // m.emplace(FILT90,  AnalysisObj(label, FILT90 ));
+    // m.emplace(FILTJET, AnalysisObj(label, FILTJET));
+  }
+
+  return m;
+}
+
+// ---------------------------------------------------------------------------
+// Helper: add an event-display command string to a list if condition is met.
+// ---------------------------------------------------------------------------
+
+void collectEventDisplay(
+  std::vector<TString>& list,
+  int returnCode,
+  const std::pair<int,double>& result,
+  const TString& fileNum,
+  Long64_t eventNum
+) {
+  if (result.first == returnCode)
+    list.push_back(Form(EVTDISPLAY_FMT, fileNum.Data(), eventNum, result.second));
+}
+
+// Print all collected event display commands for one scenario.
+// Controlled by PRINT_EVENT_DISPLAYS at the top of this file.
+void printEventDisplays(
+  const char* label,
+  const std::vector<TString>& list
+) {
+  if (!PRINT_EVENT_DISPLAYS) return;
+  std::cout << "\n--- Event displays: " << label << " ("
+            << list.size() << " events) ---\n";
+  for (const auto& cmd : list)
+    std::cout << cmd << '\n';
+}
+
+// ---------------------------------------------------------------------------
+// Helper: generate all per-KEY comparison plots for one variable KEY.
+// ---------------------------------------------------------------------------
+
+void makeComparisonPlots(
+  const char* KEY,
+  TCanvas* canvas,
+  std::map<Score, AnalysisObj>& mapHGTD,
+  std::map<Score, AnalysisObj>& mapIdealRes,
+  std::map<Score, AnalysisObj>& mapIdealEff
+) {
+  // HGTD algo vs TRKPTZ
+  moneyPlot(Form("%s/hgtd_trkptz_%s.pdf",            SAVE_DIR, KEY), KEY, canvas,
+            { &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ) });
+
+  // HGTD base times: TRKPTZ vs DNN
+  moneyPlot(Form("%s/trkptz_dnn_basetimes_%s.pdf",   SAVE_DIR, KEY), KEY, canvas,
+            { &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ), &mapHGTD.at(TESTML) });
+
+  // Misclustering study: TRKPTZ full sample vs TRKPTZ restricted to pure-cluster events
+  moneyPlot(Form("%s/misclustering_study_%s.pdf",    SAVE_DIR, KEY), KEY, canvas,
+            { &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ), &mapHGTD.at(TEST_MISCL) });
+
+  // Ideal-resolution times: TRKPTZ vs DNN
+  moneyPlot(Form("%s/trkptz_dnn_idealrestimes_%s.pdf", SAVE_DIR, KEY), KEY, canvas,
+            { &mapHGTD.at(HGTD), &mapIdealRes.at(TRKPTZ), &mapIdealRes.at(TESTML) });
+
+  // Ideal-efficiency times: TRKPTZ vs DNN
+  moneyPlot(Form("%s/trkptz_dnn_idealefftimes_%s.pdf", SAVE_DIR, KEY), KEY, canvas,
+            { &mapHGTD.at(HGTD), &mapIdealEff.at(TRKPTZ), &mapIdealEff.at(TESTML) });
+
+  // Effect of fixing HGTD matching alone
+  moneyPlot(Form("%s/fixed_assoc_%s.pdf",            SAVE_DIR, KEY), KEY, canvas,
+            { &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ),
+              &mapIdealRes.at(TRKPTZ), &mapIdealEff.at(TRKPTZ) });
+
+  // Effect of fixing cluster selection alone
+  moneyPlot(Form("%s/fixed_selection_%s.pdf",        SAVE_DIR, KEY), KEY, canvas,
+            { &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ), &mapHGTD.at(PASS) });
+
+  // Effect of fixing everything
+  moneyPlot(Form("%s/fixed_all_%s.pdf",              SAVE_DIR, KEY), KEY, canvas,
+            { &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ), &mapIdealEff.at(PASS) });
+
+  // Full ideal comparison: HGTD → TRKPTZ → IdealRes → IdealEff
+  moneyPlot(Form("%s/ideal_comp_%s.pdf",             SAVE_DIR, KEY), KEY, canvas,
+            { &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ),
+              &mapIdealRes.at(TRKPTZ), &mapIdealEff.at(TRKPTZ) });
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
 auto main() -> int {
+  gROOT->SetBatch(true);  // batch mode: no display, and suppresses OBJ teardown messages
   gStyle->SetOptStat(0);
 
-  TChain chain ("ntuple");
+  // --- Data source ---
+  TChain chain("ntuple");
   setupChain(chain, "../../ntuple-hgtd/");
   TTreeReader reader(&chain);
   BranchPointerWrapper branch(reader);
+  ROOT::EnableImplicitMT(); // use all CPU cores
 
-  ROOT::EnableImplicitMT(); // uses all cores
+  gErrorIgnoreLevel = kFatal;
 
-  TCanvas *canvas = new TCanvas("canvas", "Histograms", 800, 600);
+  // --- Canvas ---
+  TCanvas* canvas = new TCanvas("canvas", "Histograms", 800, 600);
   canvas->SetLeftMargin(0.15);
 
-  // HGTD Times
-  std::map<Score, AnalysisObj> mapHGTD;
-  mapHGTD.emplace(HGTD,   AnalysisObj("HGTD Times", HGTD   ));
-  mapHGTD.emplace(TRKPTZ, AnalysisObj("HGTD Times", TRKPTZ));
-  mapHGTD.emplace(TESTML, AnalysisObj("HGTD Times", TESTML ));  
-  // mapHGTD.emplace(CALO60, AnalysisObj("HGTD Times", CALO60 ));
-  // mapHGTD.emplace(CALO90, AnalysisObj("HGTD Times", CALO90 ));
-  // mapHGTD.emplace(JUST60, AnalysisObj("HGTD Times", JUST60 ));
-  // mapHGTD.emplace(JUST90, AnalysisObj("HGTD Times", JUST90 ));
-  // mapHGTD.emplace(FILT60, AnalysisObj("HGTD Times", FILT60 ));
-  // mapHGTD.emplace(FILT90, AnalysisObj("HGTD Times", FILT90 ));
-  // mapHGTD.emplace(FILTJET,AnalysisObj("HGTD Times", FILTJET));
-  mapHGTD.emplace(PASS  , AnalysisObj("HGTD Times", PASS   ));
+  // --- Analysis maps (one per timing scenario) ---
+  auto mapHGTD     = buildAnalysisMap(Scenario::HGTD    );
+  auto mapIdealRes = buildAnalysisMap(Scenario::IdealRes );
+  auto mapIdealEff = buildAnalysisMap(Scenario::IdealEff );
 
-  std::map<Score, AnalysisObj> mapIdealRes;
-  mapIdealRes.emplace(TRKPTZ , AnalysisObj("Ideal Res. HGTD", TRKPTZ ));
-  // mapIdealRes.emplace(CALO60 , AnalysisObj("Ideal Res. HGTD", CALO60 ));
-  // mapIdealRes.emplace(CALO90 , AnalysisObj("Ideal Res. HGTD", CALO90 ));
-  // mapIdealRes.emplace(JUST60 , AnalysisObj("Ideal Res. HGTD", JUST60 ));
-  // mapIdealRes.emplace(JUST90 , AnalysisObj("Ideal Res. HGTD", JUST90 ));
-  // mapIdealRes.emplace(FILT60 , AnalysisObj("Ideal Res. HGTD", FILT60 ));
-  // mapIdealRes.emplace(FILT90 , AnalysisObj("Ideal Res. HGTD", FILT90 ));
-  // mapIdealRes.emplace(FILTJET, AnalysisObj("Ideal Res. HGTD", FILTJET));
-  mapIdealRes.emplace(PASS   , AnalysisObj("Ideal Res. HGTD", PASS   ));
+  auto allMaps = { &mapHGTD, &mapIdealRes, &mapIdealEff };
 
-  std::map<Score, AnalysisObj> mapIdealEff;
-  mapIdealEff.emplace(TRKPTZ , AnalysisObj("Ideal Res.+Eff. HGTD", TRKPTZ ));
-  // mapIdealEff.emplace(CALO60 , AnalysisObj("Ideal Res.+Eff. HGTD", CALO60 ));
-  // mapIdealEff.emplace(CALO90 , AnalysisObj("Ideal Res.+Eff. HGTD", CALO90 ));
-  // mapIdealEff.emplace(JUST60 , AnalysisObj("Ideal Res.+Eff. HGTD", JUST60 ));
-  // mapIdealEff.emplace(JUST90 , AnalysisObj("Ideal Res.+Eff. HGTD", JUST90 ));
-  // mapIdealEff.emplace(FILT60 , AnalysisObj("Ideal Res.+Eff. HGTD", FILT60 ));
-  // mapIdealEff.emplace(FILT90 , AnalysisObj("Ideal Res.+Eff. HGTD", FILT90 ));
-  // mapIdealEff.emplace(FILTJET, AnalysisObj("Ideal Res.+Eff. HGTD", FILTJET));
-  mapIdealEff.emplace(PASS   , AnalysisObj("Ideal Res.+Eff. HGTD", PASS   ));
+  // --- Event display candidate lists ---
+  std::vector<TString> evtDisplayHGTD, evtDisplayIdealRes, evtDisplayIdealEff;
 
-  std::vector<TString> hasPassingClusterButFailsHGTD, hasPassingClusterButFailsIdealRes, hasPassingClusterButFailsIdealEff;
-  gErrorIgnoreLevel = kWarning;
+  // --- Event loop ---
   std::cout << "Starting Event Loop\n";
-  bool progress = true;
-  TString fileName, file, eventdisplay="python event_display.py --file_num %s --event_num %lld --extra_time %.2f";
-  Long64_t nEvent = chain.GetEntries();
-  Long64_t evtMax = 10e3;
+  const Long64_t nEvent = chain.GetEntries();
+
   while (reader.Next()) {
-    std::string filename = chain.GetFile()->GetName(); // file we're in
-    Long64_t thisEvnt = chain.GetReadEntry() - chain.GetChainOffset(); // +1 bc its 0 indexed
-    Long64_t readNum = chain.GetReadEntry()+1;
-    if (progress && readNum % 1000 == 0)
-      std::cout << "Progress: " << readNum << "/" << nEvent << "\n";
+    const Long64_t readNum  = chain.GetReadEntry() + 1;
+    const Long64_t eventNum = chain.GetReadEntry() - chain.GetChainOffset();
 
-    // bool
-    //   a = mapHGTD.at(Score::CALO60).get("pu_frac")->effPass->Integral() < evtMax,
-    //   b = mapIdealRes.at(Score::CALO60).get("pu_frac")->effPass->Integral() < evtMax,
-    //   c = mapIdealEff.at(Score::CALO60).get("pu_frac")->effPass->Integral() < evtMax;
-    
-    // if ((!a) and (!b) and (!c)) break;
+    if (readNum % 100 == 0)
+      std::cout << "Progress: " << readNum << "/" << nEvent << "\r" << std::flush;
 
-    auto passHGTD     = processEventData(&branch, false, true , false, mapHGTD);
-    auto passIdealRes = processEventData(&branch, true , true , false, mapIdealRes);
-    auto passIdealEff = processEventData(&branch, true , false, false, mapIdealEff);
+    // Run the three timing scenarios
+    auto resHGTD     = processEventData(&branch, false, true,  false, mapHGTD    );
+    auto resIdealRes = processEventData(&branch, true,  true,  false, mapIdealRes);
+    auto resIdealEff = processEventData(&branch, true,  false, false, mapIdealEff);
 
-    fileName = (branch.reader.GetTree()->GetCurrentFile()->GetName());
-    file = fileName(49,6);
+    // Extract file identifier from the full path (characters 49–54)
+    TString fileName = branch.reader.GetTree()->GetCurrentFile()->GetName();
+    TString fileNum  = fileName(49, 6);
 
-    // Events where my algorithm passes when HGTD fails
-    if (passHGTD.first == 2)
-     hasPassingClusterButFailsHGTD.push_back(Form(eventdisplay, file.Data(), thisEvnt, passHGTD.second));
-      
-    // Events where Ideal res passes where HGTD Times Fail
-    if (passIdealRes.first == 2)
-     hasPassingClusterButFailsIdealRes.push_back(Form(eventdisplay, file.Data(), thisEvnt, passIdealRes.second));
-
-    // Events where Ideal Eff+Res passes where Ideal Res Fails:
-    if (passIdealEff.first == 2)
-      hasPassingClusterButFailsIdealEff.push_back(Form(eventdisplay, file.Data(), thisEvnt, passIdealEff.second));
+    // Collect events where TEST_MISCL fails the efficiency test
+    collectEventDisplay(evtDisplayHGTD,      2, resHGTD,     fileNum, eventNum);
+    collectEventDisplay(evtDisplayIdealRes,  2, resIdealRes, fileNum, eventNum);
+    collectEventDisplay(evtDisplayIdealEff,  2, resIdealEff, fileNum, eventNum);
   }
 
-  auto maps = {&mapHGTD, &mapIdealRes, &mapIdealEff};
-  // auto maps = {&mapHGTD};
+  // --- Post-processing and plotting (suppress ROOT's OBJ: printf chatter) ---
+  {
+    SuppressStdout suppress;
+    for (auto* m : allMaps)
+      for (auto& [k, analysis] : *m)
+        analysis.postProcessing();
 
-  for (auto &map: maps)
-    for (auto &[k, analysis] : *map)
-      analysis.postProcessing();
-
-      
-  for (auto &map: maps)
-    for (auto &[k, analysis] : *map)
-      analysis["hs_track"]->printEfficiencyStats();
-
-  for (auto &map: maps)
-    for (auto &[k, analysis] : *map)
-      analysis.fullPlotting(canvas);
-
-  std::cout << "FINISHED PROCESSING\n";
-
-  for (const auto *const KEY: {"pu_frac", "ftrack", "pu_track", "fjet", "hs_track", "vtx_dz"}) {
-
-    // Comparison between my algo and HGTD algo
-    std::cout << "HGTD TRKPTZ" << std::endl;
-    moneyPlot(Form("../figs/hgtd_trkptz_%s.pdf", KEY), KEY, canvas,
-	      { &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ) });
-
-    moneyPlot(Form("../figs/trkptz_dnn_%s.pdf", KEY), KEY, canvas,
-              { &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ), &mapHGTD.at(TESTML) });
-
-    moneyPlot(Form("../figs/fixed_assoc_%s.pdf", KEY), KEY, canvas,
-	      { &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ), &mapIdealRes.at(TRKPTZ), &mapIdealEff.at(TRKPTZ) });
-
-    moneyPlot(Form("../figs/fixed_selection_%s.pdf", KEY), KEY, canvas,
-	      { &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ), &mapHGTD.at(PASS) });
-
-    moneyPlot(Form("../figs/fixed_all_%s.pdf", KEY), KEY, canvas,
-	      { &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ), &mapIdealEff.at(PASS) });
-    
-    // HGTD Only
-    // std::cout << "HGTD" << std::endl;
-    // moneyPlot(Form("../figs/hgtd_%s.pdf", KEY), KEY, canvas,
-	      // { &mapHGTD.at(HGTD)});
-
-    // Comparing those same two with calo exclusion
-    // std::cout << "CALO EXCLUSION COMP" << std::endl;
-    // moneyPlot(Form("../figs/calo_comp_%s.pdf", KEY), KEY, canvas,
-    // 	      { &mapHGTD.at(HGTD)  , &mapHGTD.at(TRKPTZ),
-    // 		&mapHGTD.at(CALO60), &mapHGTD.at(CALO90), });
-
-    // Filtering out various types of track
-    // std::cout << "FILTER COMP" << std::endl;
-    // moneyPlot(Form("../figs/filter_comp_%s.pdf", KEY), KEY, canvas,
-    // 	      { &mapHGTD.at(HGTD)  ,
-    // 		&mapHGTD.at(TRKPTZ),
-    // 		&mapHGTD.at(FILT60),
-    // 		&mapHGTD.at(FILT90),
-    // 		&mapHGTD.at(FILTJET) });
-
-    // Compare calo exclusion with only calo time and filtering (60ps)
-    // std::cout << "60ps CASES" << std::endl;
-    // moneyPlot(Form("../figs/calo_comp_60_%s.pdf", KEY), KEY, canvas,
-    // 	      { &mapHGTD.at(HGTD)  ,
-    // 		&mapHGTD.at(TRKPTZ),
-    // 	        &mapHGTD.at(CALO60),
-    // 		&mapHGTD.at(JUST60),
-    // 		&mapHGTD.at(FILT60), });
-
-    // Compare calo exclusion with only calo time and filtering (90ps)
-    // std::cout << "90ps CASES" << std::endl;
-    // moneyPlot(Form("../figs/calo_comp_90_%s.pdf", KEY), KEY, canvas,
-    // 	      { &mapHGTD.at(HGTD)  ,
-    // 		&mapHGTD.at(TRKPTZ),
-    // 	        &mapHGTD.at(CALO90),
-    // 		&mapHGTD.at(JUST90),
-    // 		&mapHGTD.at(FILT90), });
-
-    // moneyPlot(Form("../figs/filt_pass_comp_%s.pdf", KEY), KEY, canvas,
-    // 	      { &mapHGTD.at(HGTD)  , &mapHGTD.at(TRKPTZ) ,
-    // 		&mapHGTD.at(FILT60), &mapHGTD.at(FILTJET),
-    // 		&mapHGTD.at(PASS) });
-
-    // moneyPlot(Form("../figs/ideal_comp_%s.pdf", KEY), KEY, canvas,
-    // 	      { &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ), &mapIdealRes.at(TRKPTZ), &mapIdealEff.at(TRKPTZ), //&mapIdealEff.at(PASS),
-    // 	      });
-
-    // moneyPlot(Form("../figs/pass_comp_%s.pdf", KEY), KEY, canvas,
-    // 	      { &mapHGTD.at(HGTD), &mapHGTD.at(PASS), &mapIdealRes.at(PASS), &mapIdealEff.at(PASS),
-    // 	      });
-
-    
-    // moneyPlot(Form("../figs/filt_jet_comp_%s.pdf", KEY), KEY, canvas,
-    // 	      { &mapHGTD.at(HGTD)    ,
-    // 		&mapHGTD.at(FILTJET) , &mapIdealRes.at(FILTJET), &mapIdealEff.at(FILTJET),
-    // 	        &mapIdealEff.at(PASS),
-    // 	      });
+    // --- Per-analysis-object plots ---
+    for (auto* m : allMaps)
+      for (auto& [k, analysis] : *m)
+        analysis.fullPlotting(canvas);
   }
 
-  inclusivePlot(Form("../figs/inclusivereso_logscale.pdf"), true, false,
-		-400, 400, canvas,
-	        {
-		  &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ), &mapIdealRes.at(TRKPTZ), &mapIdealEff.at(TRKPTZ), &mapIdealEff.at(PASS),
-		});
+  // Shut down the thread pool before any ROOT object cleanup runs.
+  // Without this, worker threads still hold references to TEfficiency objects
+  // when the main-thread destructor fires, causing spurious "OBJ: ..._clone"
+  // messages at kInfo level during teardown.
+  ROOT::DisableImplicitMT();
 
-  inclusivePlot(Form("../figs/inclusivereso_linscale.pdf"), false, false,
-		-200, 200, canvas,
-	        {
-		  &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ), &mapIdealRes.at(TRKPTZ), &mapIdealEff.at(TRKPTZ), &mapIdealEff.at(PASS),
-		});
-  
+  std::cout << "\nFINISHED PROCESSING\n";
+
+  // --- Comparison plots (per variable KEY) ---
+  for (const auto* KEY : {"pu_frac", "ftrack", "pu_track", "fjet", "hs_track", "vtx_dz"})
+    makeComparisonPlots(KEY, canvas, mapHGTD, mapIdealRes, mapIdealEff);
+
+  // --- Inclusive resolution plots ---
+  const std::initializer_list<AnalysisObj*> resoSet = {
+    &mapHGTD.at(HGTD),   &mapHGTD.at(TRKPTZ),
+    &mapIdealRes.at(TRKPTZ), &mapIdealEff.at(TRKPTZ), &mapIdealEff.at(PASS),
+  };
+  inclusivePlot(Form("%s/inclusivereso_logscale.pdf", SAVE_DIR),
+                true,  false, -400, 400, canvas, resoSet);
+  inclusivePlot(Form("%s/inclusivereso_linscale.pdf", SAVE_DIR),
+                false, false, -200, 200, canvas, resoSet);
+
   std::cout << "FINISHED PLOT PRINTING\n";
 
-  // std::cout << (double)mapHGTD.at(TRKPTZ)["vtx_dz"]->effTotal->Integral(2,200)/(double)mapHGTD.at(TRKPTZ)["vtx_dz"]->effTotal->Integral() << std::endl;
+  // --- Print event display commands (toggle PRINT_EVENT_DISPLAYS above) ---
+  printEventDisplays("HGTD times: TEST_MISCL fails efficiency", evtDisplayHGTD    );
+  printEventDisplays("Ideal Res.: TEST_MISCL fails efficiency", evtDisplayIdealRes);
+  printEventDisplays("Ideal Eff.: TEST_MISCL fails efficiency", evtDisplayIdealEff);
 
-  // std::cout << hasPassingClusterButFailsHGTD.size() << " events have a passing cluster but TRKPTZ fails with HGTD times\n";
-  // for (const auto& str: hasPassingClusterButFailsHGTD) { std::cout << str << '\n'; }
-  
-  // std::cout << hasPassingClusterButFailsIdealRes.size() << " events have a passing cluster but TRKPTZ fails with Ideal Res. times\n";
-  // for (const auto& str: hasPassingClusterButFailsIdealRes) { std::cout << str << '\n'; }
-  
-  // std::cout << hasPassingClusterButFailsIdealEff.size() << " events have a passing cluster but TRKPTZ fails with Ideal Res.+Eff. times\n";
-  // for (const auto& str: hasPassingClusterButFailsIdealEff) { std::cout << str << '\n'; }
-  
   return 0;
 }

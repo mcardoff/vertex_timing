@@ -48,11 +48,20 @@ struct ErrorMetrics {
     double selection_efficiency_overall;
     double selection_efficiency_low_clusters;  // n_clusters = 2-3
     double selection_efficiency_high_clusters; // n_clusters >= 4
+    double avg_clusters_passing_eff;           // Mean number of clusters passing |Δt|<60ps per event
     double hs_cluster_rank_1_fraction;
     double hs_cluster_rank_2plus_fraction;
+    double hs_cluster_avg_rank_trkptz;    // Mean rank of HS cluster under TRKPTZ scoring
     double score_separation_trkpt;
     double score_separation_trkptz;
+    double score_separation_dnn;
     double resolution_penalty_wrong_selection;
+    // DNN selection metrics
+    double dnn_hs_rank_1_fraction;    // Fraction of events where DNN ranks HS cluster 1st
+    double dnn_hs_rank_2plus_fraction;
+    double hs_cluster_avg_rank_dnn;   // Mean rank of HS cluster under DNN scoring
+    double efficiency_dnn;            // DNN time-based efficiency (pass rate without purity cut)
+    double efficiency_trkptz;         // TRKPTZ time-based efficiency (for direct comparison)
 
     // Error Source 3: Insufficient Tracks
     double efficiency_nhs_2;      // 2 HS tracks
@@ -82,6 +91,18 @@ struct ErrorMetrics {
     double events_no_clusters;
     double events_wrong_selection;
     double events_correct_selection;
+
+    // Misclustering study: TESTML vs TEST_MISCL
+    // Compares DNN efficiency with and without a cluster purity requirement (>75% HS pT)
+    double dnn_efficiency;             // Fraction of events: DNN score>0.5 AND |Δt|<60ps
+    double dnn_pure_efficiency;        // Fraction of events: DNN + purity>0.75 AND |Δt|<60ps
+    double dnn_pure_cluster_fraction;  // Fraction of events: DNN selects a pure cluster
+    double misclustering_penalty;      // dnn_efficiency - dnn_pure_efficiency (loss from misclustering)
+    double misclustering_rate;         // Among DNN-passing events: fraction with impure cluster
+    int    n_dnn_pass;                 // Events passing TESTML
+    int    n_dnn_pure_pass;            // Events passing TEST_MISCL
+    int    n_dnn_pure_selected;        // Events where DNN selects pure cluster
+    int    n_miscl_total;              // Denominator for the misclustering study
 };
 
 void printTable(const ErrorMetrics& m) {
@@ -199,20 +220,46 @@ void printTable(const ErrorMetrics& m) {
               << std::setw(10) << std::right << m.selection_efficiency_low_clusters * 100 << " %\n";
     std::cout << std::setw(55) << std::left << "  With 4+ clusters in event"
               << std::setw(10) << std::right << m.selection_efficiency_high_clusters * 100 << " %\n";
+    std::cout << std::setw(55) << std::left << "Avg Clusters Passing |#Deltat| < 60 ps per Event"
+              << std::setw(10) << std::right << std::fixed << std::setprecision(2)
+              << m.avg_clusters_passing_eff << "\n";
     std::cout << "\n";
     std::cout << "HS Cluster Ranking:\n";
-    std::cout << std::setw(55) << std::left << "  HS Cluster Ranked 1st"
+    std::cout << std::setw(55) << std::left << "  HS Cluster Ranked 1st (TRKPTZ)"
               << std::setw(10) << std::right << m.hs_cluster_rank_1_fraction * 100 << " %\n";
-    std::cout << std::setw(55) << std::left << "  HS Cluster Ranked 2nd or Lower"
+    std::cout << std::setw(55) << std::left << "  HS Cluster Ranked 2nd or Lower (TRKPTZ)"
               << std::setw(10) << std::right << m.hs_cluster_rank_2plus_fraction * 100 << " %\n";
+    std::cout << std::setw(55) << std::left << "  Average HS Cluster Rank (TRKPTZ)"
+              << std::setw(10) << std::right << std::fixed << std::setprecision(2)
+              << m.hs_cluster_avg_rank_trkptz << "\n";
+    std::cout << std::setw(55) << std::left << "  HS Cluster Ranked 1st (DNN)"
+              << std::setw(10) << std::right << m.dnn_hs_rank_1_fraction * 100 << " %\n";
+    std::cout << std::setw(55) << std::left << "  HS Cluster Ranked 2nd or Lower (DNN)"
+              << std::setw(10) << std::right << m.dnn_hs_rank_2plus_fraction * 100 << " %\n";
+    std::cout << std::setw(55) << std::left << "  Average HS Cluster Rank (DNN)"
+              << std::setw(10) << std::right << m.hs_cluster_avg_rank_dnn << "\n";
     std::cout << "\n";
-    std::cout << "Score Separation (HS - PU):\n";
+    std::cout << "Score Separation (mean HS score - mean PU score):\n";
     std::cout << std::setw(55) << std::left << "  TRKPT scoring"
               << std::setw(10) << std::right << m.score_separation_trkpt << "\n";
     std::cout << std::setw(55) << std::left << "  TRKPTZ scoring"
               << std::setw(10) << std::right << m.score_separation_trkptz << "\n";
+    std::cout << std::setw(55) << std::left << "  DNN scoring"
+              << std::setw(10) << std::right << std::fixed << std::setprecision(4)
+              << m.score_separation_dnn << "\n";
+    std::cout << std::setprecision(2);
     std::cout << std::setw(55) << std::left << "Resolution Penalty (Wrong Selection)"
               << std::setw(10) << std::right << m.resolution_penalty_wrong_selection << " ps\n";
+    std::cout << "\n";
+
+    std::cout << "Time-Based Efficiency Comparison (TRKPTZ vs DNN):\n";
+    std::cout << std::setw(55) << std::left << "  TRKPTZ efficiency"
+              << std::setw(10) << std::right << m.efficiency_trkptz * 100 << " %\n";
+    std::cout << std::setw(55) << std::left << "  DNN efficiency (no purity cut)"
+              << std::setw(10) << std::right << m.efficiency_dnn * 100 << " %\n";
+    double dnn_gain = (m.efficiency_dnn - m.efficiency_trkptz) * 100;
+    std::cout << std::setw(55) << std::left << "  DNN gain over TRKPTZ"
+              << std::setw(10) << std::right << dnn_gain << " %\n";
     std::cout << "\n";
 
     // For cluster selection: wrong selection = event failure, so efficiency loss = prevalence
@@ -344,6 +391,53 @@ void printTable(const ErrorMetrics& m) {
               << std::setw(10) << std::right << fragmentation_inefficiency << " %\n";
     std::cout << "  (= " << std::setprecision(1) << m.fragmentation_multi_cluster * 100
               << "% prevalence × " << std::setprecision(2) << fragmentation_eff_penalty * 100 << "% penalty)\n";
+    std::cout << "\n";
+
+    // Misclustering study
+    std::cout << "========================================================================\n";
+    std::cout << "MISCLUSTERING STUDY: TESTML vs TEST_MISCL\n";
+    std::cout << "========================================================================\n";
+    std::cout << "Definition:\n";
+    std::cout << "  TESTML     : DNN score > 0.5  AND  |Δt| < 60 ps\n";
+    std::cout << "  TEST_MISCL : TESTML  AND  selected cluster purity > 75%\n";
+    std::cout << "  'Misclustered' = TESTML passes but purity <= 75%\n";
+    std::cout << "------------------------------------------------------------------------\n";
+    std::cout << std::setw(55) << std::left << "Events analysed (denominator)"
+              << std::setw(10) << std::right << m.n_miscl_total << "\n";
+    std::cout << "\n";
+    std::cout << std::setw(55) << std::left << "DNN selects a pure cluster (purity>0.75)"
+              << std::setw(10) << std::right << std::fixed << std::setprecision(2)
+              << m.dnn_pure_cluster_fraction * 100 << " %\n";
+    std::cout << "  (" << m.n_dnn_pure_selected << " / " << m.n_miscl_total << " events)\n";
+    std::cout << "\n";
+    std::cout << "Efficiency comparison:\n";
+    std::cout << std::setw(55) << std::left << "  TESTML efficiency (all DNN-selected clusters)"
+              << std::setw(10) << std::right << m.dnn_efficiency * 100 << " %\n";
+    std::cout << std::setw(55) << std::left << "  TEST_MISCL efficiency (pure clusters only)"
+              << std::setw(10) << std::right << m.dnn_pure_efficiency * 100 << " %\n";
+    std::cout << "\n";
+    std::cout << std::setw(55) << std::left
+              << "→ Efficiency loss from misclustering (TESTML - TEST_MISCL)"
+              << std::setw(10) << std::right << m.misclustering_penalty * 100 << " %\n";
+    std::cout << "  (" << m.n_dnn_pass - m.n_dnn_pure_pass << " events pass DNN time cut "
+              << "but have impure cluster)\n";
+    std::cout << "\n";
+    if (m.n_dnn_pass > 0) {
+        std::cout << std::setw(55) << std::left
+                  << "Misclustering rate (among TESTML-passing events)"
+                  << std::setw(10) << std::right << m.misclustering_rate * 100 << " %\n";
+        std::cout << "  (fraction of DNN-passing events with purity <= 75%)\n";
+    }
+    std::cout << "\n";
+    std::cout << "INTERPRETATION:\n";
+    std::cout << "  • The gap TESTML - TEST_MISCL (" << std::setprecision(1)
+              << m.misclustering_penalty * 100
+              << "%) is the efficiency lost because the DNN\n"
+              << "    selected a pileup-contaminated cluster that happened to pass |Δt|<60ps.\n";
+    std::cout << "  • If misclustering_penalty ≈ 0: DNN mislabelling is not a significant\n"
+              << "    failure mode — the algorithm already selects mostly pure clusters.\n";
+    std::cout << "  • If misclustering_penalty is large: improving cluster purity (e.g.,\n"
+              << "    stricter pileup removal, better DNN training) would recover efficiency.\n";
     std::cout << "\n";
 
     // Summary breakdown
@@ -499,15 +593,50 @@ int main() {
     metrics.selection_efficiency_low_clusters = p_selection_eff_nclusters->GetBinContent(bin_low_clust);
     metrics.selection_efficiency_high_clusters = p_selection_eff_nclusters->GetBinContent(bin_high_clust);
 
+    TH1D *h_n_clusters_passing = (TH1D*)f->Get("h_n_clusters_passing");
+    metrics.avg_clusters_passing_eff = h_n_clusters_passing ? h_n_clusters_passing->GetMean() : 0.0;
+
     // HS cluster ranking
     double rank1 = h_hs_cluster_rank->GetBinContent(1);
     double rank_total = h_hs_cluster_rank->Integral();
     metrics.hs_cluster_rank_1_fraction = rank1 / rank_total;
     metrics.hs_cluster_rank_2plus_fraction = (rank_total - rank1) / rank_total;
+    metrics.hs_cluster_avg_rank_trkptz = h_hs_cluster_rank->GetMean();
 
     // Score separation
-    metrics.score_separation_trkpt = h_score_hs_trkpt->GetMean() - h_score_pu_trkpt->GetMean();
+    metrics.score_separation_trkpt  = h_score_hs_trkpt->GetMean()  - h_score_pu_trkpt->GetMean();
     metrics.score_separation_trkptz = h_score_hs_trkptz->GetMean() - h_score_pu_trkptz->GetMean();
+
+    // DNN score separation and rank metrics
+    TH1D *h_score_hs_dnn  = (TH1D*)f->Get("h_score_hs_dnn");
+    TH1D *h_score_pu_dnn  = (TH1D*)f->Get("h_score_pu_dnn");
+    TH1D *h_hs_rank_dnn   = (TH1D*)f->Get("h_hs_cluster_rank_dnn");
+    TH1D *h_time_out_dnn  = (TH1D*)f->Get("h_time_outcome_dnn");
+
+    if (h_score_hs_dnn && h_score_pu_dnn) {
+        metrics.score_separation_dnn = h_score_hs_dnn->GetMean() - h_score_pu_dnn->GetMean();
+    } else {
+        metrics.score_separation_dnn = 0;
+    }
+
+    if (h_hs_rank_dnn && h_hs_rank_dnn->Integral() > 0) {
+        double dnn_rank1    = h_hs_rank_dnn->GetBinContent(1);
+        double dnn_rank_tot = h_hs_rank_dnn->Integral();
+        metrics.dnn_hs_rank_1_fraction    = dnn_rank1 / dnn_rank_tot;
+        metrics.dnn_hs_rank_2plus_fraction = (dnn_rank_tot - dnn_rank1) / dnn_rank_tot;
+        metrics.hs_cluster_avg_rank_dnn   = h_hs_rank_dnn->GetMean();
+    } else {
+        metrics.dnn_hs_rank_1_fraction = metrics.dnn_hs_rank_2plus_fraction = 0;
+        metrics.hs_cluster_avg_rank_dnn = 0;
+    }
+
+    if (h_time_out_dnn && h_time_out_dnn->Integral() > 0) {
+        double dnn_tot = h_time_out_dnn->Integral();
+        metrics.efficiency_dnn    = h_time_out_dnn->GetBinContent(1) / dnn_tot;
+    } else {
+        metrics.efficiency_dnn = 0;
+    }
+    metrics.efficiency_trkptz = (n_total_time > 0) ? n_pass / n_total_time : 0;
 
     // Resolution penalty
     metrics.resolution_penalty_wrong_selection = h_resolution_wrong->GetRMS() - h_resolution_correct->GetRMS();
@@ -598,6 +727,37 @@ int main() {
         sum_entries += entries;
     }
     metrics.efficiency_multi_cluster = (sum_entries > 0) ? sum_eff / sum_entries : 0;
+
+    // ========================================
+    // MISCLUSTERING STUDY: TESTML vs TEST_MISCL
+    // ========================================
+
+    TH1D *h_misclustering = (TH1D*)f->Get("h_misclustering");
+    if (h_misclustering) {
+        // bin 1: DNN passes time (TESTML)
+        // bin 2: DNN+purity passes time (TEST_MISCL)
+        // bin 3: DNN selects pure cluster (any time)
+        // bin 4: total events (denominator)
+        metrics.n_dnn_pass          = (int)h_misclustering->GetBinContent(1);
+        metrics.n_dnn_pure_pass     = (int)h_misclustering->GetBinContent(2);
+        metrics.n_dnn_pure_selected = (int)h_misclustering->GetBinContent(3);
+        metrics.n_miscl_total       = (int)h_misclustering->GetBinContent(4);
+
+        double denom = (metrics.n_miscl_total > 0) ? metrics.n_miscl_total : 1.0;
+        metrics.dnn_efficiency            = metrics.n_dnn_pass      / denom;
+        metrics.dnn_pure_efficiency       = metrics.n_dnn_pure_pass  / denom;
+        metrics.dnn_pure_cluster_fraction = metrics.n_dnn_pure_selected / denom;
+        metrics.misclustering_penalty     = metrics.dnn_efficiency - metrics.dnn_pure_efficiency;
+        metrics.misclustering_rate        = (metrics.n_dnn_pass > 0) ?
+            (double)(metrics.n_dnn_pass - metrics.n_dnn_pure_pass) / metrics.n_dnn_pass : 0.0;
+    } else {
+        std::cerr << "Warning: h_misclustering not found in ROOT file. "
+                  << "Re-run hgtd_matching.cxx to generate it.\n";
+        metrics.n_dnn_pass = metrics.n_dnn_pure_pass = metrics.n_dnn_pure_selected = 0;
+        metrics.n_miscl_total = 0;
+        metrics.dnn_efficiency = metrics.dnn_pure_efficiency = 0;
+        metrics.dnn_pure_cluster_fraction = metrics.misclustering_penalty = metrics.misclustering_rate = 0;
+    }
 
     // Print the table
     printTable(metrics);

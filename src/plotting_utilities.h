@@ -158,13 +158,13 @@ namespace MyUtl {
     }
 
     void fillGaus(int idx, TF1* fit) const {
-      double sigma = fit->GetParameter(2);
+      double sigma = fit->GetParameter("Sigma1");
 
       sigmaDist->SetBinContent(idx+1,sigma);
-      sigmaDist->SetBinError(idx+1,fit->GetParError(2));
+      sigmaDist->SetBinError(idx+1,fit->GetParError("Sigma1"));
 
-      double amp2    = fit->GetParameter(0);
-      double amp2Err = fit->GetParError (0);
+      double amp2    = fit->GetParameter("Norm1");
+      double amp2Err = fit->GetParError ("Norm1");
     
       backAmpDist->SetBinContent(idx+1,amp2);   
       backAmpDist->SetBinError(idx+1,amp2Err); 
@@ -242,14 +242,14 @@ namespace MyUtl {
       
       params = std::make_unique<FitParams>(
         title, times, Form("%s_%s_%s", name.Data(), toString(score),times),
-	xMin, foldVal, foldMax, xWid,COLORS[score]);
+	xMin, foldVal, foldMax, xWid,COLORS[score % COLORS.size()]);
       
       purity = std::make_unique<TH2D>(
         Form("cluster_purity_%s_%s_%s", name.Data(), toString(score),times),
 	Form("%s Cluster Purity vs %s (%s);%s;Cluster Purity",
 	     toString(score), title, times, title),
 	xbins, xMin, xMax, pbins, pMin, pMax);
-      purity->SetLineColor(COLORS[score]);
+      purity->SetLineColor(COLORS[score % COLORS.size()]);
     }
 
     PlotObj(const PlotObj&) = delete;
@@ -322,7 +322,7 @@ namespace MyUtl {
       std::unique_ptr<TEfficiency> eff = std::make_unique<TEfficiency>(*this->effPass, *this->effTotal);
       eff->SetStatisticOption(TEfficiency::kFNormal);
       eff->SetTitle(Form("Efficiency vs %s (%s);%s;Efficiency", this->xtitle, this->times, this->xtitle));
-      eff->SetLineColor(MyUtl::COLORS[this->scoreToUse]);
+      eff->SetLineColor(MyUtl::COLORS[this->scoreToUse % COLORS.size()]);
       eff->SetLineWidth(2);
       efficiency = std::move(eff);
 
@@ -336,21 +336,17 @@ namespace MyUtl {
       canvas->Print(fname);
 
       // Draw Efficiencies
-      auto eff = (TEfficiency*)efficiency->Clone();
-      // eff->SetMarkerColor(color);
-      // eff->SetLineColor(color);
-      // eff->SetLineWidth(2);
-      eff->Draw("AP");
+      efficiency->Draw("AP");
       gPad->Update();  // Ensure painting
-      eff->GetPaintedGraph()->GetYaxis()->SetRangeUser(EFF_YMIN, EFF_YMAX);
-      eff->GetPaintedGraph()->GetXaxis()->SetLimits(xMin, foldMax);
-      eff->GetPaintedGraph()->GetXaxis()->SetRangeUser(xMin, foldMax);
-      eff->GetPaintedGraph()->GetXaxis()->SetNdivisions(510);
-      eff->Print("ALL");
+      efficiency->GetPaintedGraph()->GetYaxis()->SetRangeUser(EFF_YMIN, EFF_YMAX);
+      efficiency->GetPaintedGraph()->GetXaxis()->SetLimits(xMin, foldMax);
+      efficiency->GetPaintedGraph()->GetXaxis()->SetRangeUser(xMin, foldMax);
+      efficiency->GetPaintedGraph()->GetXaxis()->SetNdivisions(510);
+      efficiency->Print("ALL");
       gPad->Update();
 
       TLegend* efflegend = new TLegend(0.2, 0.7, 0.4, 0.9);
-      efflegend->AddEntry(eff,"Algorithm Efficiency");
+      efflegend->AddEntry(efficiency.get(), "Algorithm Efficiency");
       TLine *max_eff_line = new TLine(xMin, 0.99, foldMax, 0.99);
       max_eff_line->SetLineColor(kRed);
       max_eff_line->SetLineWidth(2);
@@ -398,15 +394,11 @@ namespace MyUtl {
 	const auto& fit = slicesFits[i_slice];
 	TLegend* thislegend = new TLegend(0.65, 0.75, 0.9, 0.9);
 	TString restext;
-	if (fit->GetNpar() == 5) {
+	if (fit->GetNpar() == 5) { // Double Gaussian
 	  restext = Form("#sigma_{1}^{dgaus}=%.2f(%.2f%%), #sigma_{2}^{dgaus}=%.2f(%.2f%%)",
-			 fit->GetParameter(3),100*fit->GetParError(3)/fit->GetParameter(3),
-			 fit->GetParameter(4),100*fit->GetParError(4)/fit->GetParameter(4));
+			 fit->GetParameter("Sigma1"),100*fit->GetParError("Sigma1")/fit->GetParameter("Sigma1"),
+			 fit->GetParameter("Sigma2"),100*fit->GetParError("Sigma2")/fit->GetParameter("Sigma2"));
 	  thislegend->AddEntry(fit.get(),"Double Gaussian Fit");
-	} else if (fit->GetNpar() > 5) {
-	  restext = Form("#sigma_{1}=%.2f, #sigma_{2}=%.2f, #sigma_{3}=%.2f",
-			 fit->GetParameter(4), fit->GetParameter(5), fit->GetParameter(6));
-	  thislegend->AddEntry(fit.get(),"Triple Gaussian Fit");
 	} else {
 	  restext = Form("#sigma_{1}^{gaus}=%.2f(%.2f%%)",
 			 fit->GetParameter(2),100*fit->GetParError(2)/fit->GetParameter(2));
@@ -634,38 +626,6 @@ namespace MyUtl {
       total->Scale((0.2*yMax - yMin) / total->GetMaximum());
       total->Draw("HIST SAME");
 
-      std::vector<double> mlxs, mlexs;
-      std::vector<double> mlys, mleys;
-      TGraphErrors* mlEff;
-      bool isInitialized = false;
-
-      // if (key == "hs_track" and strcmp(title, "Efficiency") == 0) {
-      // 	std::cout << "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!HELLO\n";
-      // 	mlxs = { 0.5,  1.5,  2.5,  3.5,  4.5,  5.5,  6.5,  7.5,  8.5,  9.5, 10.5, 11.5, 12.5, 13.5, 14.5, 15.5, 16.5, 17.5, 18.5, 19.5, 20.5};
-      // 	mlys = {0.3125, 0.38860103626943004, 0.5104166666666666, 0.6856435643564357, 0.6561844863731656, 0.8159392789373814, 0.8191881918819188, 0.8618181818181818, 0.9171597633136095, 0.9331941544885177, 0.9515011547344111, 0.9411764705882353, 0.9472140762463344, 0.9732824427480916, 0.9862385321100917, 0.9824561403508771, 0.9787234042553191, 0.9907407407407407, 0.9910714285714286, 1.0};
-      // 	mlexs = {0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5};
-      // 	mleys = {0.043797805514170944, 0.03508614645343799, 0.029456388022495054, 0.023097751112779695, 0.02174785978126869, 0.016881233307943052, 0.016531246169965944, 0.014714717635803532, 0.012241628131660937, 0.011408419455919793, 0.010323486896101533, 0.011899334998215851, 0.012108934924520379, 0.009962473363608474, 0.007890329085654377, 0.010039708482794778, 0.012152664307651063, 0.009216292627144525, 0.008888622362733628, 0.0, 0};
-      // 	mlEff = new TGraphErrors(mlxs.size(),&mlxs[0],&mlys[0],&mlexs[0],&mleys[0]);
-      // 	isInitialized = true;
-      // } else if (key == "pu_frac" and strcmp(title, "Efficiency") == 0) {
-      // 	std::cout << "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!HELLO\n";
-      // 	mlxs = {0.025, 0.075, 0.125, 0.175, 0.225, 0.275, 0.325, 0.375, 0.425, 0.475, 0.525, 0.575, 0.625, 0.675, 0.725, 0.775, 0.825, 0.875, 0.925, 0.975};
-      // 	mlys = {0.9305555555555556, 0.0, 0.96, 0.9571428571428572, 0.9577464788732394, 0.9757575757575757, 0.9815950920245399, 0.9760479041916168, 0.9655172413793104, 0.9601593625498008, 0.9507299270072993, 0.9466911764705882, 0.930188679245283, 0.8918169209431346, 0.8654173764906303, 0.7958579881656804, 0.7124394184168013, 0.6153846153846154, 0.4840764331210191, 0.3287671232876712};
-      // 	mlexs = {0.025, 0.025, 0.025, 0.025, 0.025, 0.025, 0.025, 0.025, 0.025, 0.025, 0.025, 0.025, 0.025, 0.025, 0.025, 0.025, 0.025, 0.025, 0.025, 0.025};
-      // 	mleys = {0.029958747929501813, 0, 0.02262741699796953, 0.024207557309728497, 0.0238741303445037, 0.011973386931092818, 0.010527838450553407, 0.011831752902049008, 0.010714749418376983, 0.012345194567741016, 0.009245489421065102, 0.00963172920452717, 0.011069054283647621, 0.011567776544281136, 0.014086018353218113, 0.01550281759266597, 0.018192539324688603, 0.02423450314656061, 0.028202319551454042, 0.054981852788588643};
-      // 	mlEff = new TGraphErrors(mlxs.size(),&mlxs[0],&mlys[0],&mlexs[0],&mleys[0]);
-      // 	isInitialized = true;
-      // }
-
-      // if (isInitialized) {
-      // 	std::cout << "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!HELLO\n";
-      // 	mlEff->SetLineColor(kBlue);
-      // 	mlEff->SetLineWidth(2);
-      // 	mlEff->SetMarkerSize(10);
-      //   legend->AddEntry(mlEff, "ML Method");
-      //   mlEff->Draw("PE1 SAME");
-      // }
-
       if (refVal != -1) {
 	TLine* refLine = new TLine(xMin, refVal, xMax, refVal);
 	refLine->SetLineColor(kRed);
@@ -725,19 +685,17 @@ namespace MyUtl {
       TLegend* inclusiveLegend = new TLegend(0.65, 0.75, 0.9, 0.9);
 
       inclusiveLegend->AddEntry(hist,"Histogram");
-      inclusiveLegend->AddEntry(fit1,"Triple Gaussian Fit");
+      inclusiveLegend->AddEntry(fit1,"Double Gaussian Fit");
     
       hist->GetXaxis()->SetRangeUser(xMin, xMax);
       hist->Draw("HIST");
       fit1->Draw("SAME");
       inclusiveLegend->Draw("SAME");
     
-      double dgSigma1 = fit1->GetParameter(4);
-      double dgSigma2 = fit1->GetParameter(5);
-      double dgSigma3 = fit1->GetParameter(6);
-      latex.DrawLatexNDC(0.18, 0.90,Form("#sigma_{1}^{tgaus}=%.2f",dgSigma1));
-      latex.DrawLatexNDC(0.18, 0.85,Form("#sigma_{2}^{tgaus}=%.2f",dgSigma2));
-      latex.DrawLatexNDC(0.18, 0.80,Form("#sigma_{3}^{tgaus}=%.2f",dgSigma3));
+      double dgSigma1 = fit1->GetParameter("Sigma1");
+      double dgSigma2 = fit1->GetParameter("Sigma2");
+      latex.DrawLatexNDC(0.18, 0.90,Form("#sigma_{1}^{dgaus}=%.2f",dgSigma1));
+      latex.DrawLatexNDC(0.18, 0.85,Form("#sigma_{2}^{dgaus}=%.2f",dgSigma2));
       canvas->Print(fname);
     }
     canvas->Print(Form("%s]",fname));

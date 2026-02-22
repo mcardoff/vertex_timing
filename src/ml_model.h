@@ -2,188 +2,162 @@
 #define ML_MODEL_H
 
 #include <vector>
+#include <array>
 #include <cmath>
 #include <string>
 #include <fstream>
 #include <stdexcept>
-#include "json.hpp"  // Will need nlohmann/json or simple parser
+#include "json.hpp"
 
 // Standalone Neural Network implementation
-// Architecture: 9 -> 128 -> 64 -> 32 -> 1
+// Architecture: 8 -> 128 -> 64 -> 32 -> 1
 // Activation: ReLU for hidden layers, Sigmoid for output
+//
+// Performance notes:
+//   - Weight matrices are stored as flat 1D arrays (row-major) for cache locality
+//   - Intermediate activations use fixed-size std::array to avoid heap allocation
+//   - The predict() hot path does zero heap allocation per call
 class MLModel {
 private:
-    // Layer weights and biases
-    std::vector<std::vector<float>> W1;  // 8 x 128 (or 9 x 128 for old model)
-    std::vector<float> b1;                // 128
-    std::vector<std::vector<float>> W2;  // 128 x 64
-    std::vector<float> b2;                // 64
-    std::vector<std::vector<float>> W3;  // 64 x 32
-    std::vector<float> b3;                // 32
-    std::vector<std::vector<float>> W4;  // 32 x 1
-    std::vector<float> b4;                // 1
+    // Layer dimensions (compile-time constants match the trained model)
+    static constexpr int N_IN  = 8;
+    static constexpr int N_H1  = 128;
+    static constexpr int N_H2  = 64;
+    static constexpr int N_H3  = 32;
+    static constexpr int N_OUT = 1;
+
+    // Weights stored as flat row-major arrays: W[i][j] == w1[i*N_H1 + j]
+    // This keeps each row contiguous in memory so the inner dot-product loop
+    // streams sequentially through cache lines.
+    std::vector<float> w1;  // N_IN  * N_H1
+    std::vector<float> b1;  // N_H1
+    std::vector<float> w2;  // N_H1 * N_H2
+    std::vector<float> b2;  // N_H2
+    std::vector<float> w3;  // N_H2 * N_H3
+    std::vector<float> b3;  // N_H3
+    std::vector<float> w4;  // N_H3 * N_OUT
+    std::vector<float> b4;  // N_OUT
 
     bool weights_loaded = false;
-    int n_input_features = 8;  // Expected number of input features
+    int n_input_features = N_IN;
 
-    // ReLU activation
-    inline float relu(float x) const {
-        return x > 0.0f ? x : 0.0f;
-    }
+    inline float relu   (float x) const { return x > 0.0f ? x : 0.0f; }
+    inline float sigmoid(float x) const { return 1.0f / (1.0f + std::exp(-x)); }
 
-    // Sigmoid activation
-    inline float sigmoid(float x) const {
-        return 1.0f / (1.0f + std::exp(-x));
-    }
-
-    // Dense layer: output = activation(input * W + b)
-    std::vector<float> dense_layer(
-        const std::vector<float>& input,
-        const std::vector<std::vector<float>>& W,
-        const std::vector<float>& b,
-        bool use_relu = true
+    // Dense layer with ReLU — writes into a pre-allocated output array.
+    // No heap allocation; caller owns the output buffer.
+    template<int N_IN_L, int N_OUT_L>
+    void dense_relu(
+        const float* __restrict__ input,
+        const float* __restrict__ W,   // flat row-major [N_IN_L * N_OUT_L]
+        const float* __restrict__ b,
+        float* __restrict__ output
     ) const {
-        size_t n_out = b.size();
-        std::vector<float> output(n_out, 0.0f);
-
-        // Matrix multiplication: output = input * W + b
-        for (size_t i = 0; i < n_out; i++) {
-            float sum = b[i];
-            for (size_t j = 0; j < input.size(); j++) {
-                sum += input[j] * W[j][i];
-            }
-            output[i] = use_relu ? relu(sum) : sigmoid(sum);
+        for (int j = 0; j < N_OUT_L; ++j) {
+            float sum = b[j];
+            for (int i = 0; i < N_IN_L; ++i)
+                sum += input[i] * W[i * N_OUT_L + j];
+            output[j] = relu(sum);
         }
+    }
 
-        return output;
+    // Dense layer with Sigmoid — same pattern, different activation.
+    template<int N_IN_L, int N_OUT_L>
+    void dense_sigmoid(
+        const float* __restrict__ input,
+        const float* __restrict__ W,
+        const float* __restrict__ b,
+        float* __restrict__ output
+    ) const {
+        for (int j = 0; j < N_OUT_L; ++j) {
+            float sum = b[j];
+            for (int i = 0; i < N_IN_L; ++i)
+                sum += input[i] * W[i * N_OUT_L + j];
+            output[j] = sigmoid(sum);
+        }
     }
 
 public:
-    // Load weights from JSON file
     void load_weights(const std::string& json_path) {
         std::ifstream file(json_path);
-        if (!file.is_open()) {
+        if (!file.is_open())
             throw std::runtime_error("Cannot open weights file: " + json_path);
-        }
 
-        nlohmann::json weights_json;
-        file >> weights_json;
+        nlohmann::json j;
+        file >> j;
 
-        // Extract weights - NOTE: The layer naming from TensorFlow/ONNX
-        // Try new naming scheme first (sequential_1_1/dense_4_1), fallback to old (sequential_1/dense_1)
-        std::string w1_key = "StatefulPartitionedCall/sequential_6_1/dense_24_1/Cast/ReadVariableOp:0";
-	std::string b1_key = "StatefulPartitionedCall/sequential_6_1/dense_24_1/BiasAdd/ReadVariableOp:0";
+        // Key names — try current naming scheme first, fall back to legacy
+        auto pick = [&](const std::string& primary, const std::string& fallback) -> std::string {
+            return j.contains(primary) ? primary : fallback;
+        };
 
-        if (!weights_json.contains(w1_key)) {
-            // Fallback to old naming
-            w1_key = "StatefulPartitionedCall/sequential_1/dense_1/Cast/ReadVariableOp:0";
-            b1_key = "StatefulPartitionedCall/sequential_1/dense_1/BiasAdd/ReadVariableOp:0";
-        }
+        std::string w1k = pick(
+            "StatefulPartitionedCall/sequential_6_1/dense_24_1/Cast/ReadVariableOp:0",
+            "StatefulPartitionedCall/sequential_1/dense_1/Cast/ReadVariableOp:0");
+        std::string b1k = pick(
+            "StatefulPartitionedCall/sequential_6_1/dense_24_1/BiasAdd/ReadVariableOp:0",
+            "StatefulPartitionedCall/sequential_1/dense_1/BiasAdd/ReadVariableOp:0");
+        std::string w2k = pick(
+            "StatefulPartitionedCall/sequential_6_1/dense_25_1/Cast/ReadVariableOp:0",
+            "StatefulPartitionedCall/sequential_1/dense_1_2/Cast/ReadVariableOp:0");
+        std::string b2k = pick(
+            "StatefulPartitionedCall/sequential_6_1/dense_25_1/BiasAdd/ReadVariableOp:0",
+            "StatefulPartitionedCall/sequential_1/dense_1_2/BiasAdd/ReadVariableOp:0");
+        std::string w3k = pick(
+            "StatefulPartitionedCall/sequential_6_1/dense_26_1/Cast/ReadVariableOp:0",
+            "StatefulPartitionedCall/sequential_1/dense_2_1/Cast/ReadVariableOp:0");
+        std::string b3k = pick(
+            "StatefulPartitionedCall/sequential_6_1/dense_26_1/BiasAdd/ReadVariableOp:0",
+            "StatefulPartitionedCall/sequential_1/dense_2_1/BiasAdd/ReadVariableOp:0");
+        std::string w4k = pick(
+            "StatefulPartitionedCall/sequential_6_1/dense_27_1/Cast/ReadVariableOp:0",
+            "StatefulPartitionedCall/sequential_1/dense_3_1/Cast/ReadVariableOp:0");
+        std::string b4k = pick(
+            "StatefulPartitionedCall/sequential_6_1/dense_27_1/Add/ReadVariableOp:0",
+            "StatefulPartitionedCall/sequential_1/dense_3_1/Add/ReadVariableOp:0");
 
-        // Layer 1 (8 -> 128)
-        auto w1_flat = weights_json[w1_key]["values"].get<std::vector<float>>();
-        b1 = weights_json[b1_key]["values"].get<std::vector<float>>();
+        // Load flat weight vectors directly — no reshape needed
+        w1 = j[w1k]["values"].get<std::vector<float>>();
+        b1 = j[b1k]["values"].get<std::vector<float>>();
+        w2 = j[w2k]["values"].get<std::vector<float>>();
+        b2 = j[b2k]["values"].get<std::vector<float>>();
+        w3 = j[w3k]["values"].get<std::vector<float>>();
+        b3 = j[b3k]["values"].get<std::vector<float>>();
+        w4 = j[w4k]["values"].get<std::vector<float>>();
+        b4 = j[b4k]["values"].get<std::vector<float>>();
 
-        // Detect input size from weight matrix
-        int w1_size = w1_flat.size();
-        int detected_inputs = w1_size / 128;
-        n_input_features = detected_inputs;
-
-        // Reshape W1: [n_input_features, 128]
-        W1.resize(n_input_features, std::vector<float>(128));
-        for (int i = 0; i < n_input_features; i++) {
-            for (int j = 0; j < 128; j++) {
-                W1[i][j] = w1_flat[i * 128 + j];
-            }
-        }
-
-        // Layer 2 (128 -> 64)
-	std::string w2_key = "StatefulPartitionedCall/sequential_6_1/dense_25_1/Cast/ReadVariableOp:0";
-	std::string b2_key = "StatefulPartitionedCall/sequential_6_1/dense_25_1/BiasAdd/ReadVariableOp:0";
-        if (!weights_json.contains(w2_key)) {
-            w2_key = "StatefulPartitionedCall/sequential_1/dense_1_2/Cast/ReadVariableOp:0";
-            b2_key = "StatefulPartitionedCall/sequential_1/dense_1_2/BiasAdd/ReadVariableOp:0";
-        }
-
-        auto w2_flat = weights_json[w2_key]["values"].get<std::vector<float>>();
-        b2 = weights_json[b2_key]["values"].get<std::vector<float>>();
-
-        // Reshape W2: [128, 64]
-        W2.resize(128, std::vector<float>(64));
-        for (int i = 0; i < 128; i++) {
-            for (int j = 0; j < 64; j++) {
-                W2[i][j] = w2_flat[i * 64 + j];
-            }
-        }
-
-        // Layer 3 (64 -> 32)
-        std::string w3_key = "StatefulPartitionedCall/sequential_6_1/dense_26_1/Cast/ReadVariableOp:0";
-	std::string b3_key = "StatefulPartitionedCall/sequential_6_1/dense_26_1/BiasAdd/ReadVariableOp:0";
-        if (!weights_json.contains(w3_key)) {
-            w3_key = "StatefulPartitionedCall/sequential_1/dense_2_1/Cast/ReadVariableOp:0";
-            b3_key = "StatefulPartitionedCall/sequential_1/dense_2_1/BiasAdd/ReadVariableOp:0";
-        }
-
-        auto w3_flat = weights_json[w3_key]["values"].get<std::vector<float>>();
-        b3 = weights_json[b3_key]["values"].get<std::vector<float>>();
-
-        // Reshape W3: [64, 32]
-        W3.resize(64, std::vector<float>(32));
-        for (int i = 0; i < 64; i++) {
-            for (int j = 0; j < 32; j++) {
-                W3[i][j] = w3_flat[i * 32 + j];
-            }
-        }
-
-        // Layer 4 (32 -> 1)
-        std::string w4_key = "StatefulPartitionedCall/sequential_6_1/dense_27_1/Cast/ReadVariableOp:0";
-	std::string b4_key = "StatefulPartitionedCall/sequential_6_1/dense_27_1/Add/ReadVariableOp:0";
-        if (!weights_json.contains(w4_key)) {
-            w4_key = "StatefulPartitionedCall/sequential_1/dense_3_1/Cast/ReadVariableOp:0";
-            b4_key = "StatefulPartitionedCall/sequential_1/dense_3_1/Add/ReadVariableOp:0";
-        }
-
-        auto w4_flat = weights_json[w4_key]["values"].get<std::vector<float>>();
-        b4 = weights_json[b4_key]["values"].get<std::vector<float>>();
-
-        // Reshape W4: [32, 1]
-        W4.resize(32, std::vector<float>(1));
-        for (int i = 0; i < 32; i++) {
-            W4[i][0] = w4_flat[i];
-        }
+        // Detect input size in case model was retrained with different feature count
+        n_input_features = static_cast<int>(w1.size()) / N_H1;
 
         weights_loaded = true;
     }
 
-    // Forward pass: predict(features) -> score
+    // Forward pass: zero heap allocation in the hot path.
+    // Intermediate activations live on the stack as fixed-size arrays.
     float predict(const std::vector<float>& features) const {
-        if (!weights_loaded) {
+        if (!weights_loaded)
             throw std::runtime_error("Model weights not loaded. Call load_weights() first.");
-        }
 
-        if (features.size() != static_cast<size_t>(n_input_features)) {
-            throw std::runtime_error("Expected " + std::to_string(n_input_features) +
-                                   " features, got " + std::to_string(features.size()));
-        }
+        // Stack-allocated activation buffers — no heap involvement
+        std::array<float, N_H1>  h1;
+        std::array<float, N_H2>  h2;
+        std::array<float, N_H3>  h3;
+        std::array<float, N_OUT> out;
 
-        // Forward pass through network
-        auto h1 = dense_layer(features, W1, b1, true);   // 9 -> 128, ReLU
-        auto h2 = dense_layer(h1, W2, b2, true);         // 128 -> 64, ReLU
-        auto h3 = dense_layer(h2, W3, b3, true);         // 64 -> 32, ReLU
-        auto output = dense_layer(h3, W4, b4, false);    // 32 -> 1, Sigmoid
+        dense_relu   <N_IN, N_H1>(features.data(), w1.data(), b1.data(), h1.data() );
+        dense_relu   <N_H1, N_H2>(h1.data(),       w2.data(), b2.data(), h2.data() );
+        dense_relu   <N_H2, N_H3>(h2.data(),       w3.data(), b3.data(), h3.data() );
+        dense_sigmoid<N_H3, N_OUT>(h3.data(),      w4.data(), b4.data(), out.data());
 
-        return output[0];
+        return out[0];
     }
 
-    // Batch prediction
+    // Batch prediction (convenience wrapper)
     std::vector<float> predict_batch(const std::vector<std::vector<float>>& batch) const {
         std::vector<float> predictions;
         predictions.reserve(batch.size());
-
-        for (const auto& features : batch) {
-            predictions.push_back(predict(features));
-        }
-
+        for (const auto& f : batch)
+            predictions.push_back(predict(f));
         return predictions;
     }
 };

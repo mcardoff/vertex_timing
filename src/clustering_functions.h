@@ -31,29 +31,17 @@ namespace MyUtl {
   auto getDistanceBetweenClusters(
     const Cluster& a, const Cluster& b
   ) -> double {
-    std::vector<double> aVal = a.values;
-    std::vector<double> aSig = a.sigmas;
-    std::vector<double> bVal = b.values;
-    std::vector<double> bSig = b.sigmas;
-
-    // std::vector<double> metric = {1.,-1.};
-
-    if (aVal.size() != bVal.size()) { std::cout << "Uh ohhh\n"; }
-
-    std::vector<double> distances(aVal.size());
-    for (int i=0; i < aVal.size(); i++) {
-    
-      double diffI = (aVal.at(i) - bVal.at(i));
-      double denomI = sqrt(aSig.at(i)*aSig.at(i) + bSig.at(i)*bSig.at(i));
-      distances.at(i) = diffI/denomI;
-    }
-
+    // Work directly on references — no copies, no intermediate vector.
+    // Accumulate d^2 in a single pass.
+    const size_t n = a.values.size();
     double dsqr = 0.0;
-    for (int i=0; i < distances.size(); i++){
-      auto d = distances[i];
-      dsqr += d*d;
+    for (size_t i = 0; i < n; ++i) {
+      double diff  = a.values[i] - b.values[i];
+      double denom = std::sqrt(a.sigmas[i]*a.sigmas[i] + b.sigmas[i]*b.sigmas[i]);
+      double d = diff / denom;
+      dsqr += d * d;
     }
-    return sqrt(dsqr);
+    return std::sqrt(dsqr);
   }
 
   auto mergeClusters(
@@ -76,15 +64,13 @@ namespace MyUtl {
       mergedCluster.sigmas.push_back(newClusterSigma);
     }
 
-    for (auto time: a.allTimes)
-      mergedCluster.allTimes.push_back(time);
-    for (auto time: b.allTimes)
-      mergedCluster.allTimes.push_back(time);
-      
-    for (auto idx: a.trackIndices)
-      mergedCluster.trackIndices.push_back(idx);
-    for (auto idx: b.trackIndices)
-      mergedCluster.trackIndices.push_back(idx);
+    mergedCluster.allTimes.reserve(a.allTimes.size() + b.allTimes.size());
+    mergedCluster.allTimes.insert(mergedCluster.allTimes.end(), a.allTimes.begin(), a.allTimes.end());
+    mergedCluster.allTimes.insert(mergedCluster.allTimes.end(), b.allTimes.begin(), b.allTimes.end());
+
+    mergedCluster.trackIndices.reserve(a.trackIndices.size() + b.trackIndices.size());
+    mergedCluster.trackIndices.insert(mergedCluster.trackIndices.end(), a.trackIndices.begin(), a.trackIndices.end());
+    mergedCluster.trackIndices.insert(mergedCluster.trackIndices.end(), b.trackIndices.begin(), b.trackIndices.end());
     
     mergedCluster.nConstituents = a.nConstituents+b.nConstituents;
     mergedCluster.maxPtCluster = a.maxPtCluster || b.maxPtCluster;
@@ -129,14 +115,16 @@ namespace MyUtl {
 	double trkZ0 = branch->trackZ0[idx];
 	double trkResZ0 = std::sqrt(branch->trackVarZ0[idx]);
 
-	std::map<Score,double> scores;
-	scores[Score::HGTD] = 0;
-	scores[Score::TRKPT] = trkPt;
-
-	Cluster cluster;
-	if (usez0) cluster = {{trkTime,trkZ0}, {trkRes,trkResZ0}, {trkTime}, {idx}, scores};
-	else cluster = {{trkTime}, {trkRes}, {trkTime}, {idx}, scores};
-	simpleClusters.push_back(cluster);
+        // Initialise scores inline — avoids constructing a temporary map
+        // and two separate tree-node insertions per track.
+        Cluster cluster;
+        if (usez0)
+          cluster = {{trkTime,trkZ0}, {trkRes,trkResZ0}, {trkTime}, {idx},
+                     {{Score::HGTD, 0.0}, {Score::TRKPT, trkPt}}};
+        else
+          cluster = {{trkTime}, {trkRes}, {trkTime}, {idx},
+                     {{Score::HGTD, 0.0}, {Score::TRKPT, trkPt}}};
+        simpleClusters.push_back(std::move(cluster));
       }
     }
     return simpleClusters;
@@ -147,8 +135,6 @@ namespace MyUtl {
   ) {
     double distance = 1.e30;
     while (collection->size() > 1) {
-      // std::cout << "entering while loop" << std::endl;
-
       int i0 = 0;
       int j0 = 0;
 
@@ -164,7 +150,6 @@ namespace MyUtl {
 	
 	  double currentDistance =
 	    getDistanceBetweenClusters(a, b);
-	  // std::cout << currentDistance << std::endl;
 	  if (currentDistance <= distance) {
 	    distance = currentDistance;
 	    i0 = i;
@@ -190,7 +175,6 @@ namespace MyUtl {
 	} else
 	  break;
       }
-      // break;
     } // While
   }
 
@@ -259,7 +243,8 @@ namespace MyUtl {
      bool checkTimeValid,  // for ideal efficiency
      double smearRes,       // fixed resolution for smeared times
      bool useCone,
-     bool usez0
+     bool usez0,
+     bool calcPurityFlag = false  // only compute purity when TEST_MISCL is active
   ) -> std::vector<Cluster> {
     if (trackIndices.empty() && DEBUG)
       std::cout << "EMPTY!!!!\n";
@@ -293,13 +278,14 @@ namespace MyUtl {
     // Load ML model only once using static initialization (lazy evaluation)
     static MLModel ml_model = []() {
         MLModel m;
-        m.load_weights("../share/models/model_weights.json");
+        m.load_weights("/Users/mcard/project/vertex_timing/share/models/model_weights.json");
         std::cout << "✓ ML model loaded (one-time initialization)" << std::endl;
         return m;
     }();
 
     for (Cluster& cluster: collection) {
-      cluster.calcPurity(branch);
+      if (calcPurityFlag)
+        cluster.calcPurity(branch);  // only needed when TEST_MISCL is active
       cluster.updateScores(branch, &ml_model);
     }
     

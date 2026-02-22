@@ -30,6 +30,7 @@
 #include <TStyle.h>
 #include <TSystem.h>
 #include <TVector2.h>
+#include <TLorentzVector.h>
 
 // Boost Headers
 #include <boost/filesystem.hpp>

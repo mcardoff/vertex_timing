@@ -62,7 +62,6 @@ namespace MyUtl {
 
       double sigNear = std::abs(nearZ0 - branch->recoVtxZ[near]) / std::sqrt(nearVarZ0);
 
-      // if (near != 0 && sig_near < sig_prim && sig_near < significance_cut)
       if (near != 0 && sigNear < significanceCut)
 	continue;
 
@@ -121,11 +120,12 @@ namespace MyUtl {
     }
     return output;
   }
-  
+
   std::vector<int> getAssociatedTracks(
-    BranchPointerWrapper *branch,
-    double minTrkPt, double maxTrkPt
-  ) {
+      BranchPointerWrapper *branch,
+      double minTrkPt, double maxTrkPt,
+      double significance_cut
+    ) {
     std::vector<int> goodTracks;
 
     for (size_t trk = 0; trk < branch->trackZ0.GetSize(); ++trk) {
@@ -144,7 +144,7 @@ namespace MyUtl {
       if (not trkQuality)
 	continue;
 
-      if (passTrackVertexAssociation(trk, 0, branch, 3.0))
+      if (passTrackVertexAssociation(trk, 0, branch, significance_cut))
 	goodTracks.push_back(trk);
     }
     
@@ -164,18 +164,20 @@ namespace MyUtl {
     if (not branch->passBasicCuts()) return std::make_pair(-1,1.);
 
     // check if there is one forward jet with pt > 30 GeV
-    if (not branch->passJetPtCut()) return std::make_pair(-1,1.);;
+    if (not branch->passJetPtCut()) return std::make_pair(-1, 1.);
 
     int nForwardJet=0;
     branch->countForwardJets(nForwardJet);
     
-    std::vector<int> tracks = getAssociatedTracks(branch, MIN_TRACK_PT, MAX_TRACK_PT);
+    // Scan the track array once at the looser cut (3σ) for counting stats,
+    // then tighten to MAX_NSIGMA (2σ) by filtering the already-selected subset.
+    std::vector<int> tracks = getAssociatedTracks(branch, MIN_TRACK_PT, MAX_TRACK_PT, 3.0);
 
     int nForwardTrack=0, nForwardTrackHS=0, nForwardTrackPU=0;
     branch->countForwardTracks(nForwardTrack,nForwardTrackHS,nForwardTrackPU,tracks, checkValidTimes);
 
     // if (not branch->pass_forward_hs_tracks(nForwardTrack_HS)) return std::make_pair(-1,1.);
-    
+
     double puRatio = (double)nForwardTrackPU / (double)nForwardTrack;
     double recoZ = branch->recoVtxZ[0];
 
@@ -184,7 +186,17 @@ namespace MyUtl {
     auto effFillValHSTrack = folded(nForwardTrackHS, (int)FOLD_HS_TRACK);
     auto effFillValPUTrack = folded(nForwardTrackPU, (int)FOLD_PU_TRACK);
     auto effFillValPURatio = puRatio;
-    double effFillValVtxDz   = std::abs(branch->recoVtxZ[0] - branch->truthVtxZ[0]);
+    double effFillValVtxDz = std::abs(branch->recoVtxZ[0] - branch->truthVtxZ[0]);
+
+    // Tighten association: keep only tracks that also pass MAX_NSIGMA (2σ).
+    // Filtering the 3σ subset avoids a second full scan of the track array.
+    if (MAX_NSIGMA != 3.0)
+      tracks.erase(std::remove_if(tracks.begin(), tracks.end(),
+                                  [&](int trk) {
+                                    return !passTrackVertexAssociation(
+                                        trk, 0, branch, MAX_NSIGMA);
+                                  }),
+                   tracks.end());    
 
     if (DEBUG) {
       std::cout << "nForwardJet = " << nForwardJet << '\n';
@@ -192,12 +204,15 @@ namespace MyUtl {
       std::cout << "nForwardTrack_HS = " << nForwardTrackHS << '\n';
       std::cout << "nForwardTrack_PU = " << nForwardTrackPU << '\n';
     }
-    
+
+    // Only pay for purity calculation when TEST_MISCL is actually in this map
+    const bool needsPurity = analyses.count(Score::TEST_MISCL) > 0;
+
     std::vector<Cluster> clusters =
       clusterTracksInTime(
         tracks, branch, 3.0,
-	useSmearedTimes, checkValidTimes, 30.0,
-	true, useZ0);
+	useSmearedTimes, checkValidTimes, 10.0,
+	true, useZ0, needsPurity);
 
     std::vector<Cluster> filt60Clusters, filt90Clusters, filtjetClusters;
 
@@ -206,7 +221,7 @@ namespace MyUtl {
       filt60Clusters =
 	clusterTracksInTime(
           filteredTracks, branch, 3.0,
-          useSmearedTimes, checkValidTimes, 30.0,
+          useSmearedTimes, checkValidTimes, 20.0,
 	  true, useZ0);
     }
 
@@ -215,7 +230,7 @@ namespace MyUtl {
       filt90Clusters =
 	clusterTracksInTime(
           filteredTracks, branch, 3.0,
-          useSmearedTimes, checkValidTimes, 30.0,
+          useSmearedTimes, checkValidTimes, 20.0,
 	  true, useZ0);
     }
 
@@ -224,12 +239,16 @@ namespace MyUtl {
       filtjetClusters =
 	clusterTracksInTime(
           filteredTracks, branch, 3.0,
-          useSmearedTimes, checkValidTimes, 30.0,
+          useSmearedTimes, checkValidTimes, 20.0,
 	  true, useZ0);
     }
 
     if (DEBUG) std::cout << "LEFT CLUSTERING\n";
     for (auto& [score,analysis]: analyses) {
+      // TEST_MISCL denominator is restricted to events where the TRKPTZ-selected
+      // cluster has purity > 0.75 — fillTotal is deferred to the per-score loop
+      // below where the chosen cluster (and its purity) is already available.
+      if (score == Score::TEST_MISCL) continue;
       analysis["fjet"]->     fillTotal(effFillValFjet   );
       analysis["vtx_dz"]->   fillTotal(effFillValVtxDz  );
       analysis["ftrack"]->   fillTotal(effFillValTrack  );
@@ -261,8 +280,8 @@ namespace MyUtl {
 
     if (DEBUG) std::cout << "Chose clusters\n";
 
-    bool hasPassingCluster = false, passesMine = false;
-    
+    bool hasPassingCluster = false, passesMine = false, passesMiscl = false, misclInDenominator = false;
+
     for (auto& [score, analysis] : analyses) {
       if (DEBUG)
         std::cout << "Filling Scores: " << toString(score) << '\n';
@@ -292,10 +311,37 @@ namespace MyUtl {
 
       if (score == Score::TRKPTZ)
 	returnVal = scoreBasedTime;
+      if (score == Score::TEST_MISCL)
+        returnVal = scoreBasedTime;
       
       analysis.inclusiveReso->Fill(diff);
       analysis.inclusivePurity->Fill(clusterPurity);
-      if (scored.passEfficiency(branch)) {
+
+      // Check if this score passes the efficiency test
+      // For TESTML:     require passEfficiency AND ML score > 0.5
+      // For TEST_MISCL: uses TRKPTZ scoring; both the denominator (fillTotal) and
+      //                 numerator (fillPass) are restricted to events where the
+      //                 selected cluster has purity > 0.75.
+      bool passesEfficiency = scored.passEfficiency(branch);
+      if (score == Score::TESTML && passesEfficiency) {
+        passesEfficiency = scored.scores.at(Score::TESTML) > 0.5;
+      }
+      if (score == Score::TEST_MISCL) {
+        // Only count this event in the denominator if the selected cluster is pure
+        if (scored.purity > 0.75) {
+          misclInDenominator = true;
+          analysis["fjet"]->     fillTotal(effFillValFjet   );
+          analysis["vtx_dz"]->   fillTotal(effFillValVtxDz  );
+          analysis["ftrack"]->   fillTotal(effFillValTrack  );
+          analysis["pu_frac"]->  fillTotal(effFillValPURatio);
+          analysis["hs_track"]-> fillTotal(effFillValHSTrack);
+          analysis["pu_track"]-> fillTotal(effFillValPUTrack);
+        } else {
+          passesEfficiency = false;  // impure cluster: skip fillPass entirely
+        }
+      }
+
+      if (passesEfficiency) {
 	analysis["fjet"]->     fillPass(effFillValFjet   );
 	analysis["vtx_dz"]->   fillPass(effFillValVtxDz  );
 	analysis["ftrack"]->   fillPass(effFillValTrack  );
@@ -307,6 +353,8 @@ namespace MyUtl {
 	}
 	if (score == Score::TRKPTZ)
 	  passesMine = true;
+	if (score == Score::TEST_MISCL)
+	  passesMiscl = true;
       }
 
       // fill diff hists
@@ -325,10 +373,9 @@ namespace MyUtl {
       analysis["hs_track"]-> fillPurity(nForwardTrackHS, clusterPurity);
       analysis["pu_track"]-> fillPurity(nForwardTrackPU, clusterPurity);
     }
-    if (hasPassingCluster and (not passesMine)) returnCode = 2;
-    // else if (passesMine) returnCode = 1;
-
-    // if (not passesMine) returnCode = 0;
+    // Flag code 2 only for events that entered the TEST_MISCL denominator
+    // (pure cluster, purity > 0.75) but did NOT pass the timing window.
+    if (misclInDenominator && !passesMiscl) returnCode = 2;
     
     return std::make_pair(returnCode, returnVal);
   }
