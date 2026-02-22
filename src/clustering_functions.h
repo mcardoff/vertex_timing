@@ -1,6 +1,22 @@
 #ifndef CLUSTERING_FUNCTIONS_H
 #define CLUSTERING_FUNCTIONS_H
 
+// ---------------------------------------------------------------------------
+// clustering_functions.h
+//   Core clustering algorithms and cluster-selection logic.  All functions
+//   live inside the MyUtl namespace.  Sections:
+//     1. getSmearedTrackTime   — smear a track time with a given resolution
+//     2. getDistanceBetweenClusters — Mahalanobis-like distance metric
+//     3. mergeClusters         — precision-weighted merge of two clusters
+//     4. makeSimpleClusters    — seed one cluster per track
+//     5. doSimultaneousClustering — agglomerative (minimum-distance) merge
+//     6. doConeClustering      — seed-and-cone merge
+//     7. clusterTracksInTime   — top-level clustering entry point
+//     8. chooseHGTDCluster     — select cluster closest to reco vertex time
+//     9. chooseCluster (all scores) — select best cluster for every Score
+//    10. chooseCluster (single score) — select best cluster for one Score
+// ---------------------------------------------------------------------------
+
 #include <cmath>
 
 #include "clustering_constants.h"
@@ -9,6 +25,17 @@
 
 namespace MyUtl {
 
+// ---------------------------------------------------------------------------
+// 1. getSmearedTrackTime
+//   Returns a Gaussian-smeared time for track idx using resolution res.
+//   The true underlying time is taken from (in priority order):
+//     a) the associated truth particle's production time, if a particle link
+//        exists;
+//     b) the associated truth vertex time, if a vertex link exists;
+//     c) a random draw from Gaus(truthVtxTime[0], PILEUP_SMEAR) to model
+//        an unlinked pileup track.
+//   Used when useSmearedTimes == true in makeSimpleClusters.
+// ---------------------------------------------------------------------------
   auto getSmearedTrackTime(
     int idx, double res, BranchPointerWrapper *branch
   ) -> double {
@@ -28,6 +55,15 @@ namespace MyUtl {
     return gRandom->Gaus(tPart,smearRes);
   }
   
+// ---------------------------------------------------------------------------
+// 2. getDistanceBetweenClusters
+//   Computes the Mahalanobis-like distance between two clusters:
+//     d = sqrt( Σ_i  ((a.values[i] - b.values[i]) /
+//                      sqrt(a.sigmas[i]² + b.sigmas[i]²))² )
+//   Each dimension contributes a normalised squared difference; the combined
+//   uncertainty in the denominator accounts for both clusters' uncertainties.
+//   Used as the merge criterion in both clustering algorithms.
+// ---------------------------------------------------------------------------
   auto getDistanceBetweenClusters(
     const Cluster& a, const Cluster& b
   ) -> double {
@@ -44,6 +80,17 @@ namespace MyUtl {
     return std::sqrt(dsqr);
   }
 
+// ---------------------------------------------------------------------------
+// 3. mergeClusters
+//   Returns a new Cluster formed by precision-weighted averaging of clusters
+//   a and b in each dimension:
+//     new_value = (v1/σ1² + v2/σ2²) / (1/σ1² + 1/σ2²)
+//     new_sigma = σ1·σ2 / sqrt(σ1² + σ2²)
+//   allTimes and trackIndices are concatenated.  Scores are summed (additive
+//   combination) so that cluster-level scores reflect all constituent tracks.
+//   wasMerged is set true on the result so the clustering loop can identify
+//   freshly merged clusters and reset the flag before the next pass.
+// ---------------------------------------------------------------------------
   auto mergeClusters(
     Cluster a, Cluster b
   ) -> Cluster {
@@ -89,6 +136,16 @@ namespace MyUtl {
     return mergedCluster;
   }
 
+// ---------------------------------------------------------------------------
+// 4. makeSimpleClusters
+//   Seeds one single-track Cluster per qualifying track in trackIndices.
+//   A track is included only if checkTimeValid is false or if its
+//   Track_hasValidTime flag is set.  When useSmearedTimes is true the
+//   pre-computed smearedTimesMap and smearedTimeResMap are used in place
+//   of the raw branch times.  When usez0 is true both time and z₀ are
+//   stored as cluster dimensions; otherwise only time is used.
+//   Initial scores HGTD (0) and TRKPT (track_pT) are set inline.
+// ---------------------------------------------------------------------------
   auto makeSimpleClusters(
     const std::vector<int>& trackIndices,
     BranchPointerWrapper *branch,
@@ -130,6 +187,14 @@ namespace MyUtl {
     return simpleClusters;
   }
 
+// ---------------------------------------------------------------------------
+// 5. doSimultaneousClustering
+//   Agglomerative (bottom-up) clustering: at each iteration the globally
+//   closest pair of unmerged clusters is found and merged if their distance
+//   is below distCut.  The loop terminates when no pair is closer than
+//   distCut.  The wasMerged flag is used to skip freshly merged clusters in
+//   the inner distance search and is reset between passes.
+// ---------------------------------------------------------------------------
   void doSimultaneousClustering(
     std::vector<Cluster> *collection, double distCut
   ) {
@@ -178,6 +243,14 @@ namespace MyUtl {
     } // While
   }
 
+// ---------------------------------------------------------------------------
+// 6. doConeClustering
+//   Seed-and-cone clustering: the unmerged cluster with the highest TRKPT
+//   score is selected as the seed, all other clusters within distCut of
+//   the seed are absorbed into it, and the merged cluster is marked as
+//   processed.  Repeats until every cluster has been merged or assigned.
+//   Produces a result biased toward the highest-pT cluster being the core.
+// ---------------------------------------------------------------------------
   void doConeClustering(
     std::vector<Cluster> *collection, double distCut
   ) {
@@ -235,6 +308,20 @@ namespace MyUtl {
     if (DEBUG) std::cout << "Finished Clustering\n";
   }
 
+// ---------------------------------------------------------------------------
+// 7. clusterTracksInTime
+//   Top-level clustering entry point called from event_processing.h.
+//   Orchestrates the full pipeline:
+//     a) If useSmearedTimes, generate a smeared time for every track (using
+//        getSmearedTrackTime).  The resolution is scaled by 1/sqrt(nHits)
+//        for tracks with valid HGTD hits.
+//     b) Seed one cluster per track with makeSimpleClusters.
+//     c) Cluster with doConeClustering (useCone == true) or
+//        doSimultaneousClustering (useCone == false).
+//     d) Load the ML model once via static initialisation (first call only).
+//     e) Optionally compute cluster purity (calcPurityFlag) and call
+//        updateScores on every cluster to fill the derived score map.
+// ---------------------------------------------------------------------------
   auto clusterTracksInTime(
      const std::vector<int>& trackIndices,
      BranchPointerWrapper *branch,
@@ -293,6 +380,13 @@ namespace MyUtl {
     return collection;
   }
 
+// ---------------------------------------------------------------------------
+// 8. chooseHGTDCluster
+//   Selects the cluster whose weighted-mean time is closest (in absolute
+//   difference) to the reconstructed primary vertex time (recoVtxTime[0]).
+//   Used exclusively for the HGTD score, which compares directly against
+//   the reco-vertex timing rather than using a score ranking.
+// ---------------------------------------------------------------------------
   auto chooseHGTDCluster(
     const std::vector<Cluster>& collection,
     BranchPointerWrapper *branch
@@ -310,6 +404,22 @@ namespace MyUtl {
     return minCluster;
   }
   
+// ---------------------------------------------------------------------------
+// 9. chooseCluster  [all-scores overload]
+//   Iterates over every Score in ENUM_VEC and selects the highest-scoring
+//   cluster for each, returning a map keyed on Score.  Special handling:
+//     HGTD     — skipped here; handled separately by chooseHGTDCluster.
+//     FILTJET / FILT60 / FILT90 — skipped; use their own pre-filtered
+//                collection and are chosen by the single-score overload.
+//     JUST60 / JUST90 — a synthetic cluster with only a calorimeter time
+//                is inserted directly (no track-based cluster chosen).
+//     PASS    — uses passEfficiency() as the selection criterion instead
+//                of a numeric score.
+//     CALO90 / CALO60 — additionally require the cluster time to be within
+//                2σ of a smeared calorimeter time.
+//   Intended for the main analysis path where all active scores are needed
+//   simultaneously, avoiding repeated iteration over the cluster collection.
+// ---------------------------------------------------------------------------
   auto chooseCluster(
     std::vector<Cluster>& collection,
     BranchPointerWrapper *branch
@@ -384,6 +494,14 @@ namespace MyUtl {
     return output;
   }
 
+// ---------------------------------------------------------------------------
+// 10. chooseCluster  [single-score overload]
+//   Selects the highest-scoring cluster for a single specified Score by
+//   linear scan.  Simpler than the all-scores overload: no calorimeter-time
+//   gating, no PASS/JUST special cases.  Used to choose the best cluster
+//   from pre-filtered collections (FILT60, FILT90, FILTJET) where only one
+//   score (TRKPTZ) is needed.
+// ---------------------------------------------------------------------------
   auto chooseCluster(
     std::vector<Cluster>& collection,
     Score score

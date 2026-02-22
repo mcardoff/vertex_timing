@@ -1,6 +1,26 @@
 #ifndef STRUCTS_H
 #define STRUCTS_H
 
+// ---------------------------------------------------------------------------
+// clustering_structs.h
+//   Core data structures shared across the entire analysis pipeline.
+//   Two structs are defined here:
+//
+//   BranchPointerWrapper
+//     Owns all TTreeReaderArray / TTreeReaderValue handles for a single
+//     TTreeReader session.  Also hosts all per-event selection predicates
+//     and kinematic helper methods so that event-loop code in
+//     event_processing.h stays concise.
+//
+//   Cluster
+//     Represents one time-space cluster produced by the clustering
+//     algorithms in clustering_functions.h.  Stores the weighted-mean
+//     time (and optionally z₀), per-constituent track indices, all raw
+//     times (for spread diagnostics), and a score map keyed on Score.
+//     Also hosts the ML feature extraction and score-update logic so
+//     that the cluster is self-contained.
+// ---------------------------------------------------------------------------
+
 #include "clustering_includes.h"
 #include "clustering_constants.h"
 #include "ml_model.h"
@@ -8,6 +28,20 @@
 
 namespace MyUtl {
 
+// ---------------------------------------------------------------------------
+// BranchPointerWrapper
+//   Aggregates every TTreeReaderArray / TTreeReaderValue needed by the
+//   analysis into a single object that is passed by pointer throughout the
+//   event loop.  The constructor binds each member to its branch name so
+//   that branch-name strings appear only once in the codebase.
+//
+//   Selection methods are grouped as follows:
+//     Basic event cuts         — passBasicCuts, passJetPtCut
+//     Track / jet counters     — countForwardJets, countForwardTracks
+//     Testing-only HS filter   — passForwardHsTracks
+//     Track scoring helpers    — calcJetptDRScore, calcTrkptDRScore
+//     VBF signal region cuts   — see dedicated sub-section below
+// ---------------------------------------------------------------------------
   struct BranchPointerWrapper {
     TTreeReader& reader;
 
@@ -96,6 +130,13 @@ namespace MyUtl {
       particleT (r, "TruthPart_prodVtx_time")
     {}
 
+    // -----------------------------------------------------------------------
+    // passBasicCuts
+    //   Returns false (skip event) if:
+    //     • fewer than MIN_JETS truth-HS jets or reco jets are present, or
+    //     • the reconstructed HS vertex z is more than MAX_VTX_DZ from the
+    //       truth HS vertex z (guards against wrong-vertex events).
+    // -----------------------------------------------------------------------
     bool passBasicCuts() {
       if (this->truthHSJetPt.GetSize() < MIN_JETS or
 	  this->topoJetPt.GetSize() < MIN_JETS) {
@@ -112,7 +153,14 @@ namespace MyUtl {
       return true;
     }
 
-    bool passJetPtCut() { 
+    // -----------------------------------------------------------------------
+    // passJetPtCut
+    //   Requires the truth-HS jet collection to contain at least
+    //   MIN_PASSPT_JETS jets above MIN_JETPT, at least MIN_PASSETA_JETS of
+    //   which are in the forward HGTD acceptance, and that the two leading
+    //   jets have an η separation ≥ VBS_JET_D_ETA (VBS topology selection).
+    // -----------------------------------------------------------------------
+    bool passJetPtCut() {
       int passptcount = 0, passptetacount = 0;
       for(int jetIdx = 0; jetIdx < this->truthHSJetEta.GetSize(); ++jetIdx) {
 	float
@@ -131,12 +179,26 @@ namespace MyUtl {
       return passesPt and passesEta and passesDEta;
     }
 
+    // -----------------------------------------------------------------------
+    // passForwardHsTracks  [testing only]
+    //   Gates on the number of forward hard-scatter tracks being within the
+    //   window [MIN_NHS_TRACK, MAX_NHS_TRACK].  Used during development to
+    //   restrict studies to events with a controlled HS track multiplicity;
+    //   not applied in the primary analysis.
+    // -----------------------------------------------------------------------
     bool passForwardHsTracks(int& nForwardHSTrack) {
       return
 	MAX_NHS_TRACK >= nForwardHSTrack and
 	nForwardHSTrack >= MIN_NHS_TRACK;
     }
 
+    // -----------------------------------------------------------------------
+    // countForwardJets
+    //   Counts reco jets that fall in the HGTD η acceptance
+    //   (MIN_ABS_ETA_JET < |η| < MAX_ABS_ETA_JET) and exceed MIN_JETPT.
+    //   The result is written into nForwardJet and used as the x-axis
+    //   variable in several efficiency/resolution plots.
+    // -----------------------------------------------------------------------
     void countForwardJets(int& nForwardJet) {
     nForwardJet = 0;
     for(int jetIdx = 0; jetIdx < this->topoJetEta.GetSize(); ++jetIdx) {
@@ -148,6 +210,14 @@ namespace MyUtl {
     }
   }
     
+    // -----------------------------------------------------------------------
+    // countForwardTracks
+    //   Splits a pre-selected track list into forward HS and PU components.
+    //   A track is counted if it passes the HGTD η window, pT bounds, track
+    //   quality flag, and (when checkTimeValid is true) has a valid HGTD time.
+    //   Writes totals into nFTrack, nFTrackHS, nFTrackPU; used as x-axis
+    //   variables in efficiency/resolution plots.
+    // -----------------------------------------------------------------------
     void countForwardTracks(
       int& nFTrack, int& nFTrackHS, int& nFTrackPU,
       const std::vector<int>& tracks, bool checkTimeValid
@@ -172,6 +242,12 @@ namespace MyUtl {
       }
     }
 
+    // -----------------------------------------------------------------------
+    // calcJetptDRScore
+    //   Returns jet_pT * exp(−ΔR) where ΔR is the angular distance to the
+    //   nearest reco jet.  Higher values indicate the track is close to a
+    //   high-pT jet; used as a per-track weight in FILTJET-style scoring.
+    // -----------------------------------------------------------------------
     double calcJetptDRScore(int trkIdx) {
       double
 	trkEta = this->trackEta[trkIdx],
@@ -196,6 +272,13 @@ namespace MyUtl {
       return returnScore;
     }
 
+    // -----------------------------------------------------------------------
+    // calcTrkptDRScore
+    //   Returns track_pT * exp(−ΔR) where ΔR is the angular distance to the
+    //   nearest reco jet.  Analogous to calcJetptDRScore but uses the track's
+    //   own pT rather than the jet pT; used as the per-track contribution to
+    //   the TRKPTZ cluster score.
+    // -----------------------------------------------------------------------
     double calcTrkptDRScore(int trkIdx) {
       double
 	trkEta = this->trackEta[trkIdx],
@@ -221,16 +304,38 @@ namespace MyUtl {
       return returnScore;
     }
 
-    // ============================================================================
-    // VBF H->Invisible Signal Region Selection Functions
-    // Based on JHEP08(2022)104 - https://doi.org/10.1007/JHEP08(2022)104
+    // -----------------------------------------------------------------------
+    // VBF H→Invisible signal region selection
+    //   Implements the kinematic cuts from JHEP08(2022)104.
+    //   Jets are assumed to be pT-sorted in descending order (leading jet
+    //   at index 0, sub-leading at index 1) — verified to be 100% true in
+    //   this sample via check_jet_sorting.cxx.
+    //   Some thresholds are loosened relative to the published analysis to
+    //   retain more events for timing studies; see individual comments.
     //
-    // NOTE: These functions assume jets are pT-sorted in descending order
-    //       (verified with check_jet_sorting.cxx - 100% of events are sorted)
-    //       Leading jet = topoJetPt[0], Subleading jet = topoJetPt[1]
-    // ============================================================================
+    //   Individual predicates (each returns bool unless noted):
+    //     countJetsAbovePt    — count jets above a pT threshold
+    //     passJetMultiplicity — ≥ 2 jets with pT > 25 GeV
+    //     passLeadingJetPt    — leading > 60 GeV, sub-leading > 40 GeV
+    //     passJetDeltaPhi     — |Δφ_jj| < 2 (not back-to-back)
+    //     passOppositeHemispheres — η_j1 · η_j2 < 0
+    //     passLargeDeltaEta   — |Δη_jj| > 3.0
+    //     calcDijetMass       — computes m_jj (GeV); used by passLargeDijetMass
+    //     passLargeDijetMass  — m_jj > 300 GeV
+    //     calcAllJetsPtSum    — scalar sum of all jet pT (GeV)
+    //     passAllJetsPtSum    — scalar sum > 140 GeV
+    //     passForwardJet      — ≥ 1 leading jet in HGTD η acceptance
+    //     calcCentrality      — centrality C_i for jet i relative to j1/j2
+    //     calcRelativeMass    — relative mass m_rel_i = min(m_j1i,m_j2i)/m_jj
+    //     passFSRCompatibility — C_i < 0.6 and m_rel < 0.05 for j3, j4
+    //     passVBFSignalRegion — AND of all above (FSR cut currently disabled)
+    // -----------------------------------------------------------------------
 
-    // Count jets passing pT threshold of 25 GeV
+    // -----------------------------------------------------------------------
+    // countJetsAbovePt
+    //   Returns the number of reco jets with pT above ptThreshold (GeV).
+    //   Helper for passJetMultiplicity.
+    // -----------------------------------------------------------------------
     int countJetsAbovePt(double ptThreshold = 25.0) const {
       int count = 0;
       for (int jetIdx = 0; jetIdx < this->topoJetPt.GetSize(); ++jetIdx) {
@@ -241,14 +346,22 @@ namespace MyUtl {
       return count;
     }
 
-    // Check if event has at least 2 jets with pT > 25 GeV
+    // -----------------------------------------------------------------------
+    // passJetMultiplicity
+    //   Requires at least 2 reco jets with pT > 25 GeV.
+    // -----------------------------------------------------------------------
     bool passJetMultiplicity() const {
       int nJets = countJetsAbovePt(25.0);
       return (nJets >= 2);
     }
 
-    // Check leading jet pT > 60 GeV and subleading jet pT > 40 GeV
-    // Original ATLAS cuts: leading > 80 GeV, subleading > 50 GeV (loosened for timing studies)
+    // -----------------------------------------------------------------------
+    // passLeadingJetPt
+    //   Requires leading jet pT > 60 GeV and sub-leading jet pT > 40 GeV.
+    //   Original ATLAS cuts (JHEP08(2022)104): leading > 80 GeV,
+    //   sub-leading > 50 GeV — loosened here to retain more events for
+    //   timing studies.
+    // -----------------------------------------------------------------------
     bool passLeadingJetPt() const {
       if (this->topoJetPt.GetSize() < 2) return false;
 
@@ -259,7 +372,11 @@ namespace MyUtl {
       return (leadingPt > 60.0 && subleadingPt > 40.0);
     }
 
-    // Check if two leading jets are not back-to-back: Δφ_jj < 2
+    // -----------------------------------------------------------------------
+    // passJetDeltaPhi
+    //   Requires |Δφ_jj| < 2 between the two leading jets, rejecting
+    //   back-to-back topologies inconsistent with VBF kinematics.
+    // -----------------------------------------------------------------------
     bool passJetDeltaPhi() const {
       if (this->topoJetPt.GetSize() < 2) return false;
 
@@ -270,7 +387,11 @@ namespace MyUtl {
       return (deltaPhi < 2.0);
     }
 
-    // Check VBF topology: opposite hemispheres (η_j1 * η_j2 < 0)
+    // -----------------------------------------------------------------------
+    // passOppositeHemispheres
+    //   Requires the two leading jets to be in opposite η hemispheres
+    //   (η_j1 · η_j2 < 0), a hallmark of VBF topology.
+    // -----------------------------------------------------------------------
     bool passOppositeHemispheres() const {
       if (this->topoJetEta.GetSize() < 2) return false;
 
@@ -280,8 +401,12 @@ namespace MyUtl {
       return (eta1 * eta2 < 0);
     }
 
-    // Check VBF topology: large pseudorapidity separation (Δη_jj > 3.0)
-    // Original ATLAS cut: Δη_jj > 3.8 (loosened for timing studies)
+    // -----------------------------------------------------------------------
+    // passLargeDeltaEta
+    //   Requires |Δη_jj| > minDeltaEta (default 3.0) between the two
+    //   leading jets.  Original ATLAS cut is Δη_jj > 3.8; loosened here
+    //   for timing studies.
+    // -----------------------------------------------------------------------
     bool passLargeDeltaEta(double minDeltaEta = 3.0) const {
       if (this->topoJetEta.GetSize() < 2) return false;
 
@@ -292,7 +417,12 @@ namespace MyUtl {
       return (deltaEta > minDeltaEta);
     }
 
-    // Calculate invariant mass of two leading jets
+    // -----------------------------------------------------------------------
+    // calcDijetMass
+    //   Builds TLorentzVectors for the two leading jets (assumed massless)
+    //   and returns their invariant mass in GeV.  Returns -1 if fewer than
+    //   2 jets are present.
+    // -----------------------------------------------------------------------
     double calcDijetMass() const {
       if (this->topoJetPt.GetSize() < 2) return -1.0;
 
@@ -309,14 +439,22 @@ namespace MyUtl {
       return dijet.M(); // Return in GeV (jets already in GeV)
     }
 
-    // Check VBF topology: large invariant mass (m_jj > 0.3 TeV)
-    // Original ATLAS cut: m_jj > 0.8 TeV (loosened for timing studies)
+    // -----------------------------------------------------------------------
+    // passLargeDijetMass
+    //   Requires dijet invariant mass m_jj > minMass GeV (default 300 GeV,
+    //   i.e. 0.3 TeV).  Original ATLAS cut is m_jj > 0.8 TeV; loosened
+    //   here for timing studies.
+    // -----------------------------------------------------------------------
     bool passLargeDijetMass(double minMass = 300.0) const {
       double mjj = calcDijetMass();
       return (mjj > minMass);
     }
 
-    // Calculate scalar sum of all jet pT (for pT^all-jets requirement)
+    // -----------------------------------------------------------------------
+    // calcAllJetsPtSum
+    //   Returns the scalar sum of pT over all reco jets (GeV).
+    //   Used by passAllJetsPtSum to apply the H_T-like requirement.
+    // -----------------------------------------------------------------------
     double calcAllJetsPtSum() const {
       double ptSum = 0.0;
       for (int jetIdx = 0; jetIdx < this->topoJetPt.GetSize(); ++jetIdx) {
@@ -325,13 +463,22 @@ namespace MyUtl {
       return ptSum;
     }
 
-    // Check if sum of all jet pT > 140 GeV
+    // -----------------------------------------------------------------------
+    // passAllJetsPtSum
+    //   Requires the scalar sum of all jet pT to exceed minPtSum GeV
+    //   (default 140 GeV), applying the H_T-like requirement.
+    // -----------------------------------------------------------------------
     bool passAllJetsPtSum(double minPtSum = 140.0) const {
       double ptSum = calcAllJetsPtSum();
       return (ptSum > minPtSum);
     }
 
-    // Check if at least one of the two leading jets is in HGTD acceptance
+    // -----------------------------------------------------------------------
+    // passForwardJet
+    //   Requires at least one of the two leading jets to fall within the
+    //   HGTD η acceptance (MIN_HGTD_ETA < |η| < MAX_HGTD_ETA), ensuring
+    //   the event can be studied with HGTD timing information.
+    // -----------------------------------------------------------------------
     bool passForwardJet() const {
       if (this->topoJetEta.GetSize() < 2) return false;
 
@@ -344,8 +491,16 @@ namespace MyUtl {
       return (jet1Forward || jet2Forward);
     }
 
-    // Calculate centrality C_i for jet i (for i = j3, j4)
-    // C_i quantifies how central jet i is relative to the two leading jets in rapidity
+    // -----------------------------------------------------------------------
+    // calcCentrality
+    //   Computes the rapidity centrality C_i for jet at jetIdx relative to
+    //   the two leading jets:
+    //     C_i = exp(−4 · (η_i − η_centre)² / Δη_jj²)
+    //   where η_centre = (η_j1 + η_j2) / 2.
+    //   C_i → 1 for a jet sitting between j1 and j2; C_i → 0 for a jet
+    //   outside the rapidity gap.  Used to identify FSR jets in
+    //   passFSRCompatibility.
+    // -----------------------------------------------------------------------
     double calcCentrality(int jetIdx) const {
       if (this->topoJetEta.GetSize() < 2) return -1.0;
       if (jetIdx >= this->topoJetEta.GetSize()) return -1.0;
@@ -365,8 +520,14 @@ namespace MyUtl {
       return C_i;
     }
 
-    // Calculate relative mass m_rel for jet i
-    // m_rel_i = min{m_j1i, m_j2i} / m_jj
+    // -----------------------------------------------------------------------
+    // calcRelativeMass
+    //   Returns the relative invariant mass for jet at jetIdx:
+    //     m_rel_i = min(m_j1i, m_j2i) / m_jj
+    //   where m_j1i (m_j2i) is the invariant mass of jet i with the leading
+    //   (sub-leading) VBF jet.  Small m_rel indicates the extra jet is
+    //   consistent with FSR off one of the VBF jets.
+    // -----------------------------------------------------------------------
     double calcRelativeMass(int jetIdx) const {
       if (this->topoJetPt.GetSize() < 2) return -1.0;
       if (jetIdx >= this->topoJetPt.GetSize()) return -1.0;
@@ -387,8 +548,14 @@ namespace MyUtl {
       return m_rel;
     }
 
-    // Check FSR compatibility for third and fourth jets (if they exist)
-    // Requires C_i < 0.6 and m_rel_i < 0.05
+    // -----------------------------------------------------------------------
+    // passFSRCompatibility
+    //   For the third and fourth reco jets (if present), checks that each
+    //   satisfies C_i < 0.6 and m_rel_i < 0.05, consistent with being FSR
+    //   rather than additional hard-scatter activity.  Events with only 2
+    //   jets pass automatically.
+    //   Note: this cut is currently commented out in passVBFSignalRegion.
+    // -----------------------------------------------------------------------
     bool passFSRCompatibility() const {
       int nJets = this->topoJetPt.GetSize();
 
@@ -412,9 +579,13 @@ namespace MyUtl {
       return true;
     }
 
-    // Combined VBF signal region selection
-    // Returns true if event passes all VBF H->invisible cuts
-    // (excluding lepton veto, b-tagging, JVT, EmissT, and soft term requirements)
+    // -----------------------------------------------------------------------
+    // passVBFSignalRegion
+    //   AND of all individual VBF predicates above.  Excludes requirements
+    //   that are not available in this ntuple: lepton veto, b-tagging, JVT,
+    //   E_T^miss, and soft-term requirements.  passFSRCompatibility is
+    //   evaluated but currently excluded from the final AND.
+    // -----------------------------------------------------------------------
     bool passVBFSignalRegion() const {
       bool passMultiplicity = passJetMultiplicity();
       bool passLeadPt = passLeadingJetPt();
@@ -444,6 +615,24 @@ namespace MyUtl {
     }
   };
 
+// ---------------------------------------------------------------------------
+// Cluster
+//   Represents a single time(-z₀) cluster produced by doSimultaneousClustering
+//   or doConeClustering.  The weighted-mean position is stored in values[],
+//   with per-dimension uncertainties in sigmas[].  allTimes holds the raw
+//   track times for spread diagnostics.  trackIndices lists the original
+//   track indices from the branch arrays so that truth-matching and feature
+//   extraction can look up any per-track quantity.
+//
+//   Member methods:
+//     operator== / !=  — equality by (values[0], sigmas[0], nConstituents)
+//     calcPurity        — fraction of cluster pT belonging to truth HS vertex
+//     updateScores      — computes TRKPTZ, CALO*, TESTML, TEST_MISCL scores
+//     timeSpread        — std-dev of raw track times within the cluster
+//     zSpread           — std-dev of track z₀ values within the cluster
+//     passEfficiency    — true if cluster time is within 3·PASS_SIGMA of truth
+//     calcFeatures      — extracts and normalises the 8 ML input features
+// ---------------------------------------------------------------------------
   struct Cluster {
     std::vector<double> values;
     std::vector<double> sigmas;
@@ -455,6 +644,13 @@ namespace MyUtl {
     bool wasMerged = false;
     int nConstituents=1;
 
+    // -----------------------------------------------------------------------
+    // operator== / operator!=
+    //   Two clusters are considered identical if they share the same
+    //   weighted-mean time (values[0]), time uncertainty (sigmas[0]), and
+    //   constituent count.  This is sufficient for the duplicate-removal
+    //   checks inside chooseCluster.
+    // -----------------------------------------------------------------------
     bool operator==(const Cluster& other) {
       bool sameValues = values.at(0) == other.values.at(0);
       bool sameSigmas = sigmas.at(0) == other.sigmas.at(0);
@@ -467,6 +663,13 @@ namespace MyUtl {
       return !(*this == other);
     }
 
+    // -----------------------------------------------------------------------
+    // calcPurity
+    //   Computes the pT-weighted fraction of cluster tracks that originate
+    //   from the hard-scatter vertex (truth vertex index 0).  Stores the
+    //   result in this->purity.  Called only when TEST_MISCL is active
+    //   (calcPurityFlag == true) to avoid unnecessary truth-matching work.
+    // -----------------------------------------------------------------------
     void calcPurity(BranchPointerWrapper *branch) {
       double num = 0.0, denom = 0.0;
       for (auto trk: this->trackIndices) {
@@ -476,6 +679,24 @@ namespace MyUtl {
       this->purity = num/denom;
     }
 
+    // -----------------------------------------------------------------------
+    // updateScores
+    //   Populates the score map for all derived scoring algorithms after
+    //   clustering is complete.  Called once per cluster in
+    //   clusterTracksInTime.
+    //
+    //   TRKPTZ   — TRKPT weighted by exp(−1.5 · |Δz|), where Δz is the
+    //              distance from the cluster z₀ to the reco primary vertex.
+    //              When z₀ is available as values[1] it is used directly;
+    //              otherwise a precision-weighted average over track z₀ is
+    //              computed on the fly.
+    //   TESTML   — Output of the DNN (MLModel::predict) on the 8 normalised
+    //              features returned by calcFeatures.
+    //   TEST_MISCL — Copies TRKPTZ so that the same selection is used; the
+    //              purity gate is applied later in event_processing.h.
+    //   CALO90 / CALO60 — Also copy TRKPTZ (calo-time proximity filtering
+    //              is applied in chooseCluster, not here).
+    // -----------------------------------------------------------------------
     void updateScores(BranchPointerWrapper *branch, MLModel *ml_model) {
       // Assign TRKPTZ, CALO90, CALO60, TESTML Scores
 
@@ -511,6 +732,12 @@ namespace MyUtl {
       this->scores[Score::CALO60] = this->scores.at(Score::TRKPTZ);
     }
     
+    // -----------------------------------------------------------------------
+    // timeSpread
+    //   Returns the population standard deviation of the raw track times
+    //   stored in allTimes.  Used as a diagnostic variable in error-analysis
+    //   plots to characterise how well the cluster's tracks agree in time.
+    // -----------------------------------------------------------------------
     double timeSpread() {
       // calculate stdev of times
       auto avg = std::accumulate(allTimes.begin(),allTimes.end(),0.0)/this->allTimes.size();
@@ -522,8 +749,14 @@ namespace MyUtl {
       return std::sqrt(ssd/this->allTimes.size());
     }
 
+    // -----------------------------------------------------------------------
+    // zSpread
+    //   Returns the population standard deviation of track z₀ values for
+    //   the cluster constituents.  Analogous to timeSpread but in the
+    //   longitudinal direction; used in error-analysis diagnostics.
+    // -----------------------------------------------------------------------
     double zSpread(BranchPointerWrapper *bpw) {
-      // calculate stdev of times
+      // calculate stdev of z0 values
       auto avg = 0.0;
       for (auto trk: trackIndices)
 	avg += bpw->trackZ0[trk];
@@ -535,6 +768,13 @@ namespace MyUtl {
       return std::sqrt(ssd/this->trackIndices.size());
     }
 
+    // -----------------------------------------------------------------------
+    // passEfficiency
+    //   Returns true if the cluster's weighted-mean time is within
+    //   3 · PASS_SIGMA of the truth hard-scatter vertex time.
+    //   This is the primary efficiency criterion used when filling the
+    //   pass/total histograms in event_processing.h.
+    // -----------------------------------------------------------------------
     bool passEfficiency(BranchPointerWrapper *branch) {
       if (DEBUG) std::cout << "Choosing pass score\n";
       if (this->values.size() == 0)
@@ -554,6 +794,22 @@ namespace MyUtl {
       // return nHSTrack > 0;
     }
 
+    // -----------------------------------------------------------------------
+    // calcFeatures
+    //   Extracts the 8 features used as DNN input and applies the stored
+    //   normalisation (means/stds from training) to return a unit-normalised
+    //   feature vector.  Features (in training order):
+    //     0  delta_z              — cluster z relative to reco primary vertex
+    //     1  delta_z_resunits     — delta_z in units of cluster_z_sigma
+    //     2  cluster_z_sigma      — precision-weighted z₀ uncertainty
+    //     3  cluster_d0           — precision-weighted transverse impact parameter
+    //     4  cluster_d0_sigma     — d0 uncertainty
+    //     5  cluster_qOverP       — precision-weighted charge-over-momentum
+    //     6  cluster_qOverP_sigma — q/p uncertainty
+    //     7  cluster_sumpt        — scalar sum of constituent track pT
+    //   Normalisation parameters are stored as static arrays so they are
+    //   allocated only once regardless of how many clusters are evaluated.
+    // -----------------------------------------------------------------------
     std::vector<float> calcFeatures(BranchPointerWrapper *branch) {
       float znum  = 0., zden  = 0.;
       float dnum  = 0., dden  = 0.;

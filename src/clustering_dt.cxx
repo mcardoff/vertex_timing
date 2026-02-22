@@ -78,8 +78,11 @@ void collectEventDisplay(
     list.push_back(Form(EVTDISPLAY_FMT, fileNum.Data(), eventNum, result.second));
 }
 
-// Print all collected event display commands for one scenario.
-// Controlled by PRINT_EVENT_DISPLAYS at the top of this file.
+// ---------------------------------------------------------------------------
+// Helper: print all collected event display commands for one scenario.
+//   Output is gated on PRINT_EVENT_DISPLAYS; set that flag to true at the
+//   top of this file to enable printing after the event loop.
+// ---------------------------------------------------------------------------
 void printEventDisplays(
   const char* label,
   const std::vector<TString>& list
@@ -213,7 +216,7 @@ auto main() -> int {
 
   for (auto* m : allMaps)
       for (auto& [k, analysis] : *m)
-        analysis.printEfficiencyStats("hs_track");
+        analysis.printEfficiencyStats("pu_frac");
 
   // Shut down the thread pool before any ROOT object cleanup runs.
   // Without this, worker threads still hold references to TEfficiency objects

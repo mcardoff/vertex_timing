@@ -1,6 +1,39 @@
 #ifndef PLOTTING_UTILITIES_H
 #define PLOTTING_UTILITIES_H
 
+// ---------------------------------------------------------------------------
+// plotting_utilities.h
+//   All histogram booking, filling, fitting, and plotting logic.  Three
+//   structs and three free functions are defined here, all inside MyUtl.
+//
+//   Global fit functions (module-level TF1 objects):
+//     tgausFitFunc — triple Gaussian (3 cores, shared mean)
+//     dgausFitFunc — double Gaussian (core + background, shared mean)
+//     sgausFitFunc — single Gaussian
+//
+//   Fit factory functions:
+//     createTrpFit — configure and fit tgausFitFunc to a histogram
+//     createDblFit — configure and fit dgausFitFunc to a histogram
+//     createSngFit — configure and fit sgausFitFunc to a histogram
+//
+//   Structs:
+//     FitParams   — collection of per-bin resolution and amplitude histograms
+//                   extracted from double-Gaussian fits to timing residuals
+//     PlotObj     — one (variable, score) analysis cell: owns the 2D timing
+//                   residual histogram, efficiency TH1Ds, purity 2D histogram,
+//                   per-bin slice histograms and their fits, and the
+//                   TEfficiency object; drives all per-cell plotting
+//     AnalysisObj — collection of PlotObjs keyed by variable name, plus the
+//                   inclusive timing residual and purity histograms; top-level
+//                   container for one (scenario, score) combination
+//
+//   Free plot functions:
+//     moneyPlot     — multi-algorithm comparison: core σ, background σ,
+//                     efficiency vs one kinematic variable
+//     inclusivePlot — inclusive timing residual plot with double-Gaussian fit
+//     purityPlot    — normalised cluster purity distributions
+// ---------------------------------------------------------------------------
+
 #include "clustering_includes.h"
 #include "clustering_constants.h"
 #include <TEfficiency.h>
@@ -13,6 +46,16 @@
 
 namespace MyUtl {
 
+// ---------------------------------------------------------------------------
+// Global fit function objects
+//   Allocated once at program start and reused across all fits.
+//   tgausFitFunc — triple Gaussian: shared mean [0], three amplitudes [1-3],
+//                  three widths [4-6].  Width [6] is fixed to PILEUP_SMEAR.
+//   dgausFitFunc — double Gaussian: shared mean [0], two amplitudes [1-2],
+//                  two widths [3-4].  Width [4] optionally fixed to PILEUP_SMEAR.
+//   sgausFitFunc — single Gaussian: amplitude [0], mean [1] (fixed to 0),
+//                  width [2].
+// ---------------------------------------------------------------------------
   TF1 *tgausFitFunc = new TF1("tgaus", "[1]*TMath::Exp(-0.5 * ((x - [0]) / [4])^2) + "
 			               "[2]*TMath::Exp(-0.5 * ((x - [0]) / [5])^2) + "
 			               "[3]*TMath::Exp(-0.5 * ((x - [0]) / [6])^2)"  );
@@ -20,6 +63,14 @@ namespace MyUtl {
                                        "[2]*TMath::Exp(-0.5 * ((x - [0]) / [4])^2)");
   TF1 *sgausFitFunc = new TF1("sgaus", "[0]*TMath::Exp(-0.5 * ((x - [1]) / [2])^2)");
 
+// ---------------------------------------------------------------------------
+// createTrpFit
+//   Configures tgausFitFunc with sensible starting parameters relative to
+//   the histogram maximum, fixes the mean to 0 and the third width to
+//   PILEUP_SMEAR, constrains all amplitudes and widths to be positive, then
+//   fits the function to hist over its full range.  Returns the fitted TF1*.
+//   The caller owns the returned pointer (it is managed by ROOT's memory).
+// ---------------------------------------------------------------------------
   auto createTrpFit(
     TH1D* hist
   ) -> TF1* {
@@ -44,6 +95,14 @@ namespace MyUtl {
     return fit;
   }
 
+// ---------------------------------------------------------------------------
+// createDblFit
+//   Configures dgausFitFunc for a double-Gaussian fit.  When fixbkg is true
+//   the background width is fixed to PILEUP_SMEAR (models a flat pileup
+//   component); when false it is free within [1, PILEUP_SMEAR].  Returns
+//   the fitted TF1*.  This is the primary fit used in plotPostProcessing
+//   for per-bin timing residual slices and in inclusivePlot.
+// ---------------------------------------------------------------------------
   auto createDblFit(
     TH1D* hist, bool fixbkg
   ) -> TF1* {
@@ -64,6 +123,12 @@ namespace MyUtl {
     return fit;
   }
 
+// ---------------------------------------------------------------------------
+// createSngFit
+//   Configures sgausFitFunc for a single-Gaussian fit with the mean fixed
+//   to 0.  Used as a fallback when the double-Gaussian fit is poorly
+//   constrained (e.g. very few entries in a slice).  Returns the fitted TF1*.
+// ---------------------------------------------------------------------------
   auto createSngFit(
     TH1D* hist
   ) -> TF1* {
@@ -80,6 +145,24 @@ namespace MyUtl {
     return fit;
   }
   
+// ---------------------------------------------------------------------------
+// FitParams
+//   Holds six TH1D* distributions (one per FitParamFields enum value)
+//   that collect fitted double-Gaussian parameters as a function of the
+//   plot's x-axis variable (e.g. n forward jets).  Each bin of these
+//   histograms corresponds to one timing-residual slice that was fitted
+//   with createDblFit.
+//
+//   Member methods:
+//     FitParams() constructor — books all six histograms with consistent
+//                               binning and colour
+//     fillEach               — extract core/background σ and amplitudes
+//                               from a double-Gaussian fit result (5-param)
+//     fillGaus               — extract σ and amplitude from a single-
+//                               Gaussian fit result (3-param fallback)
+//     fromEnum               — return the TH1D* for a given FitParamFields
+//                               key (used when drawing resolution plots)
+// ---------------------------------------------------------------------------
   struct FitParams {
     TH1D* meanDist;
     TH1D* sigmaDist;
@@ -123,6 +206,13 @@ namespace MyUtl {
       }
     }
 
+    // -----------------------------------------------------------------------
+    // fillEach
+    //   Fills the core σ, background σ, core amplitude, background
+    //   amplitude, and amplitude-ratio histograms for bin idx from a
+    //   double-Gaussian (5-parameter) fit.  The smaller of Sigma1/Sigma2
+    //   is treated as the core and the larger as the background.
+    // -----------------------------------------------------------------------
     void fillEach(int idx, TF1* fit) const {
       double sigma1 = fit->GetParameter("Sigma1");
       double sigma2 = fit->GetParameter("Sigma2");
@@ -159,6 +249,12 @@ namespace MyUtl {
       ampRatioDist->SetBinError(idx+1,ampRatioErr); 
     }
 
+    // -----------------------------------------------------------------------
+    // fillGaus
+    //   Fallback for single-Gaussian fits: fills only the sigma and
+    //   background-amplitude histograms (the core σ and amplitude are not
+    //   meaningful for a single Gaussian).
+    // -----------------------------------------------------------------------
     void fillGaus(int idx, TF1* fit) const {
       double sigma = fit->GetParameter("Sigma1");
 
@@ -172,6 +268,12 @@ namespace MyUtl {
       backAmpDist->SetBinError(idx+1,amp2Err); 
     }
 
+    // -----------------------------------------------------------------------
+    // fromEnum
+    //   Returns the TH1D* corresponding to a FitParamFields enumerator.
+    //   Used in plotLogic to iterate over fit parameter distributions in
+    //   the canonical FITPARAM_VEC order.
+    // -----------------------------------------------------------------------
     auto fromEnum(FitParamFields fit) const -> TH1D* {
       switch (fit) {
       case FitParamFields::MEAN:   return meanDist;
@@ -185,6 +287,31 @@ namespace MyUtl {
     }
   };
 
+// ---------------------------------------------------------------------------
+// PlotObj
+//   One (kinematic variable, Score) analysis cell.  Owns:
+//     hist        — 2D timing residual histogram (x = kinematic var, y = Δt)
+//     effPass     — 1D histogram counting events passing the efficiency test
+//     effTotal    — 1D histogram counting all events (denominator)
+//     efficiency  — TEfficiency built from effPass / effTotal after the loop
+//     purity      — 2D cluster-purity histogram (x = kinematic var, y = purity)
+//     params      — FitParams collecting per-bin fit results
+//     slicesHists — per-bin 1D timing residual projections
+//     slicesFits  — double-Gaussian fits to each slice
+//
+//   The foldValue / foldMax mechanism collapses high-multiplicity overflow
+//   into the last visible bin so that sparse tails do not dominate plots.
+//
+//   Member methods:
+//     PlotObj constructor  — books all histograms with consistent naming
+//     fillPurity           — fill the purity 2D histogram
+//     fillDiff             — fill the timing residual 2D histogram
+//     fillPass / fillTotal — fill efficiency numerator / denominator
+//     plotPostProcessing   — slice the 2D hist, fit each slice, build
+//                            TEfficiency; called after the event loop
+//     plotLogic            — draw and print all pages to a multi-page PDF
+//     printEfficiencyStats — print a formatted per-bin efficiency table
+// ---------------------------------------------------------------------------
   struct PlotObj {
     Score scoreToUse;
     double binWidth;
@@ -272,6 +399,13 @@ namespace MyUtl {
     void fillTotal(double& val) { this->effTotal->Fill(val); }
     void fillTotal(int& val) { this->effTotal->Fill(val); }
     
+    // -----------------------------------------------------------------------
+    // plotPostProcessing
+    //   Post-event-loop processing: projects the 2D residual histogram into
+    //   per-bin slices (collapsing bins beyond foldValue), fits each slice
+    //   with createDblFit, stores the results in FitParams, and constructs
+    //   the TEfficiency object.  Must be called before plotLogic.
+    // -----------------------------------------------------------------------
     inline void plotPostProcessing() {
       for(int j = 0; j < hist->GetNbinsX(); ++j) {
 	auto color = COLORS[j % COLORS.size()];
@@ -330,6 +464,17 @@ namespace MyUtl {
 
     }
 
+    // -----------------------------------------------------------------------
+    // plotLogic
+    //   Renders and prints all pages for this PlotObj to a multi-page PDF
+    //   (fname).  Page order:
+    //     1. 2D timing residual (COLZ)
+    //     2. TEfficiency vs x with 99% reference line
+    //     3–N. Per-FitParamField distributions (σ_core, σ_bkg, amplitudes…)
+    //     N+. Per-bin timing residual slices with fit overlay, linear and
+    //         log scale
+    //   Requires plotPostProcessing() to have been called first.
+    // -----------------------------------------------------------------------
     inline void plotLogic(TCanvas *canvas) {
       canvas->Print(Form("%s[",fname.Data()));
       TH2D* hist = (TH2D*)this->hist->Clone();
@@ -434,6 +579,13 @@ namespace MyUtl {
       canvas->Print(Form("%s]",fname.Data()));
     }
 
+    // -----------------------------------------------------------------------
+    // printEfficiencyStats
+    //   Prints a formatted per-bin efficiency table to stdout showing the
+    //   scenario and score label, then one row per x-axis bin with the
+    //   pass count, total count, fail count, and efficiency percentage.
+    //   A summary footer shows the inclusive (integral) efficiency.
+    // -----------------------------------------------------------------------
     inline void printEfficiencyStats() {
       const int w_bin  = 22;
       const int w_col  = 10;
@@ -460,7 +612,7 @@ namespace MyUtl {
       std::cout << sep << '\n';
 
       // Per-bin rows
-      for (int i = 1; i < effPass->GetNbinsX(); i++) {
+      for (int i = 1; i <= effPass->GetNbinsX(); i++) {
         double numPass  = effPass->GetBinContent(i);
         double numTotal = effTotal->GetBinContent(i);
         double numFail  = numTotal - numPass;
@@ -496,6 +648,24 @@ namespace MyUtl {
     }
   };
 
+// ---------------------------------------------------------------------------
+// AnalysisObj
+//   Top-level container for one (timing scenario, Score) combination.
+//   Holds a map of PlotObjs keyed by variable name ("fjet", "ftrack",
+//   "pu_frac", "hs_track", "pu_track", "vtx_dz") plus an inclusive
+//   timing-residual histogram and an inclusive purity histogram.
+//
+//   The constructor books all PlotObjs with the histogram binning defined
+//   in clustering_constants.h.  File and histogram names are derived from
+//   the scenario label and Score enum so they are unique across scenarios.
+//
+//   Member methods:
+//     operator[]        — access a PlotObj by variable name (mutable / const)
+//     get               — const access with bounds checking
+//     postProcessing    — calls plotPostProcessing() on all PlotObjs
+//     fullPlotting      — calls plotLogic() on all PlotObjs
+//     printEfficiencyStats — delegates to the named PlotObj's method
+// ---------------------------------------------------------------------------
   struct AnalysisObj {
     // PlotObjs which store histograms vs event-level variables
     std::map<std::string, std::unique_ptr<PlotObj>> dataObjects;
@@ -610,21 +780,47 @@ namespace MyUtl {
 	(int)((PURITY_MAX-PURITY_MIN)/PURITY_WIDTH), PURITY_MIN, PURITY_MAX);
     }
 
+    // -----------------------------------------------------------------------
+    // postProcessing
+    //   Calls plotPostProcessing() on every PlotObj in dataObjects.
+    //   Must be called after the event loop and before fullPlotting.
+    // -----------------------------------------------------------------------
     inline void postProcessing() {
       for (auto &[str, plt]: this->dataObjects)
 	plt->plotPostProcessing();
     }
 
+    // -----------------------------------------------------------------------
+    // fullPlotting
+    //   Calls plotLogic() on every PlotObj in dataObjects, writing one
+    //   multi-page PDF per (variable, Score) combination to figs/.
+    // -----------------------------------------------------------------------
     inline void fullPlotting(TCanvas *canvas) {
       for (const auto& [str, plt]: this->dataObjects)
 	plt->plotLogic(canvas);
     }
 
+    // -----------------------------------------------------------------------
+    // printEfficiencyStats
+    //   Delegates to PlotObj::printEfficiencyStats() for the PlotObj
+    //   identified by key (e.g. "pu_frac").
+    // -----------------------------------------------------------------------
     inline void printEfficiencyStats(std::string key) {
       dataObjects[key]->printEfficiencyStats();
     }
   };
 
+// ---------------------------------------------------------------------------
+// moneyPlot
+//   Generates a three-page comparison PDF for a given kinematic variable
+//   (key) across the set of AnalysisObj* in plts.  Pages:
+//     1. Core timing resolution σ vs x (with 15 ps reference line)
+//     2. Background timing resolution σ_bkg vs x (with 15 ps reference line)
+//     3. Efficiency vs x (with 99% reference line)
+//   Each page overlays all provided AnalysisObj results with distinct colours
+//   and adds a normalised event-count histogram (from plts[0]) in the
+//   background to show where statistics are concentrated.
+// ---------------------------------------------------------------------------
   void moneyPlot(
     const char* fname,
     const std::string& key,
@@ -716,6 +912,14 @@ namespace MyUtl {
   }
 
 
+// ---------------------------------------------------------------------------
+// inclusivePlot
+//   Plots the inclusive timing residual histogram for each AnalysisObj in
+//   plts, overlaying a double-Gaussian fit (createDblFit) and annotating
+//   with σ_1, σ_2 from the fit.  Supports linear and logarithmic y-axis
+//   (controlled by logScale) and custom x-axis range (xMin, xMax).  Each
+//   AnalysisObj gets its own page in the output PDF.
+// ---------------------------------------------------------------------------
   void inclusivePlot(
     const char* fname,
     bool logScale, bool fixBkg,
@@ -750,6 +954,13 @@ namespace MyUtl {
     canvas->Print(Form("%s]",fname));
   }
 
+// ---------------------------------------------------------------------------
+// purityPlot
+//   Draws normalised cluster-purity distributions for each Score in
+//   purityMap on a single canvas page, using the COLORS palette.  Overflow
+//   is folded into the last bin before normalisation.  logscale toggles
+//   the y-axis.  The provided legend is drawn on the same pad.
+// ---------------------------------------------------------------------------
   void purityPlot(
     const char* fname,
     bool logscale,

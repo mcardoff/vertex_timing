@@ -1,6 +1,21 @@
 #ifndef CLUSTERING_INCLUDES_H
 #define CLUSTERING_INCLUDES_H
 
+// ---------------------------------------------------------------------------
+// clustering_includes.h
+//   Single aggregation point for all external headers required by the
+//   analysis.  Every other source file includes only this header (plus
+//   the project-specific headers it depends on) so that third-party
+//   include paths are managed in one place.  Sections:
+//     1. ROOT headers  — framework types, I/O, histogramming, fitting,
+//                        graphics, and TTree reading
+//     2. Boost headers — filesystem iteration for ntuple directory scan
+//     3. Standard C++ library headers
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// 1. ROOT headers
+// ---------------------------------------------------------------------------
 #include <Rtypes.h>
 #include <RtypesCore.h>
 #include <TRandom1.h>
@@ -32,9 +47,15 @@
 #include <TVector2.h>
 #include <TLorentzVector.h>
 
+// ---------------------------------------------------------------------------
+// 2. Boost headers
+// ---------------------------------------------------------------------------
 // Boost Headers
 #include <boost/filesystem.hpp>
 
+// ---------------------------------------------------------------------------
+// 3. Standard C++ library headers
+// ---------------------------------------------------------------------------
 // Standard C++ Library Headers
 #include <algorithm>
 #include <cassert>

@@ -1,10 +1,36 @@
 #ifndef CLUSTERING_CONSTANTS_H
 #define CLUSTERING_CONSTANTS_H
 
+// ---------------------------------------------------------------------------
+// clustering_constants.h
+//   Central repository for all compile-time constants, enums, and small
+//   utility functions shared across the analysis.  Everything lives inside
+//   the MyUtl namespace so that name collisions with ROOT globals are
+//   avoided.  Sections:
+//     1. Debug flag
+//     2. Plot colour palette
+//     3. Event / track selection cuts
+//     4. Histogram axis ranges and fold values
+//     5. Score enum + string converters
+//     6. FitParamFields enum + string converter
+//     7. folded() helper
+// ---------------------------------------------------------------------------
+
 #include "clustering_includes.h"
 
 namespace MyUtl {
+
+// ---------------------------------------------------------------------------
+// 1. Debug flag
+//   Set to true to enable verbose per-event stdout logging throughout the
+//   analysis.  Compiled out entirely when false (no runtime cost).
+// ---------------------------------------------------------------------------
   const bool DEBUG = false  ;
+// ---------------------------------------------------------------------------
+// 2. Plot colour palette
+//   Eleven colours drawn from ROOT's P10 and P6 palettes.  COLORS is the
+//   ordered vector used when cycling through scores or histogram slices.
+// ---------------------------------------------------------------------------
   const Color_t C01 = kP10Blue  ;
   const Color_t C02 = kP10Red   ;
   const Color_t C03 = kP10Yellow;
@@ -19,6 +45,12 @@ namespace MyUtl {
   const std::vector<Color_t> COLORS = {C01, C02, C03, C04, C05, C06,
                                        C07, C08, C09, C10, C11};  
 
+// ---------------------------------------------------------------------------
+// 3. Event / track selection cuts
+//   All kinematic and association thresholds used by the event selection
+//   and track clustering pipeline.  Changing a cut here propagates
+//   automatically to every function that references these constants.
+// ---------------------------------------------------------------------------
   // cut variables
   const int    MIN_JETS           = 2;     // min n jets
   const int    MIN_PASSPT_JETS    = 2;     // min n jets >30 GeV
@@ -42,6 +74,12 @@ namespace MyUtl {
   const double MIN_HGTD_ETA       = 2.38;  // Min eta of HGTD
   const double MAX_HGTD_ETA       = 4.0;   // Max eta of HGTD
 
+// ---------------------------------------------------------------------------
+// 4. Histogram axis ranges and fold values
+//   xMin/xMax define the full histogram axis.  FOLD_* values mark the
+//   point at which overflow is collapsed into the last visible bin so that
+//   sparse high-multiplicity tails don't dominate the plots.
+// ---------------------------------------------------------------------------
   // plotting ranges
   const double DIFF_MIN = -1000.0, DIFF_MAX = 1000.0;
   const double DIFF_WIDTH = 2.0;
@@ -64,8 +102,8 @@ namespace MyUtl {
   const double HS_TRACK_MIN = TRACK_MIN, HS_TRACK_MAX = TRACK_MAX, FOLD_PU_TRACK = FOLD_TRACK;
   const double HS_TRACK_WIDTH = TRACK_WIDTH;
 
-  const double PU_FRAC_MIN = 0, PU_FRAC_MAX = 1 , FOLD_PU_FRAC = PU_FRAC_MAX;
   const double PU_FRAC_WIDTH = 0.05;
+  const double PU_FRAC_MIN = 0, PU_FRAC_MAX = 1.0 + PU_FRAC_WIDTH, FOLD_PU_FRAC = 1.0;
 
   const double Z_MIN = -200, Z_MAX = 200, FOLD_Z = 100;
   const double Z_WIDTH = 10.0;
@@ -74,6 +112,14 @@ namespace MyUtl {
   const double PUR_YMIN = 0.0, PUR_YMAX = 1.5;
   const double RES_YMIN = 0.0, RES_YMAX = 40;
 
+// ---------------------------------------------------------------------------
+// 5. Score enum + string converters
+//   Each enumerator identifies one cluster-selection algorithm.  ENUM_VEC
+//   is the canonical iteration order used throughout the analysis.
+//   toString()      returns a ROOT-LaTeX label suitable for plot titles.
+//   toStringShort() returns a compact identifier used in histogram names
+//                   and on-screen tables.
+// ---------------------------------------------------------------------------
   /// enums and utilities for them
   enum Score {
     HGTD = 0,
@@ -139,6 +185,13 @@ namespace MyUtl {
     }
   }
 
+// ---------------------------------------------------------------------------
+// 6. FitParamFields enum + string converter
+//   Indexes the individual parameters extracted from a double-Gaussian fit:
+//   MEAN, core SIGMA, background BSIGMA, amplitudes CORE / BKG, and their
+//   RATIO.  Used by FitParams::fromEnum() to select which distribution to
+//   draw or fill.
+// ---------------------------------------------------------------------------
   enum FitParamFields {
     MEAN = 0, SIGMA = 1, CORE = 2, BKG = 3, RATIO = 4, BSIGMA = 5,
   };
@@ -159,6 +212,12 @@ namespace MyUtl {
     }
   }
 
+// ---------------------------------------------------------------------------
+// 7. folded() helper
+//   Clamps raw to fold when raw >= fold, collapsing overflow into the last
+//   visible histogram bin.  Used when filling efficiency/resolution plots
+//   to avoid sparse tails at high multiplicity.
+// ---------------------------------------------------------------------------
   template <typename T>
   auto folded(T raw, T fold) -> T {
     return (raw >= fold) ? fold : raw;
