@@ -26,13 +26,13 @@ using boost::filesystem::directory_iterator;
 
 namespace MyUtl {
 
-// ---------------------------------------------------------------------------
-// 1. setupChain  [directory overload]
-//   Iterates over all files in ntupleDir and adds each to the TChain.
-//   Non-file entries (sub-directories) are skipped.  Exits with an error
-//   message if the directory contains no ROOT files.  Used for the primary
-//   VBF H→Invisible sample spread across many per-run ROOT files.
-// ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // 1. setupChain  [directory overload]
+  //   Iterates over all files in ntupleDir and adds each to the TChain.
+  //   Non-file entries (sub-directories) are skipped.  Exits with an error
+  //   message if the directory contains no ROOT files.  Used for the primary
+  //   VBF H→Invisible sample spread across many per-run ROOT files.
+  // ---------------------------------------------------------------------------
   void setupChain(
     TChain &chain, const char* ntupleDir
   ) {
@@ -50,10 +50,10 @@ namespace MyUtl {
     }
   }
 
-// ---------------------------------------------------------------------------
-// 2. setupChain  [single-file overload]
-//   Adds a single SuperNtuple file to chain, selected by its numeric run
-//   identifier.  Convenience wrapper for quick single-file checks.
+  // ---------------------------------------------------------------------------
+  // 2. setupChain  [single-file overload]
+  //   Adds a single SuperNtuple file to chain, selected by its numeric run
+  //   identifier.  Convenience wrapper for quick single-file checks.
 // ---------------------------------------------------------------------------
   void setupChain(
     TChain &chain, const std::string& number
@@ -61,15 +61,15 @@ namespace MyUtl {
     chain.Add(Form("../ntuple-hgtd/user.mcardiff.45809429.Output._%s.SuperNtuple.root", number.c_str()));
   }
 
-// ---------------------------------------------------------------------------
-// 3. passTrackVertexAssociation
-//   Returns true if the z₀ distance between track trackIdx and vertex
-//   vertexIdx is within significanceCut standard deviations:
-//     |z0_trk - z_vtx| / sqrt(var_z0_trk) < significanceCut
-//   The vertex z variance is assumed to be zero (reco-vertex z is treated
-//   as exact).  Called by getAssociatedTracks and for the tighter MAX_NSIGMA
-//   filter applied after counting statistics.
-// ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // 3. passTrackVertexAssociation
+  //   Returns true if the z₀ distance between track trackIdx and vertex
+  //   vertexIdx is within significanceCut standard deviations:
+  //     |z0_trk - z_vtx| / sqrt(var_z0_trk) < significanceCut
+  //   The vertex z variance is assumed to be zero (reco-vertex z is treated
+  //   as exact).  Called by getAssociatedTracks and for the tighter MAX_NSIGMA
+  //   filter applied after counting statistics.
+  // ---------------------------------------------------------------------------
   bool passTrackVertexAssociation(
     int trackIdx, int vertexIdx,
     BranchPointerWrapper *branch,
@@ -85,16 +85,16 @@ namespace MyUtl {
     return nsigmaPrim < significanceCut;
   }
 
-// ---------------------------------------------------------------------------
-// 4. pileupRemoval
-//   Removes tracks that are significantly associated with a non-HS reco
-//   vertex.  For each track the nearest reco vertex (stored in
-//   Track_nearestVtx_idx) is identified; if that vertex is not vertex 0
-//   (the HS vertex) and the track-to-nearest-vertex significance is below
-//   significanceCut, the track is dropped.  Returns the surviving subset.
-//   Note: z₀sinθ and its uncertainty are corrected back to plain z₀ using
-//   the track's θ and θ variance.
-// ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // 4. pileupRemoval
+  //   Removes tracks that are significantly associated with a non-HS reco
+  //   vertex.  For each track the nearest reco vertex (stored in
+  //   Track_nearestVtx_idx) is identified; if that vertex is not vertex 0
+  //   (the HS vertex) and the track-to-nearest-vertex significance is below
+  //   significanceCut, the track is dropped.  Returns the surviving subset.
+  //   Note: z₀sinθ and its uncertainty are corrected back to plain z₀ using
+  //   the track's θ and θ variance.
+  // ---------------------------------------------------------------------------
   std::vector<int> pileupRemoval(
     const std::vector<int>& tracks,
     BranchPointerWrapper *branch,
@@ -116,15 +116,15 @@ namespace MyUtl {
     return output;
   }
 
-// ---------------------------------------------------------------------------
-// 5. filterCaloTracks
-//   Retains only tracks whose HGTD time is within significanceCut standard
-//   deviations of a calorimeter-smeared event time.  The calorimeter time
-//   is drawn from Gaus(truthVtxTime[0], caloRes) once per call.  Tracks
-//   where |t_trk - t_calo| / sqrt(σ_trk² + caloRes²) > significanceCut
-//   are removed.  Used to build the FILT60 and FILT90 filtered-track
-//   collections.
-// ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // 5. filterCaloTracks
+  //   Retains only tracks whose HGTD time is within significanceCut standard
+  //   deviations of a calorimeter-smeared event time.  The calorimeter time
+  //   is drawn from Gaus(truthVtxTime[0], caloRes) once per call.  Tracks
+  //   where |t_trk - t_calo| / sqrt(σ_trk² + caloRes²) > significanceCut
+  //   are removed.  Used to build the FILT60 and FILT90 filtered-track
+  //   collections.
+  // ---------------------------------------------------------------------------
   std::vector<int> filterCaloTracks(
     const std::vector<int>& tracks,
     BranchPointerWrapper *branch,
@@ -147,13 +147,13 @@ namespace MyUtl {
     return output;
   }
 
-// ---------------------------------------------------------------------------
-// 6. filterTracksInJets
-//   Retains only tracks that lie within minDRCut of at least one reco jet
-//   with pT > MIN_JETPT.  ΔR is computed using the standard
-//   sqrt(Δη² + Δφ²) metric.  Used to build the FILTJET collection, which
-//   restricts clustering to tracks geometrically associated with jets.
-// ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // 6. filterTracksInJets
+  //   Retains only tracks that lie within minDRCut of at least one reco jet
+  //   with pT > MIN_JETPT.  ΔR is computed using the standard
+  //   sqrt(Δη² + Δφ²) metric.  Used to build the FILTJET collection, which
+  //   restricts clustering to tracks geometrically associated with jets.
+  // ---------------------------------------------------------------------------
   std::vector<int> filterTracksInJets(
     const std::vector<int>& tracks,
     BranchPointerWrapper *branch,
@@ -183,20 +183,20 @@ namespace MyUtl {
     return output;
   }
 
-// ---------------------------------------------------------------------------
-// 7. getAssociatedTracks
-//   Scans the full track array and returns indices of tracks that pass:
-//     • HGTD η acceptance: MIN_HGTD_ETA < |η| < MAX_HGTD_ETA
-//     • pT window: minTrkPt < pT < maxTrkPt
-//     • Track quality flag
-//     • passTrackVertexAssociation at significance_cut
-//   In processEventData this is first called at 3σ to collect statistics,
-//   then the list is filtered down to MAX_NSIGMA for the clustering step.
-// ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // 7. getAssociatedTracks
+  //   Scans the full track array and returns indices of tracks that pass:
+  //     • HGTD η acceptance: MIN_HGTD_ETA < |η| < MAX_HGTD_ETA
+  //     • pT window: minTrkPt < pT < maxTrkPt
+  //     • Track quality flag
+  //     • passTrackVertexAssociation at significance_cut
+  //   In processEventData this is first called at 3σ to collect statistics,
+  //   then the list is filtered down to MAX_NSIGMA for the clustering step.
+  // ---------------------------------------------------------------------------
   std::vector<int> getAssociatedTracks(
       BranchPointerWrapper *branch,
       double minTrkPt, double maxTrkPt,
-      double significance_cut
+      double significanceCut
     ) {
     std::vector<int> goodTracks;
 
@@ -216,39 +216,39 @@ namespace MyUtl {
       if (not trkQuality)
 	continue;
 
-      if (passTrackVertexAssociation(trk, 0, branch, significance_cut))
+      if (passTrackVertexAssociation(trk, 0, branch, significanceCut))
 	goodTracks.push_back(trk);
     }
     
     return goodTracks;
   }
 
-// ---------------------------------------------------------------------------
-// 8. processEventData
-//   Main per-event analysis function.  Called once per event per timing
-//   scenario (HGTD / IdealRes / IdealEff).  Pipeline:
-//     a) Basic event selection (passBasicCuts, passJetPtCut).
-//     b) Track selection at 3σ and counting statistics (nForwardJet,
-//        nForwardTrack, nForwardTrackHS, nForwardTrackPU, puRatio).
-//     c) Tighten track association to MAX_NSIGMA if different from 3σ.
-//     d) Cluster the main track list (cone algorithm).
-//     e) Optionally build FILT60, FILT90, FILTJET filtered collections
-//        (only when the corresponding scores are present in analyses).
-//     f) Run HGTD simultaneous clustering on the unfiltered list (for
-//        the HGTD score).
-//     g) Choose the best cluster for every active score.
-//     h) Fill denominator (fillTotal) and numerator (fillPass) histograms
-//        for each score; apply special purity gate for TEST_MISCL.
-//     i) Fill timing residual (fillDiff) and purity (fillPurity) 2D hists.
-//
-//   Return value: pair<returnCode, returnVal>
-//     returnCode == 0  normal event
-//     returnCode == -1 event rejected by selection
-//     returnCode == 2  event passed TEST_MISCL denominator (purity > 0.75)
-//                      but failed the timing window — useful for event
-//                      display collection
-//     returnVal        TRKPTZ-selected cluster time (or TEST_MISCL time)
-// ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // 8. processEventData
+  //   Main per-event analysis function.  Called once per event per timing
+  //   scenario (HGTD / IdealRes / IdealEff).  Pipeline:
+  //     a) Basic event selection (passBasicCuts, passJetPtCut).
+  //     b) Track selection at 3σ and counting statistics (nForwardJet,
+  //        nForwardTrack, nForwardTrackHS, nForwardTrackPU, puRatio).
+  //     c) Tighten track association to MAX_NSIGMA if different from 3σ.
+  //     d) Cluster the main track list (cone algorithm).
+  //     e) Optionally build FILT60, FILT90, FILTJET filtered collections
+  //        (only when the corresponding scores are present in analyses).
+  //     f) Run HGTD simultaneous clustering on the unfiltered list (for
+  //        the HGTD score).
+  //     g) Choose the best cluster for every active score.
+  //     h) Fill denominator (fillTotal) and numerator (fillPass) histograms
+  //        for each score; apply special purity gate for TEST_MISCL.
+  //     i) Fill timing residual (fillDiff) and purity (fillPurity) 2D hists.
+  //
+  //   Return value: pair<returnCode, returnVal>
+  //     returnCode == 0  normal event
+  //     returnCode == -1 event rejected by selection
+  //     returnCode == 2  event passed TEST_MISCL denominator (purity > 0.75)
+  //                      but failed the timing window — useful for event
+  //                      display collection
+  //     returnVal        TRKPTZ-selected cluster time (or TEST_MISCL time)
+  // ---------------------------------------------------------------------------
   std::pair<int,double> processEventData(
     BranchPointerWrapper *branch,
     bool useSmearedTimes,
@@ -304,13 +304,13 @@ namespace MyUtl {
     }
 
     // Only pay for purity calculation when TEST_MISCL is actually in this map
-    const bool needsPurity = analyses.count(Score::TEST_MISCL) > 0;
+    const bool NEEDS_PURITY = analyses.count(Score::TEST_MISCL) > 0;
 
     std::vector<Cluster> clusters =
       clusterTracksInTime(
         tracks, branch, 3.0,
 	useSmearedTimes, checkValidTimes, 10.0,
-	true, useZ0, needsPurity);
+	true, useZ0, NEEDS_PURITY);
 
     std::vector<Cluster> filt60Clusters, filt90Clusters, filtjetClusters;
 

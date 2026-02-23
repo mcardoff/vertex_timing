@@ -3,7 +3,6 @@
 #include "clustering_constants.h"
 #include "event_processing.h"
 #include "plotting_utilities.h"
-#include "suppress_stdout.h"
 
 using namespace MyUtl;
 
@@ -12,10 +11,10 @@ using namespace MyUtl;
 // ---------------------------------------------------------------------------
 
 // Output directory for saved plots
-static const char* SAVE_DIR = "../figs";
+static constexpr const char* SAVE_DIR = "../figs";
 
 // Event display command template (filled with file number, event number, extra time)
-static const char* EVTDISPLAY_FMT =
+static constexpr const char* EVTDISPLAY_FMT =
   "python3 event_display.py --file_num %s --event_num %lld --extra_time %.2f";
 
 // Set to true to print event display commands to stdout after the event loop.
@@ -27,14 +26,16 @@ static constexpr bool PRINT_EVENT_DISPLAYS = false;
 //   only requires changing this one function.
 // ---------------------------------------------------------------------------
 
-enum class Scenario { HGTD, IdealRes, IdealEff };
+enum class Scenario { HGTD, IDEAL_RES, IDEAL_EFF };
 
-auto buildAnalysisMap(Scenario scenario) -> std::map<Score, AnalysisObj> {
+auto buildAnalysisMap(
+   Scenario scenario
+) -> std::map<Score, AnalysisObj> {
   const char* label = [&]() -> const char* {
     switch (scenario) {
-      case Scenario::HGTD:     return "HGTD Times";
-      case Scenario::IdealRes: return "Ideal Res"; // "Ideal Res. HGTD";
-      case Scenario::IdealEff: return "Ideal R/E"; // "Ideal Res.+Eff. HGTD"
+      case Scenario::HGTD:      return "HGTD Times";
+      case Scenario::IDEAL_RES: return "Ideal Res.";
+      case Scenario::IDEAL_EFF: return "Ideal Res.+Eff.";
     }
     return "";
   }();
@@ -83,13 +84,14 @@ void collectEventDisplay(
 //   Output is gated on PRINT_EVENT_DISPLAYS; set that flag to true at the
 //   top of this file to enable printing after the event loop.
 // ---------------------------------------------------------------------------
+
 void printEventDisplays(
   const char* label,
   const std::vector<TString>& list
 ) {
   if (!PRINT_EVENT_DISPLAYS) return;
   std::cout << "\n--- Event displays: " << label << " ("
-            << list.size() << " events) ---\n";
+	    << list.size() << " events) ---\n";
   for (const auto& cmd : list)
     std::cout << cmd << '\n';
 }
@@ -99,49 +101,85 @@ void printEventDisplays(
 // ---------------------------------------------------------------------------
 
 void makeComparisonPlots(
-  const char* KEY,
+  const char* key,
   TCanvas* canvas,
   std::map<Score, AnalysisObj>& mapHGTD,
   std::map<Score, AnalysisObj>& mapIdealRes,
   std::map<Score, AnalysisObj>& mapIdealEff
 ) {
+  const char* compSubdir = Form("%s/comparisons", SAVE_DIR);
   // HGTD algo vs TRKPTZ
-  moneyPlot(Form("%s/hgtd_trkptz_%s.pdf",            SAVE_DIR, KEY), KEY, canvas,
-            { &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ) });
+  moneyPlot(Form("%s/hgtd_trkptz_%s.pdf", compSubdir, key), key, canvas,
+            {
+                &mapHGTD.at(HGTD),
+                &mapHGTD.at(TRKPTZ)
+	    });
 
   // HGTD base times: TRKPTZ vs DNN
-  moneyPlot(Form("%s/trkptz_dnn_basetimes_%s.pdf",   SAVE_DIR, KEY), KEY, canvas,
-            { &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ), &mapHGTD.at(TESTML) });
+  moneyPlot(Form("%s/trkptz_dnn_hgtd_%s.pdf", compSubdir, key), key, canvas,
+            {
+                &mapHGTD.at(HGTD),
+                &mapHGTD.at(TRKPTZ),
+                &mapHGTD.at(TESTML)
+	    });
 
   // Misclustering study: TRKPTZ full sample vs TRKPTZ restricted to pure-cluster events
-  moneyPlot(Form("%s/misclustering_study_%s.pdf",    SAVE_DIR, KEY), KEY, canvas,
-            { &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ), &mapHGTD.at(TEST_MISCL) });
+  moneyPlot(Form("%s/pure_clusters_%s.pdf", compSubdir, key), key, canvas,
+            {
+                &mapHGTD.at(HGTD),
+                &mapHGTD.at(TRKPTZ),
+                &mapHGTD.at(TEST_MISCL)
+	    });
 
   // Ideal-resolution times: TRKPTZ vs DNN
-  moneyPlot(Form("%s/trkptz_dnn_idealrestimes_%s.pdf", SAVE_DIR, KEY), KEY, canvas,
-            { &mapHGTD.at(HGTD), &mapIdealRes.at(TRKPTZ), &mapIdealRes.at(TESTML) });
+  moneyPlot(Form("%s/trkptz_dnn_ires_%s.pdf", compSubdir, key), key, canvas,
+            {
+                &mapHGTD.at(HGTD),
+                &mapIdealRes.at(TRKPTZ),
+                &mapIdealRes.at(TESTML)
+	    });
 
   // Ideal-efficiency times: TRKPTZ vs DNN
-  moneyPlot(Form("%s/trkptz_dnn_idealefftimes_%s.pdf", SAVE_DIR, KEY), KEY, canvas,
-            { &mapHGTD.at(HGTD), &mapIdealEff.at(TRKPTZ), &mapIdealEff.at(TESTML) });
+  moneyPlot(Form("%s/trkptz_dnn_ieff_%s.pdf", compSubdir, key), key, canvas,
+            {
+                &mapHGTD.at(HGTD),
+                &mapIdealEff.at(TRKPTZ),
+                &mapIdealEff.at(TESTML)
+	    });
 
   // Effect of fixing HGTD matching alone
-  moneyPlot(Form("%s/fixed_assoc_%s.pdf",            SAVE_DIR, KEY), KEY, canvas,
-            { &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ),
-              &mapIdealRes.at(TRKPTZ), &mapIdealEff.at(TRKPTZ) });
+  moneyPlot(Form("%s/fixed_assoc_%s.pdf", compSubdir, key), key, canvas,
+            {
+                &mapHGTD.at(HGTD),
+                &mapHGTD.at(TRKPTZ),
+                &mapIdealRes.at(TRKPTZ),
+                &mapIdealEff.at(TRKPTZ)
+	    });
 
   // Effect of fixing cluster selection alone
-  moneyPlot(Form("%s/fixed_selection_%s.pdf",        SAVE_DIR, KEY), KEY, canvas,
-            { &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ), &mapHGTD.at(PASS) });
+  moneyPlot(Form("%s/fixed_selection_%s.pdf", compSubdir, key), key, canvas,
+            {
+                &mapHGTD.at(HGTD),
+                &mapHGTD.at(TRKPTZ),
+                &mapHGTD.at(PASS)
+	    });
 
   // Effect of fixing everything
-  moneyPlot(Form("%s/fixed_all_%s.pdf",              SAVE_DIR, KEY), KEY, canvas,
-            { &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ), &mapIdealEff.at(PASS) });
+  moneyPlot(Form("%s/fixed_all_%s.pdf", compSubdir, key), key, canvas,
+            {
+                &mapHGTD.at(HGTD),
+                &mapHGTD.at(TRKPTZ),
+                &mapIdealEff.at(PASS)
+	    });
 
   // Full ideal comparison: HGTD → TRKPTZ → IdealRes → IdealEff
-  moneyPlot(Form("%s/ideal_comp_%s.pdf",             SAVE_DIR, KEY), KEY, canvas,
-            { &mapHGTD.at(HGTD), &mapHGTD.at(TRKPTZ),
-              &mapIdealRes.at(TRKPTZ), &mapIdealEff.at(TRKPTZ) });
+  moneyPlot(Form("%s/ideal_comp_%s.pdf", compSubdir, key), key, canvas,
+            {
+                &mapHGTD.at(HGTD),
+                &mapHGTD.at(TRKPTZ),
+                &mapIdealRes.at(TRKPTZ),
+                &mapIdealEff.at(TRKPTZ)
+	    });
 }
 
 // ---------------------------------------------------------------------------
@@ -149,7 +187,6 @@ void makeComparisonPlots(
 // ---------------------------------------------------------------------------
 
 auto main() -> int {
-  gROOT->SetBatch(true);  // batch mode: no display, and suppresses OBJ teardown messages
   gStyle->SetOptStat(0);
 
   // --- Data source ---
@@ -166,9 +203,9 @@ auto main() -> int {
   canvas->SetLeftMargin(0.15);
 
   // --- Analysis maps (one per timing scenario) ---
-  auto mapHGTD     = buildAnalysisMap(Scenario::HGTD    );
-  auto mapIdealRes = buildAnalysisMap(Scenario::IdealRes );
-  auto mapIdealEff = buildAnalysisMap(Scenario::IdealEff );
+  auto mapHGTD     = buildAnalysisMap(Scenario::HGTD      );
+  auto mapIdealRes = buildAnalysisMap(Scenario::IDEAL_RES );
+  auto mapIdealEff = buildAnalysisMap(Scenario::IDEAL_EFF );
 
   auto allMaps = { &mapHGTD, &mapIdealRes, &mapIdealEff };
 
@@ -177,14 +214,14 @@ auto main() -> int {
 
   // --- Event loop ---
   std::cout << "Starting Event Loop\n";
-  const Long64_t nEvent = chain.GetEntries();
+  const Long64_t N_EVENT = chain.GetEntries();
 
   while (reader.Next()) {
-    const Long64_t readNum  = chain.GetReadEntry() + 1;
-    const Long64_t eventNum = chain.GetReadEntry() - chain.GetChainOffset();
+    const Long64_t READ_NUM  = chain.GetReadEntry() + 1;
+    const Long64_t EVENT_NUM = chain.GetReadEntry() - chain.GetChainOffset();
 
-    if (readNum % 100 == 0)
-      std::cout << "Progress: " << readNum << "/" << nEvent << "\r" << std::flush;
+    if (READ_NUM % 100 == 0)
+      std::cout << "Progress: " << READ_NUM << "/" << N_EVENT << "\r" << std::flush;
 
     // Run the three timing scenarios
     auto resHGTD     = processEventData(&branch, false, true,  false, mapHGTD    );
@@ -196,49 +233,42 @@ auto main() -> int {
     TString fileNum  = fileName(49, 6);
 
     // Collect events where TEST_MISCL fails the efficiency test
-    collectEventDisplay(evtDisplayHGTD,      2, resHGTD,     fileNum, eventNum);
-    collectEventDisplay(evtDisplayIdealRes,  2, resIdealRes, fileNum, eventNum);
-    collectEventDisplay(evtDisplayIdealEff,  2, resIdealEff, fileNum, eventNum);
-  }
-
-  // --- Post-processing and plotting (suppress ROOT's OBJ: printf chatter) ---
-  {
-    SuppressStdout suppress;
-    for (auto* m : allMaps)
-      for (auto& [k, analysis] : *m)
-        analysis.postProcessing();
-
-    // --- Per-analysis-object plots ---
-    for (auto* m : allMaps)
-      for (auto& [k, analysis] : *m)
-        analysis.fullPlotting(canvas);
+    collectEventDisplay(evtDisplayHGTD,      2, resHGTD,     fileNum, EVENT_NUM);
+    collectEventDisplay(evtDisplayIdealRes,  2, resIdealRes, fileNum, EVENT_NUM);
+    collectEventDisplay(evtDisplayIdealEff,  2, resIdealEff, fileNum, EVENT_NUM);
   }
 
   for (auto* m : allMaps)
-      for (auto& [k, analysis] : *m)
-        analysis.printEfficiencyStats("pu_frac");
+    for (auto& [k, analysis] : *m)
+      analysis.postProcessing();
 
-  // Shut down the thread pool before any ROOT object cleanup runs.
-  // Without this, worker threads still hold references to TEfficiency objects
-  // when the main-thread destructor fires, causing spurious "OBJ: ..._clone"
-  // messages at kInfo level during teardown.
-  ROOT::DisableImplicitMT();
+  // --- Per-analysis-object plots ---
+  for (auto* m : allMaps)
+    for (auto& [k, analysis] : *m)
+      analysis.fullPlotting(canvas);
+
+  for (auto* m : allMaps)
+      for (auto& [k, analysis] : *m)
+	analysis.printEfficiencyStats("pu_frac");
 
   std::cout << "\nFINISHED PROCESSING\n";
 
+  const auto KEYS = {"pu_frac", "ftrack"  , "pu_track",
+		     "fjet"   , "hs_track", "vtx_dz"};
+
   // --- Comparison plots (per variable KEY) ---
-  for (const auto* KEY : {"pu_frac", "ftrack", "pu_track", "fjet", "hs_track", "vtx_dz"})
-    makeComparisonPlots(KEY, canvas, mapHGTD, mapIdealRes, mapIdealEff);
+  for (const auto* key : KEYS)
+    makeComparisonPlots(key, canvas, mapHGTD, mapIdealRes, mapIdealEff);
 
   // --- Inclusive resolution plots ---
-  const std::initializer_list<AnalysisObj*> resoSet = {
+  const std::initializer_list<AnalysisObj*> RESO_SET = {
     &mapHGTD.at(HGTD),   &mapHGTD.at(TRKPTZ),
     &mapIdealRes.at(TRKPTZ), &mapIdealEff.at(TRKPTZ), &mapIdealEff.at(PASS),
   };
-  inclusivePlot(Form("%s/inclusivereso_logscale.pdf", SAVE_DIR),
-                true,  false, -400, 400, canvas, resoSet);
-  inclusivePlot(Form("%s/inclusivereso_linscale.pdf", SAVE_DIR),
-                false, false, -200, 200, canvas, resoSet);
+  inclusivePlot(Form("%s/inclusive/inclusivereso_logscale.pdf", SAVE_DIR),
+		true,  false, -400, 400, canvas, RESO_SET);
+  inclusivePlot(Form("%s/inclusive/inclusivereso_linscale.pdf", SAVE_DIR),
+		false, false, -200, 200, canvas, RESO_SET);
 
   std::cout << "FINISHED PLOT PRINTING\n";
 

@@ -28,20 +28,20 @@
 
 namespace MyUtl {
 
-// ---------------------------------------------------------------------------
-// BranchPointerWrapper
-//   Aggregates every TTreeReaderArray / TTreeReaderValue needed by the
-//   analysis into a single object that is passed by pointer throughout the
-//   event loop.  The constructor binds each member to its branch name so
-//   that branch-name strings appear only once in the codebase.
-//
-//   Selection methods are grouped as follows:
-//     Basic event cuts         — passBasicCuts, passJetPtCut
-//     Track / jet counters     — countForwardJets, countForwardTracks
-//     Testing-only HS filter   — passForwardHsTracks
-//     Track scoring helpers    — calcJetptDRScore, calcTrkptDRScore
-//     VBF signal region cuts   — see dedicated sub-section below
-// ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // BranchPointerWrapper
+  //   Aggregates every TTreeReaderArray / TTreeReaderValue needed by the
+  //   analysis into a single object that is passed by pointer throughout the
+  //   event loop.  The constructor binds each member to its branch name so
+  //   that branch-name strings appear only once in the codebase.
+  //
+  //   Selection methods are grouped as follows:
+  //     Basic event cuts         — passBasicCuts, passJetPtCut
+  //     Track / jet counters     — countForwardJets, countForwardTracks
+  //     Testing-only HS filter   — passForwardHsTracks
+  //     Track scoring helpers    — calcJetptDRScore, calcTrkptDRScore
+  //     VBF signal region cuts   — see dedicated sub-section below
+  // ---------------------------------------------------------------------------
   struct BranchPointerWrapper {
     TTreeReader& reader;
 
@@ -505,19 +505,19 @@ namespace MyUtl {
       if (this->topoJetEta.GetSize() < 2) return -1.0;
       if (jetIdx >= this->topoJetEta.GetSize()) return -1.0;
 
-      double eta_j1 = this->topoJetEta[0];
-      double eta_j2 = this->topoJetEta[1];
-      double eta_i = this->topoJetEta[jetIdx];
+      double etaJ1 = this->topoJetEta[0];
+      double etaJ2 = this->topoJetEta[1];
+      double etaI = this->topoJetEta[jetIdx];
 
       // Central position between the two leading jets
-      double eta_center = (eta_j1 + eta_j2) / 2.0;
-      double delta_eta_jj = eta_j1 - eta_j2;
+      double etaCenter = (etaJ1 + etaJ2) / 2.0;
+      double deltaEtaJj = etaJ1 - etaJ2;
 
       // Calculate centrality
-      double numerator = eta_i - eta_center;
-      double C_i = std::exp(-4.0 / (delta_eta_jj * delta_eta_jj) * numerator * numerator);
+      double numerator = etaI - etaCenter;
+      double cI = std::exp(-4.0 / (deltaEtaJj * deltaEtaJj) * numerator * numerator);
 
-      return C_i;
+      return cI;
     }
 
     // -----------------------------------------------------------------------
@@ -539,13 +539,13 @@ namespace MyUtl {
       jetI.SetPtEtaPhiM(this->topoJetPt[jetIdx], this->topoJetEta[jetIdx], this->topoJetPhi[jetIdx], 0.0);
 
       // Calculate invariant masses
-      double m_jj = (jet1 + jet2).M();
-      double m_j1i = (jet1 + jetI).M();
-      double m_j2i = (jet2 + jetI).M();
+      double mJj = (jet1 + jet2).M();
+      double mJ1i = (jet1 + jetI).M();
+      double mJ2i = (jet2 + jetI).M();
 
       // Return relative mass
-      double m_rel = std::min(m_j1i, m_j2i) / m_jj;
-      return m_rel;
+      double mRel = std::min(mJ1i, mJ2i) / mJj;
+      return mRel;
     }
 
     // -----------------------------------------------------------------------
@@ -564,16 +564,16 @@ namespace MyUtl {
 
       // Check third jet (index 2)
       if (nJets >= 3) {
-        double C_j3 = calcCentrality(2);
-        double m_rel_j3 = calcRelativeMass(2);
-        if (C_j3 >= 0.6 || m_rel_j3 >= 0.05) return false;
+        double cJ3 = calcCentrality(2);
+        double mRelJ3 = calcRelativeMass(2);
+        if (cJ3 >= 0.6 || mRelJ3 >= 0.05) return false;
       }
 
       // Check fourth jet (index 3) if it exists
       if (nJets >= 4) {
-        double C_j4 = calcCentrality(3);
-        double m_rel_j4 = calcRelativeMass(3);
-        if (C_j4 >= 0.6 || m_rel_j4 >= 0.05) return false;
+        double cJ4 = calcCentrality(3);
+        double mRelJ4 = calcRelativeMass(3);
+        if (cJ4 >= 0.6 || mRelJ4 >= 0.05) return false;
       }
 
       return true;
@@ -697,7 +697,7 @@ namespace MyUtl {
     //   CALO90 / CALO60 — Also copy TRKPTZ (calo-time proximity filtering
     //              is applied in chooseCluster, not here).
     // -----------------------------------------------------------------------
-    void updateScores(BranchPointerWrapper *branch, MLModel *ml_model) {
+    void updateScores(BranchPointerWrapper *branch, MLModel *mlModel) {
       // Assign TRKPTZ, CALO90, CALO60, TESTML Scores
 
       if (this->values.size() > 1) {
@@ -721,7 +721,7 @@ namespace MyUtl {
 
       // ML score for TESTML
       std::vector<float> features = this->calcFeatures(branch);
-      float mlScore = ml_model->predict(features);
+      float mlScore = mlModel->predict(features);
       this->scores[TESTML] = mlScore;
 
       // TEST_MISCL uses TRKPTZ as its selection score; the purity gate is applied
@@ -817,40 +817,40 @@ namespace MyUtl {
       float sumpt = 0.;
       for (auto trk: trackIndices) {
         auto
-            trk_z = branch->trackZ0[trk], trk_var_z = branch->trackVarZ0[trk],
-	    trk_d = branch->trackD0[trk], trk_var_d = branch->trackVarD0[trk],
-	    trk_q = branch->trackQP[trk], trk_var_q = branch->trackVarQp[trk],
-	    trk_pt = branch->trackPt[trk];
+            trkZ = branch->trackZ0[trk], trkVarZ = branch->trackVarZ0[trk],
+	    trkD = branch->trackD0[trk], trkVarD = branch->trackVarD0[trk],
+	    trkQ = branch->trackQP[trk], trkVarQ = branch->trackVarQp[trk],
+	    trkPt = branch->trackPt[trk];
 
-        znum += trk_z / (trk_var_z);
-        zden += 1 / (trk_var_z);
+        znum += trkZ / (trkVarZ);
+        zden += 1 / (trkVarZ);
 
-        dnum += trk_d / (trk_var_d);
-        dden += 1 / (trk_var_d);
+        dnum += trkD / (trkVarD);
+        dden += 1 / (trkVarD);
 
-	qpnum += trk_q / (trk_var_q);
-        qpden += 1 / (trk_var_q);
+	qpnum += trkQ / (trkVarQ);
+        qpden += 1 / (trkVarQ);
 
-	sumpt += trk_pt;
+	sumpt += trkPt;
       }
 
       // Calculate cluster properties
-      float cluster_z = znum / zden;
-      float cluster_z_sigma = 1.0f / std::sqrt(zden);
-      float cluster_d0 = dnum / dden;
-      float cluster_d0_sigma = 1.0f / std::sqrt(dden);
-      float cluster_qOverP = qpnum / qpden;
-      float cluster_qOverP_sigma = 1.0f / std::sqrt(qpden);
+      float clusterZ = znum / zden;
+      float clusterZSigma = 1.0f / std::sqrt(zden);
+      float clusterD0 = dnum / dden;
+      float clusterD0Sigma = 1.0f / std::sqrt(dden);
+      float clusterQOverP = qpnum / qpden;
+      float clusterQOverPSigma = 1.0f / std::sqrt(qpden);
 
       // Reference vertex (primary vertex)
-      float ref_vtx_z = branch->recoVtxZ[0];
+      float refVtxZ = branch->recoVtxZ[0];
 
       // Calculate delta_z and delta_z in resolution units
-      float delta_z = cluster_z - ref_vtx_z;
-      float delta_z_resunits = delta_z / cluster_z_sigma;
+      float deltaZ = clusterZ - refVtxZ;
+      float deltaZResunits = deltaZ / clusterZSigma;
 
       // Normalization parameters (static: allocated once, never reconstructed)
-      static const float means[8] = {
+      static const float MEANS[8] = {
         0.6658103458145465f,      // delta_z mean
         1.4062413922431898f,      // delta_z_resunits mean
         0.4384938254278939f,      // cluster_z_sigma mean
@@ -860,7 +860,7 @@ namespace MyUtl {
         2.249843783028648e-06f,   // cluster_qOverP_sigma mean
         36.363541536390116f,      // cluster_sumpt mean
       };
-      static const float stds[8] = {
+      static const float STDS[8] = {
         1.0862063628195677f,      // delta_z std
         1.0457992632101616f,      // delta_z_resunits std
         0.5121707999068104f,      // cluster_z_sigma std
@@ -873,14 +873,14 @@ namespace MyUtl {
 
       // Return normalized features in training order
       std::vector<float> features = {
-        (delta_z              - means[0]) / stds[0],  // Feature 0
-        (delta_z_resunits     - means[1]) / stds[1],  // Feature 1
-        (cluster_z_sigma      - means[2]) / stds[2],  // Feature 2
-        (cluster_d0           - means[3]) / stds[3],  // Feature 3
-        (cluster_d0_sigma     - means[4]) / stds[4],  // Feature 4
-        (cluster_qOverP       - means[5]) / stds[5],  // Feature 5
-        (cluster_qOverP_sigma - means[6]) / stds[6],  // Feature 6
-        (sumpt                - means[7]) / stds[7],  // Feature 7
+        (deltaZ             - MEANS[0]) / STDS[0],  // Feature 0
+        (deltaZResunits     - MEANS[1]) / STDS[1],  // Feature 1
+        (clusterZSigma      - MEANS[2]) / STDS[2],  // Feature 2
+        (clusterD0          - MEANS[3]) / STDS[3],  // Feature 3
+        (clusterD0Sigma     - MEANS[4]) / STDS[4],  // Feature 4
+        (clusterQOverP      - MEANS[5]) / STDS[5],  // Feature 5
+        (clusterQOverPSigma - MEANS[6]) / STDS[6],  // Feature 6
+        (sumpt              - MEANS[7]) / STDS[7],  // Feature 7
       };
 
       return features;
