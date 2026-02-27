@@ -14,6 +14,8 @@
 //   cluster_qOverP       : precision-weighted q/p  [MeV^{-1}]
 //   cluster_qOverP_sigma : uncertainty on cluster_qOverP  [MeV^{-1}]
 //   cluster_sumpt        : scalar sum of constituent track pT  [GeV]
+//   cluster_time_sigma   : precision-weighted HGTD time uncertainty  [ps]  (= sigmas[0])
+//   cluster_n_tracks     : number of constituent tracks (integer stored as float)
 //   cluster_dR           : min deltaR between cluster eta/phi centroid and nearest topo jet
 //   has_hs               : 1 if >=1 constituent track is truth-matched to the HS vertex
 //                          (trackToTruthvtx[trk] == 0), else 0
@@ -92,6 +94,8 @@ struct RawFeatures {
     float cluster_qOverP;
     float cluster_qOverP_sigma;
     float cluster_sumpt;
+    float cluster_time_sigma;   // = sigmas[0]: precision-weighted HGTD time uncertainty
+    float cluster_n_tracks;     // = trackIndices.size()
 };
 
 static RawFeatures calcRawFeatures(
@@ -126,10 +130,15 @@ static RawFeatures calcRawFeatures(
     float delta_z    = cluster_z - ref_z;
     float delta_z_ru = delta_z   / cluster_z_sigma;
 
+    float cluster_time_sigma = static_cast<float>(cluster.sigmas.at(0));
+    float cluster_n_tracks   = static_cast<float>(cluster.trackIndices.size());
+
     return { delta_z, delta_z_ru, cluster_z_sigma,
              cluster_d0, cluster_d0_sig,
              cluster_qp, cluster_qp_sig,
-             sumpt };
+             sumpt,
+             cluster_time_sigma,
+             cluster_n_tracks };
 }
 
 // ---------------------------------------------------------------------------
@@ -157,6 +166,7 @@ auto main() -> int {
     csv << "event_num,delta_t,delta_z,delta_z_resunits,"
         << "cluster_z_sigma,cluster_d0,cluster_d0_sigma,"
         << "cluster_qOverP,cluster_qOverP_sigma,cluster_sumpt,"
+        << "cluster_time_sigma,cluster_n_tracks,"
         << "cluster_dR,has_hs,n_hs_tracks,label\n";
     csv << std::setprecision(6) << std::fixed;
 
@@ -240,6 +250,8 @@ auto main() -> int {
                 << f.cluster_qOverP    << ","
                 << f.cluster_qOverP_sigma << ","
                 << f.cluster_sumpt     << ","
+                << f.cluster_time_sigma << ","
+                << f.cluster_n_tracks  << ","
                 << dR                  << ","
                 << has_hs              << ","
                 << nFTrackHS           << ","
