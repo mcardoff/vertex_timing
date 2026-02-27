@@ -631,7 +631,7 @@ namespace MyUtl {
 //     timeSpread        — std-dev of raw track times within the cluster
 //     zSpread           — std-dev of track z₀ values within the cluster
 //     passEfficiency    — true if cluster time is within 3·PASS_SIGMA of truth
-//     calcFeatures      — extracts and normalises the 8 ML input features
+//     calcFeatures      — extracts and normalises the 10 ML input features
 // ---------------------------------------------------------------------------
   struct Cluster {
     std::vector<double> values;
@@ -796,7 +796,7 @@ namespace MyUtl {
 
     // -----------------------------------------------------------------------
     // calcFeatures
-    //   Extracts the 8 features used as DNN input and applies the stored
+    //   Extracts the 10 features used as DNN input and applies the stored
     //   normalisation (means/stds from training) to return a unit-normalised
     //   feature vector.  Features (in training order):
     //     0  delta_z              — cluster z relative to reco primary vertex
@@ -807,8 +807,17 @@ namespace MyUtl {
     //     5  cluster_qOverP       — precision-weighted charge-over-momentum
     //     6  cluster_qOverP_sigma — q/p uncertainty
     //     7  cluster_sumpt        — scalar sum of constituent track pT
+    //     8  cluster_time_sigma   — precision-weighted HGTD time uncertainty
+    //                               (= sigmas[0], analogous to cluster_z_sigma)
+    //     9  cluster_n_tracks     — number of constituent tracks
     //   Normalisation parameters are stored as static arrays so they are
     //   allocated only once regardless of how many clusters are evaluated.
+    //
+    //     10 cluster_dR           — min ΔR between the pT-weighted cluster
+    //                               centroid (η,φ) and the nearest topo jet
+    //                               passing MIN_JETPT
+    //   NOTE: MEANS[10], STDS[10] are placeholders — update from
+    //   normalization_params.json after retraining with the new feature.
     // -----------------------------------------------------------------------
     std::vector<float> calcFeatures(BranchPointerWrapper *branch) {
       float znum  = 0., zden  = 0.;
@@ -842,6 +851,41 @@ namespace MyUtl {
       float clusterQOverP = qpnum / qpden;
       float clusterQOverPSigma = 1.0f / std::sqrt(qpden);
 
+      // Feature 8: precision-weighted time uncertainty
+      // sigmas[0] is set by makeSimpleClusters to 1/sqrt(sum(1/sigma_t^2))
+      float clusterTimeSigma = static_cast<float>(this->sigmas.at(0));
+
+      // Feature 9: constituent track multiplicity
+      float clusterNTracks   = static_cast<float>(this->trackIndices.size());
+
+      // Feature 10: min ΔR between pT-weighted cluster centroid and nearest jet
+      // Mirrors clusterMinDR() in export_training_data.cxx exactly.
+      float clusterDR = -1.0f;
+      {
+        double sumPt = 0., etaSum = 0., phiSum = 0.;
+        for (int trk : this->trackIndices) {
+          double pt  = branch->trackPt[trk];
+          double eta = branch->trackEta[trk];
+          double phi = branch->trackPhi[trk];
+          sumPt  += pt;
+          etaSum += pt * eta;
+          phiSum += pt * phi;
+        }
+        if (sumPt > 0.) {
+          double cEta  = etaSum / sumPt;
+          double cPhi  = phiSum / sumPt;
+          double minDR = 1e9;
+          for (int j = 0; j < (int)branch->topoJetPt.GetSize(); ++j) {
+            if (branch->topoJetPt[j] < MIN_JETPT) continue;
+            double deta = branch->topoJetEta[j] - cEta;
+            double dphi = TVector2::Phi_mpi_pi(branch->topoJetPhi[j] - cPhi);
+            double dR   = std::sqrt(deta*deta + dphi*dphi);
+            if (dR < minDR) minDR = dR;
+          }
+          if (minDR < 1e8) clusterDR = static_cast<float>(minDR);
+        }
+      }
+
       // Reference vertex (primary vertex)
       float refVtxZ = branch->recoVtxZ[0];
 
@@ -850,37 +894,46 @@ namespace MyUtl {
       float deltaZResunits = deltaZ / clusterZSigma;
 
       // Normalization parameters (static: allocated once, never reconstructed)
-      static const float MEANS[8] = {
-        0.6658103458145465f,      // delta_z mean
-        1.4062413922431898f,      // delta_z_resunits mean
-        0.4384938254278939f,      // cluster_z_sigma mean
-        -0.0006795810095683315f,  // cluster_d0 mean
-        0.03825910434563131f,     // cluster_d0_sigma mean
-        2.5463849668322525e-07f,  // cluster_qOverP mean
-        2.249843783028648e-06f,   // cluster_qOverP_sigma mean
-        36.363541536390116f,      // cluster_sumpt mean
+      static const float MEANS[11] = {
+        0.000181542369520147,  // delta_z mean
+        0.0022696158408701665,  // delta_z_resunits mean
+        1.0721281960578108,  // cluster_z_sigma mean
+        -0.0025243291487635593,  // cluster_d0 mean
+        0.08665513919653857,  // cluster_d0_sigma mean
+        1.9620804663321413e-07,  // cluster_qOverP mean
+        4.9269252726781045e-06,  // cluster_qOverP_sigma mean
+        14.154102551101227,  // cluster_sumpt mean
+        17.277764049475678,  // cluster_time_sigma mean
+        5.649361497551156,  // cluster_n_tracks mean
+        1.7420735517923134  // cluster_dR mean
       };
-      static const float STDS[8] = {
-        1.0862063628195677f,      // delta_z std
-        1.0457992632101616f,      // delta_z_resunits std
-        0.5121707999068104f,      // cluster_z_sigma std
-        0.16671231081127164f,     // cluster_d0 std
-        0.034856748414000265f,    // cluster_d0_sigma std
-        2.33339973420475e-05f,    // cluster_qOverP std
-        2.0502623770486916e-06f,  // cluster_qOverP_sigma std
-        33.386926190214176f,      // cluster_sumpt std
+      static const float STDS[11] = {
+        2.7448773941025766,  // delta_z std
+        1.7700623344292996,  // delta_z_resunits std
+        1.1223853949974232,  // cluster_z_sigma std
+        0.42576499860027983,  // cluster_d0 std
+        0.11750566161560266,  // cluster_d0_sigma std
+        4.238450693042457e-05,  // cluster_qOverP std
+        4.359020547359499e-06,  // cluster_qOverP_sigma std
+        21.517411638686664,  // cluster_sumpt std
+        9.664553181701693,  // cluster_time_sigma std
+        6.224281332216253,  // cluster_n_tracks std
+        1.0543692647024774  // cluster_dR std
       };
 
       // Return normalized features in training order
       std::vector<float> features = {
-        (deltaZ             - MEANS[0]) / STDS[0],  // Feature 0
-        (deltaZResunits     - MEANS[1]) / STDS[1],  // Feature 1
-        (clusterZSigma      - MEANS[2]) / STDS[2],  // Feature 2
-        (clusterD0          - MEANS[3]) / STDS[3],  // Feature 3
-        (clusterD0Sigma     - MEANS[4]) / STDS[4],  // Feature 4
-        (clusterQOverP      - MEANS[5]) / STDS[5],  // Feature 5
-        (clusterQOverPSigma - MEANS[6]) / STDS[6],  // Feature 6
-        (sumpt              - MEANS[7]) / STDS[7],  // Feature 7
+        (deltaZ             - MEANS[0])  / STDS[0],   // Feature 0
+        (deltaZResunits     - MEANS[1])  / STDS[1],   // Feature 1
+        (clusterZSigma      - MEANS[2])  / STDS[2],   // Feature 2
+        (clusterD0          - MEANS[3])  / STDS[3],   // Feature 3
+        (clusterD0Sigma     - MEANS[4])  / STDS[4],   // Feature 4
+        (clusterQOverP      - MEANS[5])  / STDS[5],   // Feature 5
+        (clusterQOverPSigma - MEANS[6])  / STDS[6],   // Feature 6
+        (sumpt              - MEANS[7])  / STDS[7],   // Feature 7
+        (clusterTimeSigma   - MEANS[8])  / STDS[8],   // Feature 8
+        (clusterNTracks     - MEANS[9])  / STDS[9],   // Feature 9
+        (clusterDR          - MEANS[10]) / STDS[10],  // Feature 10
       };
 
       return features;

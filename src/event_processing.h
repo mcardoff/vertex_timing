@@ -412,8 +412,11 @@ namespace MyUtl {
       if (score == Score::TEST_MISCL)
         returnVal = scoreBasedTime;
       
-      analysis.inclusiveReso->Fill(diff);
-      analysis.inclusivePurity->Fill(clusterPurity);
+      // For TEST_MISCL, only fill inclusive histos when the cluster is pure (purity > 0.75)
+      if (score != Score::TEST_MISCL || scored.purity > 0.75) {
+        analysis.inclusiveReso->Fill(diff);
+        analysis.inclusivePurity->Fill(clusterPurity);
+      }
 
       // Check if this score passes the efficiency test
       // For TESTML:     require passEfficiency AND ML score > 0.5
@@ -422,7 +425,7 @@ namespace MyUtl {
       //                 selected cluster has purity > 0.75.
       bool passesEfficiency = scored.passEfficiency(branch);
       if (score == Score::TESTML && passesEfficiency) {
-        passesEfficiency = scored.scores.at(Score::TESTML) > 0.5;
+        passesEfficiency = scored.scores.at(Score::TESTML) > 0.3;
       }
       if (score == Score::TEST_MISCL) {
         // Only count this event in the denominator if the selected cluster is pure
@@ -455,21 +458,25 @@ namespace MyUtl {
 	  passesMiscl = true;
       }
 
-      // fill diff hists
-      analysis["fjet"]->     fillDiff(nForwardJet    , diff);
-      analysis["vtx_dz"]->   fillDiff(effFillValVtxDz, diff);
-      analysis["ftrack"]->   fillDiff(nForwardTrack  , diff);
-      analysis["pu_frac"]->  fillDiff(puRatio        , diff);
-      analysis["hs_track"]-> fillDiff(nForwardTrackHS, diff);
-      analysis["pu_track"]-> fillDiff(nForwardTrackPU, diff);
-      
-      // fill purities
-      analysis["fjet"]->     fillPurity(nForwardJet    , clusterPurity);
-      analysis["vtx_dz"]->   fillPurity(effFillValVtxDz, clusterPurity);
-      analysis["ftrack"]->   fillPurity(nForwardTrack  , clusterPurity);
-      analysis["pu_frac"]->  fillPurity(puRatio        , clusterPurity);
-      analysis["hs_track"]-> fillPurity(nForwardTrackHS, clusterPurity);
-      analysis["pu_track"]-> fillPurity(nForwardTrackPU, clusterPurity);
+      // fill diff hists — for TEST_MISCL only fill when in the denominator
+      if (score != Score::TEST_MISCL || misclInDenominator) {
+        analysis["fjet"]->     fillDiff(nForwardJet    , diff);
+        analysis["vtx_dz"]->   fillDiff(effFillValVtxDz, diff);
+        analysis["ftrack"]->   fillDiff(nForwardTrack  , diff);
+        analysis["pu_frac"]->  fillDiff(puRatio        , diff);
+        analysis["hs_track"]-> fillDiff(nForwardTrackHS, diff);
+        analysis["pu_track"]-> fillDiff(nForwardTrackPU, diff);
+      }
+
+      // fill purities — same gate for TEST_MISCL
+      if (score != Score::TEST_MISCL || misclInDenominator) {
+        analysis["fjet"]->     fillPurity(nForwardJet    , clusterPurity);
+        analysis["vtx_dz"]->   fillPurity(effFillValVtxDz, clusterPurity);
+        analysis["ftrack"]->   fillPurity(nForwardTrack  , clusterPurity);
+        analysis["pu_frac"]->  fillPurity(puRatio        , clusterPurity);
+        analysis["hs_track"]-> fillPurity(nForwardTrackHS, clusterPurity);
+        analysis["pu_track"]-> fillPurity(nForwardTrackPU, clusterPurity);
+      }
     }
     // Flag code 2 only for events that entered the TEST_MISCL denominator
     // (pure cluster, purity > 0.75) but did NOT pass the timing window.

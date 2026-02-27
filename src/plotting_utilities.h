@@ -826,6 +826,7 @@ namespace MyUtl {
     TCanvas* canvas,
     const std::vector<AnalysisObj*>& plts
   ) {
+    // std::cout << fname << "\n";
     if (plts.empty()) return;
 
     double xMin = plts[0]->get(key)->xMin;

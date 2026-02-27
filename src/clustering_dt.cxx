@@ -107,32 +107,47 @@ void makeComparisonPlots(
   std::map<Score, AnalysisObj>& mapIdealRes,
   std::map<Score, AnalysisObj>& mapIdealEff
 ) {
-  const char* compSubdir = Form("%s/comparisons", SAVE_DIR);
+  static const std::string compSubdir = std::string(SAVE_DIR) + "/comparisons";
   // HGTD algo vs TRKPTZ
-  moneyPlot(Form("%s/hgtd_trkptz_%s.pdf", compSubdir, key), key, canvas,
+  moneyPlot(Form("%s/hgtd_trkptz_%s.pdf", compSubdir.c_str(), key), key, canvas,
             {
                 &mapHGTD.at(HGTD),
                 &mapHGTD.at(TRKPTZ)
 	    });
 
   // HGTD base times: TRKPTZ vs DNN
-  moneyPlot(Form("%s/trkptz_dnn_hgtd_%s.pdf", compSubdir, key), key, canvas,
+  moneyPlot(Form("%s/trkptz_dnn_hgtd_%s.pdf", compSubdir.c_str(), key), key, canvas,
             {
                 &mapHGTD.at(HGTD),
                 &mapHGTD.at(TRKPTZ),
                 &mapHGTD.at(TESTML)
 	    });
 
-  // Misclustering study: TRKPTZ full sample vs TRKPTZ restricted to pure-cluster events
-  moneyPlot(Form("%s/pure_clusters_%s.pdf", compSubdir, key), key, canvas,
+  // TRKPTZ full sample vs TRKPTZ restricted to highly pure clusters
+  moneyPlot(Form("%s/pure_clusters_%s.pdf", compSubdir.c_str(), key), key, canvas,
             {
                 &mapHGTD.at(HGTD),
                 &mapHGTD.at(TRKPTZ),
                 &mapHGTD.at(TEST_MISCL)
 	    });
 
+  // pure clusters with ideal resolution
+  moneyPlot(Form("%s/pure_clusters_ires_%s.pdf", compSubdir.c_str(), key), key, canvas,
+            {
+                &mapHGTD.at(HGTD),
+                &mapIdealRes.at(TRKPTZ),
+                &mapIdealRes.at(TEST_MISCL)
+	    });
+
+  moneyPlot(Form("%s/pure_clusters_ieff_%s.pdf", compSubdir.c_str(), key), key, canvas,
+            {
+                &mapHGTD.at(HGTD),
+                &mapIdealEff.at(TRKPTZ),
+                &mapIdealEff.at(TEST_MISCL)
+	    });
+
   // Ideal-resolution times: TRKPTZ vs DNN
-  moneyPlot(Form("%s/trkptz_dnn_ires_%s.pdf", compSubdir, key), key, canvas,
+  moneyPlot(Form("%s/trkptz_dnn_ires_%s.pdf", compSubdir.c_str(), key), key, canvas,
             {
                 &mapHGTD.at(HGTD),
                 &mapIdealRes.at(TRKPTZ),
@@ -140,46 +155,47 @@ void makeComparisonPlots(
 	    });
 
   // Ideal-efficiency times: TRKPTZ vs DNN
-  moneyPlot(Form("%s/trkptz_dnn_ieff_%s.pdf", compSubdir, key), key, canvas,
+  moneyPlot(Form("%s/trkptz_dnn_ieff_%s.pdf", compSubdir.c_str(), key), key, canvas,
             {
                 &mapHGTD.at(HGTD),
                 &mapIdealEff.at(TRKPTZ),
                 &mapIdealEff.at(TESTML)
 	    });
 
-  // Effect of fixing HGTD matching alone
-  moneyPlot(Form("%s/fixed_assoc_%s.pdf", compSubdir, key), key, canvas,
+  // Full ideal comparison: HGTD → TRKPTZ → IdealRes → IdealEff
+  moneyPlot(Form("%s/ideal_comp_%s.pdf", compSubdir.c_str(), key), key, canvas,
             {
                 &mapHGTD.at(HGTD),
                 &mapHGTD.at(TRKPTZ),
                 &mapIdealRes.at(TRKPTZ),
                 &mapIdealEff.at(TRKPTZ)
 	    });
+
+  // Effect of fixing HGTD matching alone
+  // moneyPlot(Form("%s/fixed_assoc_%s.pdf", compSubdir.c_str(), key), key, canvas,
+  //           {
+  //               &mapHGTD.at(HGTD),
+  //               &mapHGTD.at(TRKPTZ),
+  //               &mapIdealRes.at(TRKPTZ),
+  //               &mapIdealEff.at(TRKPTZ)
+  // 	    });
 
   // Effect of fixing cluster selection alone
-  moneyPlot(Form("%s/fixed_selection_%s.pdf", compSubdir, key), key, canvas,
-            {
-                &mapHGTD.at(HGTD),
-                &mapHGTD.at(TRKPTZ),
-                &mapHGTD.at(PASS)
-	    });
+  // moneyPlot(Form("%s/fixed_selection_%s.pdf", compSubdir.c_str(), key), key, canvas,
+  //           {
+  //               &mapHGTD.at(HGTD),
+  //               &mapHGTD.at(TRKPTZ),
+  //               &mapHGTD.at(PASS)
+  // 	    });
 
   // Effect of fixing everything
-  moneyPlot(Form("%s/fixed_all_%s.pdf", compSubdir, key), key, canvas,
-            {
-                &mapHGTD.at(HGTD),
-                &mapHGTD.at(TRKPTZ),
-                &mapIdealEff.at(PASS)
-	    });
+  // moneyPlot(Form("%s/fixed_all_%s.pdf", compSubdir.c_str(), key), key, canvas,
+  //           {
+  //               &mapHGTD.at(HGTD),
+  //               &mapHGTD.at(TRKPTZ),
+  //               &mapIdealEff.at(PASS)
+  // 	    });
 
-  // Full ideal comparison: HGTD → TRKPTZ → IdealRes → IdealEff
-  moneyPlot(Form("%s/ideal_comp_%s.pdf", compSubdir, key), key, canvas,
-            {
-                &mapHGTD.at(HGTD),
-                &mapHGTD.at(TRKPTZ),
-                &mapIdealRes.at(TRKPTZ),
-                &mapIdealEff.at(TRKPTZ)
-	    });
 }
 
 // ---------------------------------------------------------------------------
@@ -220,6 +236,8 @@ auto main() -> int {
     const Long64_t READ_NUM  = chain.GetReadEntry() + 1;
     const Long64_t EVENT_NUM = chain.GetReadEntry() - chain.GetChainOffset();
 
+    // if (READ_NUM > 1000) break;
+
     if (READ_NUM % 100 == 0)
       std::cout << "Progress: " << READ_NUM << "/" << N_EVENT << "\r" << std::flush;
 
@@ -249,12 +267,11 @@ auto main() -> int {
 
   for (auto* m : allMaps)
       for (auto& [k, analysis] : *m)
-	analysis.printEfficiencyStats("pu_frac");
+	analysis.printEfficiencyStats("hs_track");
 
   std::cout << "\nFINISHED PROCESSING\n";
 
-  const auto KEYS = {"pu_frac", "ftrack"  , "pu_track",
-		     "fjet"   , "hs_track", "vtx_dz"};
+  const auto KEYS = {"pu_frac", "fjet", "hs_track"};
 
   // --- Comparison plots (per variable KEY) ---
   for (const auto* key : KEYS)
