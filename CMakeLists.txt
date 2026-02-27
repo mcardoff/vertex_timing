@@ -26,7 +26,8 @@ add_executable(test_vbf_selection test_vbf_selection.cxx)
 add_executable(evaluate_ml_lowtrack src/evaluate_ml_lowtrack.cxx)
 add_executable(export_training_data src/export_training_data.cxx)
 add_executable(distcut_sweep src/distcut_sweep.cxx)
-add_executable(trackpt_sweep src/trackpt_sweep.cxx)
+add_executable(maxtrackpt_sweep src/maxtrackpt_sweep.cxx)
+add_executable(mintrackpt_sweep src/mintrackpt_sweep.cxx)
 
 # Specify the include directories for your header files
 target_include_directories(clustering_dt
@@ -83,7 +84,13 @@ target_include_directories(distcut_sweep
         ${ROOT_INCLUDE_DIRS}
 )
 
-target_include_directories(trackpt_sweep
+target_include_directories(maxtrackpt_sweep
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${ROOT_INCLUDE_DIRS}
+)
+
+target_include_directories(mintrackpt_sweep
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${ROOT_INCLUDE_DIRS}
@@ -146,7 +153,13 @@ target_link_libraries(distcut_sweep
         Boost::filesystem
 )
 
-target_link_libraries(trackpt_sweep
+target_link_libraries(maxtrackpt_sweep
+    PRIVATE
+        ${ROOT_LIBRARIES}
+        Boost::filesystem
+)
+
+target_link_libraries(mintrackpt_sweep
     PRIVATE
         ${ROOT_LIBRARIES}
         Boost::filesystem
