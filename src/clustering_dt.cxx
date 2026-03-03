@@ -43,22 +43,16 @@ auto buildAnalysisMap(
   std::map<Score, AnalysisObj> m;
 
   // Scores active in all scenarios
-  m.emplace(TRKPTZ, AnalysisObj(label, TRKPTZ));
-  m.emplace(TESTML, AnalysisObj(label, TESTML));
-  m.emplace(PASS,   AnalysisObj(label, PASS  ));
-  m.emplace(TEST_MISCL, AnalysisObj(label, TEST_MISCL));
+  m.emplace(Score::TRKPTZ,     AnalysisObj(label, Score::TRKPTZ    ));
+  m.emplace(Score::TESTML,     AnalysisObj(label, Score::TESTML    ));
+  m.emplace(Score::PASS,       AnalysisObj(label, Score::PASS      ));
+  m.emplace(Score::TEST_MISCL, AnalysisObj(label, Score::TEST_MISCL));
 
   // Scores active only in the real-HGTD scenario
   if (scenario == Scenario::HGTD) {
-    m.emplace(HGTD,       AnalysisObj(label, HGTD      ));
-    // Uncomment to re-enable additional algorithms:
-    // m.emplace(CALO60,  AnalysisObj(label, CALO60 ));
-    // m.emplace(CALO90,  AnalysisObj(label, CALO90 ));
-    // m.emplace(JUST60,  AnalysisObj(label, JUST60 ));
-    // m.emplace(JUST90,  AnalysisObj(label, JUST90 ));
-    // m.emplace(FILT60,  AnalysisObj(label, FILT60 ));
-    // m.emplace(FILT90,  AnalysisObj(label, FILT90 ));
-    // m.emplace(FILTJET, AnalysisObj(label, FILTJET));
+    m.emplace(Score::HGTD,      AnalysisObj(label, Score::HGTD     ));
+    m.emplace(Score::HGTD_SORT, AnalysisObj(label, Score::HGTD_SORT));
+    m.emplace(Score::FILTJET,   AnalysisObj(label, Score::FILTJET  ));
   }
 
   return m;
@@ -111,64 +105,72 @@ void makeComparisonPlots(
   // HGTD algo vs TRKPTZ
   moneyPlot(Form("%s/hgtd_trkptz_%s.pdf", compSubdir.c_str(), key), key, canvas,
             {
-                &mapHGTD.at(HGTD),
-                &mapHGTD.at(TRKPTZ)
+                &mapHGTD.at(Score::HGTD),
+                &mapHGTD.at(Score::TRKPTZ)
+	    });
+
+  // HGTD algo vs TRKPTZ vs HGTD_SORT (pT-sorted simultaneous + BDT)
+  moneyPlot(Form("%s/hgtd_sort_%s.pdf", compSubdir.c_str(), key), key, canvas,
+            {
+                &mapHGTD.at(Score::HGTD),
+                &mapHGTD.at(Score::TRKPTZ),
+                &mapHGTD.at(Score::HGTD_SORT)
 	    });
 
   // HGTD base times: TRKPTZ vs DNN
   moneyPlot(Form("%s/trkptz_dnn_hgtd_%s.pdf", compSubdir.c_str(), key), key, canvas,
             {
-                &mapHGTD.at(HGTD),
-                &mapHGTD.at(TRKPTZ),
-                &mapHGTD.at(TESTML)
+                &mapHGTD.at(Score::HGTD),
+                &mapHGTD.at(Score::TRKPTZ),
+                &mapHGTD.at(Score::TESTML)
 	    });
 
   // TRKPTZ full sample vs TRKPTZ restricted to highly pure clusters
   moneyPlot(Form("%s/pure_clusters_%s.pdf", compSubdir.c_str(), key), key, canvas,
             {
-                &mapHGTD.at(HGTD),
-                &mapHGTD.at(TRKPTZ),
-                &mapHGTD.at(TEST_MISCL)
+                &mapHGTD.at(Score::HGTD),
+                &mapHGTD.at(Score::TRKPTZ),
+                &mapHGTD.at(Score::TEST_MISCL)
 	    });
 
   // pure clusters with ideal resolution
   moneyPlot(Form("%s/pure_clusters_ires_%s.pdf", compSubdir.c_str(), key), key, canvas,
             {
-                &mapHGTD.at(HGTD),
-                &mapIdealRes.at(TRKPTZ),
-                &mapIdealRes.at(TEST_MISCL)
+                &mapHGTD.at(Score::HGTD),
+                &mapIdealRes.at(Score::TRKPTZ),
+                &mapIdealRes.at(Score::TEST_MISCL)
 	    });
 
   moneyPlot(Form("%s/pure_clusters_ieff_%s.pdf", compSubdir.c_str(), key), key, canvas,
             {
-                &mapHGTD.at(HGTD),
-                &mapIdealEff.at(TRKPTZ),
-                &mapIdealEff.at(TEST_MISCL)
+                &mapHGTD.at(Score::HGTD),
+                &mapIdealEff.at(Score::TRKPTZ),
+                &mapIdealEff.at(Score::TEST_MISCL)
 	    });
 
   // Ideal-resolution times: TRKPTZ vs DNN
   moneyPlot(Form("%s/trkptz_dnn_ires_%s.pdf", compSubdir.c_str(), key), key, canvas,
             {
-                &mapHGTD.at(HGTD),
-                &mapIdealRes.at(TRKPTZ),
-                &mapIdealRes.at(TESTML)
+                &mapHGTD.at(Score::HGTD),
+                &mapIdealRes.at(Score::TRKPTZ),
+                &mapIdealRes.at(Score::TESTML)
 	    });
 
   // Ideal-efficiency times: TRKPTZ vs DNN
   moneyPlot(Form("%s/trkptz_dnn_ieff_%s.pdf", compSubdir.c_str(), key), key, canvas,
             {
-                &mapHGTD.at(HGTD),
-                &mapIdealEff.at(TRKPTZ),
-                &mapIdealEff.at(TESTML)
+                &mapHGTD.at(Score::HGTD),
+                &mapIdealEff.at(Score::TRKPTZ),
+                &mapIdealEff.at(Score::TESTML)
 	    });
 
   // Full ideal comparison: HGTD → TRKPTZ → IdealRes → IdealEff
   moneyPlot(Form("%s/ideal_comp_%s.pdf", compSubdir.c_str(), key), key, canvas,
             {
-                &mapHGTD.at(HGTD),
-                &mapHGTD.at(TRKPTZ),
-                &mapIdealRes.at(TRKPTZ),
-                &mapIdealEff.at(TRKPTZ)
+                &mapHGTD.at(Score::HGTD),
+                &mapHGTD.at(Score::TRKPTZ),
+                &mapIdealRes.at(Score::TRKPTZ),
+                &mapIdealEff.at(Score::TRKPTZ)
 	    });
 
   // Effect of fixing HGTD matching alone
@@ -279,8 +281,8 @@ auto main() -> int {
 
   // --- Inclusive resolution plots ---
   const std::initializer_list<AnalysisObj*> RESO_SET = {
-    &mapHGTD.at(HGTD),   &mapHGTD.at(TRKPTZ),
-    &mapIdealRes.at(TRKPTZ), &mapIdealEff.at(TRKPTZ), &mapIdealEff.at(PASS),
+    &mapHGTD.at(Score::HGTD),   &mapHGTD.at(Score::TRKPTZ),
+    &mapIdealRes.at(Score::TRKPTZ), &mapIdealEff.at(Score::TRKPTZ), &mapIdealEff.at(Score::PASS),
   };
   inclusivePlot(Form("%s/inclusive/inclusivereso_logscale.pdf", SAVE_DIR),
 		true,  false, -400, 400, canvas, RESO_SET);

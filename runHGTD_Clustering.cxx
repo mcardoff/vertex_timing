@@ -67,7 +67,7 @@ void runHGTD_Clustering(std::string number, Long64_t eventNum) {
 
   for (int j = 0; j < clusters.size(); j++) {
     auto cluster = clusters.at(j);
-    auto score = cluster.scores.at(TRKPTZ);
+    auto score = cluster.scores.at(Score::TRKPTZ);
     std::cout << "---------\n";
     std::cout << "t: " << cluster.values.at(0) << "\n";
     if (cluster.values.size() > 1) std::cout << "z: " << cluster.values.at(1) << "\n";

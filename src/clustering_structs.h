@@ -226,7 +226,6 @@ namespace MyUtl {
       for(auto trkIdx: tracks) {
 	double eta = std::abs(this->trackEta[trkIdx]);
 	double pt = this->trackPt[trkIdx];
-	int  truthVtx = this->trackToTruthvtx[trkIdx];
 	bool quality = this->trackQuality[trkIdx] == true;
 	bool hasValidTime = checkTimeValid ? (this->trackTimeValid[trkIdx] == 1) : true;
 	// already know these pass association
@@ -234,6 +233,8 @@ namespace MyUtl {
 	    pt > MIN_TRACK_PT_COUNT and pt < MAX_TRACK_PT and
 	    quality and hasValidTime) {
 	  nFTrack++;
+	  // Fetch truth vertex index only for tracks that pass the gate
+	  int truthVtx = this->trackToTruthvtx[trkIdx];
 	  if (truthVtx != -1 and this->truthVtxIshs[truthVtx])
 	    nFTrackHS++;
 	  else
@@ -694,42 +695,32 @@ namespace MyUtl {
     //              features returned by calcFeatures.
     //   TEST_MISCL — Copies TRKPTZ so that the same selection is used; the
     //              purity gate is applied later in event_processing.h.
-    //   CALO90 / CALO60 — Also copy TRKPTZ (calo-time proximity filtering
-    //              is applied in chooseCluster, not here).
     // -----------------------------------------------------------------------
     void updateScores(BranchPointerWrapper *branch, MLModel *mlModel) {
-      // Assign TRKPTZ, CALO90, CALO60, TESTML Scores
+      // Call calcFeatures once — it returns the normalised feature vector and
+      // the raw deltaZ (cluster z − reco vertex z).  Reusing the returned
+      // deltaZ avoids a second precision-weighted z-average pass over tracks.
+      auto [features, rawDeltaZ] = this->calcFeatures(branch);
 
+      // TRKPTZ: score = TRKPT × exp(−1.5 · |Δz|)
       if (this->values.size() > 1) {
-	double dz = std::abs(this->values.at(1)-branch->recoVtxZ[0]);
-	auto oldscore = std::pow(this->scores.at(Score::TRKPT),0.9);
-        this->scores[Score::TRKPTZ] = oldscore*exp(-1.5*dz);
+        // Clustering was done with z₀ as a second dimension: use that value.
+        double dz = std::abs(this->values.at(1) - branch->recoVtxZ[0]);
+        double oldscore = std::pow(this->scores.at(Score::TRKPT), 0.9);
+        this->scores[Score::TRKPTZ] = oldscore * std::exp(-1.5 * dz);
       } else {
-	double znum=0., zden=0.;
-	for (auto trk: this->trackIndices) {
-	  auto
-	    trkZ = branch->trackZ0[trk],
-	    trkVarZ = branch->trackVarZ0[trk];
-	  znum += trkZ/(trkVarZ);
-	  zden += 1/(trkVarZ);
-	}
-
-	double z = znum/zden, zsigma = 1/std::sqrt(zden);
-	double dz = std::abs(z-branch->recoVtxZ[0]);
-        this->scores[Score::TRKPTZ] = this->scores.at(Score::TRKPT)*exp(-1.5*dz);
+        // Common case (usez0=false): reuse deltaZ already computed by calcFeatures.
+        this->scores[Score::TRKPTZ] =
+          this->scores.at(Score::TRKPT) * std::exp(-1.5 * std::abs(rawDeltaZ));
       }
 
       // ML score for TESTML
-      std::vector<float> features = this->calcFeatures(branch);
       float mlScore = mlModel->predict(features);
-      this->scores[TESTML] = mlScore;
+      this->scores[Score::TESTML] = mlScore;
 
       // TEST_MISCL uses TRKPTZ as its selection score; the purity gate is applied
       // at efficiency-check time in event_processing.h (both pass and total fills).
-      this->scores[TEST_MISCL] = this->scores.at(Score::TRKPTZ);
-
-      this->scores[Score::CALO90] = this->scores.at(Score::TRKPTZ);
-      this->scores[Score::CALO60] = this->scores.at(Score::TRKPTZ);
+      this->scores[Score::TEST_MISCL] = this->scores.at(Score::TRKPTZ);
     }
     
     // -----------------------------------------------------------------------
@@ -775,7 +766,7 @@ namespace MyUtl {
     //   This is the primary efficiency criterion used when filling the
     //   pass/total histograms in event_processing.h.
     // -----------------------------------------------------------------------
-    bool passEfficiency(BranchPointerWrapper *branch) {
+    bool passEfficiency(BranchPointerWrapper *branch) const {
       if (DEBUG) std::cout << "Choosing pass score\n";
       if (this->values.size() == 0)
 	return false;
@@ -819,28 +810,38 @@ namespace MyUtl {
     //   NOTE: MEANS[10], STDS[10] are placeholders — update from
     //   normalization_params.json after retraining with the new feature.
     // -----------------------------------------------------------------------
-    std::vector<float> calcFeatures(BranchPointerWrapper *branch) {
-      float znum  = 0., zden  = 0.;
-      float dnum  = 0., dden  = 0.;
-      float qpnum = 0., qpden = 0.;
-      float sumpt = 0.;
+    // -----------------------------------------------------------------------
+    // calcFeatures
+    //   Returns {normalised feature vector, raw deltaZ}.
+    //   The raw deltaZ is returned alongside the features so updateScores can
+    //   compute TRKPTZ without repeating the z weighted-average loop.
+    //
+    //   Single-pass optimisation: the two original track loops (one for
+    //   z/d0/q/p/sumpt, one for pT-weighted centroid η/φ) are merged into a
+    //   single scan over trackIndices so each branch array is read once.
+    // -----------------------------------------------------------------------
+    std::pair<std::vector<float>, float> calcFeatures(BranchPointerWrapper *branch) {
+      float znum  = 0.f, zden  = 0.f;
+      float dnum  = 0.f, dden  = 0.f;
+      float qpnum = 0.f, qpden = 0.f;
+      float sumpt = 0.f;
+      float etaSum = 0.f, phiSum = 0.f; // for pT-weighted centroid
+
+      // Single pass: accumulate all per-track quantities together
       for (auto trk: trackIndices) {
-        auto
-            trkZ = branch->trackZ0[trk], trkVarZ = branch->trackVarZ0[trk],
-	    trkD = branch->trackD0[trk], trkVarD = branch->trackVarD0[trk],
-	    trkQ = branch->trackQP[trk], trkVarQ = branch->trackVarQp[trk],
-	    trkPt = branch->trackPt[trk];
+        float trkZ   = branch->trackZ0[trk],  trkVarZ = branch->trackVarZ0[trk];
+        float trkD   = branch->trackD0[trk],  trkVarD = branch->trackVarD0[trk];
+        float trkQ   = branch->trackQP[trk],  trkVarQ = branch->trackVarQp[trk];
+        float trkPt  = branch->trackPt[trk];
+        float trkEta = branch->trackEta[trk];
+        float trkPhi = branch->trackPhi[trk];
 
-        znum += trkZ / (trkVarZ);
-        zden += 1 / (trkVarZ);
-
-        dnum += trkD / (trkVarD);
-        dden += 1 / (trkVarD);
-
-	qpnum += trkQ / (trkVarQ);
-        qpden += 1 / (trkVarQ);
-
-	sumpt += trkPt;
+        znum += trkZ / trkVarZ;  zden += 1.f / trkVarZ;
+        dnum += trkD / trkVarD;  dden += 1.f / trkVarD;
+        qpnum += trkQ / trkVarQ; qpden += 1.f / trkVarQ;
+        sumpt   += trkPt;
+        etaSum  += trkPt * trkEta;
+        phiSum  += trkPt * trkPhi;
       }
 
       // Calculate cluster properties
@@ -859,31 +860,20 @@ namespace MyUtl {
       float clusterNTracks   = static_cast<float>(this->trackIndices.size());
 
       // Feature 10: min ΔR between pT-weighted cluster centroid and nearest jet
-      // Mirrors clusterMinDR() in export_training_data.cxx exactly.
+      // sumpt > 0 always (at least one track), so no guard needed.
       float clusterDR = -1.0f;
       {
-        double sumPt = 0., etaSum = 0., phiSum = 0.;
-        for (int trk : this->trackIndices) {
-          double pt  = branch->trackPt[trk];
-          double eta = branch->trackEta[trk];
-          double phi = branch->trackPhi[trk];
-          sumPt  += pt;
-          etaSum += pt * eta;
-          phiSum += pt * phi;
+        float cEta = etaSum / sumpt;
+        float cPhi = phiSum / sumpt;
+        double minDR = 1e9;
+        for (int j = 0; j < (int)branch->topoJetPt.GetSize(); ++j) {
+          if (branch->topoJetPt[j] < MIN_JETPT) continue;
+          double deta = branch->topoJetEta[j] - cEta;
+          double dphi = TVector2::Phi_mpi_pi(branch->topoJetPhi[j] - cPhi);
+          double dR   = std::sqrt(deta*deta + dphi*dphi);
+          if (dR < minDR) minDR = dR;
         }
-        if (sumPt > 0.) {
-          double cEta  = etaSum / sumPt;
-          double cPhi  = phiSum / sumPt;
-          double minDR = 1e9;
-          for (int j = 0; j < (int)branch->topoJetPt.GetSize(); ++j) {
-            if (branch->topoJetPt[j] < MIN_JETPT) continue;
-            double deta = branch->topoJetEta[j] - cEta;
-            double dphi = TVector2::Phi_mpi_pi(branch->topoJetPhi[j] - cPhi);
-            double dR   = std::sqrt(deta*deta + dphi*dphi);
-            if (dR < minDR) minDR = dR;
-          }
-          if (minDR < 1e8) clusterDR = static_cast<float>(minDR);
-        }
+        if (minDR < 1e8) clusterDR = static_cast<float>(minDR);
       }
 
       // Reference vertex (primary vertex)
@@ -936,7 +926,7 @@ namespace MyUtl {
         (clusterDR          - MEANS[10]) / STDS[10],  // Feature 10
       };
 
-      return features;
+      return {features, deltaZ};
     }
   };
   

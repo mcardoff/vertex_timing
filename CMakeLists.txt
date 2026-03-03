@@ -11,10 +11,15 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Find the ROOT and Boost libraries
 # Assumes ROOT and Boost are installed and discoverable by find_package
-find_package(ROOT REQUIRED COMPONENTS RIO Core Gpad Graf Hist Tree)
+find_package(ROOT REQUIRED COMPONENTS RIO Core Gpad Graf Hist Tree TMVA)
 find_package(Boost COMPONENTS filesystem REQUIRED)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=native -DNDEBUG")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=native -DNDEBUG \
+  -fno-math-errno \
+  -fno-trapping-math \
+  -ffp-contract=fast \
+  -flto=thin \
+")
 
 # Add your executables, specifying the path to the source files
 add_executable(clustering_dt src/clustering_dt.cxx)

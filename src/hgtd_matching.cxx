@@ -171,12 +171,12 @@ int main() {
   std::map<Score, TH1D*> h_score_hs;
   std::map<Score, TH1D*> h_score_pu;
 
-  h_score_hs[TRKPT]  = new TH1D("h_score_hs_trkpt",  "HS Cluster Score (TRKPT);Score;Clusters",  50, 0, 200);
-  h_score_pu[TRKPT]  = new TH1D("h_score_pu_trkpt",  "PU Cluster Score (TRKPT);Score;Clusters",  50, 0, 200);
-  h_score_hs[TRKPTZ] = new TH1D("h_score_hs_trkptz", "HS Cluster Score (TRKPTZ);Score;Clusters", 50, 0, 200);
-  h_score_pu[TRKPTZ] = new TH1D("h_score_pu_trkptz", "PU Cluster Score (TRKPTZ);Score;Clusters", 50, 0, 200);
-  h_score_hs[TESTML] = new TH1D("h_score_hs_dnn",    "HS Cluster Score (DNN);DNN Score;Clusters", 50, 0, 1);
-  h_score_pu[TESTML] = new TH1D("h_score_pu_dnn",    "PU Cluster Score (DNN);DNN Score;Clusters", 50, 0, 1);
+  h_score_hs[Score::TRKPT]  = new TH1D("h_score_hs_trkpt",  "HS Cluster Score (TRKPT);Score;Clusters",  50, 0, 200);
+  h_score_pu[Score::TRKPT]  = new TH1D("h_score_pu_trkpt",  "PU Cluster Score (TRKPT);Score;Clusters",  50, 0, 200);
+  h_score_hs[Score::TRKPTZ] = new TH1D("h_score_hs_trkptz", "HS Cluster Score (TRKPTZ);Score;Clusters", 50, 0, 200);
+  h_score_pu[Score::TRKPTZ] = new TH1D("h_score_pu_trkptz", "PU Cluster Score (TRKPTZ);Score;Clusters", 50, 0, 200);
+  h_score_hs[Score::TESTML] = new TH1D("h_score_hs_dnn",    "HS Cluster Score (DNN);DNN Score;Clusters", 50, 0, 1);
+  h_score_pu[Score::TESTML] = new TH1D("h_score_pu_dnn",    "PU Cluster Score (DNN);DNN Score;Clusters", 50, 0, 1);
 
   // DNN-based HS cluster ranking and score ratio (parallel to existing TRKPTZ quantities)
   TH1D *h_hs_cluster_rank_dnn = new TH1D("h_hs_cluster_rank_dnn",
@@ -731,23 +731,23 @@ int main() {
       }
 
       // Fill score distributions (TRKPT, TRKPTZ, and DNN)
-      double score_trkpt  = cluster.scores[TRKPT];
-      double score_trkptz = cluster.scores[TRKPTZ];
-      double score_dnn    = cluster.scores[TESTML];
+      double score_trkpt  = cluster.scores[Score::TRKPT];
+      double score_trkptz = cluster.scores[Score::TRKPTZ];
+      double score_dnn    = cluster.scores[Score::TESTML];
 
       if (is_hs_cluster) {
-	h_score_hs[TRKPT]->Fill(score_trkpt);
-	h_score_hs[TRKPTZ]->Fill(score_trkptz);
-	h_score_hs[TESTML]->Fill(score_dnn);
+	h_score_hs[Score::TRKPT]->Fill(score_trkpt);
+	h_score_hs[Score::TRKPTZ]->Fill(score_trkptz);
+	h_score_hs[Score::TESTML]->Fill(score_dnn);
       } else {
-	h_score_pu[TRKPT]->Fill(score_trkpt);
-	h_score_pu[TRKPTZ]->Fill(score_trkptz);
-	h_score_pu[TESTML]->Fill(score_dnn);
+	h_score_pu[Score::TRKPT]->Fill(score_trkpt);
+	h_score_pu[Score::TRKPTZ]->Fill(score_trkptz);
+	h_score_pu[Score::TESTML]->Fill(score_dnn);
       }
     }
 
     // Select cluster using TRKPTZ score
-    Cluster selected_cluster = chooseCluster(clusters, TRKPTZ);
+    Cluster selected_cluster = chooseCluster(clusters, Score::TRKPTZ);
 
     // Find which cluster was selected
     int selected_idx = -1;
@@ -781,7 +781,7 @@ int main() {
     // -------------------------------------------------------
     // DNN (TESTML) parallel selection for Error Source 2
     // -------------------------------------------------------
-    Cluster dnn_selected_cluster = chooseCluster(clusters, TESTML);
+    Cluster dnn_selected_cluster = chooseCluster(clusters, Score::TESTML);
     int dnn_selected_idx = -1;
     for (int ic = 0; ic < (int)clusters.size(); ic++) {
       if (clusters[ic] == dnn_selected_cluster) { dnn_selected_idx = ic; break; }
@@ -812,7 +812,7 @@ int main() {
     if (hs_exists) {
       std::vector<std::pair<double, int>> dnn_ranking;
       for (int ic = 0; ic < (int)clusters.size(); ic++)
-        dnn_ranking.push_back({clusters[ic].scores[TESTML], ic});
+        dnn_ranking.push_back({clusters[ic].scores[Score::TESTML], ic});
       std::sort(dnn_ranking.begin(), dnn_ranking.end(), std::greater<>());
 
       int dnn_rank = 1;
@@ -849,7 +849,7 @@ int main() {
 								    );
 
       if (clusters_ideal_res.size() > 0) {
-	Cluster selected_ideal_res = chooseCluster(clusters_ideal_res, TRKPTZ);
+	Cluster selected_ideal_res = chooseCluster(clusters_ideal_res, Score::TRKPTZ);
 	if (selected_ideal_res.values.size() > 0) {
 	  double time_res_ideal_res = selected_ideal_res.values[0] - vtx_time_truth;
 	  passes_ideal_res = (std::abs(time_res_ideal_res) <= PASS_THRESHOLD);
@@ -868,7 +868,7 @@ int main() {
 								    );
 
       if (clusters_ideal_eff.size() > 0) {
-	Cluster selected_ideal_eff = chooseCluster(clusters_ideal_eff, TRKPTZ);
+	Cluster selected_ideal_eff = chooseCluster(clusters_ideal_eff, Score::TRKPTZ);
 	if (selected_ideal_eff.values.size() > 0) {
 	  double time_res_ideal_eff = selected_ideal_eff.values[0] - vtx_time_truth;
 	  passes_ideal_eff = (std::abs(time_res_ideal_eff) <= PASS_THRESHOLD);
@@ -940,9 +940,9 @@ int main() {
       // updateScores sets TESTML (and TEST_MISCL) on every cluster; calcPurity is
       // already called in the cluster-identity loop above.
       // chooseCluster with TESTML picks the cluster with the highest DNN score.
-      Cluster dnn_cluster = chooseCluster(clusters, TESTML);
+      Cluster dnn_cluster = chooseCluster(clusters, Score::TESTML);
 
-      double dnn_score    = dnn_cluster.scores.at(TESTML);
+      double dnn_score    = dnn_cluster.scores.at(Score::TESTML);
       double dnn_purity   = dnn_cluster.purity;
       double dnn_time     = (dnn_cluster.values.size() > 0) ? dnn_cluster.values[0] : -999.0;
       double dnn_diff     = dnn_time - vtx_time_truth;
@@ -1160,7 +1160,7 @@ int main() {
     if (hs_exists) {
       std::vector<std::pair<double, int>> score_ranking;
       for (int ic = 0; ic < clusters.size(); ic++) {
-	score_ranking.push_back({clusters[ic].scores[TRKPTZ], ic});
+	score_ranking.push_back({clusters[ic].scores[Score::TRKPTZ], ic});
       }
       std::sort(score_ranking.begin(), score_ranking.end(), std::greater<>());
 
@@ -1489,45 +1489,45 @@ int main() {
 
   c4->cd(1);
   gPad->SetLogy();
-  h_score_hs[TRKPT]->SetLineColor(C01);
-  h_score_hs[TRKPT]->SetFillColorAlpha(C01, 0.3);
-  h_score_hs[TRKPT]->SetLineWidth(2);
-  h_score_hs[TRKPT]->Draw("HIST");
+  h_score_hs[Score::TRKPT]->SetLineColor(C01);
+  h_score_hs[Score::TRKPT]->SetFillColorAlpha(C01, 0.3);
+  h_score_hs[Score::TRKPT]->SetLineWidth(2);
+  h_score_hs[Score::TRKPT]->Draw("HIST");
 
-  h_score_pu[TRKPT]->SetLineColor(C02);
-  h_score_pu[TRKPT]->SetFillColorAlpha(C02, 0.3);
-  h_score_pu[TRKPT]->SetLineWidth(2);
-  h_score_pu[TRKPT]->Draw("HIST SAME");
+  h_score_pu[Score::TRKPT]->SetLineColor(C02);
+  h_score_pu[Score::TRKPT]->SetFillColorAlpha(C02, 0.3);
+  h_score_pu[Score::TRKPT]->SetLineWidth(2);
+  h_score_pu[Score::TRKPT]->Draw("HIST SAME");
 
   TLegend *leg4 = new TLegend(0.6, 0.7, 0.88, 0.88);
-  leg4->AddEntry(h_score_hs[TRKPT], "HS clusters", "f");
-  leg4->AddEntry(h_score_pu[TRKPT], "PU clusters", "f");
+  leg4->AddEntry(h_score_hs[Score::TRKPT], "HS clusters", "f");
+  leg4->AddEntry(h_score_pu[Score::TRKPT], "PU clusters", "f");
   leg4->Draw();
 
   c4->cd(2);
   gPad->SetLogy();
-  h_score_hs[TRKPTZ]->SetLineColor(C01);
-  h_score_hs[TRKPTZ]->SetFillColorAlpha(C01, 0.3);
-  h_score_hs[TRKPTZ]->SetLineWidth(2);
-  h_score_hs[TRKPTZ]->Draw("HIST");
+  h_score_hs[Score::TRKPTZ]->SetLineColor(C01);
+  h_score_hs[Score::TRKPTZ]->SetFillColorAlpha(C01, 0.3);
+  h_score_hs[Score::TRKPTZ]->SetLineWidth(2);
+  h_score_hs[Score::TRKPTZ]->Draw("HIST");
 
-  h_score_pu[TRKPTZ]->SetLineColor(C02);
-  h_score_pu[TRKPTZ]->SetFillColorAlpha(C02, 0.3);
-  h_score_pu[TRKPTZ]->SetLineWidth(2);
-  h_score_pu[TRKPTZ]->Draw("HIST SAME");
+  h_score_pu[Score::TRKPTZ]->SetLineColor(C02);
+  h_score_pu[Score::TRKPTZ]->SetFillColorAlpha(C02, 0.3);
+  h_score_pu[Score::TRKPTZ]->SetLineWidth(2);
+  h_score_pu[Score::TRKPTZ]->Draw("HIST SAME");
   leg4->Draw();
 
   c4->cd(3);
   gPad->SetLogy();
-  h_score_hs[TESTML]->SetLineColor(C01);
-  h_score_hs[TESTML]->SetFillColorAlpha(C01, 0.3);
-  h_score_hs[TESTML]->SetLineWidth(2);
-  h_score_hs[TESTML]->Draw("HIST");
+  h_score_hs[Score::TESTML]->SetLineColor(C01);
+  h_score_hs[Score::TESTML]->SetFillColorAlpha(C01, 0.3);
+  h_score_hs[Score::TESTML]->SetLineWidth(2);
+  h_score_hs[Score::TESTML]->Draw("HIST");
 
-  h_score_pu[TESTML]->SetLineColor(C02);
-  h_score_pu[TESTML]->SetFillColorAlpha(C02, 0.3);
-  h_score_pu[TESTML]->SetLineWidth(2);
-  h_score_pu[TESTML]->Draw("HIST SAME");
+  h_score_pu[Score::TESTML]->SetLineColor(C02);
+  h_score_pu[Score::TESTML]->SetFillColorAlpha(C02, 0.3);
+  h_score_pu[Score::TESTML]->SetLineWidth(2);
+  h_score_pu[Score::TESTML]->Draw("HIST SAME");
   leg4->Draw();
 
   c4->SaveAs("error_analysis_plots/plot4_cluster_scores.pdf");

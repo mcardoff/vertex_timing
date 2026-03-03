@@ -371,14 +371,14 @@ namespace MyUtl {
       
       params = std::make_unique<FitParams>(
         title, times, Form("%s_%s_%s", name.Data(), toString(score),times),
-	xMin, foldVal, foldMax, xWid,COLORS[score % COLORS.size()]);
-      
+	xMin, foldVal, foldMax, xWid,COLORS[score.id % COLORS.size()]);
+
       purity = std::make_unique<TH2D>(
         Form("cluster_purity_%s_%s_%s", name.Data(), toString(score),times),
 	Form("%s Cluster Purity vs %s (%s);%s;Cluster Purity",
 	     toString(score), title, times, title),
 	xbins, xMin, xMax, pbins, pMin, pMax);
-      purity->SetLineColor(COLORS[score % COLORS.size()]);
+      purity->SetLineColor(COLORS[score.id % COLORS.size()]);
     }
 
     PlotObj(const PlotObj&) = delete;
@@ -387,17 +387,17 @@ namespace MyUtl {
     PlotObj& operator=(PlotObj&& other) noexcept = default;
     ~PlotObj() {}
 
-    void fillPurity(double& x, double&y) { this->purity->Fill(x,y); }
-    void fillPurity(int& x, double&y) { this->purity->Fill(x,y); }
+    void fillPurity(const double x, const double y) { this->purity->Fill(x,y); }
+    void fillPurity(const int x,    const double y) { this->purity->Fill(x,y); }
 
-    void fillDiff(double& x, double&y) { this->hist->Fill(x,y); }
-    void fillDiff(int& x, double&y) { this->hist->Fill(x,y); }
+    void fillDiff(const double x, const double y) { this->hist->Fill(x,y); }
+    void fillDiff(const int x,    const double y) { this->hist->Fill(x,y); }
 
-    void fillPass(double& val) { this->effPass->Fill(val); }
-    void fillPass(int& val) { this->effPass->Fill(val); }
-    
-    void fillTotal(double& val) { this->effTotal->Fill(val); }
-    void fillTotal(int& val) { this->effTotal->Fill(val); }
+    void fillPass(const double val) { this->effPass->Fill(val); }
+    void fillPass(const int val)    { this->effPass->Fill(val); }
+
+    void fillTotal(const double val) { this->effTotal->Fill(val); }
+    void fillTotal(const int val)    { this->effTotal->Fill(val); }
     
     // -----------------------------------------------------------------------
     // plotPostProcessing
@@ -458,7 +458,7 @@ namespace MyUtl {
       std::unique_ptr<TEfficiency> eff = std::make_unique<TEfficiency>(*this->effPass, *this->effTotal);
       eff->SetStatisticOption(TEfficiency::kFNormal);
       eff->SetTitle(Form("Efficiency vs %s (%s);%s;Efficiency", this->xtitle, this->times, this->xtitle));
-      eff->SetLineColor(MyUtl::COLORS[this->scoreToUse % COLORS.size()]);
+      eff->SetLineColor(MyUtl::COLORS[this->scoreToUse.id % COLORS.size()]);
       eff->SetLineWidth(2);
       efficiency = std::move(eff);
 
@@ -671,7 +671,17 @@ namespace MyUtl {
     // inclusive resolution for the scoretype provided
     std::unique_ptr<TH1D> inclusiveReso;
     std::unique_ptr<TH1D> inclusivePurity;
-    
+
+    // Cached raw pointers for the six standard fill keys.
+    // Populated at the end of the constructor so that fill helpers can avoid
+    // std::map string lookups (O(log N) string comparison) on every event.
+    PlotObj* ptr_fjet     = nullptr;
+    PlotObj* ptr_vtx_dz   = nullptr;
+    PlotObj* ptr_ftrack   = nullptr;
+    PlotObj* ptr_pu_frac  = nullptr;
+    PlotObj* ptr_hs_track = nullptr;
+    PlotObj* ptr_pu_track = nullptr;
+
     // Non-const version for modification
     std::unique_ptr<PlotObj>& operator[](const std::string& key) {
       return dataObjects[key];
@@ -777,6 +787,14 @@ namespace MyUtl {
 	Form("purity_%s", filenameIDer.Data()),
 	Form("%s Purity (%s);Purity;Entries", toString(score), timetypeIDer),
 	(int)((PURITY_MAX-PURITY_MIN)/PURITY_WIDTH), PURITY_MIN, PURITY_MAX);
+
+      // Cache raw PlotObj* pointers for fast per-event fill access (no map lookup)
+      ptr_fjet     = dataObjects["fjet"    ].get();
+      ptr_vtx_dz   = dataObjects["vtx_dz" ].get();
+      ptr_ftrack   = dataObjects["ftrack"  ].get();
+      ptr_pu_frac  = dataObjects["pu_frac" ].get();
+      ptr_hs_track = dataObjects["hs_track"].get();
+      ptr_pu_track = dataObjects["pu_track"].get();
     }
 
     // -----------------------------------------------------------------------
@@ -974,7 +992,7 @@ namespace MyUtl {
     canvas->SetLogy(logscale);
     for (auto pair: purityMap) {
       TH1D *hist = pair.second;
-      hist->SetLineColor(COLORS[pair.first % COLORS.size()]);
+      hist->SetLineColor(COLORS[pair.first.id % COLORS.size()]);
       hist->SetLineWidth(2);
       hist->SetBinContent(hist->GetNbinsX(), 
 			  hist->GetBinContent(hist->GetNbinsX()) + hist->GetBinContent(hist->GetNbinsX()+1));

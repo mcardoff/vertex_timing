@@ -140,6 +140,7 @@ int main() {
           /*smearRes=*/10.0,
           /*useCone=*/true,
           /*usez0=*/false,
+          /*sortTracks=*/false,
           /*calcPurityFlag=*/true);
 
       if (clusters.empty()) continue;

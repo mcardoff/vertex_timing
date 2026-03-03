@@ -69,6 +69,7 @@
 #include <utility>
 #include <vector>
 #include <map>
+#include <unordered_map>
 #include <memory>
 
 #endif // CLUSTERING_INCLUDES_H

@@ -11,10 +11,11 @@
 //     4. makeSimpleClusters    — seed one cluster per track
 //     5. doSimultaneousClustering — agglomerative (minimum-distance) merge
 //     6. doConeClustering      — seed-and-cone merge
-//     7. clusterTracksInTime   — top-level clustering entry point
-//     8. chooseHGTDCluster     — select cluster closest to reco vertex time
-//     9. chooseCluster (all scores) — select best cluster for every Score
-//    10. chooseCluster (single score) — select best cluster for one Score
+//     7. clusterTracksInTime      — top-level clustering entry point
+//     8. chooseHGTDCluster        — select cluster closest to reco vertex time
+//     9. chooseHGTDSortCluster    — select highest-BDT cluster (HGTD_SORT score)
+//    10. chooseCluster (all scores) — select best cluster for every Score
+//    11. chooseCluster (single score) — select best cluster for one Score
 // ---------------------------------------------------------------------------
 
 #include <cmath>
@@ -22,6 +23,8 @@
 #include "clustering_constants.h"
 #include "clustering_structs.h"
 #include "ml_model.h"
+#include "TMVA/Tools.h"
+#include "TMVA/Reader.h"
 
 namespace MyUtl {
 
@@ -92,7 +95,7 @@ namespace MyUtl {
   //   freshly merged clusters and reset the flag before the next pass.
   // ---------------------------------------------------------------------------
   auto mergeClusters(
-    Cluster a, Cluster b
+    const Cluster& a, const Cluster& b
   ) -> Cluster {
     Cluster mergedCluster;
     mergedCluster.wasMerged = true;
@@ -150,12 +153,13 @@ namespace MyUtl {
     const std::vector<int>& trackIndices,
     BranchPointerWrapper *branch,
     bool useSmearedTimes,                         // if true, use smeared_times map
-    const std::map<int, double>& smearedTimesMap, // map of smeared times
-    const std::map<int, double>& smearedTimeResMap, // map of resolution for smeared times if used
+    const std::unordered_map<int, double>& smearedTimesMap, // map of smeared times
+    const std::unordered_map<int, double>& smearedTimeResMap, // map of resolution for smeared times if used
     bool checkTimeValid,                          // if true, apply branch->track_time_valid check
     bool usez0
   ) -> std::vector<Cluster> {
     std::vector<Cluster> simpleClusters;
+    simpleClusters.reserve(trackIndices.size()); // avoid repeated reallocation
     for (auto idx: trackIndices) {
       if (!checkTimeValid || branch->trackTimeValid[idx] == 1) {
 	double trkTime = NAN;
@@ -225,13 +229,16 @@ namespace MyUtl {
 
       // fuse closest two vertices
       if (distance < distCut and i0 != j0) {
-	Cluster newCluster = mergeClusters(collection->at(i0),collection->at(j0));
-	collection->erase(collection->begin()+j0);
-	if (i0 < j0)
-	  collection->erase(collection->begin()+i0);
-	else
-	  collection->erase(collection->begin()+(i0-1));
-	collection->push_back(newCluster);
+	Cluster newCluster = mergeClusters(collection->at(i0), collection->at(j0));
+	// j0 > i0 always (inner loop starts at j = i+1).
+	// Remove the higher index first so i0 stays valid, both in O(1).
+	auto sz = collection->size();
+	if ((size_t)j0 != sz - 1) (*collection)[j0] = std::move((*collection)[sz - 1]);
+	collection->pop_back();
+	sz = collection->size();
+	if ((size_t)i0 != sz - 1) (*collection)[i0] = std::move((*collection)[sz - 1]);
+	collection->pop_back();
+	collection->push_back(std::move(newCluster));
       } else {
 	if (std::find_if(collection->begin(), collection->end(),
 			 [](const Cluster& a) {return a.wasMerged;}) != collection->end()) {
@@ -273,36 +280,43 @@ namespace MyUtl {
       
       if (DEBUG) std::cout << "Found Seed\n";
 
-      // find merge candidates
-      Cluster seed = collection->at(i0);
+      // find merge candidates — use a const-ref to avoid copying the seed
+      // cluster before we know whether any merge will happen.
+      const Cluster& seedRef = (*collection)[i0];
       std::vector<int> toMerge;
-      for (int j = 0; j < collection->size(); ++j) {
+      for (int j = 0; j < (int)collection->size(); ++j) {
 	if (j == i0) { continue; }
-	double clusterDistance = getDistanceBetweenClusters(seed, collection->at(j));
+	double clusterDistance = getDistanceBetweenClusters(seedRef, (*collection)[j]);
 	if (clusterDistance < distCut) {
 	  toMerge.push_back(j);
 	}
       }
-      
+
       if (DEBUG) std::cout << "Found " << toMerge.size() << " merge candidates\n";
 
       if (!toMerge.empty()) {
-	Cluster newCluster = seed;
+	Cluster newCluster = (*collection)[i0]; // copy only when we know we need it
 	for (int idx : toMerge)
 	  newCluster = mergeClusters(newCluster, collection->at(idx));
 
 	newCluster.wasMerged = true;
 	toMerge.push_back(i0);
+	// Remove all consumed clusters in descending-index order via O(1) swap+pop_back.
+	// Descending order ensures each swap targets a position that hasn't been
+	// vacated yet by an earlier removal.
 	std::sort(toMerge.begin(), toMerge.end(), std::greater<int>());
 	for (int idx : toMerge) {
-	  collection->erase(collection->begin() + idx);
+	  auto last = collection->size() - 1;
+	  if ((size_t)idx != last) (*collection)[idx] = std::move((*collection)[last]);
+	  collection->pop_back();
 	}
-	collection->push_back(newCluster);
+	collection->push_back(std::move(newCluster));
       } else {
-	Cluster seedOnly = collection->at(i0);
-	seedOnly.wasMerged = true;
-	collection->erase(collection->begin() + i0);
-	collection->push_back(seedOnly);
+	// Seed has no merge candidates: mark it done in-place and rotate it to
+	// the back so the seed-search loop skips it (wasMerged == true).
+	(*collection)[i0].wasMerged = true;
+	if ((size_t)i0 != collection->size() - 1)
+	  std::swap((*collection)[i0], collection->back());
       }
     } // While
     if (DEBUG) std::cout << "Finished Clustering\n";
@@ -326,21 +340,31 @@ namespace MyUtl {
      const std::vector<int>& trackIndices,
      BranchPointerWrapper *branch,
      double distanceCut,          // Cone size/distance cut
-     bool useSmearedTimes,        // for ideal cases
-     bool checkTimeValid,         // for ideal efficiency
-     double smearRes,             // fixed resolution for smeared times
-     bool useCone,                // whether or not to use improved cone clustering
+     bool useSmearedTimes,        // For Ideal Scenarios
+     bool checkTimeValid,         // For Ideal Efficiency Scenario
+     double smearRes,             // Fixed resolution for smeared times
+     bool useCone,                // Whether or not to use improved cone clustering
      bool usez0,                  // Use z info in clustering as well
+     bool sortTracks = false,      // Before clustering, sort tracks by pT
      bool calcPurityFlag = false  // only compute purity when TEST_MISCL is active
   ) -> std::vector<Cluster> {
     if (trackIndices.empty() && DEBUG)
       std::cout << "EMPTY!!!!\n";
 
-    std::map<int,double> smearedTimesMap;
-    std::map<int,double> smearedTimeResMap;
+    std::vector<int> sortedIndices;
+    if (sortTracks) {
+      sortedIndices = trackIndices;
+      std::sort(sortedIndices.begin(), sortedIndices.end(), [&](int a, int b) {
+        return branch->trackPt[a] > branch->trackPt[b];
+      });
+    }
+    const std::vector<int>& indices = sortTracks ? sortedIndices : trackIndices;
+
+    std::unordered_map<int,double> smearedTimesMap;
+    std::unordered_map<int,double> smearedTimeResMap;
 
     if (useSmearedTimes) {
-      for (auto idx: trackIndices) {
+      for (auto idx: indices) {
 	double res = smearRes;
 	bool timeQuery = branch->trackTimeValid[idx] == 1
 	  and branch->trackHgtdHits[idx] > 0;
@@ -354,7 +378,7 @@ namespace MyUtl {
     }
 
     std::vector<Cluster> collection =
-      makeSimpleClusters(trackIndices, branch, useSmearedTimes,
+      makeSimpleClusters(indices, branch, useSmearedTimes,
 			 smearedTimesMap, smearedTimeResMap, checkTimeValid, usez0);
     
     if (not useCone)
@@ -394,7 +418,7 @@ namespace MyUtl {
     double minDiff = 1e50;
     double recoTime = branch->recoVtxTime[0];
     Cluster minCluster;
-    for (Cluster cluster: collection) {
+    for (const Cluster& cluster: collection) {
       double thisDiff = std::abs(cluster.values.at(0) - recoTime);
       if (thisDiff < minDiff) {
 	minDiff = thisDiff;
@@ -405,105 +429,160 @@ namespace MyUtl {
   }
   
   // ---------------------------------------------------------------------------
-  // 9. chooseCluster  [all-scores overload]
-  //   Iterates over every Score in ENUM_VEC and selects the highest-scoring
-  //   cluster for each, returning a map keyed on Score.  Special handling:
-  //     HGTD     — skipped here; handled separately by chooseHGTDCluster.
-  //     FILTJET / FILT60 / FILT90 — skipped; use their own pre-filtered
-  //                collection and are chosen by the single-score overload.
-  //     JUST60 / JUST90 — a synthetic cluster with only a calorimeter time
-  //                is inserted directly (no track-based cluster chosen).
+  // 9. chooseHGTDSortCluster
+  //   Evaluates each cluster with the ATLAS HGTD TMVA BDT and returns the
+  //   cluster with the highest BDT output.  The BDT score is stored in
+  //   cluster.scores[Score::HGTD_SORT] so the caller can apply the 0.3
+  //   confidence threshold.
+  //
+  //   TMVA variables (order must match weights XML exactly):
+  //     m_delta_z          — cluster z minus primary vertex z (mm)
+  //     m_z_sigma          — cluster z uncertainty (mm)
+  //     m_q_over_p         — precision-weighted charge-over-momentum
+  //     m_q_over_p_sigma   — q/p uncertainty
+  //     m_delta_z_resunits — delta_z in cluster z-resolution units
+  //     m_cluster_sumpt2   — sum of constituent track pT² (GeV²)
+  //     m_d0               — precision-weighted transverse impact parameter (mm)
+  //     m_d0_sigma         — d0 uncertainty (mm)
+  //
+  //   The TMVA::Reader is initialised once (static) — safe for the serial
+  //   TTreeReader event loop in clustering_dt.cxx.
+  // ---------------------------------------------------------------------------
+  auto chooseHGTDSortCluster(
+    const std::vector<Cluster>& collection,
+    BranchPointerWrapper* branch
+  ) -> Cluster {
+    if (collection.empty()) return Cluster{};
+
+    // Static floats: TMVA Reader holds float* pointers to these, so they must
+    // have stable addresses.  Initialised to 0 by the C++ standard.
+    static float m_delta_z, m_z_sigma, m_q_over_p, m_q_over_p_sigma;
+    static float m_delta_z_resunits, m_cluster_sumpt2, m_d0, m_d0_sigma;
+
+    // Initialise TMVA Reader once; variable order must match the weights XML.
+    static TMVA::Reader* reader = []() {
+      TMVA::Tools::Instance();
+      TMVA::Reader* r = new TMVA::Reader("!Color:!Silent");
+      r->AddVariable("m_delta_z",          &m_delta_z);
+      r->AddVariable("m_z_sigma",          &m_z_sigma);
+      r->AddVariable("m_q_over_p",         &m_q_over_p);
+      r->AddVariable("m_q_over_p_sigma",   &m_q_over_p_sigma);
+      r->AddVariable("m_delta_z_resunits", &m_delta_z_resunits);
+      r->AddVariable("m_cluster_sumpt2",   &m_cluster_sumpt2);
+      r->AddVariable("m_d0",               &m_d0);
+      r->AddVariable("m_d0_sigma",         &m_d0_sigma);
+      r->BookMVA("BDT", "../share/models/TMVA.VBFinv.mu200.Step3p1.8var.weights.xml");
+      std::cout << "✓ HGTD BDT loaded (one-time initialization)" << std::endl;
+      return r;
+    }();
+
+    Cluster best;
+    double bestScore = -1e50;
+    float refVtxZ = branch->recoVtxZ[0];
+
+    for (const Cluster& cluster : collection) {
+      float znum = 0., zden = 0., dnum = 0., dden = 0., qpnum = 0., qpden = 0.;
+      float sumpt2 = 0.;
+
+      for (auto trk : cluster.trackIndices) {
+        float trkZ   = branch->trackZ0[trk],  trkVarZ = branch->trackVarZ0[trk];
+        float trkD   = branch->trackD0[trk],  trkVarD = branch->trackVarD0[trk];
+        float trkQ   = branch->trackQP[trk],  trkVarQ = branch->trackVarQp[trk];
+        float trkPt  = branch->trackPt[trk];
+        znum  += trkZ / trkVarZ;  zden  += 1.f / trkVarZ;
+        dnum  += trkD / trkVarD;  dden  += 1.f / trkVarD;
+        qpnum += trkQ / trkVarQ;  qpden += 1.f / trkVarQ;
+        sumpt2 += trkPt * trkPt;
+      }
+
+      float clusterZ        = znum / zden;
+      float clusterZSigma   = 1.f / std::sqrt(zden);
+      float deltaZ          = clusterZ - refVtxZ;
+
+      m_delta_z          = deltaZ;
+      m_z_sigma          = clusterZSigma;
+      m_q_over_p         = qpnum / qpden;
+      m_q_over_p_sigma   = 1.f / std::sqrt(qpden);
+      m_delta_z_resunits = deltaZ / clusterZSigma;
+      m_cluster_sumpt2   = sumpt2;
+      m_d0               = dnum / dden;
+      m_d0_sigma         = 1.f / std::sqrt(dden);
+
+      double bdtScore = reader->EvaluateMVA("BDT");
+      if (bdtScore > bestScore) {
+        bestScore = bdtScore;
+        best = cluster;
+      }
+    }
+
+    best.scores[Score::HGTD_SORT] = bestScore;
+    return best;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 10. chooseCluster  [all-scores overload]
+  //   Iterates over every Score in SCORE_REGISTRY and selects the highest-
+  //   scoring cluster for each, returning a map keyed on Score.
+  //   Special handling:
+  //     HGTD / HGTD_SORT — skipped; each uses its own dedicated collection
+  //                         (handled by chooseHGTDCluster / chooseHGTDSortCluster).
+  //     FILTJET — skipped; uses a pre-filtered jet-cone track collection and
+  //               is chosen by the single-score overload.
   //     PASS    — uses passEfficiency() as the selection criterion instead
-  //                of a numeric score.
-  //     CALO90 / CALO60 — additionally require the cluster time to be within
-  //                2σ of a smeared calorimeter time.
+  //               of a numeric score.
   //   Intended for the main analysis path where all active scores are needed
   //   simultaneously, avoiding repeated iteration over the cluster collection.
   // ---------------------------------------------------------------------------
   auto chooseCluster(
-    std::vector<Cluster>& collection,
+    const std::vector<Cluster>& collection,
     BranchPointerWrapper *branch
   ) -> std::map<Score, Cluster> {
     std::map<Score,Cluster> output;
     if (DEBUG) std::cout << "Choosing score\n";
 
-    double caloTime90, caloTime60;
-    if (std::find(ENUM_VEC.begin(), ENUM_VEC.end(), CALO90) != ENUM_VEC.end())      
-      caloTime90 = gRandom->Gaus(branch->truthVtxTime[0],90);
-
-    if (std::find(ENUM_VEC.begin(), ENUM_VEC.end(), CALO60) != ENUM_VEC.end())      
-      caloTime60 = gRandom->Gaus(branch->truthVtxTime[0],60);
-    
-    for (Score score: ENUM_VEC) {
+    for (Score score: SCORE_REGISTRY) {
       if (DEBUG)
         std::cout << "SCORE: " << toString(score) << '\n';
-      if (score == HGTD)
+      if (score.usesOwnCollection)
 	continue;
 
-      // skip filtered tracks, they use a different collection
-      if (score == FILTJET or score == FILT60 or score == FILT90)
+      // FILTJET uses its own pre-filtered collection; chosen by single-score overload
+      if (score == Score::FILTJET)
 	continue;
-      if (score == Score::JUST60) {
-	output[score] = {{caloTime60}, {60.0}, {}, {-1}, {}};
-	continue;
-      }
-      
-      if (score == Score::JUST90) {
-	output[score] = {{caloTime90}, {90.0}, {}, {-1}, {}};
-	continue;
-      }
 
-      if (score == Score::PASS) {        
+      if (score == Score::PASS) {
 	if (DEBUG) std::cout << "Choosing pass score\n";
-        for (Cluster &cluster : collection)
-          if (cluster.passEfficiency(branch))            
+        for (const Cluster& cluster : collection)
+          if (cluster.passEfficiency(branch))
 	    output[score] = cluster;
 	continue;
       }
 
-      output[score] = collection[0]; // final time we are giving to the user
-      double maxScore = output[score].scores.at(score);
-      // std::cout << ""<< maxScore << '\n';
-    
-      for (Cluster& cluster: collection) {
-	double compScore = cluster.scores[score];
-	bool query = compScore > maxScore;
+      // Track the best cluster via pointer — only copy the winner once at the end.
+      const Cluster* best = &collection[0];
+      double maxScore = best->scores.at(score);
 
-	if (score == Score::CALO90) {
-	  double caloDiff = std::abs(cluster.values.at(0)-caloTime90);
-	  double caloSigma = std::hypot(cluster.sigmas.at(0), 90);
-	  double nsigma = caloDiff/caloSigma;
-	  if (nsigma > 2.0)
-	    continue;
-	}
-
-	if (score == Score::CALO60) {
-	  double caloDiff = std::abs(cluster.values.at(0)-caloTime60);
-	  double caloSigma = std::hypot(cluster.sigmas.at(0), 60);
-	  double nsigma = caloDiff/caloSigma;
-	  if (nsigma > 2.0)
-	    continue;
-	}
-	
-	if (query) {
+      for (const Cluster& cluster: collection) {
+	double compScore = cluster.scores.at(score);
+	if (compScore > maxScore) {
 	  maxScore = compScore;
-	  output[score] = cluster;
+	  best = &cluster;
 	}
       }
+      output[score] = *best;
     }
     return output;
   }
 
   // ---------------------------------------------------------------------------
-  // 10. chooseCluster  [single-score overload]
+  // 11. chooseCluster  [single-score overload]
   //   Selects the highest-scoring cluster for a single specified Score by
-  //   linear scan.  Simpler than the all-scores overload: no calorimeter-time
-  //   gating, no PASS/JUST special cases.  Used to choose the best cluster
-  //   from pre-filtered collections (FILT60, FILT90, FILTJET) where only one
-  //   score (TRKPTZ) is needed.
+  //   linear scan.  Simpler than the all-scores overload: no PASS special
+  //   case.  Used to choose the best cluster from the pre-filtered FILTJET
+  //   collection where only TRKPTZ scoring is needed.
   // ---------------------------------------------------------------------------
   auto chooseCluster(
-    std::vector<Cluster>& collection,
+    const std::vector<Cluster>& collection,
     Score score
   ) -> Cluster {
     if (DEBUG) std::cout << "Choosing score\n";
@@ -516,8 +595,8 @@ namespace MyUtl {
     Cluster output = collection[0]; // final time we are giving to the user
     double maxScore = output.scores.at(score);
     
-    for (Cluster& cluster: collection) {
-      double compScore = cluster.scores[score];
+    for (const Cluster& cluster: collection) {
+      double compScore = cluster.scores.at(score);
       bool query = compScore > maxScore;
 	
       if (query) {

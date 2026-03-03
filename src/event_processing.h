@@ -10,10 +10,12 @@
 //     2. setupChain (single-file overload) — add one file by run number
 //     3. passTrackVertexAssociation — |z₀ - vtx_z| / σ significance cut
 //     4. pileupRemoval              — reject tracks near a non-HS vertex
-//     5. filterCaloTracks           — reject tracks inconsistent with calo time
-//     6. filterTracksInJets         — keep only tracks within ΔR of a jet
-//     7. getAssociatedTracks        — full HGTD-acceptance + pTV selection
-//     8. processEventData           — main per-event analysis function
+//     5. filterTracksInJets         — keep only tracks within ΔR of a jet
+//     6. getAssociatedTracks        — full HGTD-acceptance + pTV selection
+//     7. EventCounts                — per-event count and histogram-fill values
+//     8. Histogram fill helpers     — fillTotals / fillPasses / fillDiffs / fillPurities
+//     9. selectClusters             — choose best cluster for every active score
+//    10. processEventData           — main per-event analysis orchestrator
 // ---------------------------------------------------------------------------
 
 #include "clustering_includes.h"
@@ -43,7 +45,7 @@ namespace MyUtl {
       chain.Add(entry.path().c_str());
       // break;
     }
-  
+
     if (chain.GetEntries() == 0) {
       std::cerr << "No ROOT files found in directory\n";
       return;
@@ -54,7 +56,7 @@ namespace MyUtl {
   // 2. setupChain  [single-file overload]
   //   Adds a single SuperNtuple file to chain, selected by its numeric run
   //   identifier.  Convenience wrapper for quick single-file checks.
-// ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
   void setupChain(
     TChain &chain, const std::string& number
   ) {
@@ -80,7 +82,7 @@ namespace MyUtl {
       trkZVar = branch->trackVarZ0[trackIdx],
       vxZ      = branch->recoVtxZ[vertexIdx],
       vxZVar  = 0.0;
-    
+
     double nsigmaPrim = std::abs(trkZ0 - vxZ) / std::sqrt(trkZVar + vxZVar);
     return nsigmaPrim < significanceCut;
   }
@@ -117,38 +119,7 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
-  // 5. filterCaloTracks
-  //   Retains only tracks whose HGTD time is within significanceCut standard
-  //   deviations of a calorimeter-smeared event time.  The calorimeter time
-  //   is drawn from Gaus(truthVtxTime[0], caloRes) once per call.  Tracks
-  //   where |t_trk - t_calo| / sqrt(σ_trk² + caloRes²) > significanceCut
-  //   are removed.  Used to build the FILT60 and FILT90 filtered-track
-  //   collections.
-  // ---------------------------------------------------------------------------
-  std::vector<int> filterCaloTracks(
-    const std::vector<int>& tracks,
-    BranchPointerWrapper *branch,
-    double caloRes,
-    double signficanceCut
-  ) {
-    std::vector<int> output;
-    double caloTime = gRandom->Gaus(branch->truthVtxTime[0], caloRes);
-    for (const auto& trk: tracks) {
-      double trkTime = branch->trackTime[trk];
-      double trkTimeRes = branch->trackTimeRes[trk];
-      double caloDiff = std::abs(trkTime-caloTime);
-      double caloSigma = std::hypot(trkTimeRes, caloRes);
-      double nsigma = caloDiff/caloSigma;
-      if (nsigma > signficanceCut)
-	continue;
-      
-      output.push_back(trk);
-    }
-    return output;
-  }
-
-  // ---------------------------------------------------------------------------
-  // 6. filterTracksInJets
+  // 5. filterTracksInJets
   //   Retains only tracks that lie within minDRCut of at least one reco jet
   //   with pT > MIN_JETPT.  ΔR is computed using the standard
   //   sqrt(Δη² + Δφ²) metric.  Used to build the FILTJET collection, which
@@ -160,31 +131,31 @@ namespace MyUtl {
     double minDRCut
   ) {
     std::vector<int> output;
+    output.reserve(tracks.size()); // upper bound; shrink_to_fit not worth the cost
+    const int nJets = branch->topoJetEta.GetSize();
     for (const auto& trk: tracks) {
       double
 	trkEta = branch->trackEta[trk],
 	trkPhi = branch->trackPhi[trk];
-      double minDR = 1e6;
-      for (size_t jetIdx=0; jetIdx < branch->topoJetEta.GetSize(); ++jetIdx) {
+      bool inCone = false;
+      for (int jetIdx = 0; jetIdx < nJets; ++jetIdx) {
 	if (branch->topoJetPt[jetIdx] < MIN_JETPT) continue;
 	double
-	  jetEta = branch->topoJetEta[jetIdx],
-	  jetPhi = branch->topoJetPhi[jetIdx];
-	double
-	  deta = jetEta-trkEta,
-	  dphi = TVector2::Phi_mpi_pi(jetPhi - trkPhi);
-	double thisDR = std::hypot(deta, dphi);
-	if (thisDR < minDR)
-	  minDR = thisDR;
+	  deta = branch->topoJetEta[jetIdx] - trkEta,
+	  dphi = TVector2::Phi_mpi_pi(branch->topoJetPhi[jetIdx] - trkPhi);
+	if (std::hypot(deta, dphi) < minDRCut) {
+	  inCone = true;
+	  break; // found a qualifying jet — no need to check the rest
+	}
       }
-      if (minDR < minDRCut)
+      if (inCone)
 	output.push_back(trk);
     }
     return output;
   }
 
   // ---------------------------------------------------------------------------
-  // 7. getAssociatedTracks
+  // 6. getAssociatedTracks
   //   Scans the full track array and returns indices of tracks that pass:
   //     • HGTD η acceptance: MIN_HGTD_ETA < |η| < MAX_HGTD_ETA
   //     • pT window: minTrkPt < pT < maxTrkPt
@@ -219,270 +190,291 @@ namespace MyUtl {
       if (passTrackVertexAssociation(trk, 0, branch, significanceCut))
 	goodTracks.push_back(trk);
     }
-    
+
     return goodTracks;
   }
 
   // ---------------------------------------------------------------------------
-  // 8. processEventData
-  //   Main per-event analysis function.  Called once per event per timing
+  // 7. EventCounts
+  //   Holds all per-event counts and pre-folded histogram fill values
+  //   derived from a 3σ track selection.  Computed once at the top of
+  //   processEventData and passed to the histogram fill helpers below.
+  // ---------------------------------------------------------------------------
+  struct EventCounts {
+    // Raw forward track/jet counts
+    int nForwardJet      = 0;
+    int nForwardTrack    = 0;
+    int nForwardTrackHS  = 0;
+    int nForwardTrackPU  = 0;
+    double puRatio       = 0.0;
+    // Pre-folded x-values for efficiency / purity histograms
+    int    effFillValFjet;
+    int    effFillValTrack;
+    int    effFillValHSTrack;
+    int    effFillValPUTrack;
+    double effFillValPURatio;
+    double effFillValVtxDz;
+
+    EventCounts(BranchPointerWrapper* branch,
+                const std::vector<int>& tracks,
+                bool checkValidTimes) {
+      branch->countForwardJets(nForwardJet);
+      branch->countForwardTracks(nForwardTrack, nForwardTrackHS, nForwardTrackPU,
+                                 tracks, checkValidTimes);
+      puRatio          = (double)nForwardTrackPU / (double)nForwardTrack;
+      effFillValFjet    = folded(nForwardJet,     (int)FOLD_FJET);
+      effFillValTrack   = folded(nForwardTrack,   (int)FOLD_TRACK);
+      effFillValHSTrack = folded(nForwardTrackHS, (int)FOLD_HS_TRACK);
+      effFillValPUTrack = folded(nForwardTrackPU, (int)FOLD_PU_TRACK);
+      effFillValPURatio = folded(puRatio,         FOLD_PU_FRAC);
+      effFillValVtxDz   = std::abs(branch->recoVtxZ[0] - branch->truthVtxZ[0]);
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // 8. Histogram fill helpers
+  //   Each function fills one histogram operation (total/pass/diff/purity)
+  //   across all six analysis sub-categories (fjet, vtx_dz, ftrack, pu_frac,
+  //   hs_track, pu_track) in a single call, eliminating the repeated pattern
+  //   of six individual fill calls at each call site.
+  // ---------------------------------------------------------------------------
+
+  void fillTotals(AnalysisObj& a, const EventCounts& ev) {
+    a.ptr_fjet->     fillTotal(ev.effFillValFjet   );
+    a.ptr_vtx_dz->   fillTotal(ev.effFillValVtxDz  );
+    a.ptr_ftrack->   fillTotal(ev.effFillValTrack  );
+    a.ptr_pu_frac->  fillTotal(ev.effFillValPURatio);
+    a.ptr_hs_track-> fillTotal(ev.effFillValHSTrack);
+    a.ptr_pu_track-> fillTotal(ev.effFillValPUTrack);
+  }
+
+  void fillPasses(AnalysisObj& a, const EventCounts& ev) {
+    a.ptr_fjet->     fillPass(ev.effFillValFjet   );
+    a.ptr_vtx_dz->   fillPass(ev.effFillValVtxDz  );
+    a.ptr_ftrack->   fillPass(ev.effFillValTrack  );
+    a.ptr_pu_frac->  fillPass(ev.effFillValPURatio);
+    a.ptr_hs_track-> fillPass(ev.effFillValHSTrack);
+    a.ptr_pu_track-> fillPass(ev.effFillValPUTrack);
+  }
+
+  void fillDiffs(AnalysisObj& a, const EventCounts& ev, double diff) {
+    a.ptr_fjet->     fillDiff(ev.nForwardJet,     diff);
+    a.ptr_vtx_dz->   fillDiff(ev.effFillValVtxDz, diff);
+    a.ptr_ftrack->   fillDiff(ev.nForwardTrack,   diff);
+    a.ptr_pu_frac->  fillDiff(ev.puRatio,         diff);
+    a.ptr_hs_track-> fillDiff(ev.nForwardTrackHS, diff);
+    a.ptr_pu_track-> fillDiff(ev.nForwardTrackPU, diff);
+  }
+
+  void fillPurities(AnalysisObj& a, const EventCounts& ev, double purity) {
+    a.ptr_fjet->     fillPurity(ev.nForwardJet,     purity);
+    a.ptr_vtx_dz->   fillPurity(ev.effFillValVtxDz, purity);
+    a.ptr_ftrack->   fillPurity(ev.nForwardTrack,   purity);
+    a.ptr_pu_frac->  fillPurity(ev.puRatio,         purity);
+    a.ptr_hs_track-> fillPurity(ev.nForwardTrackHS, purity);
+    a.ptr_pu_track-> fillPurity(ev.nForwardTrackPU, purity);
+  }
+
+  // ---------------------------------------------------------------------------
+  // 9. selectClusters
+  //   Chooses the best cluster for every active score and returns a map of
+  //   Score → Cluster.  Handles four distinct cluster collections:
+  //     main clusters  — cone clustering on unfiltered tracks; covers TRKPT,
+  //                      TRKPTZ, PASS, TESTML, TEST_MISCL via chooseCluster.
+  //     FILTJET        — cone clustering on jet-cone-filtered tracks; selected
+  //                      by TRKPTZ scoring via the single-score overload.
+  //     HGTD           — simultaneous clustering on unfiltered tracks using
+  //                      real HGTD times; selected by chooseHGTDCluster.
+  //     HGTD_SORT      — pT-sorted simultaneous clustering; selected by the
+  //                      TMVA BDT via chooseHGTDSortCluster.
+  // ---------------------------------------------------------------------------
+  auto selectClusters(
+    const std::vector<Cluster>&        clusters,
+    const std::vector<int>&            tracks,
+    BranchPointerWrapper*              branch,
+    const std::map<Score,AnalysisObj>& analyses,
+    const std::vector<Cluster>&        filtjetClusters
+  ) -> std::map<Score,Cluster> {
+    std::map<Score,Cluster> chosen;
+
+    // Main cone-clustering collection covers most scores
+    if (!clusters.empty())
+      chosen = chooseCluster(clusters, branch);
+
+    // FILTJET: separate collection of jet-cone-filtered tracks
+    if (!filtjetClusters.empty())
+      chosen[Score::FILTJET] = chooseCluster(filtjetClusters, Score::TRKPTZ);
+
+    // HGTD: simultaneous clustering using real HGTD track times.
+    // Only built when HGTD is actually active (real-HGTD scenario).
+    if (branch->recoVtxValid[0] == 1 && analyses.count(Score::HGTD)) {
+      auto clustersHGTD = clusterTracksInTime(tracks, branch, 3.0,
+                                              /*useSmearedTimes=*/false,
+                                              /*checkTimeValid=*/true,
+                                              /*smearRes=*/-1,
+                                              /*useCone=*/false,
+                                              /*usez0=*/false);
+      chosen[Score::HGTD] = chooseHGTDCluster(clustersHGTD, branch);
+    }
+
+    // HGTD_SORT: pT-sorted simultaneous clustering evaluated by TMVA BDT
+    if (analyses.count(Score::HGTD_SORT)) {
+      auto sortedClusters = clusterTracksInTime(tracks, branch, 3.0,
+                                                /*useSmearedTimes=*/false,
+                                                /*checkTimeValid=*/true,
+                                                /*smearRes=*/-1,
+                                                /*useCone=*/false,
+                                                /*usez0=*/false,
+                                                /*sortTracks=*/true);
+      if (!sortedClusters.empty())
+        chosen[Score::HGTD_SORT] = chooseHGTDSortCluster(sortedClusters, branch);
+    }
+
+    return chosen;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 10. processEventData
+  //   Main per-event analysis orchestrator.  Called once per event per timing
   //   scenario (HGTD / IdealRes / IdealEff).  Pipeline:
-  //     a) Basic event selection (passBasicCuts, passJetPtCut).
-  //     b) Track selection at 3σ and counting statistics (nForwardJet,
-  //        nForwardTrack, nForwardTrackHS, nForwardTrackPU, puRatio).
-  //     c) Tighten track association to MAX_NSIGMA if different from 3σ.
-  //     d) Cluster the main track list (cone algorithm).
-  //     e) Optionally build FILT60, FILT90, FILTJET filtered collections
-  //        (only when the corresponding scores are present in analyses).
-  //     f) Run HGTD simultaneous clustering on the unfiltered list (for
-  //        the HGTD score).
-  //     g) Choose the best cluster for every active score.
-  //     h) Fill denominator (fillTotal) and numerator (fillPass) histograms
-  //        for each score; apply special purity gate for TEST_MISCL.
-  //     i) Fill timing residual (fillDiff) and purity (fillPurity) 2D hists.
+  //     A) Event selection — passBasicCuts, passJetPtCut.
+  //     B) Track selection — 3σ scan for counting statistics; optionally
+  //        tighten to MAX_NSIGMA for the clustering step.
+  //     C) Per-event counts — forward jet / track counts and folded fill values.
+  //     D) Main cone clustering — covers TRKPT, TRKPTZ, PASS, TESTML, TEST_MISCL.
+  //     E) FILTJET collection — jet-cone-filtered tracks (if score active).
+  //     F) Denominator fills — fillTotal for all scores except TEST_MISCL
+  //        (deferred until the selected cluster's purity is known).
+  //     G) Cluster selection — selectClusters() builds the Score→Cluster map.
+  //     H) Per-score fills — inclusive reso, efficiency pass/total, diff, purity.
   //
-  //   Return value: pair<returnCode, returnVal>
-  //     returnCode == 0  normal event
-  //     returnCode == -1 event rejected by selection
-  //     returnCode == 2  event passed TEST_MISCL denominator (purity > 0.75)
-  //                      but failed the timing window — useful for event
-  //                      display collection
-  //     returnVal        TRKPTZ-selected cluster time (or TEST_MISCL time)
+  //   Return: pair<returnCode, returnVal>
+  //     returnCode == 0   normal event
+  //     returnCode == -1  rejected by event selection
+  //     returnCode == 2   event entered TEST_MISCL denominator (purity > 0.75)
+  //                       but failed the timing window (useful for event display)
+  //     returnVal         TRKPTZ-selected (or TEST_MISCL) cluster time
   // ---------------------------------------------------------------------------
   std::pair<int,double> processEventData(
     BranchPointerWrapper *branch,
     bool useSmearedTimes,
     bool checkValidTimes,
-    bool useZ0, // whether or not to use 2D Clustering
+    bool useZ0,
     std::map<Score,AnalysisObj>& analyses
   ) {
-    int returnCode = 0;
-    double returnVal = -1.;
-    // check if vertex selection is correct & number of jets
-    if (not branch->passBasicCuts()) return std::make_pair(-1,1.);
+    // ── A. Event selection ──────────────────────────────────────────────────
+    if (!branch->passBasicCuts()) return {-1, 1.};
+    if (!branch->passJetPtCut())  return {-1, 1.};
 
-    // check if there is one forward jet with pt > 30 GeV
-    if (not branch->passJetPtCut()) return std::make_pair(-1, 1.);
-
-    int nForwardJet=0;
-    branch->countForwardJets(nForwardJet);
-    
-    // Scan the track array once at the looser cut (3σ) for counting stats,
-    // then tighten to MAX_NSIGMA by filtering the already-selected subset.
+    // ── B. Track selection ──────────────────────────────────────────────────
+    // Scan once at 3σ so counting statistics include slightly-displaced tracks,
+    // then optionally tighten to MAX_NSIGMA for the clustering step.
     std::vector<int> tracks = getAssociatedTracks(branch, MIN_TRACK_PT, MAX_TRACK_PT, 3.0);
 
-    int nForwardTrack=0, nForwardTrackHS=0, nForwardTrackPU=0;
-    branch->countForwardTracks(nForwardTrack,nForwardTrackHS,nForwardTrackPU,tracks, checkValidTimes);
-
-    // if (not branch->pass_forward_hs_tracks(nForwardTrack_HS)) return std::make_pair(-1,1.);
-
-    double puRatio = (double)nForwardTrackPU / (double)nForwardTrack;
-    double recoZ = branch->recoVtxZ[0];
-
-    auto effFillValFjet    = folded(nForwardJet    , (int)FOLD_FJET) ;
-    auto effFillValTrack   = folded(nForwardTrack  , (int)FOLD_TRACK);
-    auto effFillValHSTrack = folded(nForwardTrackHS, (int)FOLD_HS_TRACK);
-    auto effFillValPUTrack = folded(nForwardTrackPU, (int)FOLD_PU_TRACK);
-    auto effFillValPURatio = puRatio >= 1.0 ? 0.99 : puRatio;
-    double effFillValVtxDz = std::abs(branch->recoVtxZ[0] - branch->truthVtxZ[0]);
-
-    // Tighten association: keep only tracks that also pass MAX_NSIGMA.
-    // Filtering the 3σ subset avoids a second full scan of the track array.
-    if (MAX_NSIGMA != 3.0)
-      tracks.erase(std::remove_if(tracks.begin(), tracks.end(),
-                                  [&](int trk) {
-                                    return !passTrackVertexAssociation(
-                                        trk, 0, branch, MAX_NSIGMA);
-                                  }),
-                   tracks.end());    
+    // ── C. Per-event counts ─────────────────────────────────────────────────
+    EventCounts ev(branch, tracks, checkValidTimes);
 
     if (DEBUG) {
-      std::cout << "nForwardJet = " << nForwardJet << '\n';
-      std::cout << "nForwardTrack = " << nForwardTrack << '\n';
-      std::cout << "nForwardTrack_HS = " << nForwardTrackHS << '\n';
-      std::cout << "nForwardTrack_PU = " << nForwardTrackPU << '\n';
+      std::cout << "nForwardJet = "    << ev.nForwardJet     << '\n';
+      std::cout << "nForwardTrack = "  << ev.nForwardTrack   << '\n';
+      std::cout << "nForwardTrack_HS = " << ev.nForwardTrackHS << '\n';
+      std::cout << "nForwardTrack_PU = " << ev.nForwardTrackPU << '\n';
     }
 
-    // Only pay for purity calculation when TEST_MISCL is actually in this map
+    if (MAX_NSIGMA != 3.0)
+      tracks.erase(std::remove_if(tracks.begin(), tracks.end(),
+        [&](int trk) {
+          return !passTrackVertexAssociation(trk, 0, branch, MAX_NSIGMA);
+        }), tracks.end());
+
+    // ── D. Main cone clustering ─────────────────────────────────────────────
+    // Purity is only computed when TEST_MISCL is active (it is expensive).
     const bool NEEDS_PURITY = analyses.count(Score::TEST_MISCL) > 0;
+    auto clusters = clusterTracksInTime(tracks, branch, 3.0,
+                                        useSmearedTimes, checkValidTimes, 10.0,
+                                        /*useCone=*/true, useZ0,
+                                        /*sortTracks=*/false, NEEDS_PURITY);
 
-    std::vector<Cluster> clusters =
-      clusterTracksInTime(
-        tracks, branch, 3.0,
-	useSmearedTimes, checkValidTimes, 10.0,
-	true, useZ0, NEEDS_PURITY);
-
-    std::vector<Cluster> filt60Clusters, filt90Clusters, filtjetClusters;
-
-    if (analyses.count(Score::FILT60)) {
-      std::vector<int> filteredTracks = filterCaloTracks(tracks, branch, 60, 2.0);
-      filt60Clusters =
-	clusterTracksInTime(
-          filteredTracks, branch, 3.0,
-          useSmearedTimes, checkValidTimes, 20.0,
-	  true, useZ0);
-    }
-
-    if (analyses.count(Score::FILT90)) {
-      std::vector<int> filteredTracks = filterCaloTracks(tracks, branch, 90, 2.0);
-      filt90Clusters =
-	clusterTracksInTime(
-          filteredTracks, branch, 3.0,
-          useSmearedTimes, checkValidTimes, 20.0,
-	  true, useZ0);
-    }
-
+    // ── E. FILTJET filtered collection ──────────────────────────────────────
+    std::vector<Cluster> filtjetClusters;
     if (analyses.count(Score::FILTJET)) {
-      std::vector<int> filteredTracks = filterTracksInJets(tracks, branch, 0.4);
-      filtjetClusters =
-	clusterTracksInTime(
-          filteredTracks, branch, 3.0,
-          useSmearedTimes, checkValidTimes, 20.0,
-	  true, useZ0);
+      auto filtTracks = filterTracksInJets(tracks, branch, 0.4);
+      filtjetClusters = clusterTracksInTime(filtTracks, branch, 3.0,
+                                            useSmearedTimes, checkValidTimes, 20.0,
+                                            /*useCone=*/true, useZ0);
     }
 
-    if (DEBUG) std::cout << "LEFT CLUSTERING\n";
-    for (auto& [score,analysis]: analyses) {
-      // TEST_MISCL denominator is restricted to events where the TRKPTZ-selected
-      // cluster has purity > 0.75 — fillTotal is deferred to the per-score loop
-      // below where the chosen cluster (and its purity) is already available.
-      if (score == Score::TEST_MISCL) continue;
-      analysis["fjet"]->     fillTotal(effFillValFjet   );
-      analysis["vtx_dz"]->   fillTotal(effFillValVtxDz  );
-      analysis["ftrack"]->   fillTotal(effFillValTrack  );
-      analysis["pu_frac"]->  fillTotal(effFillValPURatio);
-      analysis["hs_track"]-> fillTotal(effFillValHSTrack);
-      analysis["pu_track"]-> fillTotal(effFillValPUTrack);
-    }
-    
-    std::map<Score,Cluster> chosen;
-    if (clusters.size() != 0)
-      chosen = chooseCluster(clusters, branch);    
-    if (DEBUG) std::cout << "Chose My Clusters\n";
+    // ── F. Fill denominator histograms ──────────────────────────────────────
+    // TEST_MISCL denominator is deferred to step H where cluster purity is known.
+    for (auto& [score, analysis] : analyses)
+      if (!score.requiresPurity)
+        fillTotals(analysis, ev);
 
-    if (not filt60Clusters.empty())
-      chosen[FILT60] = chooseCluster(filt60Clusters, TRKPTZ);
-
-    if (not filt90Clusters.empty())
-      chosen[FILT90] = chooseCluster(filt90Clusters, TRKPTZ);
-
-    if (not filtjetClusters.empty())
-      chosen[FILTJET] = chooseCluster(filtjetClusters, TRKPTZ);
-
-    // run HGTD Clustering (simultaneous)
-    std::vector<Cluster> clustersHGTD =
-      clusterTracksInTime(tracks, branch, 3.0, false, true , -1, false, false);
-
-    if (branch->recoVtxValid[0] == 1 and analyses.count(Score::HGTD))
-      chosen[HGTD] = chooseHGTDCluster(clustersHGTD, branch);
-
+    // ── G. Select best cluster for each score ───────────────────────────────
+    auto chosen = selectClusters(clusters, tracks, branch, analyses, filtjetClusters);
     if (DEBUG) std::cout << "Chose clusters\n";
 
-    bool hasPassingCluster = false, passesMine = false, passesMiscl = false, misclInDenominator = false;
+    // ── H. Per-score histogram filling ──────────────────────────────────────
+    int    returnCode = 0;
+    double returnVal  = -1.;
+    bool passesMine = false, passesMiscl = false, misclInDenominator = false;
 
     for (auto& [score, analysis] : analyses) {
-      if (DEBUG)
-        std::cout << "Filling Scores: " << toString(score) << '\n';
-      if (branch->recoVtxValid[0] == 0 and score == Score::HGTD)
-	continue;
+      if (DEBUG) std::cout << "Filling: " << toString(score) << '\n';
 
-      if (clusters.size() == 0 and score != Score::HGTD)
-	continue;
+      // Skip scores with invalid or missing cluster data
+      if (branch->recoVtxValid[0] == 0 && score == Score::HGTD)  continue;
+      if (clusters.empty() && !score.usesOwnCollection)           continue;
+      if (!chosen.count(score) && score != Score::HGTD)           continue;
 
-      if (!chosen.count(score) and score != Score::HGTD)
-	continue;
+      Cluster& scored    = chosen[score];
+      double t           = (score == Score::HGTD) ? branch->recoVtxTime[0]
+                                                   : scored.values.at(0);
+      double purity      = clusters.empty() ? 0.0 : scored.purity;
+      double diff        = t - branch->truthVtxTime[0];
 
-      if (DEBUG)
-        std::cout << "Attempting to access chosen[" << toString(score) << "]\n";
-      Cluster scored = chosen[score];
-      if (DEBUG)
-        std::cout << "Attempting to access scores values, size: " << scored.values.size() << '\n';
-      double scoreBasedTime = score == Score::HGTD ? branch->recoVtxTime[0] : scored.values.at(0);
-      if (DEBUG)
-        std::cout << "Attempting to access purity\n";
-      double clusterPurity = clusters.size() != 0 ? scored.purity : 0;
-      if (DEBUG)
-        std::cout << "Purity: " << clusterPurity << '\n';
-      double diff = scoreBasedTime - branch->truthVtxTime[0];
-      if (DEBUG)
-        std::cout << "Diff: " << diff << '\n';
+      // Expose time for the caller's event-display collection
+      if (score == Score::TRKPTZ || score.requiresPurity) returnVal = t;
 
-      if (score == Score::TRKPTZ)
-	returnVal = scoreBasedTime;
-      if (score == Score::TEST_MISCL)
-        returnVal = scoreBasedTime;
-      
-      // For TEST_MISCL, only fill inclusive histos when the cluster is pure (purity > 0.75)
-      if (score != Score::TEST_MISCL || scored.purity > 0.75) {
+      // Inclusive timing resolution and purity (purity-gated for TEST_MISCL)
+      if (!score.requiresPurity || purity > 0.75) {
         analysis.inclusiveReso->Fill(diff);
-        analysis.inclusivePurity->Fill(clusterPurity);
+        analysis.inclusivePurity->Fill(purity);
       }
 
-      // Check if this score passes the efficiency test
-      // For TESTML:     require passEfficiency AND ML score > 0.5
-      // For TEST_MISCL: uses TRKPTZ scoring; both the denominator (fillTotal) and
-      //                 numerator (fillPass) are restricted to events where the
-      //                 selected cluster has purity > 0.75.
-      bool passesEfficiency = scored.passEfficiency(branch);
-      if (score == Score::TESTML && passesEfficiency) {
-        passesEfficiency = scored.scores.at(Score::TESTML) > 0.3;
-      }
-      if (score == Score::TEST_MISCL) {
-        // Only count this event in the denominator if the selected cluster is pure
-        if (scored.purity > 0.75) {
+      // Efficiency check: base timing window, plus optional score threshold
+      bool passes = scored.passEfficiency(branch);
+      if (score.hasThreshold() && passes)
+        passes = scored.scores.at(score) > score.threshold;
+
+      // TEST_MISCL: restrict both denominator and numerator to pure clusters
+      if (score.requiresPurity) {
+        if (purity > 0.75) {
           misclInDenominator = true;
-          analysis["fjet"]->     fillTotal(effFillValFjet   );
-          analysis["vtx_dz"]->   fillTotal(effFillValVtxDz  );
-          analysis["ftrack"]->   fillTotal(effFillValTrack  );
-          analysis["pu_frac"]->  fillTotal(effFillValPURatio);
-          analysis["hs_track"]-> fillTotal(effFillValHSTrack);
-          analysis["pu_track"]-> fillTotal(effFillValPUTrack);
+          fillTotals(analysis, ev);
         } else {
-          passesEfficiency = false;  // impure cluster: skip fillPass entirely
+          passes = false;  // impure cluster: skip numerator entirely
         }
       }
 
-      if (passesEfficiency) {
-	analysis["fjet"]->     fillPass(effFillValFjet   );
-	analysis["vtx_dz"]->   fillPass(effFillValVtxDz  );
-	analysis["ftrack"]->   fillPass(effFillValTrack  );
-	analysis["pu_frac"]->  fillPass(effFillValPURatio);
-	analysis["hs_track"]-> fillPass(effFillValHSTrack);
-	analysis["pu_track"]-> fillPass(effFillValPUTrack);
-	if (score == Score::PASS) {
-	  hasPassingCluster = true;
-	}
-	if (score == Score::TRKPTZ)
-	  passesMine = true;
-	if (score == Score::TEST_MISCL)
-	  passesMiscl = true;
+      if (passes) {
+        fillPasses(analysis, ev);
+        if (score == Score::TRKPTZ)   passesMine   = true;
+        if (score.requiresPurity)     passesMiscl  = true;
       }
 
-      // fill diff hists — for TEST_MISCL only fill when in the denominator
-      if (score != Score::TEST_MISCL || misclInDenominator) {
-        analysis["fjet"]->     fillDiff(nForwardJet    , diff);
-        analysis["vtx_dz"]->   fillDiff(effFillValVtxDz, diff);
-        analysis["ftrack"]->   fillDiff(nForwardTrack  , diff);
-        analysis["pu_frac"]->  fillDiff(puRatio        , diff);
-        analysis["hs_track"]-> fillDiff(nForwardTrackHS, diff);
-        analysis["pu_track"]-> fillDiff(nForwardTrackPU, diff);
-      }
-
-      // fill purities — same gate for TEST_MISCL
-      if (score != Score::TEST_MISCL || misclInDenominator) {
-        analysis["fjet"]->     fillPurity(nForwardJet    , clusterPurity);
-        analysis["vtx_dz"]->   fillPurity(effFillValVtxDz, clusterPurity);
-        analysis["ftrack"]->   fillPurity(nForwardTrack  , clusterPurity);
-        analysis["pu_frac"]->  fillPurity(puRatio        , clusterPurity);
-        analysis["hs_track"]-> fillPurity(nForwardTrackHS, clusterPurity);
-        analysis["pu_track"]-> fillPurity(nForwardTrackPU, clusterPurity);
+      // 2D timing residual and purity distributions
+      // (TEST_MISCL: only fill events that entered the denominator)
+      if (!score.requiresPurity || misclInDenominator) {
+        fillDiffs   (analysis, ev, diff);
+        fillPurities(analysis, ev, purity);
       }
     }
-    // Flag code 2 only for events that entered the TEST_MISCL denominator
-    // (pure cluster, purity > 0.75) but did NOT pass the timing window.
+
+    // returnCode == 2: event was in TEST_MISCL denominator but failed timing window
     if (misclInDenominator && !passesMiscl) returnCode = 2;
-    
-    return std::make_pair(returnCode, returnVal);
+
+    return {returnCode, returnVal};
   }
 }
 #endif // EVENT_PROCESSING_H

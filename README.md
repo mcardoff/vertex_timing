@@ -122,6 +122,39 @@ make
 python ../event_display.py --file_num 0 --event_num 42
 ```
 
+## Scoring Algorithms
+
+Each run of `clustering_dt` evaluates several scoring algorithms simultaneously. Scores are defined as `struct Score` instances in `src/clustering_constants.h` and carry their own metadata (name, threshold, flags). The active set is:
+
+| Short name | Long name | Description |
+|---|---|---|
+| `HGTD` | HGTD Algorithm | Selects the cluster chosen by the HGTD detector's own timing algorithm. Uses the HGTD-seeded cluster collection; only active in the real-HGTD scenario. |
+| `TRKPT` | ΣpT | Scores each cluster by the scalar sum of track pT. Selects the highest-scoring cluster. |
+| `TRKPTZ` | ΣpT·exp(−\|Δz\|) | Like `TRKPT` but weights each track's pT by exp(−\|Δz\|/σ_z) so tracks closer to the vertex in z contribute more. |
+| `PASS` | Pass Cluster | Selects the first cluster that passes all quality requirements, without using a score. |
+| `FILTJET` | Filter Tracks in Jets | Re-clusters using only tracks within ΔR < 0.4 of a reconstructed jet before scoring with TRKPTZ. Only active in the real-HGTD scenario. |
+| `TESTML` | DNN Selection | Scores clusters with a neural network (8→128→64→32→1, ReLU/sigmoid). Applies a score threshold of 0.3. Weights loaded from `share/models/model_weights.json`. |
+| `MISCL` | TRKPTZ (pure clusters) | Runs TRKPTZ but only fills histograms for events where the selected cluster is "pure" (≥80% hard-scatter tracks). Isolates the intrinsic timing resolution from cluster-selection errors. |
+| `HGTD_SORT` | HGTD BDT (pT-sorted) | Like `HGTD` but sorts tracks by pT before clustering (order-sensitive cone algorithm) and applies a TMVA BDT post-selection with threshold 0.3. |
+
+Scores that set `usesOwnCollection = true` (`HGTD`, `HGTD_SORT`) bypass the main cone-clustering output and select from their own pre-built collections. Scores with `requiresPurity = true` (`MISCL`) only fill histograms when the selected cluster passes a purity check.
+
+---
+
+## Removed Scoring Algorithms
+
+The following experimental scores were removed from the codebase. They were all based on using an independent calorimeter-derived timing estimate to gate or replace the HGTD track timing. The calorimeter time was computed as a Gaussian-weighted average of track times within a fixed cone around the calorimeter cluster centroid. In practice the estimator proved unreliable and all three approaches degraded efficiency without a compensating improvement in purity or resolution.
+
+| Short name | How it worked |
+|---|---|
+| `CALO60` / `CALO90` | Applied the standard `TRKPTZ` score, but vetoed cluster selection if the cluster's time differed from the calorimeter time estimate by more than 60 ps / 90 ps. The cluster collection and z reconstruction were unchanged; only the selection decision was affected by the calorimeter gate. |
+| `JUST60` / `JUST90` | Constructed a synthetic cluster whose assigned time came entirely from the calorimeter estimate. Only tracks whose times fell within 60 ps / 90 ps of the calorimeter time were included in the synthetic cluster. Unlike the FILT variants, the underlying cone-clustering and z reconstruction used the full track set; only the reported cluster time was replaced. |
+| `FILT60` / `FILT90` | Called `filterCaloTracks` before cone clustering to remove any track whose time lay more than 60 ps / 90 ps from the calorimeter estimate. Because the filtering happened before clustering, both the z position and the track composition of the resulting clusters were affected, not just the timing. |
+
+The supporting infrastructure (`filterCaloTracks`, the calorimeter time variables in `chooseCluster`, and the JUST synthetic-cluster branches) has been deleted along with the score definitions.
+
+---
+
 ## Disabled Event Selection Cuts
 
 The following cuts are commented out in `src/event_processing.h` and can be re-enabled for specific studies:

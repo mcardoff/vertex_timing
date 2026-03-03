@@ -11,7 +11,7 @@
 //     2. Plot colour palette
 //     3. Event / track selection cuts
 //     4. Histogram axis ranges and fold values
-//     5. Score enum + string converters
+//     5. Score struct + SCORE_REGISTRY
 //     6. FitParamFields enum + string converter
 //     7. folded() helper
 // ---------------------------------------------------------------------------
@@ -104,7 +104,7 @@ namespace MyUtl {
   const double HS_TRACK_WIDTH = TRACK_WIDTH;
 
   const double PU_FRAC_WIDTH = 0.05;
-  const double PU_FRAC_MIN = 0, PU_FRAC_MAX = 1.0 + PU_FRAC_WIDTH, FOLD_PU_FRAC = 1.0;
+  const double PU_FRAC_MIN = 0, PU_FRAC_MAX = 1.0 + PU_FRAC_WIDTH, FOLD_PU_FRAC = 0.99;
 
   const double Z_MIN = -200, Z_MAX = 200, FOLD_Z = 100;
   const double Z_WIDTH = 10.0;
@@ -114,76 +114,75 @@ namespace MyUtl {
   const double RES_YMIN = 0.0, RES_YMAX = 40;
 
   // ---------------------------------------------------------------------------
-  // 5. Score enum + string converters
-  //   Each enumerator identifies one cluster-selection algorithm.  ENUM_VEC
-  //   is the canonical iteration order used throughout the analysis.
-  //   toString()      returns a ROOT-LaTeX label suitable for plot titles.
-  //   toStringShort() returns a compact identifier used in histogram names
-  //                   and on-screen tables.
+  // 5. Score struct
+  //   Self-describing configuration for each cluster-selection algorithm.
+  //   Each named instance carries display strings and behavioural flags so
+  //   that adding a new score requires only one spot (declare + define below)
+  //   rather than touching four switch-statement functions.
+  //
+  //   Fields:
+  //     id               — stable integer identity (map key, COLORS index)
+  //     longName         — ROOT-LaTeX label for plot titles
+  //     shortName        — compact identifier for histogram names / tables
+  //     usesOwnCollection— true: score has a dedicated cluster collection
+  //                        (HGTD, HGTD_SORT); skip main-collection guards
+  //     requiresPurity   — true: fills are gated on cluster purity > 0.75
+  //                        (TEST_MISCL pattern)
+  //     threshold        — ≥ 0: passesEfficiency requires score > threshold
+  //                        (TESTML = 0.3, HGTD_SORT = 0.3); -1 = no gate
+  //
+  //   Member helpers:
+  //     toString()      — returns longName
+  //     toStringShort() — returns shortName
+  //     hasThreshold()  — returns threshold >= 0
+  //
+  //   SCORE_REGISTRY replaces ENUM_VEC as the canonical iteration order.
+  //   Free-function wrappers toString(Score) / toStringShort(Score) are kept
+  //   for backward compatibility with existing callsites.
   // ---------------------------------------------------------------------------
-  enum Score {
-    HGTD = 0,
-    TRKPT = 1,
-    TRKPTZ = 2,
-    PASS = 3,
-    CALO90 = 4,
-    CALO60 = 5,
-    JUST90 = 6,
-    JUST60 = 7,
-    FILT90 = 8,
-    FILT60 = 9,
-    FILTJET = 10,
-    TESTML = 11,
-    TEST_MISCL = 12,    
+  struct Score {
+    int id;
+    const char* longName;
+    const char* shortName;
+    bool usesOwnCollection = false;
+    bool requiresPurity    = false;
+    float threshold        = -1.f;
+
+    bool operator<(const Score& o)  const { return id < o.id; }
+    bool operator==(const Score& o) const { return id == o.id; }
+    bool operator!=(const Score& o) const { return id != o.id; }
+    const char* toString()      const { return longName; }
+    const char* toStringShort() const { return shortName; }
+    bool hasThreshold()         const { return threshold >= 0.f; }
+
+    static const Score HGTD;
+    static const Score TRKPT;
+    static const Score TRKPTZ;
+    static const Score PASS;
+    static const Score FILTJET;
+    static const Score TESTML;
+    static const Score TEST_MISCL;
+    static const Score HGTD_SORT;
   };
 
-  const std::vector<Score> ENUM_VEC = {
-    Score::HGTD, Score::PASS, Score::TRKPT, Score::TRKPTZ, Score::CALO60,
-    Score::CALO90, Score::JUST60, Score::JUST90, Score::FILT90, Score::FILT60,
-    Score::FILTJET, Score::TESTML, Score::TEST_MISCL,
-  }; // valid values
+  //                                       id  longName                         shortName    own    purity thresh.
+  inline const Score Score::HGTD       = {  0, "HGTD Algorithm",               "HGTD",      true , false, -1.f  };
+  inline const Score Score::TRKPT      = {  1, "#Sigma p_{T}",                 "TRKPT",     false, false, -1.f  };
+  inline const Score Score::TRKPTZ     = {  2, "#Sigma p_{T}exp(-|#Delta z|)", "TRKPTZ",    false, false, -1.f  };
+  inline const Score Score::PASS       = {  3, "Pass Cluster",                 "PASS",      false, false, -1.f  };
+  inline const Score Score::FILTJET    = { 10, "Filter Tracks in Jets",        "FILTJET",   false, false, -1.f  };
+  inline const Score Score::TESTML     = { 11, "DNN Selection",                "TESTML",    false, false,  0.3f };
+  inline const Score Score::TEST_MISCL = { 12, "TRKPTZ (pure clusters)",       "MISCL",     false, true , -1.f  };
+  inline const Score Score::HGTD_SORT  = { 13, "HGTD BDT (pT-sorted)",        "HGTD_SORT", true , false,  0.3f };
 
-  auto toString(
-    MyUtl::Score score
-  ) -> const char* {
-    switch (score) {
-    case Score::HGTD:       return "HGTD Algorithm";
-    case Score::TRKPTZ:     return "Track p_{T} exp(-|#Delta z|)";
-    case Score::TRKPT:      return "Track p_{T}";
-    case Score::CALO90:     return "Calo Time Exclusion (90 ps)";
-    case Score::CALO60:     return "Calo Time Exclusion (60 ps)";
-    case Score::JUST90:     return "Calo Time (90 ps)";
-    case Score::JUST60:     return "Calo Time (60 ps)";
-    case Score::PASS:       return "Pass Cluster";
-    case Score::FILT90:     return "90 ps Track Filter";
-    case Score::FILT60:     return "60 ps Track Filter";
-    case Score::FILTJET:    return "Only Tracks in Jets";
-    case Score::TESTML:     return "DNN";
-    case Score::TEST_MISCL: return "TRKPTZ (pure clusters)";
-    default:                return "INVALID";
-    }
-  }
+  inline const std::vector<Score> SCORE_REGISTRY = {
+    Score::HGTD, Score::PASS, Score::TRKPT, Score::TRKPTZ,
+    Score::FILTJET, Score::TESTML, Score::TEST_MISCL, Score::HGTD_SORT,
+  };
 
-  auto toStringShort(
-    MyUtl::Score score
-  ) -> const char* {
-    switch (score) {
-    case Score::HGTD:       return "HGTD";
-    case Score::TRKPTZ:     return "TRKPTZ";
-    case Score::TRKPT:      return "TRKPT";
-    case Score::CALO90:     return "CALO90";
-    case Score::CALO60:     return "CALO60";
-    case Score::PASS:       return "PASS";
-    case Score::JUST90:     return "JUST90";
-    case Score::JUST60:     return "JUST60";
-    case Score::FILT90:     return "FILT90";
-    case Score::FILT60:     return "FILT60";
-    case Score::FILTJET:    return "FILTJET";
-    case Score::TESTML:     return "TESTML";
-    case Score::TEST_MISCL: return "MISCL";
-    default:                return "INVALID";
-    }
-  }
+  // Backward-compatible free-function wrappers (existing callsites unchanged)
+  inline const char* toString(Score s)      { return s.toString(); }
+  inline const char* toStringShort(Score s) { return s.toStringShort(); }
 
   // ---------------------------------------------------------------------------
   // 6. FitParamFields enum + string converter
