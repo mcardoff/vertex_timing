@@ -138,7 +138,7 @@ int main() {
           /*useSmearedTimes=*/false,
           /*checkTimeValid=*/true,
           /*smearRes=*/10.0,
-          /*useCone=*/true,
+          ClusteringMethod::CONE,
           /*usez0=*/false,
           /*sortTracks=*/false,
           /*calcPurityFlag=*/true);

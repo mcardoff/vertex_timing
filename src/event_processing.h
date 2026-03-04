@@ -278,22 +278,26 @@ namespace MyUtl {
   // ---------------------------------------------------------------------------
   // 9. selectClusters
   //   Chooses the best cluster for every active score and returns a map of
-  //   Score → Cluster.  Handles four distinct cluster collections:
-  //     main clusters  — cone clustering on unfiltered tracks; covers TRKPT,
-  //                      TRKPTZ, PASS, TESTML, TEST_MISCL via chooseCluster.
-  //     FILTJET        — cone clustering on jet-cone-filtered tracks; selected
-  //                      by TRKPTZ scoring via the single-score overload.
-  //     HGTD           — simultaneous clustering on unfiltered tracks using
-  //                      real HGTD times; selected by chooseHGTDCluster.
-  //     HGTD_SORT      — pT-sorted simultaneous clustering; selected by the
-  //                      TMVA BDT via chooseHGTDSortCluster.
+  //   Score → Cluster.  Handles five distinct cluster collections:
+  //     main clusters      — cone clustering on unfiltered tracks; covers TRKPT,
+  //                          TRKPTZ, PASS, TESTML, TEST_MISCL via chooseCluster.
+  //     FILTJET            — cone clustering on jet-cone-filtered tracks; selected
+  //                          by TRKPTZ scoring via the single-score overload.
+  //     ITERATIVE          — anti-KT-style iterative clustering on unfiltered
+  //                          tracks; selected by TRKPTZ via the single-score
+  //                          overload.
+  //     HGTD               — simultaneous clustering on unfiltered tracks using
+  //                          real HGTD times; selected by chooseHGTDCluster.
+  //     HGTD_SORT          — pT-sorted simultaneous clustering; selected by the
+  //                          TMVA BDT via chooseHGTDSortCluster.
   // ---------------------------------------------------------------------------
   auto selectClusters(
     const std::vector<Cluster>&        clusters,
     const std::vector<int>&            tracks,
     BranchPointerWrapper*              branch,
     const std::map<Score,AnalysisObj>& analyses,
-    const std::vector<Cluster>&        filtjetClusters
+    const std::vector<Cluster>&        filtjetClusters,
+    const std::vector<Cluster>&        iterativeClusters
   ) -> std::map<Score,Cluster> {
     std::map<Score,Cluster> chosen;
 
@@ -305,6 +309,10 @@ namespace MyUtl {
     if (!filtjetClusters.empty())
       chosen[Score::FILTJET] = chooseCluster(filtjetClusters, Score::TRKPTZ);
 
+    // ITERATIVE: nearest-neighbour iterative clustering, best selected by TRKPTZ
+    if (!iterativeClusters.empty())
+      chosen[Score::ITERATIVE] = chooseCluster(iterativeClusters, Score::TRKPTZ);
+
     // HGTD: simultaneous clustering using real HGTD track times.
     // Only built when HGTD is actually active (real-HGTD scenario).
     if (branch->recoVtxValid[0] == 1 && analyses.count(Score::HGTD)) {
@@ -312,7 +320,7 @@ namespace MyUtl {
                                               /*useSmearedTimes=*/false,
                                               /*checkTimeValid=*/true,
                                               /*smearRes=*/-1,
-                                              /*useCone=*/false,
+                                              ClusteringMethod::SIMULTANEOUS,
                                               /*usez0=*/false);
       chosen[Score::HGTD] = chooseHGTDCluster(clustersHGTD, branch);
     }
@@ -323,7 +331,7 @@ namespace MyUtl {
                                                 /*useSmearedTimes=*/false,
                                                 /*checkTimeValid=*/true,
                                                 /*smearRes=*/-1,
-                                                /*useCone=*/false,
+                                                ClusteringMethod::SIMULTANEOUS,
                                                 /*usez0=*/false,
                                                 /*sortTracks=*/true);
       if (!sortedClusters.empty())
@@ -390,18 +398,26 @@ namespace MyUtl {
     // ── D. Main cone clustering ─────────────────────────────────────────────
     // Purity is only computed when TEST_MISCL is active (it is expensive).
     const bool NEEDS_PURITY = analyses.count(Score::TEST_MISCL) > 0;
-    auto clusters = clusterTracksInTime(tracks, branch, 3.0,
+    auto clusters = clusterTracksInTime(tracks, branch, DIST_CUT_CONE,
                                         useSmearedTimes, checkValidTimes, 10.0,
-                                        /*useCone=*/true, useZ0,
+                                        ClusteringMethod::CONE, useZ0,
                                         /*sortTracks=*/false, NEEDS_PURITY);
 
     // ── E. FILTJET filtered collection ──────────────────────────────────────
     std::vector<Cluster> filtjetClusters;
     if (analyses.count(Score::FILTJET)) {
       auto filtTracks = filterTracksInJets(tracks, branch, 0.4);
-      filtjetClusters = clusterTracksInTime(filtTracks, branch, 3.0,
+      filtjetClusters = clusterTracksInTime(filtTracks, branch, DIST_CUT_CONE,
                                             useSmearedTimes, checkValidTimes, 20.0,
-                                            /*useCone=*/true, useZ0);
+                                            ClusteringMethod::CONE, useZ0);
+    }
+
+    // ── E-2. ITERATIVE collection ────────────────────────────────────────────
+    std::vector<Cluster> iterativeClusters;
+    if (analyses.count(Score::ITERATIVE)) {
+      iterativeClusters = clusterTracksInTime(tracks, branch, DIST_CUT_ITER,
+                                              useSmearedTimes, checkValidTimes, 10.0,
+                                              ClusteringMethod::ITERATIVE, useZ0);
     }
 
     // ── F. Fill denominator histograms ──────────────────────────────────────
@@ -411,7 +427,8 @@ namespace MyUtl {
         fillTotals(analysis, ev);
 
     // ── G. Select best cluster for each score ───────────────────────────────
-    auto chosen = selectClusters(clusters, tracks, branch, analyses, filtjetClusters);
+    auto chosen = selectClusters(clusters, tracks, branch, analyses,
+                                 filtjetClusters, iterativeClusters);
     if (DEBUG) std::cout << "Chose clusters\n";
 
     // ── H. Per-score histogram filling ──────────────────────────────────────

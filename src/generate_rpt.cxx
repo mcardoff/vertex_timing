@@ -275,7 +275,7 @@ int main() {
     // Run clustering on HGTD tracks
     // Create simple clusters (one per track)
     std::map<int, double> emptyMap; // empty maps for non-smeared times
-    std::vector<MyUtl::Cluster> all_clusters = MyUtl::clusterTracksInTime(hgtd_track_indices, &branch, 3.0, false, true, 30.0, true, false);
+    std::vector<MyUtl::Cluster> all_clusters = MyUtl::clusterTracksInTime(hgtd_track_indices, &branch, 3.0, false, true, 30.0, MyUtl::ClusteringMethod::CONE, false);
 
     
     // Get best cluster time (highest TRKPT scoring cluster)

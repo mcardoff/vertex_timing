@@ -75,7 +75,22 @@ namespace MyUtl {
   const double MAX_NSIGMA         = 3.0;   // how close a track can be to PV
   const double DIST_CUT_CONE      = 3.0;   // Distance cut for cone clustering
   const double DIST_CUT_SIMUL     = 3.0;   // Distance cut for simultaneous clustering
-  
+  const double DIST_CUT_ITER      = 3.0;   // Distance cut for iterative clustering
+
+  // ---------------------------------------------------------------------------
+  // 3b. Clustering method selector
+  //   Passed as a single parameter to clusterTracksInTime, replacing the old
+  //   bool useCone flag.  Three modes are supported:
+  //     SIMULTANEOUS — globally-closest-pair agglomerative merge
+  //     CONE         — seed-and-cone, absorbs all in-cone candidates at once
+  //     ITERATIVE    — nearest-neighbour iterative, centroid updated per step
+  // ---------------------------------------------------------------------------
+  enum class ClusteringMethod {
+    SIMULTANEOUS, // doSimultaneousClustering — agglomerative minimum-distance
+    CONE,         // doConeClustering — seed-and-cone simultaneous absorption
+    ITERATIVE,    // doIterativeClustering — nearest-neighbour, centroid-updating (anti-KT style)
+  };
+
   // ---------------------------------------------------------------------------
   // 4. Histogram axis ranges and fold values
   //   xMin/xMax define the full histogram axis.  FOLD_* values mark the
@@ -163,6 +178,7 @@ namespace MyUtl {
     static const Score TESTML;
     static const Score TEST_MISCL;
     static const Score HGTD_SORT;
+    static const Score ITERATIVE;
   };
 
   //                                       id  longName                         shortName    own    purity thresh.
@@ -174,10 +190,12 @@ namespace MyUtl {
   inline const Score Score::TESTML     = { 11, "DNN Selection",                "TESTML",    false, false,  0.3f };
   inline const Score Score::TEST_MISCL = { 12, "TRKPTZ (pure clusters)",       "MISCL",     false, true , -1.f  };
   inline const Score Score::HGTD_SORT  = { 13, "HGTD BDT (pT-sorted)",         "HGTD_SORT", true , false,  0.3f };
+  inline const Score Score::ITERATIVE  = { 14, "Iterative (#Anti-k_{T})",       "ITERATIVE", false, false, -1.f  };
 
   inline const std::vector<Score> SCORE_REGISTRY = {
     Score::HGTD, Score::PASS, Score::TRKPT, Score::TRKPTZ,
     Score::FILTJET, Score::TESTML, Score::TEST_MISCL, Score::HGTD_SORT,
+    Score::ITERATIVE,
   };
 
   // Backward-compatible free-function wrappers (existing callsites unchanged)

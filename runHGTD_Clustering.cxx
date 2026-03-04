@@ -55,7 +55,7 @@ void runHGTD_Clustering(std::string number, Long64_t eventNum) {
 			useSmearTimes,
 			useValidTimesOnly,
 			30.0,
-			useConeClustering,
+			useConeClustering ? ClusteringMethod::CONE : ClusteringMethod::SIMULTANEOUS,
 			useZ0);
 
   // auto clustermerge = mergeClusters(clusters[0], clusters[1]);

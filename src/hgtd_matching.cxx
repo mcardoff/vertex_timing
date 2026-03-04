@@ -666,7 +666,7 @@ int main() {
 							false,    // useSmearedTimes
 							true,     // checkTimeValid (MUST match main algorithm!)
 							30.0,     // smearRes
-							true,     // useCone (main algorithm uses true)
+							ClusteringMethod::CONE,     // method
 							false     // usez0
 							);
 
@@ -844,7 +844,7 @@ int main() {
 								    true,     // useSmearedTimes
 								    true,     // checkTimeValid
 								    30.0,     // smearRes
-								    true,     // useCone
+								    ClusteringMethod::CONE,     // method
 								    false     // usez0
 								    );
 
@@ -863,7 +863,7 @@ int main() {
 								    true,     // useSmearedTimes
 								    false,    // checkTimeValid (ignore validity!)
 								    30.0,     // smearRes
-								    true,     // useCone
+								    ClusteringMethod::CONE,     // method
 								    false     // usez0
 								    );
 

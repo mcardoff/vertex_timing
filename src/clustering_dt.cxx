@@ -52,7 +52,8 @@ auto buildAnalysisMap(
   if (scenario == Scenario::HGTD) {
     m.emplace(Score::HGTD,      AnalysisObj(label, Score::HGTD     ));
     m.emplace(Score::HGTD_SORT, AnalysisObj(label, Score::HGTD_SORT));
-    m.emplace(Score::FILTJET,   AnalysisObj(label, Score::FILTJET  ));
+    m.emplace(Score::ITERATIVE,  AnalysisObj(label, Score::ITERATIVE ));
+    // m.emplace(Score::FILTJET,   AnalysisObj(label, Score::FILTJET  ));
   }
 
   return m;
@@ -131,6 +132,14 @@ void makeComparisonPlots(
                 &mapHGTD.at(Score::HGTD),
                 &mapHGTD.at(Score::TRKPTZ),
                 &mapHGTD.at(Score::TEST_MISCL)
+	    });
+
+  // Check iterative clustering score
+  moneyPlot(Form("%s/iterative_clust_%s.pdf", compSubdir.c_str(), key), key, canvas,
+            {
+                &mapHGTD.at(Score::HGTD),
+                &mapHGTD.at(Score::TRKPTZ),
+                &mapHGTD.at(Score::ITERATIVE)
 	    });
 
   // pure clusters with ideal resolution

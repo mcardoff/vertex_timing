@@ -5,12 +5,13 @@
 // clustering_functions.h
 //   Core clustering algorithms and cluster-selection logic.  All functions
 //   live inside the MyUtl namespace.  Sections:
-//     1. getSmearedTrackTime   — smear a track time with a given resolution
+//     1. getSmearedTrackTime      — smear a track time with a given resolution
 //     2. getDistanceBetweenClusters — Mahalanobis-like distance metric
-//     3. mergeClusters         — precision-weighted merge of two clusters
-//     4. makeSimpleClusters    — seed one cluster per track
+//     3. mergeClusters            — precision-weighted merge of two clusters
+//     4. makeSimpleClusters       — seed one cluster per track
 //     5. doSimultaneousClustering — agglomerative (minimum-distance) merge
-//     6. doConeClustering      — seed-and-cone merge
+//     6. doConeClustering         — seed-and-cone merge
+//     6.5. doIterativeClustering  — nearest-neighbour iterative merge (anti-KT style)
 //     7. clusterTracksInTime      — top-level clustering entry point
 //     8. chooseHGTDCluster        — select cluster closest to reco vertex time
 //     9. chooseHGTDSortCluster    — select highest-BDT cluster (HGTD_SORT score)
@@ -323,6 +324,70 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
+  // 6.5. doIterativeClustering
+  //   Nearest-neighbour iterative clustering seeded by the highest-pT cluster.
+  //   Algorithm:
+  //     1. Pick the unconsumed cluster with the largest TRKPT score as seed.
+  //     2. Find the nearest unconsumed cluster (by getDistanceBetweenClusters).
+  //     3. If its distance is < distCut, absorb it: merge into the growing
+  //        cluster and update the centroid.  Repeat from step 2.
+  //     4. When no unconsumed cluster is within distCut, finalise this cluster
+  //        and return to step 1 with the remaining unconsumed clusters.
+  //
+  //   Differs from doConeClustering in that the cluster centroid is updated
+  //   after each individual absorption, so subsequent distance checks reflect
+  //   the shifted position rather than the original seed.  This is analogous
+  //   to the iterative step in the anti-kT jet algorithm.
+  // ---------------------------------------------------------------------------
+  void doIterativeClustering(
+    std::vector<Cluster>* collection, double distCut
+  ) {
+    const int N = (int)collection->size();
+    std::vector<bool> consumed(N, false);
+    std::vector<Cluster> result;
+    result.reserve(N); // worst case: no merges, one cluster per track
+
+    while (true) {
+      // ── Seed: highest-pT unconsumed single-track cluster ──────────────────
+      int seedIdx = -1;
+      double maxPt = -1.0;
+      for (int i = 0; i < N; ++i) {
+        if (consumed[i]) continue;
+        double pt = (*collection)[i].scores.at(Score::TRKPT);
+        if (pt > maxPt) { maxPt = pt; seedIdx = i; }
+      }
+      if (seedIdx == -1) break; // all clusters consumed
+
+      consumed[seedIdx] = true;
+      Cluster current = (*collection)[seedIdx];
+
+      // ── Grow: absorb nearest neighbour within distCut one at a time ───────
+      // After each absorption the centroid of `current` is updated, so
+      // subsequent checks use the new merged position.
+      bool anyAbsorbed = true;
+      while (anyAbsorbed) {
+        anyAbsorbed = false;
+        int bestIdx = -1;
+        double minDist = distCut; // strict threshold: only absorb if d < distCut
+        for (int i = 0; i < N; ++i) {
+          if (consumed[i]) continue;
+          double d = getDistanceBetweenClusters(current, (*collection)[i]);
+          if (d < minDist) { minDist = d; bestIdx = i; }
+        }
+        if (bestIdx != -1) {
+          consumed[bestIdx] = true;
+          current = mergeClusters(current, (*collection)[bestIdx]);
+          anyAbsorbed = true;
+        }
+      } // inner growth loop
+
+      result.push_back(std::move(current));
+    } // outer seed loop
+
+    *collection = std::move(result);
+  }
+
+  // ---------------------------------------------------------------------------
   // 7. clusterTracksInTime
   //   Top-level clustering entry point called from event_processing.h.
   //   Orchestrates the full pipeline:
@@ -339,14 +404,14 @@ namespace MyUtl {
   auto clusterTracksInTime(
      const std::vector<int>& trackIndices,
      BranchPointerWrapper *branch,
-     double distanceCut,          // Cone size/distance cut
-     bool useSmearedTimes,        // For Ideal Scenarios
-     bool checkTimeValid,         // For Ideal Efficiency Scenario
-     double smearRes,             // Fixed resolution for smeared times
-     bool useCone,                // Whether or not to use improved cone clustering
-     bool usez0,                  // Use z info in clustering as well
+     double distanceCut,           // Cone size/distance cut
+     bool useSmearedTimes,         // For Ideal Scenarios
+     bool checkTimeValid,          // For Ideal Efficiency Scenario
+     double smearRes,              // Fixed resolution for smeared times
+     ClusteringMethod method,      // Clustering algorithm to use
+     bool usez0,                   // Use z info in clustering as well
      bool sortTracks = false,      // Before clustering, sort tracks by pT
-     bool calcPurityFlag = false  // only compute purity when TEST_MISCL is active
+     bool calcPurityFlag = false   // only compute purity when TEST_MISCL is active
   ) -> std::vector<Cluster> {
     if (trackIndices.empty() && DEBUG)
       std::cout << "EMPTY!!!!\n";
@@ -381,10 +446,14 @@ namespace MyUtl {
       makeSimpleClusters(indices, branch, useSmearedTimes,
 			 smearedTimesMap, smearedTimeResMap, checkTimeValid, usez0);
     
-    if (not useCone)
-      doSimultaneousClustering(&collection, distanceCut);
-    else
-      doConeClustering(&collection, distanceCut);
+    switch (method) {
+      case ClusteringMethod::SIMULTANEOUS:
+        doSimultaneousClustering(&collection, distanceCut); break;
+      case ClusteringMethod::CONE:
+        doConeClustering        (&collection, distanceCut); break;
+      case ClusteringMethod::ITERATIVE:
+        doIterativeClustering   (&collection, distanceCut); break;
+    }
 
     // Load ML model only once using static initialization (lazy evaluation)
     static MLModel mlModel = []() {
@@ -546,8 +615,9 @@ namespace MyUtl {
       if (score.usesOwnCollection)
 	continue;
 
-      // FILTJET uses its own pre-filtered collection; chosen by single-score overload
-      if (score == Score::FILTJET)
+      // FILTJET and ITERATIVE each use their own pre-built collection;
+      // both are chosen by the single-score overload in selectClusters.
+      if (score == Score::FILTJET || score == Score::ITERATIVE)
 	continue;
 
       if (score == Score::PASS) {

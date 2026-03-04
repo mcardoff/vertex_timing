@@ -207,7 +207,7 @@ auto main() -> int {
                 /* useSmearedTimes */ false,
                 /* checkTimeValid */  true,
                 /* smearRes */        10.0,
-                /* useCone */         true,
+                /* method */         ClusteringMethod::CONE,
                 /* usez0 */           false,
                 /* sortTracks */      false,
                 /* calcPurityFlag */  true

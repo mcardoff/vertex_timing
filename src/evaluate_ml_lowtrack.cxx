@@ -98,7 +98,7 @@ auto main() -> int {
     std::vector<Cluster> clusters = clusterTracksInTime(
       tracks, &branch, 3.0,
       false, true, 10.0,  // useSmearedTimes=false, checkValidTimes=true
-      true, false);        // useCone=true, useZ0=false
+      ClusteringMethod::CONE, false);  // method=CONE, useZ0=false
 
     if (clusters.empty()) continue;
 
