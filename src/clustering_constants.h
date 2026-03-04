@@ -173,7 +173,7 @@ namespace MyUtl {
   inline const Score Score::FILTJET    = { 10, "Filter Tracks in Jets",        "FILTJET",   false, false, -1.f  };
   inline const Score Score::TESTML     = { 11, "DNN Selection",                "TESTML",    false, false,  0.3f };
   inline const Score Score::TEST_MISCL = { 12, "TRKPTZ (pure clusters)",       "MISCL",     false, true , -1.f  };
-  inline const Score Score::HGTD_SORT  = { 13, "HGTD BDT (pT-sorted)",        "HGTD_SORT", true , false,  0.3f };
+  inline const Score Score::HGTD_SORT  = { 13, "HGTD BDT (pT-sorted)",         "HGTD_SORT", true , false,  0.3f };
 
   inline const std::vector<Score> SCORE_REGISTRY = {
     Score::HGTD, Score::PASS, Score::TRKPT, Score::TRKPTZ,
