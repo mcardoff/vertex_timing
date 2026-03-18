@@ -33,6 +33,10 @@ add_executable(export_training_data src/export_training_data.cxx)
 add_executable(distcut_sweep src/distcut_sweep.cxx)
 add_executable(maxtrackpt_sweep src/maxtrackpt_sweep.cxx)
 add_executable(mintrackpt_sweep src/mintrackpt_sweep.cxx)
+add_executable(cone_iter_k_sweep src/cone_iter_k_sweep.cxx)
+add_executable(dist_refine_sweep src/dist_refine_sweep.cxx)
+add_executable(rate_diagnostics src/rate_diagnostics.cxx)
+add_executable(failure_decomposition src/failure_decomposition.cxx)
 
 # Specify the include directories for your header files
 target_include_directories(clustering_dt
@@ -96,6 +100,30 @@ target_include_directories(maxtrackpt_sweep
 )
 
 target_include_directories(mintrackpt_sweep
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${ROOT_INCLUDE_DIRS}
+)
+
+target_include_directories(cone_iter_k_sweep
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${ROOT_INCLUDE_DIRS}
+)
+
+target_include_directories(dist_refine_sweep
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${ROOT_INCLUDE_DIRS}
+)
+
+target_include_directories(rate_diagnostics
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${ROOT_INCLUDE_DIRS}
+)
+
+target_include_directories(failure_decomposition
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${ROOT_INCLUDE_DIRS}
@@ -165,6 +193,30 @@ target_link_libraries(maxtrackpt_sweep
 )
 
 target_link_libraries(mintrackpt_sweep
+    PRIVATE
+        ${ROOT_LIBRARIES}
+        Boost::filesystem
+)
+
+target_link_libraries(cone_iter_k_sweep
+    PRIVATE
+        ${ROOT_LIBRARIES}
+        Boost::filesystem
+)
+
+target_link_libraries(dist_refine_sweep
+    PRIVATE
+        ${ROOT_LIBRARIES}
+        Boost::filesystem
+)
+
+target_link_libraries(rate_diagnostics
+    PRIVATE
+        ${ROOT_LIBRARIES}
+        Boost::filesystem
+)
+
+target_link_libraries(failure_decomposition
     PRIVATE
         ${ROOT_LIBRARIES}
         Boost::filesystem

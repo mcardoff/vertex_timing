@@ -54,28 +54,36 @@ namespace MyUtl {
   const int    MIN_JETS           = 2;     // min n jets
   const int    MIN_PASSPT_JETS    = 2;     // min n jets >30 GeV
   const int    MIN_PASSETA_JETS   = 1;     // min n forward jets >30GeV
+  const int    MIN_CLUSTER_TRACKS = 0;     // min tracks required to select a cluster
   const int    MIN_NHS_TRACK      = 2;     // testing only
   const int    MAX_NHS_TRACK      = 6;     // testing only
   const double VBS_JET_D_ETA      = 3.0;   // min eta separation for VBS Jets
-  const double MIN_JETPT          = 30.0;  // self explanatory
+  const double MIN_JET_PT         = 30.0;  // self explanatory
   const double MAX_VTX_DZ         = 2.0;   // max error for reco HS vertex z
-  const double MIN_HGTD_ETA       = 2.38;  // Min eta of HGTD
-  const double MAX_HGTD_ETA       = 4.0;   // Max eta of HGTD
-  const double MIN_ABS_ETA_JET    = 2.38;  // min eta for a "forward" jet
-  const double MAX_ABS_ETA_JET    = 4.00;  // max eta for a "forward" jet
-  const double MIN_ABS_ETA_TRACK  = 2.38;  // min eta for a "forward" track 
-  const double MAX_ABS_ETA_TRACK  = 4.00;  // max eta for a "forward" track
-  const double MIN_TRACK_PT       = 1.0;   // clustered track_pt > 0.5 GeV
+  const double MIN_HGTD_ETA       = 2.38;  // HGTD Min eta
+  const double MAX_HGTD_ETA       = 4.0;   // HGTD Max eta
+  const double MIN_ABS_ETA_JET    = 2.38;  // "forward" jet min eta
+  const double MAX_ABS_ETA_JET    = 4.00;  // "forward" jet max eta
+  const double MIN_ABS_ETA_TRACK  = 2.38;  // "forward" track min eta 
+  const double MAX_ABS_ETA_TRACK  = 4.00;  // "forward" track max eta
+  const double MIN_TRACK_PT       = 1.0;   // clustered track_pt > 1.0 GeV
   const double MAX_TRACK_PT       = 30.0;  // clustered track_pt < 30.0 GeV
-  const double MIN_TRACK_PT_COUNT = 1.0;   // track_pt > 1.0 GeV for counting purposes
+  const double MIN_TRACK_PT_COUNT = 1.0;   // track_pt > 1.0 GeV for histgramming
   const double PASS_SIGMA         = 20.0;  // Pass threshold for efficiency
   const double PILEUP_SMEAR       = 175.0; // Pileup track resolution
 
   const double MAX_TRK_VTX_SIG    = 3.0;   // Pileup removal sigma
   const double MAX_NSIGMA         = 3.0;   // how close a track can be to PV
   const double DIST_CUT_CONE      = 3.0;   // Distance cut for cone clustering
-  const double DIST_CUT_SIMUL     = 3.0;   // Distance cut for simultaneous clustering
+  const double DIST_CUT_SIMUL     = 3.0;   // Distance cut for simul. clustering
   const double DIST_CUT_ITER      = 3.0;   // Distance cut for iterative clustering
+  const double DIST_CUT_REFINE    = 2.0;   // Tighter iterative cut for REFINED score
+  const int    CONE_ITER_K        = 3;     // Top cone clusters to refine (REFINED score)
+  const double TRUTH_PULL_CUT     = 2.0;   // |pull| < cut keeps track as truth-matched
+  // Per-track timing resolution used for Ideal Resolution/Efficiency scenarios.
+  // Flat per-track value (independent of hit count), representing a hypothetically
+  // better detector.  Contrast with real HGTD: ~30 ps/hit → 30/√nHits ≈ 15–21 ps/track.
+  const double IDEAL_TRACK_RES   = 10.0;  // ps, flat per-track
 
   // ---------------------------------------------------------------------------
   // 3b. Clustering method selector
@@ -88,7 +96,7 @@ namespace MyUtl {
   enum class ClusteringMethod {
     SIMULTANEOUS, // doSimultaneousClustering — agglomerative minimum-distance
     CONE,         // doConeClustering — seed-and-cone simultaneous absorption
-    ITERATIVE,    // doIterativeClustering — nearest-neighbour, centroid-updating (anti-KT style)
+    ITERATIVE,    // doIterativeClustering — nearest-neighbour, centroid-updating
   };
 
   // ---------------------------------------------------------------------------
@@ -103,13 +111,13 @@ namespace MyUtl {
   const double PURITY_MIN = 0, PURITY_MAX = 1;
   const double PURITY_WIDTH = 0.05;
 
-  const double FJET_MIN = 0, FJET_MAX = 31, FOLD_FJET = 5;
+  const double FJET_MIN = 0, FJET_MAX = 31.5, FOLD_FJET = 5;
   const double FJET_WIDTH = 1.0;
 
   const double VTX_DZ_MIN = 0, VTX_DZ_MAX = 5.0, FOLD_VTX_DZ = 2.0;
   const double VTX_DZ_WIDTH = 0.1;
 
-  const double TRACK_MIN = 0, TRACK_MAX = 100, FOLD_TRACK = 25;
+  const double TRACK_MIN = 0, TRACK_MAX = 100.5, FOLD_TRACK = 10;
   const double TRACK_WIDTH = 1.0;
 
   const double PU_TRACK_MIN = TRACK_MIN, PU_TRACK_MAX = TRACK_MAX, FOLD_HS_TRACK = FOLD_TRACK;  
@@ -118,15 +126,16 @@ namespace MyUtl {
   const double HS_TRACK_MIN = TRACK_MIN, HS_TRACK_MAX = TRACK_MAX, FOLD_PU_TRACK = FOLD_TRACK;
   const double HS_TRACK_WIDTH = TRACK_WIDTH;
 
-  const double PU_FRAC_WIDTH = 0.05;
-  const double PU_FRAC_MIN = 0, PU_FRAC_MAX = 1.0 + PU_FRAC_WIDTH, FOLD_PU_FRAC = 0.99;
+  const double PU_FRAC_WIDTH = 0.1;
+  const double PU_FRAC_MIN = 0, PU_FRAC_MAX = 1.0 + PU_FRAC_WIDTH, FOLD_PU_FRAC = 1.0;
 
   const double Z_MIN = -200, Z_MAX = 200, FOLD_Z = 100;
   const double Z_WIDTH = 10.0;
 
-  const double EFF_YMIN = 0.0, EFF_YMAX = 1.5;
+  const double EFF_YMIN = 0.0, EFF_YMAX = 1.8;
   const double PUR_YMIN = 0.0, PUR_YMAX = 1.5;
-  const double RES_YMIN = 0.0, RES_YMAX = 40;
+  const double RES_YMIN = 0.0, RES_YMAX = 40.0;
+  const double BKG_RES_YMIN = 90.0, BKG_RES_YMAX = 500.0;
 
   // ---------------------------------------------------------------------------
   // 5. Score struct
@@ -179,23 +188,32 @@ namespace MyUtl {
     static const Score TEST_MISCL;
     static const Score HGTD_SORT;
     static const Score ITERATIVE;
+    static const Score CONE_BDT;
+    static const Score REFINED;
+    static const Score TEST_MISAS;
+    static const Score TEST_HS;
   };
 
-  //                                       id  longName                         shortName    own    purity thresh.
-  inline const Score Score::HGTD       = {  0, "HGTD Algorithm",               "HGTD",      true , false, -1.f  };
-  inline const Score Score::TRKPT      = {  1, "#Sigma p_{T}",                 "TRKPT",     false, false, -1.f  };
-  inline const Score Score::TRKPTZ     = {  2, "#Sigma p_{T}exp(-|#Delta z|)", "TRKPTZ",    false, false, -1.f  };
-  inline const Score Score::PASS       = {  3, "Pass Cluster",                 "PASS",      false, false, -1.f  };
-  inline const Score Score::FILTJET    = { 10, "Filter Tracks in Jets",        "FILTJET",   false, false, -1.f  };
-  inline const Score Score::TESTML     = { 11, "DNN Selection",                "TESTML",    false, false,  0.3f };
-  inline const Score Score::TEST_MISCL = { 12, "TRKPTZ (pure clusters)",       "MISCL",     false, true , -1.f  };
-  inline const Score Score::HGTD_SORT  = { 13, "HGTD BDT (pT-sorted)",         "HGTD_SORT", true , false,  0.3f };
-  inline const Score Score::ITERATIVE  = { 14, "Iterative (#Anti-k_{T})",       "ITERATIVE", false, false, -1.f  };
+  //                                         id  longName                          shortName    own    purity thresh.
+  inline const Score Score::HGTD         = {  0, "HGTD Algorithm",                "HGTD",      true , false, -1.f  };
+  inline const Score Score::TRKPT        = {  1, "#Sigma p_{T}",                  "TRKPT",     false, false, -1.f  };
+  inline const Score Score::TRKPTZ       = {  2, "#Sigma p_{T}e^{-|#Delta z|}",  "TRKPTZ",    false, false, -1.f  };
+  inline const Score Score::PASS         = {  3, "Pass Cluster",                  "PASS",      false, false, -1.f  };
+  inline const Score Score::FILTJET      = { 10, "Filter Tracks in Jets",         "FILTJET",   false, false, -1.f  };
+  inline const Score Score::TESTML       = { 11, "DNN Selection",                 "TESTML",    false, false,  0.3f };
+  inline const Score Score::TEST_MISCL   = { 12, "#Sigma p_{T}e^{-|#Delta z|} (pure)",        "MISCL",     false, true , -1.f  };
+  inline const Score Score::HGTD_SORT    = { 13, "HGTD BDT (pT-sorted)",          "HGTD_SORT", true , false,  0.3f };
+  inline const Score Score::ITERATIVE    = { 14, "Iterative",                     "ITERATIVE", false, false, -1.f  };
+  inline const Score Score::CONE_BDT     = { 15, "Cone (BDT)",                    "CONE_BDT",  false, false,  0.3f };
+  inline const Score Score::REFINED      = { 16, "Iterative Refinement",          "REFINED",   false, false, -1.f  };
+  inline const Score Score::TEST_MISAS   = { 17, "#Sigma p_{T}e^{-|#Delta z|} (misassign. removed)",   "MISAS",     false, false ,  -1.f };
+  inline const Score Score::TEST_HS      = { 18, "#Sigma p_{T}e^{-|#Delta z|} (HS tracks only)",       "TEST_HS",   false, false, -1.f  };
 
   inline const std::vector<Score> SCORE_REGISTRY = {
     Score::HGTD, Score::PASS, Score::TRKPT, Score::TRKPTZ,
     Score::FILTJET, Score::TESTML, Score::TEST_MISCL, Score::HGTD_SORT,
-    Score::ITERATIVE,
+    Score::ITERATIVE, Score::CONE_BDT, Score::REFINED, Score::TEST_MISAS,
+    Score::TEST_HS,
   };
 
   // Backward-compatible free-function wrappers (existing callsites unchanged)
@@ -210,11 +228,13 @@ namespace MyUtl {
   //   draw or fill.
   // ---------------------------------------------------------------------------
   enum FitParamFields {
-    MEAN = 0, SIGMA = 1, CORE = 2, BKG = 3, RATIO = 4, BSIGMA = 5,
+    MEAN = 0, SIGMA = 1, CORE = 2, BKG = 3, RATIO = 4, BSIGMA = 5, RMS = 6
   };
   const std::vector<FitParamFields> FITPARAM_VEC = {
       FitParamFields::SIGMA, FitParamFields::BSIGMA, FitParamFields::CORE,
-      FitParamFields::BKG,   FitParamFields::RATIO,  FitParamFields::MEAN};  
+      FitParamFields::BKG,   //FitParamFields::RATIO,  FitParamFields::MEAN,
+      FitParamFields::RMS
+  };  
 
   auto toString(
     FitParamFields key

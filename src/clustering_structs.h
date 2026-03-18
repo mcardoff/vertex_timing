@@ -87,6 +87,8 @@ namespace MyUtl {
     TTreeReaderArray<float> truthHSJetPt;
     TTreeReaderArray<float> truthHSJetEta;
 
+    TTreeReaderArray<std::vector<int>> topoJetTruthHSIdx;
+
     TTreeReaderArray<float> particleT;
 
   BranchPointerWrapper(TTreeReader& r)
@@ -127,19 +129,20 @@ namespace MyUtl {
       topoJetPhi (r, "AntiKt4EMTopoJets_phi"),
       truthHSJetPt (r, "TruthHSJet_pt"),
       truthHSJetEta (r, "TruthHSJet_eta"),
+      topoJetTruthHSIdx (r, "AntiKt4EMTopoJets_truthHSJet_idx"),
       particleT (r, "TruthPart_prodVtx_time")
     {}
 
     // -----------------------------------------------------------------------
     // passBasicCuts
     //   Returns false (skip event) if:
-    //     • fewer than MIN_JETS truth-HS jets or reco jets are present, or
+    //     • fewer than MIN_JETS reco jets are present (fast pre-filter before
+    //       the full HS-matching check in passJetPtCut), or
     //     • the reconstructed HS vertex z is more than MAX_VTX_DZ from the
     //       truth HS vertex z (guards against wrong-vertex events).
     // -----------------------------------------------------------------------
     bool passBasicCuts() {
-      if (this->truthHSJetPt.GetSize() < MIN_JETS or
-	  this->topoJetPt.GetSize() < MIN_JETS) {
+      if (this->topoJetPt.GetSize() < MIN_JETS) {
 	if (DEBUG) std::cout << "Skipping low jet event\n";
         return false;
       }
@@ -155,28 +158,33 @@ namespace MyUtl {
 
     // -----------------------------------------------------------------------
     // passJetPtCut
-    //   Requires the truth-HS jet collection to contain at least
-    //   MIN_PASSPT_JETS jets above MIN_JETPT, at least MIN_PASSETA_JETS of
-    //   which are in the forward HGTD acceptance, and that the two leading
-    //   jets have an η separation ≥ VBS_JET_D_ETA (VBS topology selection).
+    //   Requires at least MIN_PASSPT_JETS reco jets above MIN_JET_PT that are
+    //   matched to a truth-HS jet (non-empty AntiKt4EMTopoJets_truthHSJet_idx),
+    //   at least MIN_PASSETA_JETS of which are in the forward HGTD acceptance,
+    //   and that the two leading matched jets have an η separation ≥
+    //   VBS_JET_D_ETA (VBS topology selection).
     // -----------------------------------------------------------------------
     bool passJetPtCut() {
       int passptcount = 0, passptetacount = 0;
-      for(int jetIdx = 0; jetIdx < this->truthHSJetEta.GetSize(); ++jetIdx) {
-	float
-	  eta = std::abs(truthHSJetEta[jetIdx]),
-	  pt = truthHSJetPt[jetIdx];
-	if (DEBUG) std::cout << "pt, eta: " << pt << ", " << eta << '\n';
-	bool passpt = pt > MIN_JETPT;
-	bool passpteta = passpt and eta > MIN_ABS_ETA_JET and eta < MAX_ABS_ETA_JET;
-	passptcount += passpt ? 1 : 0;
-	passptetacount += passpteta ? 1 : 0;
+      std::vector<float> matchedEtas;  // signed η of pT-passing HS-matched jets
+
+      for (int jetIdx = 0; jetIdx < (int)this->topoJetPt.GetSize(); ++jetIdx) {
+        if (this->topoJetTruthHSIdx[jetIdx].empty()) continue;  // not HS-matched
+        float eta = std::abs(this->topoJetEta[jetIdx]);
+        float pt  = this->topoJetPt[jetIdx];
+        if (DEBUG) std::cout << "reco HS-matched jet pt, eta: " << pt << ", " << eta << '\n';
+        bool passpt    = pt > MIN_JET_PT;
+        bool passpteta = passpt && eta > MIN_ABS_ETA_JET && eta < MAX_ABS_ETA_JET;
+        passptcount    += passpt    ? 1 : 0;
+        passptetacount += passpteta ? 1 : 0;
+        if (passpt) matchedEtas.push_back(this->topoJetEta[jetIdx]);
       }
-      
-      bool passesPt   = passptcount >= MIN_PASSPT_JETS;
+
+      bool passesPt   = passptcount   >= MIN_PASSPT_JETS;
       bool passesEta  = passptetacount >= MIN_PASSETA_JETS;
-      bool passesDEta = std::abs(truthHSJetEta[0]-truthHSJetEta[1]) >= VBS_JET_D_ETA;
-      return passesPt and passesEta and passesDEta;
+      bool passesDEta = (int)matchedEtas.size() >= 2 &&
+                        std::abs(matchedEtas[0] - matchedEtas[1]) >= VBS_JET_D_ETA;
+      return passesPt && passesEta && passesDEta;
     }
 
     // -----------------------------------------------------------------------
@@ -195,7 +203,7 @@ namespace MyUtl {
     // -----------------------------------------------------------------------
     // countForwardJets
     //   Counts reco jets that fall in the HGTD η acceptance
-    //   (MIN_ABS_ETA_JET < |η| < MAX_ABS_ETA_JET) and exceed MIN_JETPT.
+    //   (MIN_ABS_ETA_JET < |η| < MAX_ABS_ETA_JET) and exceed MIN_JET_PT.
     //   The result is written into nForwardJet and used as the x-axis
     //   variable in several efficiency/resolution plots.
     // -----------------------------------------------------------------------
@@ -205,7 +213,7 @@ namespace MyUtl {
       float
 	jetEta = std::abs(this->topoJetEta[jetIdx]),
 	jetPt = this->topoJetPt[jetIdx];
-      if (jetEta > MIN_ABS_ETA_JET and jetEta < MAX_ABS_ETA_JET and jetPt > MIN_JETPT)
+      if (jetEta > MIN_ABS_ETA_JET and jetEta < MAX_ABS_ETA_JET and jetPt > MIN_JET_PT)
 	nForwardJet++;
     }
   }
@@ -721,6 +729,7 @@ namespace MyUtl {
       // TEST_MISCL uses TRKPTZ as its selection score; the purity gate is applied
       // at efficiency-check time in event_processing.h (both pass and total fills).
       this->scores[Score::TEST_MISCL] = this->scores.at(Score::TRKPTZ);
+      this->scores[Score::TEST_MISAS] = this->scores.at(Score::TRKPTZ);
     }
     
     // -----------------------------------------------------------------------
@@ -775,6 +784,8 @@ namespace MyUtl {
       if (diff > 3*PASS_SIGMA)
 	return false;
 
+      // return diff < 3*PASS_SIGMA;
+
       return true;
       // int nHSTrack = 0;
       // for (auto idx: this->trackIndices) {
@@ -806,7 +817,7 @@ namespace MyUtl {
     //
     //     10 cluster_dR           — min ΔR between the pT-weighted cluster
     //                               centroid (η,φ) and the nearest topo jet
-    //                               passing MIN_JETPT
+    //                               passing MIN_JET_PT
     //   NOTE: MEANS[10], STDS[10] are placeholders — update from
     //   normalization_params.json after retraining with the new feature.
     // -----------------------------------------------------------------------
@@ -867,7 +878,7 @@ namespace MyUtl {
         float cPhi = phiSum / sumpt;
         double minDR = 1e9;
         for (int j = 0; j < (int)branch->topoJetPt.GetSize(); ++j) {
-          if (branch->topoJetPt[j] < MIN_JETPT) continue;
+          if (branch->topoJetPt[j] < MIN_JET_PT) continue;
           double deta = branch->topoJetEta[j] - cEta;
           double dphi = TVector2::Phi_mpi_pi(branch->topoJetPhi[j] - cPhi);
           double dR   = std::sqrt(deta*deta + dphi*dphi);

@@ -88,7 +88,13 @@ int main() {
     Form("nFTrackHS > %d",  HS_TRACK_SPLIT)
   };
 
+  TH1D* ptHist[N_REGIONS];
   for (int r = 0; r < N_REGIONS; ++r) {
+    ptHist[r] = new TH1D(
+      Form("ptdist_r%d", r),
+      Form("Track p_{T} Distribution (%s);Track p_{T} [GeV];Normalised Entries",
+           regionLabel[r].c_str()),
+      100, 0.0, 50.0);
     for (int ic = 0; ic < nCuts; ++ic) {
       resHists[r][ic] = new TH1D(
         Form("res_r%d_ptmax%.1f", r, cuts[ic]),
@@ -113,6 +119,16 @@ int main() {
     // ── Event selection ──────────────────────────────────────────────────────
     if (!branch.passBasicCuts()) continue;
     if (!branch.passJetPtCut())  continue;
+
+    // ── Reference track pT histogram at the most permissive max-pT cut ───────
+    {
+      std::vector<int> refTracks = getAssociatedTracks(&branch, MIN_TRACK_PT, cuts.back(), 3.0);
+      int nFTref = 0, nFTHSref = 0, nFTPUref = 0;
+      branch.countForwardTracks(nFTref, nFTHSref, nFTPUref, refTracks, /*checkTimeValid=*/true);
+      const int refReg = (nFTHSref <= HS_TRACK_SPLIT) ? 0 : 1;
+      for (int idx : refTracks)
+        ptHist[refReg]->Fill(branch.trackPt[idx]);
+    }
 
     // ── Per-cut clustering ───────────────────────────────────────────────────
     for (int ic = 0; ic < nCuts; ++ic) {
@@ -275,32 +291,121 @@ int main() {
 
   // Plot 6: Normalised residual shape overlay per region (two pages)
   for (int r = 0; r < N_REGIONS; ++r) {
-    canvas->SetLogy(true);
-    TLegend* leg = new TLegend(0.62, 0.58, 0.90, 0.88);
-    leg->SetTextSize(0.025);
-    leg->SetHeader(regionLabel[r].c_str(), "C");
-    bool first = true;
+    std::vector<TH1D*> resClones;
+    std::vector<std::string> resLabels6;
     for (int ic = 0; ic < nPlot[r]; ++ic) {
-      if (ic % 2 != 0 && ic != nPlot[r] - 1) continue;
+      if (ic % 5 != 0 && ic != nPlot[r] - 1) continue;
       TH1D* h = (TH1D*)resHists[r][ic]->Clone(Form("res_clone_r%d_%d", r, ic));
       if (h->Integral() == 0) { delete h; continue; }
       h->Scale(1.0 / h->Integral());
-      h->SetLineColor(COLORS[ic % COLORS.size()]);
+      h->SetLineColor(COLORS[resClones.size() % COLORS.size()]);
       h->SetLineWidth(2);
       h->GetXaxis()->SetRangeUser(-400, 400);
-      h->GetYaxis()->SetTitle("Normalised Entries");
       h->SetTitle(Form("TRKPTZ #Deltat shape (%s);#Delta t [ps];Normalised Entries",
                        regionLabel[r].c_str()));
-      if (first) { h->Draw("HIST"); first = false; }
-      else        h->Draw("HIST SAME");
-      leg->AddEntry(h, Form("maxPt=%.0f GeV", cuts[ic]), "l");
+      resLabels6.push_back(Form("%.0f GeV", cuts[ic]));
+      resClones.push_back(h);
     }
-    if (!first) {
-      leg->Draw("SAME");
-      canvas->Print(outFile.c_str());
+    if (resClones.empty()) continue;
+    double yMax6 = 0.0, yMin6 = 1e30;
+    for (auto* h : resClones)
+      for (int b = 1; b <= h->GetNbinsX(); ++b) {
+        double v = h->GetBinContent(b);
+        if (v > 0.0) { yMax6 = std::max(yMax6, v); yMin6 = std::min(yMin6, v); }
+      }
+    yMax6 *= 3.0;  yMin6 = std::max(yMin6 * 0.3, 1e-6);
+    resClones[0]->GetYaxis()->SetRangeUser(yMin6, yMax6);
+    canvas->SetLogy(true);
+    LegendBox lb6 = bestLegendCornerHist(
+      resClones, -400.0, 400.0, yMin6, yMax6, (int)resClones.size() + 1, true);
+    TLegend* leg6 = new TLegend(lb6.x1, lb6.y1, lb6.x2, lb6.y2);
+    leg6->SetTextSize(0.025);
+    leg6->SetHeader(regionLabel[r].c_str(), "C");
+    bool first6 = true;
+    for (size_t i = 0; i < resClones.size(); ++i) {
+      if (first6) { resClones[i]->Draw("HIST"); first6 = false; }
+      else          resClones[i]->Draw("HIST SAME");
+      leg6->AddEntry(resClones[i], resLabels6[i].c_str(), "l");
     }
+    leg6->Draw("SAME");
+    canvas->Print(outFile.c_str());
     canvas->SetLogy(false);
+    for (auto* h : resClones) delete h;
   }
+
+  // Plot 7: Track pT distribution at most-permissive max-pT cut, with sweep cut markers (one page)
+  {
+    TH1D* h0 = (TH1D*)ptHist[0]->Clone("ptdist_low_clone");
+    TH1D* h1 = (TH1D*)ptHist[1]->Clone("ptdist_high_clone");
+    if (h0->Integral() > 0) h0->Scale(1.0 / h0->Integral());
+    if (h1->Integral() > 0) h1->Scale(1.0 / h1->Integral());
+    h0->SetLineColor(C01);  h0->SetLineWidth(2);
+    h1->SetLineColor(C02);  h1->SetLineWidth(2);
+    h0->GetXaxis()->SetRangeUser(0.0, 50.0);
+    h0->SetTitle("Track p_{T} Distribution (max p_{T} sweep);Track p_{T} [GeV];Normalised Entries");
+    double yMaxPt = 0.0, yMinPt = 1e30;
+    for (auto* h : {h0, h1})
+      for (int b = 1; b <= h->GetNbinsX(); ++b) {
+        double v = h->GetBinContent(b);
+        if (v > 0.0) { yMaxPt = std::max(yMaxPt, v); yMinPt = std::min(yMinPt, v); }
+      }
+    yMaxPt *= 5.0;  yMinPt = std::max(yMinPt * 0.3, 1e-6);
+    h0->GetYaxis()->SetRangeUser(yMinPt, yMaxPt);
+    canvas->SetLogy(true);
+    h0->Draw("HIST");
+    h1->Draw("HIST SAME");
+    // Vertical dashed lines at every 5th sweep cut value
+    std::vector<TLine*> vlines;
+    for (int ic = 0; ic < nCuts; ic += 5) {
+      TLine* vl = new TLine(cuts[ic], yMinPt, cuts[ic], yMaxPt);
+      vl->SetLineColor(kGray + 1);  vl->SetLineStyle(2);  vl->SetLineWidth(1);
+      vl->Draw("SAME");
+      vlines.push_back(vl);
+    }
+    LegendBox lbPt = bestLegendCornerHist({h0, h1}, 0.0, 50.0, yMinPt, yMaxPt, 3, true);
+    TLegend* legPt = new TLegend(lbPt.x1, lbPt.y1, lbPt.x2, lbPt.y2);
+    legPt->SetTextSize(0.025);
+    legPt->AddEntry(h0, Form("nFTrackHS #leq %d", HS_TRACK_SPLIT), "l");
+    legPt->AddEntry(h1, Form("nFTrackHS > %d",    HS_TRACK_SPLIT), "l");
+    TLine* dummyVL = new TLine(0, 0, 0, 0);
+    dummyVL->SetLineColor(kGray + 1);  dummyVL->SetLineStyle(2);
+    legPt->AddEntry(dummyVL, "Sweep cuts (every 5 GeV)", "l");
+    legPt->Draw("SAME");
+    canvas->Print(outFile.c_str());
+    canvas->SetLogy(false);
+    delete h0;  delete h1;  delete dummyVL;
+    for (auto* vl : vlines) delete vl;
+  }
+
+  // --- Pseudo-ROC plots (pages 7-9) ---
+  std::vector<std::string> maxPtLabels(nCuts);
+  for (int ic = 0; ic < nCuts; ++ic)
+    maxPtLabels[ic] = Form("%.0f GeV", cuts[ic]);
+
+  const auto effLow  = graphYVals(grEff[0]);
+  const auto effHigh = graphYVals(grEff[1]);
+  const auto sigLow  = graphYVals(grSigma[0]);
+  const auto sigHigh = graphYVals(grSigma[1]);
+  const auto purLow  = graphYVals(grPurity[0]);
+  const auto purHigh = graphYVals(grPurity[1]);
+
+  saveRocPlot(outFile, canvas,
+    effLow, purLow, effHigh, purHigh, maxPtLabels,
+    "Purity vs. Efficiency (max p_{T} sweep)",
+    "Overall Efficiency", "Mean Cluster Purity",
+    HS_TRACK_SPLIT);
+
+  saveRocPlot(outFile, canvas,
+    sigLow, purLow, sigHigh, purHigh, maxPtLabels,
+    "Purity vs. Core #sigma (max p_{T} sweep)",
+    "Core #sigma [ps]", "Mean Cluster Purity",
+    HS_TRACK_SPLIT);
+
+  saveRocPlot(outFile, canvas,
+    sigLow, effLow, sigHigh, effHigh, maxPtLabels,
+    "Efficiency vs. Core #sigma (max p_{T} sweep)",
+    "Core #sigma [ps]", "Overall Efficiency",
+    HS_TRACK_SPLIT);
 
   canvas->Print((outFile + "]").c_str());
   std::cout << "Saved: " << outFile << '\n';

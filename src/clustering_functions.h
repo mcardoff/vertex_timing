@@ -409,7 +409,7 @@ namespace MyUtl {
      bool checkTimeValid,          // For Ideal Efficiency Scenario
      double smearRes,              // Fixed resolution for smeared times
      ClusteringMethod method,      // Clustering algorithm to use
-     bool usez0,                   // Use z info in clustering as well
+     bool usez0 = false,           // Use z info in clustering as well
      bool sortTracks = false,      // Before clustering, sort tracks by pT
      bool calcPurityFlag = false   // only compute purity when TEST_MISCL is active
   ) -> std::vector<Cluster> {
@@ -430,10 +430,11 @@ namespace MyUtl {
 
     if (useSmearedTimes) {
       for (auto idx: indices) {
+	// smearRes is interpreted as a flat per-track resolution (e.g. IDEAL_TRACK_RES).
+	// Previously this divided by sqrt(nHGTDHits), which exactly replicated the real
+	// HGTD per-track resolution formula (30 ps/hit → 30/√N per track) and left the
+	// "ideal" scenarios with essentially the same resolution as real HGTD.
 	double res = smearRes;
-	bool timeQuery = branch->trackTimeValid[idx] == 1
-	  and branch->trackHgtdHits[idx] > 0;
-	if (timeQuery) { res /= std::sqrt(branch->trackHgtdHits[idx]); }
 	if (!checkTimeValid || branch->trackTimeValid[idx] == 1) {
 	  double smearedTime = getSmearedTrackTime(idx, res, branch);
 	  smearedTimesMap.emplace(idx, smearedTime);
@@ -458,7 +459,7 @@ namespace MyUtl {
     // Load ML model only once using static initialization (lazy evaluation)
     static MLModel mlModel = []() {
         MLModel m;
-        m.load_weights("../share/models/model_weights.json");
+        m.load_weights("/Users/mcard/project/vertex_timing/share/models/model_weights.json");
         std::cout << "✓ ML model loaded (one-time initialization)" << std::endl;
         return m;
     }();
@@ -615,9 +616,12 @@ namespace MyUtl {
       if (score.usesOwnCollection)
 	continue;
 
-      // FILTJET and ITERATIVE each use their own pre-built collection;
-      // both are chosen by the single-score overload in selectClusters.
-      if (score == Score::FILTJET || score == Score::ITERATIVE)
+      // FILTJET, ITERATIVE, CONE_BDT, REFINED, TEST_MISAS, and TEST_HS each use
+      // their own pre-built collection or custom selection method; chosen via the
+      // single-score or BDT overload in selectClusters.
+      if (score == Score::FILTJET || score == Score::ITERATIVE ||
+          score == Score::CONE_BDT || score == Score::REFINED ||
+          score == Score::TEST_MISAS || score == Score::TEST_HS)
 	continue;
 
       if (score == Score::PASS) {
@@ -675,6 +679,53 @@ namespace MyUtl {
       }
     }
     return output;
+  }
+
+  // ---------------------------------------------------------------------------
+  // refineClusterTiming
+  //   Post-selection timing refinement: given a cluster found at 3σ, recompute
+  //   its time using only the subset of constituent tracks that fall within
+  //   dist_cut σ of the existing centroid.  This is the second pass of the
+  //   two-pass REFINED algorithm — the cluster membership is unchanged; only
+  //   values[0] and sigmas[0] are updated.
+  //
+  //   Times are read from c.allTimes[i] (populated during clustering; already
+  //   smeared or raw depending on how the cluster was built).  Resolutions come
+  //   from branch->trackTimeRes[idx] unless idealRes > 0, in which case a flat
+  //   per-track resolution of idealRes is used instead.
+  //
+  //   Falls back to the original values[0]/sigmas[0] if no tracks survive the
+  //   filter (degenerate edge case).
+  // ---------------------------------------------------------------------------
+  inline Cluster refineClusterTiming(
+      const Cluster&          c,
+      BranchPointerWrapper*   branch,
+      double                  dist_cut,
+      double                  idealRes = -1.0)
+  {
+    Cluster result  = c;
+    double  t_clust = c.values[0];
+    double  s_clust = c.sigmas[0];
+
+    double sumW = 0.0, sumWT = 0.0;
+    for (size_t i = 0; i < c.trackIndices.size(); ++i) {
+      int    idx = c.trackIndices[i];
+      double t   = c.allTimes[i];   // already smeared/raw as built
+      double s   = (idealRes > 0.0) ? idealRes : (double)branch->trackTimeRes[idx];
+
+      double denom = std::sqrt(s * s + s_clust * s_clust);
+      if (denom <= 0.0) continue;
+      if (std::abs(t - t_clust) / denom >= dist_cut) continue;
+
+      double w  = 1.0 / (s * s);
+      sumW     += w;
+      sumWT    += w * t;
+    }
+    if (sumW > 0.0) {
+      result.values[0] = sumWT / sumW;
+      result.sigmas[0] = std::sqrt(1.0 / sumW);
+    }
+    return result;
   }
 }
 #endif // CLUSTERING_FUNCTIONS_H

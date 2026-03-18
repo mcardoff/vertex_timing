@@ -16,300 +16,214 @@ The project performs timing-based vertex reconstruction using:
 
 ```
 vertex_timing/
-├── src/                          # Core library headers
-│   ├── clustering_constants.h   # Analysis constants and configuration
-│   ├── clustering_functions.h   # Clustering algorithms (ML model loaded here)
-│   ├── clustering_includes.h    # Common ROOT/C++ includes
-│   ├── clustering_structs.h     # Data structures (ML feature extraction)
-│   ├── event_processing.h       # Event loop processing
-│   ├── plotting_utilities.h     # Visualization tools
-│   ├── ml_model.h               # Standalone C++ neural network
-│   └── json.hpp                 # JSON parser for model weights
-├── share/                        # Shared resources (NEW!)
-│   ├── models/                  # ML model files
-│   │   ├── model.onnx          # ONNX model (8 features)
-│   │   ├── model_weights.json  # Exported weights for C++ (330 KB)
-│   │   └── normalization_params.json  # Feature normalization parameters
-│   ├── scripts/                 # Utility scripts
-│   │   ├── event_display.py    # Python event visualization
-│   │   ├── inspect_onnx_model.py  # Model inspection tool
-│   │   ├── export_onnx_model.py   # ONNX export helper
-│   │   └── model_evaluation_helper.py  # Model integration guide
-│   ├── docs/                    # Documentation
-│   │   ├── SUMMARY.md           # Project status overview
-│   │   ├── ML_QUICK_START.md    # Quick ML integration guide
-│   │   ├── ML_FEATURE_EXTRACTION.md  # Feature calculation guide
-│   │   ├── ML_MODEL_INTEGRATION.md   # Complete ML integration
-│   │   └── ERROR_ANALYSIS_PLAN.md    # Error analysis methodology
-│   └── README.md                # Share directory documentation
-├── *.cxx                         # Analysis executables (see below)
-├── CMakeLists.txt               # Build configuration
-├── build/                       # Build directory
-│   ├── clustering_dt            # Main analysis executable
-│   ├── hgtd_matching            # Error analysis executable
-│   ├── extract_error_metrics    # Metrics extraction
-│   ├── test_ml_model            # ML model test
-│   ├── error_metrics_summary.txt  # Analysis results
-│   └── example_events.txt       # Event display candidates
-├── figs/                        # Output plots
-├── old/                         # Legacy implementations
-└── DBSCAN.ipynb                 # Jupyter notebook for DBSCAN clustering
+├── src/                           # Analysis executables and core library headers
+│   ├── clustering_constants.h    # Analysis constants, Score enum, ClusteringMethod enum
+│   ├── clustering_functions.h    # Clustering algorithms; ML model loaded here (line 294)
+│   ├── clustering_includes.h     # Common ROOT/C++ includes
+│   ├── clustering_structs.h      # Data structures; ML feature extraction (line 328)
+│   ├── event_processing.h        # Event loop: setupChain, getAssociatedTracks, processEvent
+│   ├── plotting_utilities.h      # Visualization tools (overlay histogram, money plots)
+│   ├── sweep_utilities.h         # Shared helpers for 1-D parameter sweep executables
+│   ├── ml_model.h                # Standalone C++ neural network
+│   ├── AtlasLabels.h / AtlasStyle.h  # ATLAS plot style utilities
+│   ├── json.hpp                  # JSON parser for model weights
+│   │
+│   ├── clustering_dt.cxx         # Main analysis (3 timing scenarios × multiple scores)
+│   ├── failure_decomposition.cxx # Failure mode categorisation + pie chart
+│   ├── rate_diagnostics.cxx      # Selection-agnostic misclustering/misassignment rates
+│   ├── hgtd_matching.cxx         # Low-level track/cluster matching diagnostics
+│   ├── extract_error_metrics.cxx # Extracts metrics from hgtd_matching output
+│   ├── generate_rpt.cxx          # Timing distribution report
+│   ├── test_ml_model.cxx         # ML model validation
+│   ├── evaluate_ml_lowtrack.cxx  # NN score analysis for low-track-count events
+│   ├── export_training_data.cxx  # Exports CSV rows for DNN retraining (8 features)
+│   ├── distcut_sweep.cxx         # Sweep: cone distance cut
+│   ├── mintrackpt_sweep.cxx      # Sweep: minimum track pT
+│   ├── maxtrackpt_sweep.cxx      # Sweep: maximum track pT
+│   ├── cone_iter_k_sweep.cxx     # Sweep: CONE_ITER_K (REFINED top-K parameter)
+│   └── dist_refine_sweep.cxx     # Sweep: DIST_CUT_REFINE (REFINED iterative distance)
+├── runHGTD_Clustering.cxx        # Interactive event-display clustering script (root dir)
+├── vertex_time.cxx               # Vertex timing distribution analysis with jet selection
+├── check_jet_sorting.cxx         # Utility: verify jets are pT-sorted in ntuples
+├── test_vbf_integration.cxx      # Tests VBF cut integration
+├── test_vbf_selection.cxx        # VBF signal region selection demo
+├── share/
+│   ├── models/                   # ML model files (model.onnx, model_weights.json,
+│   │                             #   normalization_params.json)
+│   ├── scripts/                  # Python utilities
+│   │   ├── event_display.py      # Event visualisation (calls runHGTD_Clustering.cxx)
+│   │   ├── inspect_onnx_model.py
+│   │   ├── export_onnx_model.py
+│   │   └── model_evaluation_helper.py
+│   └── docs/                     # Design docs and ML integration guides
+├── CMakeLists.txt
+├── build/                        # Build output
+├── figs/                         # Output plots (PDF)
+├── old/                          # Legacy implementations
+└── DBSCAN.ipynb
 ```
 
 ## Main Executables
 
 ### Primary Analysis
-- **clustering_dt.cxx**: Main clustering analysis comparing HGTD times, ideal resolution, and efficiency scenarios
-- **vertex_time.cxx**: Vertex timing distribution analysis with forward jet selection
-- **hgtd_matching.cxx**: Comprehensive error analysis quantifying three major failure modes:
-  1. Wrong HGTD matching (incorrect track time assignments)
-  2. Wrong cluster selection (incorrect hard scatter identification)
-  3. Insufficient tracks (too few tracks for reliable clustering)
+- **clustering_dt.cxx** (`src/`): Main clustering analysis comparing HGTD times, ideal resolution, and efficiency scenarios. Evaluates `Score::HGTD`, `TRKPTZ`, `REFINED`, and optionally `TESTML`.
+- **vertex_time.cxx**: Vertex timing distribution analysis with forward jet selection.
 
-### Plotting Utilities
-- **generate_timeplot.cxx**: Generate timing resolution plots
-- **generate_onefile_timeplot.cxx**: Single-file timing plots
-- **generate_rpt.cxx**: Report generation with timing distributions
+### Diagnostics & Failure Analysis
+- **failure_decomposition.cxx** (`src/`): Classifies every TRKPTZ failure into four non-exclusive categories (see section below). Primary diagnostic tool.
+- **rate_diagnostics.cxx** (`src/`): Selection-agnostic rates — misclustering (purity > 75%?) and timing misassignment (HGTD vs Ideal Res. PASS oracle). Binned tables matching clustering_dt style.
+- **hgtd_matching.cxx** (`src/`): Low-level track/cluster matching diagnostics. Quantifies wrong HGTD matching, wrong cluster selection, and insufficient track count failure modes.
+- **extract_error_metrics.cxx** (`src/`): Extracts quantitative metrics from hgtd_matching output.
 
-### Support Scripts
-- **runHGTD_Clustering.cxx**: Wrapper for running HGTD clustering
-- **testing_separation.cxx**: Test vertex separation algorithms
+### Parameter Sweeps
+All sweep executables live in `src/` and share helpers from `sweep_utilities.h`.
+- **distcut_sweep.cxx**: Sweeps `DIST_CUT_CONE` (0.5 σ – 5 σ).
+- **mintrackpt_sweep.cxx** / **maxtrackpt_sweep.cxx**: pT threshold sweeps.
+- **cone_iter_k_sweep.cxx**: Sweeps `CONE_ITER_K` (top-K cone clusters for REFINED pooling).
+- **dist_refine_sweep.cxx**: Sweeps `DIST_CUT_REFINE` (iterative distance cut in REFINED stage).
+
+### ML Tools
+- **test_ml_model.cxx**: Validates the loaded neural network model.
+- **evaluate_ml_lowtrack.cxx**: Evaluates NN scores specifically on ≤4 HS-track events.
+- **export_training_data.cxx**: Exports 8-feature CSV rows + labels for DNN retraining.
+
+### Utilities
+- **runHGTD_Clustering.cxx** (root dir): Interactive per-event clustering. Runs CONE at 3.0 σ then applies the REFINED stage (top-`CONE_ITER_K` cone clusters re-clustered with ITERATIVE at `DIST_CUT_REFINE`). To revert to plain cone output comment out the `===== REFINED STAGE =====` block. Output format is consumed by `event_display.py`.
+- **generate_rpt.cxx**: Report generation with timing distributions.
+- **check_jet_sorting.cxx**: Verifies jet pT ordering in ntuples.
+
+## REFINED Clustering Algorithm
+
+REFINED is a two-stage approach implemented in `src/event_processing.h` and mirrored in `runHGTD_Clustering.cxx`:
+
+1. **Stage 1 (Cone)**: Standard cone clustering at `DIST_CUT_CONE = 3.0 σ` on all forward tracks.
+2. **Stage 2 (Iterative refinement)**: Filter cone clusters to those with `≥ MIN_CLUSTER_TRACKS` tracks, sort by TRKPTZ score descending, pool the track indices of the top `CONE_ITER_K = 3` clusters, then re-cluster the pooled tracks using `ClusteringMethod::ITERATIVE` at the tighter `DIST_CUT_REFINE = 2.0 σ`. The ITERATIVE method updates the centroid after each merge, preventing PU track absorption that plagues CONE in spread events.
+
+Relevant constants in `src/clustering_constants.h`:
+```cpp
+DIST_CUT_CONE   = 3.0   // Stage 1 cone distance
+DIST_CUT_REFINE = 2.0   // Stage 2 iterative distance
+CONE_ITER_K     = 3     // Top-K cone clusters to pool
+MIN_CLUSTER_TRACKS = 2  // Minimum tracks to qualify a cluster
+```
+
+Score enum: `Score::REFINED` — selected by TRKPTZ among the refined sub-clusters.
+
+## Failure Decomposition
+
+`src/failure_decomposition.cxx` classifies every TRKPTZ-failing event into four non-exclusive categories (an event can satisfy multiple):
+
+| # | Name | Condition |
+|---|------|-----------|
+| 1 | Selection failure | Another qualifying HGTD cluster passes the efficiency window |
+| 2 | Timing misassignment | Re-running with ideal timing resolution fixes it |
+| 3 | Misclustering | No HGTD cluster has purity > 75% **OR** the REFINED algorithm fixes it |
+| 4 | Track efficiency loss | Ideal resolution + ideal efficiency fixes it (but ideal resolution alone does not) |
+
+Categories 2 and 4 are mutually exclusive by construction.
+`cat_none` catches events satisfying none of the four — true fundamental failures.
+
+**Output per run:**
+- Console: summary table with per-category counts/fractions, per-bin breakdown vs n Forward HS Tracks, and a sanity check that `|A∪B∪C∪D| + |None| = n_fail`.
+- PDF page 1: TEfficiency curves per category, normalised to **failing events** in each bin (`h_fail` denominator). The overall failure rate (`n_fail / n_total`) is overlaid as a grey dashed reference.
+- PDF page 2: Pie chart of exclusive Venn decomposition (12 slices summing to `n_fail`); a `printf` sanity check verifies the sum before drawing.
+
+**cat_none debug output**: When `cat_none` fires, a ready-to-run event display command is printed:
+```
+python3 event_display.py --file_num <NUM> --event_num <ENTRY> --extra_time 0.00
+```
+followed by the full cluster dump (time, score, purity, tracks, passes?).
 
 ## Key Analysis Parameters
 
-From vertex_time.cxx:
+From `src/clustering_constants.h`:
 ```cpp
-min_jets          = 2      // Minimum number of jets per event
-min_jetpt         = 30.0   // Minimum jet pT (GeV)
-min_abs_eta       = 2.0    // Minimum |eta| for forward vertices
-min_abs_track_eta = 2.4    // Minimum |eta| for forward tracks
-min_track_pt      = 1.0    // Minimum track pT (GeV)
-max_vtx_dz        = 1.0e6  // Maximum vertex z error
-max_nsigma        = 3.0    // Track-to-PV association threshold
+MIN_TRACK_PT     = 0.5   // GeV — track selection floor
+MAX_TRACK_PT     = 30.0  // GeV — track selection ceiling
+DIST_CUT_CONE    = 3.0   // σ — cone clustering distance
+DIST_CUT_REFINE  = 2.0   // σ — REFINED iterative distance
+CONE_ITER_K      = 3     // top-K cone clusters for REFINED pooling
+IDEAL_TRACK_RES  = 10.0  // ps — flat per-track resolution for ideal scenarios
+PASS_SIGMA       = 20.0  // pass threshold for efficiency oracle
 ```
 
 ## Build System
 
 ### Requirements
-- CMake >= 3.10
+- CMake ≥ 3.10
 - C++17 compiler
-- ROOT (with RIO, Core, Gpad, Graf, Hist, Tree components)
+- ROOT (RIO, Core, Gpad, Graf, Hist, Tree)
 - Boost (filesystem)
 
 ### Build Commands
 ```bash
 cd build
 cmake ..
-make
+make [<target>]   # e.g. make failure_decomposition
 ```
 
 ### Compiler Flags
-- `-O3`: Maximum optimization
-- `-march=native`: CPU-specific optimization
-- `-DNDEBUG`: Disable debug assertions
+`-O3 -march=native -DNDEBUG` plus thin LTO.
 
 ## Data Format
 
-The analysis reads ROOT ntuples with the following branch structure:
+ROOT ntuples with the following key branches:
 
-### Jets
-- `AntiKt4EMTopoJets_pt`, `AntiKt4EMTopoJets_eta`
-- `AntiKt4EMTopoJets_track_idx`: Track association
+| Group | Branches |
+|-------|----------|
+| Jets | `AntiKt4EMTopoJets_pt`, `_eta`, `_track_idx` |
+| Vertices | `TruthVtx_z/time`, `RecoVtx_z/time/timeRes/hasValidTime` |
+| Tracks | `Track_z0/pt/eta/time/timeRes/hasValidTime/var_z0/truthVtx_idx/truthPart_idx` |
+| Particles | `TruthPart_prodVtx_z` |
 
-### Vertices
-- `TruthVtx_z`, `TruthVtx_time`: Truth-level vertices
-- `RecoVtx_z`, `RecoVtx_time`, `RecoVtx_timeRes`: Reconstructed vertices
-- `RecoVtx_hasValidTime`: Timing validity flag
+## Event Display
 
-### Tracks
-- `Track_z0`, `Track_pt`, `Track_eta`: Kinematics
-- `Track_time`, `Track_timeRes`, `Track_hasValidTime`: Timing info
-- `Track_var_z0`: z0 variance
-- `Track_truthVtx_idx`, `Track_truthPart_idx`: Truth matching
-
-### Particles
-- `TruthPart_prodVtx_z`: Production vertex z-position
-
-## Analysis Modes
-
-The clustering_dt.cxx implements three analysis scenarios:
-
-1. **HGTD Times**: Real HGTD detector timing performance
-2. **Ideal Resolution**: Perfect timing resolution, real efficiency
-3. **Ideal Efficiency**: Perfect timing resolution and efficiency
-
-Each mode evaluates multiple scoring algorithms:
-- `HGTD`: Basic HGTD timing
-- `TRKPTZ`: Track pT-weighted timing
-- `PASS`: Passing clusters
-- (Commented: CALO60, CALO90, JUST60, JUST90, FILT60, FILT90, FILTJET)
-
-## Output
-
-### Plots
-Generated plots are saved to `figs/` directory in PDF format:
-- Vertex timing distributions
-- Timing resolution vs. forward jet multiplicity
-- Efficiency and purity curves
-- 2D correlation plots
-
-### Event Display
-Events of interest can be visualized using:
 ```bash
-python share/scripts/event_display.py --file_num <file> --event_num <event> --extra_time <dt>
+python share/scripts/event_display.py --file_num <NUM> --event_num <ENTRY> --extra_time <dt>
 ```
+
+Internally calls `runHGTD_Clustering.cxx` and parses its stdout to produce a 2-page PDF (R-Z geometry view + time histogram).
 
 ## Machine Learning Model
 
-### Overview
-The project integrates a neural network for cluster selection, providing improved hard scatter identification compared to traditional TRKPT/TRKPTZ scoring methods.
-
-### Model Architecture
-- **Input**: 8 features
-  1. delta_z - Cluster z position relative to reference vertex
-  2. delta_z_resunits - delta_z in resolution units
-  3. cluster_z_sigma - Cluster z uncertainty
-  4. cluster_d0 - Transverse impact parameter
-  5. cluster_d0_sigma - d0 uncertainty
-  6. cluster_qOverP - Charge over momentum
-  7. cluster_qOverP_sigma - q/p uncertainty
-  8. cluster_sumpt - Sum of track pT
-- **Architecture**: 8 → 128 → 64 → 32 → 1
-- **Activations**: ReLU (hidden), Sigmoid (output)
-- **Parameters**: 11,521
-- **Performance**: ~0.01-0.02 ms per inference
-
-### Integration
-- **Model loading**: Lazy static initialization in `src/clustering_functions.h:294`
-- **Feature extraction**: `src/clustering_structs.h:328` (calcFeatures function)
-- **Scoring**: Part of `updateScores()` called after clustering
-- **Usage**: Score assigned to `cluster.scores[TESTML]` or `cluster.scores[Score::TESTML]`
-
-### Files
-- `share/models/model_weights.json` - Model weights loaded by C++
-- `share/models/model.onnx` - Original ONNX model
-- `share/models/normalization_params.json` - Feature normalization parameters
-- `src/ml_model.h` - Standalone C++ neural network implementation
-
-### Performance Optimization
-Model is loaded **once** on first event (static initialization), not per-event. Expect ~100x speedup vs naive per-event loading.
-
-### Documentation
-- Quick start: `share/docs/ML_QUICK_START.md`
-- Feature extraction: `share/docs/ML_FEATURE_EXTRACTION.md`
-- Full integration: `share/docs/ML_MODEL_INTEGRATION.md`
+- **Architecture**: 8 → 128 → 64 → 32 → 1 (ReLU hidden, Sigmoid output; 11 521 parameters)
+- **Features**: delta_z, delta_z_resunits, cluster_z_sigma, cluster_d0, cluster_d0_sigma, cluster_qOverP, cluster_qOverP_sigma, cluster_sumpt
+- **Loading**: Lazy static init in `src/clustering_functions.h:294` — once per run, ~0.01 ms per inference
+- **Score**: `Score::TESTML`
+- **Files**: `share/models/model_weights.json`, `model.onnx`, `normalization_params.json`
 
 ### Retraining Workflow
-1. Train model in Python with proper normalization
-2. Export to ONNX: `tf2onnx.convert.from_keras()`
-3. Save normalization params: `scaler.mean_` and `scaler.scale_`
-4. Run: `python share/scripts/inspect_onnx_model.py --model share/models/model.onnx --export-weights`
-5. Copy new files to `share/models/`
-6. Update normalization in C++ if needed
-7. Rebuild: `cd build && make`
-
-## Development Notes
-
-### Debug Mode
-Set `#define debug true` at the top of executables to enable verbose logging.
-
-### Multicore Processing
-`ROOT::EnableImplicitMT()` is used to parallelize event processing across all CPU cores.
-
-### Color Scheme
-Standard colors defined in vertex_time.cxx:
-- c1: #3f90da (blue)
-- c2: #ffa90e (orange)
-- c3: #bd1f01 (red)
-- c4: #94a4a2 (gray)
-- c5: #832db6 (purple)
-
-## Git Status (Last Snapshot)
-
-Current branch: main
-
-Untracked files:
-- .DS_Store
-- hgtd_matching.cxx
-- hgtd_matching_analysis.root
-
-Recent commits:
-- 78bff80: Up to date before claude implementation
-- 261a1a8: add cmakelists.txt
-- 5a61760: Update scripts to latest
+1. Train in Python, export to ONNX: `tf2onnx.convert.from_keras()`
+2. Save normalization params (`scaler.mean_`, `scaler.scale_`)
+3. `python share/scripts/inspect_onnx_model.py --model share/models/model.onnx --export-weights`
+4. Copy new files to `share/models/`
+5. `cd build && make`
 
 ## Common Workflows
 
-### Running Full Analysis
 ```bash
-cd build
-./clustering_dt
-# Output: Various plots in ../figs/ and event lists
+# Full analysis
+cd build && ./clustering_dt
+
+# Failure decomposition
+cd build && ./failure_decomposition
+
+# Event display for a specific event
+python share/scripts/event_display.py --file_num 000009 --event_num 1856 --extra_time 0.0
+
+# Parameter sweep
+cd build && ./dist_refine_sweep
+
+# Rebuild after header change
+cd build && make
 ```
 
-### Analyzing Vertex Times
-```bash
-cd build
-cmake .. && make
-./clustering_dt
-# Check figs/ for timing distribution plots
-```
+## Development Notes
 
-### Single File Analysis
-Use generate_onefile_timeplot.cxx for quick checks on individual ROOT files.
-
-## Error Analysis Tool
-
-The `hgtd_matching.cxx` executable provides comprehensive diagnostics for algorithm failure modes:
-
-### Usage
-```bash
-# Run the error analysis
-root -l -b -q hgtd_matching.cxx
-
-# Extract quantitative metrics and generate summary table
-root -l -b -q extract_error_metrics.cxx
-```
-
-### Output
-- **ROOT file**: `hgtd_matching_analysis.root` (all histograms)
-- **PDF plots**: `error_analysis_plots/plot*.pdf` (11 diagnostic plots)
-- **Summary table**: `error_metrics_summary.txt` (quantitative breakdown)
-
-### Generated Plots
-
-**Error Source 1: Wrong HGTD Matching**
-- Plot 1: Track time residual distributions (all, HS, PU, matched, mismatched, cumulative)
-- Plot 2: Matching efficiency vs kinematics (η, pT, nHGTDHits)
-- Plot 3: Resolution vs matching quality (RMS vs nHits, resolution vs avg residual)
-
-**Error Source 2: Wrong Cluster Selection**
-- Plot 4: Cluster score distributions (HS vs PU for TRKPT and TRKPTZ)
-- Plot 5: Selection efficiency vs event properties (n_clusters, n_jets, n_HS, PU fraction)
-- Plot 6: Resolution impact (correct vs wrong selection, extra error)
-
-**Error Source 3: Insufficient Tracks**
-- Plot 7: Track multiplicity (HS valid distribution, success rate, 2D HS vs PU, track loss waterfall)
-- Plot 8: Cluster sizes (HS vs PU, HS tracks in HS cluster)
-- Plot 9: HS track fragmentation (time spread, z spread, success vs spread)
-- Plot 10: Resolution vs track count (resolution scaling with N_HS)
-- Plot 11: Additional diagnostics (selection outcomes, HS cluster rank, score ratios)
-
-### Key Metrics Provided
-- Track-level time residuals and matching quality
-- Event-level matching efficiency by kinematics
-- Cluster selection confusion matrix (TP, FP, FN, TN)
-- Track loss through selection pipeline
-- Success rate vs track multiplicity with efficiency thresholds
-- HS track fragmentation in time and space
-
-## Notes for Claude Code
-
-- The main analysis entry point is `src/clustering_dt.cxx`
-- Error analysis tool is `hgtd_matching.cxx` (comprehensive failure mode diagnostics)
-- Core algorithms are in header files under `src/`
-- When modifying analysis cuts, update constants in `src/clustering_constants.h`
-- Always rebuild after header changes: `cd build && make`
-- Plot styling uses ROOT's TColor and TCanvas
-- Event loop uses TTreeReader for efficient branch access
-- The project uses namespace `MyUtl` for utilities
+- **Namespace**: all utilities live in `namespace MyUtl`
+- **Debug mode**: `#define debug true` at top of executable for verbose logging
+- **Multicore**: `ROOT::EnableImplicitMT()` parallelises histogram filling; `TTreeReader::Next()` loop remains sequential
+- **Constants**: modify analysis cuts in `src/clustering_constants.h`; always rebuild after header changes
+- **Plot styling**: ROOT `TColor`/`TCanvas`; ATLAS style via `AtlasStyle.h`/`AtlasLabels.h`
+- **Event loop**: `TTreeReader` + `BranchPointerWrapper` for branch access
+- **File identification**: within a TChain loop, `chain.GetCurrentFile()->GetName()` gives the file path and `chain.GetTree()->GetReadEntry()` gives the local (0-indexed) entry number — both needed to reconstruct an event display command

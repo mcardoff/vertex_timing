@@ -26,7 +26,7 @@ args = parser.parse_args()
 event_num, file_num = args.event_num, args.file_num
 
 IDEALEFF = False
-filename = f'event_displays/pure_clust_fails/event_display_{file_num}_{event_num:04d}.pdf'
+filename = f'event_displays/refine_event_display_{file_num}_{event_num:04d}.pdf'
 
 def generate_cluster_colors(n):
     """Generate n perceptually distinct colors using golden-ratio HSV spacing."""

@@ -3,6 +3,8 @@
 #include "clustering_constants.h"
 #include "event_processing.h"
 #include "plotting_utilities.h"
+#include "AtlasStyle.h"
+#include "AtlasLabels.h"
 
 using namespace MyUtl;
 
@@ -44,15 +46,19 @@ auto buildAnalysisMap(
 
   // Scores active in all scenarios
   m.emplace(Score::TRKPTZ,     AnalysisObj(label, Score::TRKPTZ    ));
-  m.emplace(Score::TESTML,     AnalysisObj(label, Score::TESTML    ));
-  m.emplace(Score::PASS,       AnalysisObj(label, Score::PASS      ));
+  // m.emplace(Score::TESTML,     AnalysisObj(label, Score::TESTML    ));
+  // m.emplace(Score::PASS,       AnalysisObj(label, Score::PASS      ));
   m.emplace(Score::TEST_MISCL, AnalysisObj(label, Score::TEST_MISCL));
+  // m.emplace(Score::TEST_MISAS, AnalysisObj(label, Score::TEST_MISAS ));
+  // m.emplace(Score::REFINED,    AnalysisObj(label, Score::REFINED    ));
 
   // Scores active only in the real-HGTD scenario
   if (scenario == Scenario::HGTD) {
-    m.emplace(Score::HGTD,      AnalysisObj(label, Score::HGTD     ));
-    m.emplace(Score::HGTD_SORT, AnalysisObj(label, Score::HGTD_SORT));
-    m.emplace(Score::ITERATIVE,  AnalysisObj(label, Score::ITERATIVE ));
+    m.emplace(Score::HGTD,       AnalysisObj(label, Score::HGTD      ));
+    // m.emplace(Score::TEST_HS,    AnalysisObj(label, Score::TEST_HS    ));
+    // m.emplace(Score::HGTD_SORT, AnalysisObj(label, Score::HGTD_SORT));
+    // m.emplace(Score::ITERATIVE,  AnalysisObj(label, Score::ITERATIVE ));
+    // m.emplace(Score::CONE_BDT,  AnalysisObj(label, Score::CONE_BDT ));
     // m.emplace(Score::FILTJET,   AnalysisObj(label, Score::FILTJET  ));
   }
 
@@ -103,6 +109,16 @@ void makeComparisonPlots(
   std::map<Score, AnalysisObj>& mapIdealEff
 ) {
   static const std::string compSubdir = std::string(SAVE_DIR) + "/comparisons";
+
+  moneyPlot(Form("%s/theplot_%s.pdf",compSubdir.c_str(), key), key, canvas,
+	    {
+	      &mapHGTD.at(Score::HGTD),           // HGTD Base Performance
+	      &mapHGTD.at(Score::TRKPTZ),         // TRKPTZ Base Performance
+	      &mapHGTD.at(Score::TEST_MISCL),     // TRKPTZ Fix Misclustering
+	      &mapIdealRes.at(Score::TRKPTZ),     // TRKPTZ Fix Misclustering
+	      &mapIdealRes.at(Score::TEST_MISCL), // TRKPTZ Fix Misclustering
+	    });
+  
   // HGTD algo vs TRKPTZ
   moneyPlot(Form("%s/hgtd_trkptz_%s.pdf", compSubdir.c_str(), key), key, canvas,
             {
@@ -110,77 +126,136 @@ void makeComparisonPlots(
                 &mapHGTD.at(Score::TRKPTZ)
 	    });
 
+  // HGTD algo vs TRKPTZ vs REFINED (cone + iterative refinement)
+  // moneyPlot(Form("%s/refined_%s.pdf", compSubdir.c_str(), key), key, canvas,
+  //           {
+  //               &mapHGTD.at(Score::HGTD),
+  //               &mapHGTD.at(Score::TRKPTZ),
+  //               &mapHGTD.at(Score::REFINED)
+  // 	    });
+
+  // // HGTD algo vs TRKPTZ vs HGTD_SORT (pT-sorted simultaneous + BDT)
+  // moneyPlot(Form("%s/hgtd_sort_%s.pdf", compSubdir.c_str(), key), key, canvas,
+  //           {
+  //               &mapHGTD.at(Score::HGTD),
+  //               &mapHGTD.at(Score::TRKPTZ),
+  //               &mapHGTD.at(Score::HGTD_SORT)
+  // 	    });
+
   // HGTD algo vs TRKPTZ vs HGTD_SORT (pT-sorted simultaneous + BDT)
-  moneyPlot(Form("%s/hgtd_sort_%s.pdf", compSubdir.c_str(), key), key, canvas,
-            {
-                &mapHGTD.at(Score::HGTD),
-                &mapHGTD.at(Score::TRKPTZ),
-                &mapHGTD.at(Score::HGTD_SORT)
-	    });
+  // moneyPlot(Form("%s/iter_v_sort_%s.pdf", compSubdir.c_str(), key), key, canvas,
+  //           {
+  //               &mapHGTD.at(Score::HGTD),
+  //               &mapHGTD.at(Score::TRKPTZ),
+  //               &mapHGTD.at(Score::HGTD_SORT),
+  // 		&mapHGTD.at(Score::ITERATIVE)
+  // 	    });
 
-  // HGTD base times: TRKPTZ vs DNN
-  moneyPlot(Form("%s/trkptz_dnn_hgtd_%s.pdf", compSubdir.c_str(), key), key, canvas,
-            {
-                &mapHGTD.at(Score::HGTD),
-                &mapHGTD.at(Score::TRKPTZ),
-                &mapHGTD.at(Score::TESTML)
-	    });
+  // // HGTD base times: TRKPTZ vs DNN
+  // moneyPlot(Form("%s/trkptz_dnn_hgtd_%s.pdf", compSubdir.c_str(), key), key, canvas,
+  //           {
+  //               &mapHGTD.at(Score::HGTD),
+  //               &mapHGTD.at(Score::TRKPTZ),
+  //               &mapHGTD.at(Score::TESTML)
+  // 	    });
 
-  // TRKPTZ full sample vs TRKPTZ restricted to highly pure clusters
-  moneyPlot(Form("%s/pure_clusters_%s.pdf", compSubdir.c_str(), key), key, canvas,
-            {
-                &mapHGTD.at(Score::HGTD),
-                &mapHGTD.at(Score::TRKPTZ),
-                &mapHGTD.at(Score::TEST_MISCL)
-	    });
+  // // TRKPTZ full sample vs TRKPTZ restricted to highly pure clusters
+  // moneyPlot(Form("%s/pure_clusters_%s.pdf", compSubdir.c_str(), key), key, canvas,
+  //           {
+  //               &mapHGTD.at(Score::HGTD),
+  //               &mapHGTD.at(Score::TRKPTZ),
+  //               &mapHGTD.at(Score::TEST_MISCL)
+  // 	    });
+
+  // // Misassignment effect: HGTD vs TRKPTZ vs TEST_MISAS (misassigned tracks removed)
+  // moneyPlot(Form("%s/test_misas_%s.pdf", compSubdir.c_str(), key), key, canvas,
+  //           {
+  //               &mapHGTD.at(Score::HGTD),
+  //               &mapHGTD.at(Score::TRKPTZ),
+  //               &mapHGTD.at(Score::TEST_MISAS)
+  // 	    });
+
+  // // PU-contamination effect: HGTD vs TRKPTZ vs TEST_HS (HS-origin tracks only)
+  // moneyPlot(Form("%s/test_hs_%s.pdf", compSubdir.c_str(), key), key, canvas,
+  //           {
+  //               &mapHGTD.at(Score::HGTD),
+  //               &mapHGTD.at(Score::TRKPTZ),
+  //               &mapHGTD.at(Score::TEST_HS)
+  // 	    });
+
+  // // Full error decomposition: misclustering vs misassignment vs PU-contamination
+  // moneyPlot(Form("%s/error_decomp_%s.pdf", compSubdir.c_str(), key), key, canvas,
+  //           {
+  //               &mapHGTD.at(Score::TRKPTZ),
+  //               &mapHGTD.at(Score::TEST_MISCL),
+  // 		&mapIdealRes.at(Score::TRKPTZ),
+  // 		&mapIdealRes.at(Score::PASS),
+  // 		&mapIdealEff.at(Score::PASS)
+  // 	    });
+
+  // moneyPlot(Form("%s/idealres_error_decomp_%s.pdf", compSubdir.c_str(), key), key, canvas,
+  //           {
+  //               &mapHGTD.at(Score::HGTD),
+  //               &mapIdealRes.at(Score::TRKPTZ),
+  //               &mapIdealRes.at(Score::TEST_MISCL),
+  //               &mapIdealRes.at(Score::TEST_MISAS)
+  // 	    });
 
   // Check iterative clustering score
-  moneyPlot(Form("%s/iterative_clust_%s.pdf", compSubdir.c_str(), key), key, canvas,
-            {
-                &mapHGTD.at(Score::HGTD),
-                &mapHGTD.at(Score::TRKPTZ),
-                &mapHGTD.at(Score::ITERATIVE)
-	    });
+  // moneyPlot(Form("%s/iterative_clust_%s.pdf", compSubdir.c_str(), key), key, canvas,
+  //           {
+  //               &mapHGTD.at(Score::HGTD),
+  //               &mapHGTD.at(Score::TRKPTZ),
+  //               &mapHGTD.at(Score::ITERATIVE)
+  // 	    });
+
+  // HGTD BDT on cone clusters vs HGTD_SORT (BDT on pT-sorted simultaneous) vs TRKPTZ
+  // moneyPlot(Form("%s/cone_bdt_%s.pdf", compSubdir.c_str(), key), key, canvas,
+  //           {
+  //               &mapHGTD.at(Score::HGTD),
+  //               &mapHGTD.at(Score::TRKPTZ),
+  //               &mapHGTD.at(Score::CONE_BDT)
+  // 	    });
 
   // pure clusters with ideal resolution
-  moneyPlot(Form("%s/pure_clusters_ires_%s.pdf", compSubdir.c_str(), key), key, canvas,
-            {
-                &mapHGTD.at(Score::HGTD),
-                &mapIdealRes.at(Score::TRKPTZ),
-                &mapIdealRes.at(Score::TEST_MISCL)
-	    });
+  // moneyPlot(Form("%s/pure_clusters_ires_%s.pdf", compSubdir.c_str(), key), key, canvas,
+  //           {
+  //               &mapHGTD.at(Score::HGTD),
+  //               &mapIdealRes.at(Score::TRKPTZ),
+  //               &mapIdealRes.at(Score::TEST_MISCL)
+  // 	    });
 
-  moneyPlot(Form("%s/pure_clusters_ieff_%s.pdf", compSubdir.c_str(), key), key, canvas,
-            {
-                &mapHGTD.at(Score::HGTD),
-                &mapIdealEff.at(Score::TRKPTZ),
-                &mapIdealEff.at(Score::TEST_MISCL)
-	    });
+  // moneyPlot(Form("%s/pure_clusters_ieff_%s.pdf", compSubdir.c_str(), key), key, canvas,
+  //           {
+  //               &mapHGTD.at(Score::HGTD),
+  //               &mapIdealEff.at(Score::TRKPTZ),
+  //               &mapIdealEff.at(Score::TEST_MISCL)
+  // 	    });
 
-  // Ideal-resolution times: TRKPTZ vs DNN
-  moneyPlot(Form("%s/trkptz_dnn_ires_%s.pdf", compSubdir.c_str(), key), key, canvas,
-            {
-                &mapHGTD.at(Score::HGTD),
-                &mapIdealRes.at(Score::TRKPTZ),
-                &mapIdealRes.at(Score::TESTML)
-	    });
+  // // Ideal-resolution times: TRKPTZ vs DNN
+  // moneyPlot(Form("%s/trkptz_dnn_ires_%s.pdf", compSubdir.c_str(), key), key, canvas,
+  //           {
+  //               &mapHGTD.at(Score::HGTD),
+  //               &mapIdealRes.at(Score::TRKPTZ),
+  //               &mapIdealRes.at(Score::TESTML)
+  // 	    });
 
-  // Ideal-efficiency times: TRKPTZ vs DNN
-  moneyPlot(Form("%s/trkptz_dnn_ieff_%s.pdf", compSubdir.c_str(), key), key, canvas,
-            {
-                &mapHGTD.at(Score::HGTD),
-                &mapIdealEff.at(Score::TRKPTZ),
-                &mapIdealEff.at(Score::TESTML)
-	    });
+  // // Ideal-efficiency times: TRKPTZ vs DNN
+  // moneyPlot(Form("%s/trkptz_dnn_ieff_%s.pdf", compSubdir.c_str(), key), key, canvas,
+  //           {
+  //               &mapHGTD.at(Score::HGTD),
+  //               &mapIdealEff.at(Score::TRKPTZ),
+  //               &mapIdealEff.at(Score::TESTML)
+  // 	    });
 
-  // Full ideal comparison: HGTD → TRKPTZ → IdealRes → IdealEff
-  moneyPlot(Form("%s/ideal_comp_%s.pdf", compSubdir.c_str(), key), key, canvas,
-            {
-                &mapHGTD.at(Score::HGTD),
-                &mapHGTD.at(Score::TRKPTZ),
-                &mapIdealRes.at(Score::TRKPTZ),
-                &mapIdealEff.at(Score::TRKPTZ)
-	    });
+  // // Full ideal comparison: HGTD → TRKPTZ → IdealRes → IdealEff
+  // moneyPlot(Form("%s/ideal_comp_%s.pdf", compSubdir.c_str(), key), key, canvas,
+  //           {
+  //               &mapHGTD.at(Score::HGTD),
+  //               &mapHGTD.at(Score::TRKPTZ),
+  //               &mapIdealRes.at(Score::TRKPTZ),
+  //               &mapIdealEff.at(Score::TRKPTZ)
+  // 	    });
 
   // Effect of fixing HGTD matching alone
   // moneyPlot(Form("%s/fixed_assoc_%s.pdf", compSubdir.c_str(), key), key, canvas,
@@ -214,7 +289,7 @@ void makeComparisonPlots(
 // ---------------------------------------------------------------------------
 
 auto main() -> int {
-  gStyle->SetOptStat(0);
+  SetAtlasStyle();  // ATLAS publication style (fonts, margins, ticks, …)
 
   // --- Data source ---
   TChain chain("ntuple");
@@ -227,7 +302,6 @@ auto main() -> int {
 
   // --- Canvas ---
   TCanvas* canvas = new TCanvas("canvas", "Histograms", 800, 600);
-  canvas->SetLeftMargin(0.15);
 
   // --- Analysis maps (one per timing scenario) ---
   auto mapHGTD     = buildAnalysisMap(Scenario::HGTD      );
@@ -261,10 +335,10 @@ auto main() -> int {
     TString fileName = branch.reader.GetTree()->GetCurrentFile()->GetName();
     TString fileNum  = fileName(49, 6);
 
-    // Collect events where TEST_MISCL fails the efficiency test
-    collectEventDisplay(evtDisplayHGTD,      2, resHGTD,     fileNum, EVENT_NUM);
-    collectEventDisplay(evtDisplayIdealRes,  2, resIdealRes, fileNum, EVENT_NUM);
-    collectEventDisplay(evtDisplayIdealEff,  2, resIdealEff, fileNum, EVENT_NUM);
+    // Collect events where TRKPTZ passes but TEST_MISAS does not (misassignment effect)
+    collectEventDisplay(evtDisplayHGTD,      3, resHGTD,     fileNum, EVENT_NUM);
+    collectEventDisplay(evtDisplayIdealRes,  3, resIdealRes, fileNum, EVENT_NUM);
+    collectEventDisplay(evtDisplayIdealEff,  3, resIdealEff, fileNum, EVENT_NUM);
   }
 
   for (auto* m : allMaps)
@@ -290,20 +364,30 @@ auto main() -> int {
 
   // --- Inclusive resolution plots ---
   const std::initializer_list<AnalysisObj*> RESO_SET = {
-    &mapHGTD.at(Score::HGTD),   &mapHGTD.at(Score::TRKPTZ),
-    &mapIdealRes.at(Score::TRKPTZ), &mapIdealEff.at(Score::TRKPTZ), &mapIdealEff.at(Score::PASS),
+    &mapHGTD.at(Score::HGTD), &mapHGTD.at(Score::TRKPTZ), &mapHGTD.at(Score::TEST_MISCL), &mapIdealRes.at(Score::TRKPTZ)
+    // &mapHGTD.at(Score::REFINED)
+    // &mapHGTD.at(Score::TEST_MISAS), &mapHGTD.at(Score::TEST_HS),
+    // &mapIdealRes.at(Score::TRKPTZ),
+    // &mapIdealEff.at(Score::TRKPTZ), &mapIdealEff.at(Score::PASS),
   };
   inclusivePlot(Form("%s/inclusive/inclusivereso_logscale.pdf", SAVE_DIR),
 		true,  false, -400, 400, canvas, RESO_SET);
   inclusivePlot(Form("%s/inclusive/inclusivereso_linscale.pdf", SAVE_DIR),
 		false, false, -200, 200, canvas, RESO_SET);
 
+  // Low-track (nHSTrack <= 5) inclusive plots
+  auto lowTrackGetter = [](AnalysisObj* a){ return a->inclusiveResoLowTrack.get(); };
+  inclusivePlot(Form("%s/inclusive/inclusivereso_lowtrack_logscale.pdf", SAVE_DIR),
+		true,  false, -400, 400, canvas, RESO_SET, lowTrackGetter);
+  inclusivePlot(Form("%s/inclusive/inclusivereso_lowtrack_linscale.pdf", SAVE_DIR),
+		false, false, -200, 200, canvas, RESO_SET, lowTrackGetter);
+
   std::cout << "FINISHED PLOT PRINTING\n";
 
   // --- Print event display commands (toggle PRINT_EVENT_DISPLAYS above) ---
-  printEventDisplays("HGTD times: TEST_MISCL fails efficiency", evtDisplayHGTD    );
-  printEventDisplays("Ideal Res.: TEST_MISCL fails efficiency", evtDisplayIdealRes);
-  printEventDisplays("Ideal Eff.: TEST_MISCL fails efficiency", evtDisplayIdealEff);
+  printEventDisplays("HGTD times: TRKPTZ passes, TEST_MISAS fails (misassignment)", evtDisplayHGTD    );
+  printEventDisplays("Ideal Res.: TRKPTZ passes, TEST_MISAS fails (misassignment)", evtDisplayIdealRes);
+  printEventDisplays("Ideal Eff.: TRKPTZ passes, TEST_MISAS fails (misassignment)", evtDisplayIdealEff);
 
   return 0;
 }

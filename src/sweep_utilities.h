@@ -215,4 +215,245 @@ inline void saveGraphPair(
   canvas->Print(fname.c_str());
 }
 
+// ── bestLegendCorner (TGraph overload) ────────────────────────────────────────
+// Same four-corner selection as above but for plain TGraph (no error bars).
+// An optional list of extra data-coordinate positions (e.g. text-label anchor
+// points) are also scored against each candidate box so the chosen corner
+// avoids both markers and labels.
+// ─────────────────────────────────────────────────────────────────────────────
+inline LegendBox bestLegendCorner(
+  TGraph* gr1, TGraph* gr2,
+  double xAxisLo, double xAxisHi,
+  double yMin, double yMax,
+  const std::vector<std::pair<double,double>>& extraPts = {})
+{
+  const double leftM = 0.15, rightM = 0.05;
+  const double botM  = 0.10, topM   = 0.05;
+  const double padW  = 1.0 - leftM - rightM;
+  const double padH  = 1.0 - botM  - topM;
+  const double legH  = 0.20;
+
+  const LegendBox CORNERS[4] = {
+    {0.55,        1.0-topM-legH, 0.88,        1.0-topM       },  // top-right
+    {leftM+0.01,  1.0-topM-legH, leftM+0.34,  1.0-topM       },  // top-left
+    {0.55,        botM+0.02,     0.88,        botM+legH+0.02  },  // bottom-right
+    {leftM+0.01,  botM+0.02,     leftM+0.34,  botM+legH+0.02 },  // bottom-left
+  };
+
+  auto toNDCx = [&](double x) -> double {
+    return leftM + (x - xAxisLo) / (xAxisHi - xAxisLo) * padW;
+  };
+  auto toNDCy = [&](double y) -> double {
+    double v = botM + (y - yMin) / (yMax - yMin) * padH;
+    return std::max(botM, std::min(1.0 - topM, v));
+  };
+  auto hitBox = [&](const LegendBox& box, double gx, double gy) -> bool {
+    double nx = toNDCx(gx), ny = toNDCy(gy);
+    return (nx >= box.x1 && nx <= box.x2 && ny >= box.y1 && ny <= box.y2);
+  };
+
+  int bestIdx = 0, bestScore = INT_MAX;
+  for (int c = 0; c < 4; ++c) {
+    const auto& box = CORNERS[c];
+    int score = 0;
+    for (auto* gr : {gr1, gr2}) {
+      for (int i = 0; i < gr->GetN(); ++i) {
+        double gx, gy;
+        gr->GetPoint(i, gx, gy);
+        if (hitBox(box, gx, gy)) ++score;
+      }
+    }
+    for (const auto& [px, py] : extraPts)
+      if (hitBox(box, px, py)) ++score;
+    if (score < bestScore) { bestScore = score; bestIdx = c; }
+  }
+  return CORNERS[bestIdx];
+}
+
+// ── bestLegendCornerHist ──────────────────────────────────────────────────────
+// Select the least-occupied canvas corner for a legend on a 1D histogram
+// overlay plot.  Each candidate corner is scored by summing the normalised bin
+// content of every supplied histogram whose bin-centre NDC coordinate falls
+// inside the candidate box.  The corner with the lowest cumulative score wins.
+//
+//   hists        — all histograms that will be drawn (raw counts; normalised
+//                  internally per-histogram)
+//   nLegEntries  — number of text entries in the legend (controls box height)
+//   logY         — true when the plot uses a log Y axis (changes NDC mapping)
+// ─────────────────────────────────────────────────────────────────────────────
+inline LegendBox bestLegendCornerHist(
+  const std::vector<TH1D*>& hists,
+  double xAxisLo, double xAxisHi,
+  double yMin,    double yMax,
+  int    nLegEntries = 2,
+  bool   logY        = false)
+{
+  const double leftM = 0.15, rightM = 0.05;
+  const double botM  = 0.10, topM   = 0.05;
+  const double padW  = 1.0 - leftM - rightM;
+  const double padH  = 1.0 - botM  - topM;
+  const double legH  = 0.055 + nLegEntries * 0.038;  // ~0.20 for 4 entries
+
+  const LegendBox CORNERS[4] = {
+    {0.55,        1.0-topM-legH, 0.88,        1.0-topM       },  // top-right
+    {leftM+0.01,  1.0-topM-legH, leftM+0.34,  1.0-topM       },  // top-left
+    {0.55,        botM+0.02,     0.88,        botM+legH+0.02  },  // bottom-right
+    {leftM+0.01,  botM+0.02,     leftM+0.34,  botM+legH+0.02 },  // bottom-left
+  };
+
+  auto toNDCx = [&](double x) -> double {
+    return leftM + (x - xAxisLo) / (xAxisHi - xAxisLo) * padW;
+  };
+  auto toNDCy = [&](double y) -> double {
+    double v;
+    if (logY && yMin > 0 && yMax > yMin)
+      v = botM + std::log(y / yMin) / std::log(yMax / yMin) * padH;
+    else
+      v = botM + (y - yMin) / (yMax - yMin) * padH;
+    return std::max(botM, std::min(1.0 - topM, v));
+  };
+
+  int    bestIdx   = 0;
+  double bestScore = 1e30;
+  for (int c = 0; c < 4; ++c) {
+    const auto& box = CORNERS[c];
+    double score = 0.0;
+    for (auto* h : hists) {
+      double norm = h->Integral();
+      if (norm <= 0.0) continue;
+      for (int b = 1; b <= h->GetNbinsX(); ++b) {
+        double bx = h->GetBinCenter(b);
+        double by = h->GetBinContent(b) / norm;
+        double nx  = toNDCx(bx);
+        double ny  = toNDCy(by);
+        if (nx >= box.x1 && nx <= box.x2 && ny >= box.y1 && ny <= box.y2)
+          score += by;
+      }
+    }
+    if (score < bestScore) { bestScore = score; bestIdx = c; }
+  }
+  return CORNERS[bestIdx];
+}
+
+// ── graphYVals ────────────────────────────────────────────────────────────────
+// Extract the Y values from a TGraphErrors into a std::vector<double>.
+// ─────────────────────────────────────────────────────────────────────────────
+inline std::vector<double> graphYVals(TGraphErrors* gr) {
+  std::vector<double> v(gr->GetN());
+  for (int i = 0; i < gr->GetN(); ++i) {
+    double x, y;
+    gr->GetPoint(i, x, y);
+    v[i] = y;
+  }
+  return v;
+}
+
+// ── saveRocPlot ───────────────────────────────────────────────────────────────
+// Draw a pseudo-ROC (metric-vs-metric) curve for the two HS regions.
+// Each point corresponds to one sweep step and is labelled with its
+// parameter value string.  Both regions are overlaid on one canvas page.
+//
+//   xLow / yLow   — (x,y) metric pairs for region 0 (low HS)
+//   xHigh / yHigh — (x,y) metric pairs for region 1 (high HS)
+//   labels        — one ROOT-LaTeX label string per point (shared by both)
+//   hsSplit       — HS track boundary for the legend entries
+// ─────────────────────────────────────────────────────────────────────────────
+inline void saveRocPlot(
+  const std::string&              fname,
+  TCanvas*                        canvas,
+  const std::vector<double>&      xLow,
+  const std::vector<double>&      yLow,
+  const std::vector<double>&      xHigh,
+  const std::vector<double>&      yHigh,
+  const std::vector<std::string>& labels,
+  const char*                     title,
+  const char*                     xtitle,
+  const char*                     ytitle,
+  int                             hsSplit)
+{
+  canvas->cd();
+  const int nPts = (int)xLow.size();
+
+  // Compute axis ranges across both regions
+  auto bothMinMax = [](const std::vector<double>& a, const std::vector<double>& b)
+    -> std::pair<double,double> {
+    double lo = std::min(*std::min_element(a.begin(), a.end()),
+                         *std::min_element(b.begin(), b.end()));
+    double hi = std::max(*std::max_element(a.begin(), a.end()),
+                         *std::max_element(b.begin(), b.end()));
+    return {lo, hi};
+  };
+
+  auto [xLo, xHi] = bothMinMax(xLow, xHigh);
+  auto [yLo, yHi] = bothMinMax(yLow, yHigh);
+  const double dxPad = 0.10 * (xHi - xLo + 1e-9);
+  const double dyPad = 0.10 * (yHi - yLo + 1e-9);
+  xLo -= dxPad;
+  xHi += 2.0 * dxPad;   // extra right margin for end-point label
+  yLo -= dyPad;
+  yHi += 1.5 * dyPad;   // extra top  margin for first-point label
+
+  TGraph* grLow  = new TGraph(nPts, xLow.data(),  yLow.data());
+  TGraph* grHigh = new TGraph(nPts, xHigh.data(), yHigh.data());
+
+  grLow->SetTitle(Form("%s;%s;%s", title, xtitle, ytitle));
+  grLow->SetLineColor(MyUtl::C01);
+  grLow->SetMarkerColor(MyUtl::C01);
+  grLow->SetMarkerStyle(20);
+  grLow->SetMarkerSize(0.9);
+  grLow->SetLineWidth(2);
+
+  grHigh->SetLineColor(MyUtl::C02);
+  grHigh->SetMarkerColor(MyUtl::C02);
+  grHigh->SetMarkerStyle(21);
+  grHigh->SetMarkerSize(0.9);
+  grHigh->SetLineWidth(2);
+
+  grLow->Draw("APL");
+  grLow->GetXaxis()->SetLimits(xLo, xHi);
+  grLow->GetYaxis()->SetRangeUser(yLo, yHi);
+  grHigh->Draw("PL SAME");
+
+  // Label only the first and last points to avoid clutter on dense curves
+  TLatex tex;
+  tex.SetTextSize(0.022);
+  tex.SetTextFont(42);
+  const double offY = 0.022 * (yHi - yLo);
+  const double offX = 0.008 * (xHi - xLo);
+
+  // first point: label above (+1.0);  last point: label below (-1.8)
+  const int    labelIdx[2] = { 0, nPts - 1 };
+  const double labelSign[2] = { 1.0, -1.8 };
+
+  // Collect label anchor positions so the legend avoids both markers and labels
+  std::vector<std::pair<double,double>> labelPts;
+  for (int ii = 0; ii < 2; ++ii) {
+    const int i = labelIdx[ii];
+    if (i < 0 || i >= nPts) continue;
+    const double s = labelSign[ii];
+    labelPts.push_back({xLow[i]  + offX, yLow[i]  + s * offY});
+    labelPts.push_back({xHigh[i] + offX, yHigh[i] + s * offY});
+  }
+
+  for (int ii = 0; ii < 2; ++ii) {
+    const int i = labelIdx[ii];
+    if (i < 0 || i >= nPts) continue;
+    const double s = labelSign[ii];
+    tex.SetTextColor(MyUtl::C01);
+    tex.DrawLatex(xLow[i]  + offX, yLow[i]  + s * offY, labels[i].c_str());
+    tex.SetTextColor(MyUtl::C02);
+    tex.DrawLatex(xHigh[i] + offX, yHigh[i] + s * offY, labels[i].c_str());
+  }
+
+  LegendBox lb = bestLegendCorner(grLow, grHigh, xLo, xHi, yLo, yHi, labelPts);
+  TLegend* leg = new TLegend(lb.x1, lb.y1, lb.x2, lb.y2);
+  leg->AddEntry(grLow,  Form("nFTrackHS #leq %d", hsSplit), "lp");
+  leg->AddEntry(grHigh, Form("nFTrackHS > %d",    hsSplit), "lp");
+  leg->Draw("SAME");
+
+  canvas->Print(fname.c_str());
+  delete grLow;
+  delete grHigh;
+}
+
 #endif // SWEEP_UTILITIES_H

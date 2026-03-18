@@ -71,7 +71,7 @@ static double clusterMinDR(
 
     double minDR = 1e9;
     for (int j = 0; j < (int)branch->topoJetPt.GetSize(); ++j) {
-        if (branch->topoJetPt[j] < MIN_JETPT) continue;
+        if (branch->topoJetPt[j] < MIN_JET_PT) continue;
         double deta = branch->topoJetEta[j] - cEta;
         double dphi = TVector2::Phi_mpi_pi(branch->topoJetPhi[j] - cPhi);
         double dR   = std::sqrt(deta*deta + dphi*dphi);
