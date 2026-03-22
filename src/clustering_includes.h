@@ -32,6 +32,7 @@
 #include <TGraphErrors.h>
 #include <TH1.h>
 #include <TH2.h>
+#include <THStack.h>
 #include <TLatex.h>
 #include <TLegend.h>
 #include <TLine.h>

@@ -77,13 +77,13 @@ namespace MyUtl {
   const double DIST_CUT_CONE      = 3.0;   // Distance cut for cone clustering
   const double DIST_CUT_SIMUL     = 3.0;   // Distance cut for simul. clustering
   const double DIST_CUT_ITER      = 3.0;   // Distance cut for iterative clustering
-  const double DIST_CUT_REFINE    = 2.0;   // Tighter iterative cut for REFINED score
+  const double DIST_CUT_REFINE    = 1.5;   // Tighter iterative cut for REFINED score
   const int    CONE_ITER_K        = 3;     // Top cone clusters to refine (REFINED score)
   const double TRUTH_PULL_CUT     = 2.0;   // |pull| < cut keeps track as truth-matched
   // Per-track timing resolution used for Ideal Resolution/Efficiency scenarios.
   // Flat per-track value (independent of hit count), representing a hypothetically
   // better detector.  Contrast with real HGTD: ~30 ps/hit → 30/√nHits ≈ 15–21 ps/track.
-  const double IDEAL_TRACK_RES   = 10.0;  // ps, flat per-track
+  const double IDEAL_TRACK_RES   = 1.0;  // ps, flat per-track
 
   // ---------------------------------------------------------------------------
   // 3b. Clustering method selector
@@ -192,6 +192,8 @@ namespace MyUtl {
     static const Score REFINED;
     static const Score TEST_MISAS;
     static const Score TEST_HS;
+    static const Score Z_REFINED;
+    static const Score ZT_REFINED;
   };
 
   //                                         id  longName                          shortName    own    purity thresh.
@@ -201,19 +203,21 @@ namespace MyUtl {
   inline const Score Score::PASS         = {  3, "Pass Cluster",                  "PASS",      false, false, -1.f  };
   inline const Score Score::FILTJET      = { 10, "Filter Tracks in Jets",         "FILTJET",   false, false, -1.f  };
   inline const Score Score::TESTML       = { 11, "DNN Selection",                 "TESTML",    false, false,  0.3f };
-  inline const Score Score::TEST_MISCL   = { 12, "#Sigma p_{T}e^{-|#Delta z|} (pure)",        "MISCL",     false, true , -1.f  };
+  inline const Score Score::TEST_MISCL   = { 12, "#Sigma p_{T}e^{-|#Delta z|} (pure)","MISCL",     false, true , -1.f  };
   inline const Score Score::HGTD_SORT    = { 13, "HGTD BDT (pT-sorted)",          "HGTD_SORT", true , false,  0.3f };
   inline const Score Score::ITERATIVE    = { 14, "Iterative",                     "ITERATIVE", false, false, -1.f  };
   inline const Score Score::CONE_BDT     = { 15, "Cone (BDT)",                    "CONE_BDT",  false, false,  0.3f };
-  inline const Score Score::REFINED      = { 16, "Iterative Refinement",          "REFINED",   false, false, -1.f  };
+  inline const Score Score::REFINED      = { 16, "2#sigma t Refinement",          "REFINED",   false, false, -1.f  };
   inline const Score Score::TEST_MISAS   = { 17, "#Sigma p_{T}e^{-|#Delta z|} (misassign. removed)",   "MISAS",     false, false ,  -1.f };
   inline const Score Score::TEST_HS      = { 18, "#Sigma p_{T}e^{-|#Delta z|} (HS tracks only)",       "TEST_HS",   false, false, -1.f  };
+  inline const Score Score::Z_REFINED    = { 19, "1#sigma z Refinement", "Z_REFINED",  false, false, -1.f  };
+  inline const Score Score::ZT_REFINED   = { 20, "ZT-Refined Timing", "ZT_REFINED", false, false, -1.f  };
 
   inline const std::vector<Score> SCORE_REGISTRY = {
     Score::HGTD, Score::PASS, Score::TRKPT, Score::TRKPTZ,
     Score::FILTJET, Score::TESTML, Score::TEST_MISCL, Score::HGTD_SORT,
     Score::ITERATIVE, Score::CONE_BDT, Score::REFINED, Score::TEST_MISAS,
-    Score::TEST_HS,
+    Score::TEST_HS, Score::Z_REFINED, Score::ZT_REFINED,
   };
 
   // Backward-compatible free-function wrappers (existing callsites unchanged)

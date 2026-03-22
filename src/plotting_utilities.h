@@ -560,10 +560,6 @@ namespace MyUtl {
 	slicesHists.push_back(std::move(hSlice));
 	slicesFits.push_back(std::move(dgausFit));
 
-
-	
-
-
 	if (right == hist->GetNbinsX()+1)
 	  break;
       }
@@ -860,9 +856,13 @@ namespace MyUtl {
   struct AnalysisObj {
     // PlotObjs which store histograms vs event-level variables
     std::map<std::string, std::unique_ptr<PlotObj>> dataObjects;
-    // inclusive resolution for the scoretype provided
-    std::unique_ptr<TH1D> inclusiveReso;
-    std::unique_ptr<TH1D> inclusiveResoLowTrack;  // nHSTrack <= 5 subset
+    // Inclusive resolution: three purity-based layers (sig/mix/bkg) + low-track variants
+    std::unique_ptr<TH1D> inclusiveResoSig;          // purity > 0.75
+    std::unique_ptr<TH1D> inclusiveResoMix;          // 0.50 <= purity <= 0.75
+    std::unique_ptr<TH1D> inclusiveResoBkg;          // purity < 0.50
+    std::unique_ptr<TH1D> inclusiveResoLowTrackSig;  // nHSTrack <= 5, purity > 0.75
+    std::unique_ptr<TH1D> inclusiveResoLowTrackMix;  // nHSTrack <= 5, 0.50-0.75
+    std::unique_ptr<TH1D> inclusiveResoLowTrackBkg;  // nHSTrack <= 5, purity < 0.50
     std::unique_ptr<TH1D> inclusivePurity;
 
     // Cached raw pointers for the six standard fill keys.
@@ -975,17 +975,27 @@ namespace MyUtl {
 	PURITY_MIN  , PURITY_MAX  , PURITY_WIDTH   ,
 	FOLD_PU_TRACK, FOLD_PU_TRACK+PU_TRACK_WIDTH);
 
-      inclusiveReso = std::make_unique<TH1D>(
-        Form("reso_%s", filenameIDer.Data()),
-	Form("Inclusive %s t_{0} - TruthVtx t_{0} (%s);#Delta t[ps];Entries",
-	     toString(score), timetypeIDer),
-	(int)((DIFF_MAX-DIFF_MIN)/DIFF_WIDTH), DIFF_MIN, DIFF_MAX);
-
-      inclusiveResoLowTrack = std::make_unique<TH1D>(
-        Form("reso_lowtrack_%s", filenameIDer.Data()),
-	Form("Inclusive (nHSTrack #leq 5) %s t_{0} - TruthVtx t_{0} (%s);#Delta t[ps];Entries",
-	     toString(score), timetypeIDer),
-	(int)((DIFF_MAX-DIFF_MIN)/DIFF_WIDTH), DIFF_MIN, DIFF_MAX);
+      // Helper to construct one inclusive-reso histogram
+      auto makeResoHist = [&](const char* prefix, const char* catLabel) {
+        return std::make_unique<TH1D>(
+          Form("%s_%s", prefix, filenameIDer.Data()),
+          Form("%s %s t_{0}-TruthVtx t_{0} (%s);#Delta t[ps];Entries",
+               catLabel, toString(score), timetypeIDer),
+          (int)((DIFF_MAX-DIFF_MIN)/DIFF_WIDTH), DIFF_MIN, DIFF_MAX);
+      };
+      inclusiveResoSig         = makeResoHist("reso_sig",    "Signal");
+      inclusiveResoMix         = makeResoHist("reso_mix",    "Mixed");
+      inclusiveResoBkg         = makeResoHist("reso_bkg",    "Bkg");
+      inclusiveResoLowTrackSig = makeResoHist("reso_lt_sig", "Signal(#leq5tk)");
+      inclusiveResoLowTrackMix = makeResoHist("reso_lt_mix", "Mixed(#leq5tk)");
+      inclusiveResoLowTrackBkg = makeResoHist("reso_lt_bkg", "Bkg(#leq5tk)");
+      // Styling: C01=blue (signal), C03=yellow (mixed), C02=red (background)
+      inclusiveResoSig->SetFillColorAlpha(C01, 0.6); inclusiveResoSig->SetLineColor(C01);
+      inclusiveResoMix->SetFillColorAlpha(C03, 0.6); inclusiveResoMix->SetLineColor(C03);
+      inclusiveResoBkg->SetFillColorAlpha(C02, 0.6); inclusiveResoBkg->SetLineColor(C02);
+      inclusiveResoLowTrackSig->SetFillColorAlpha(C01, 0.6); inclusiveResoLowTrackSig->SetLineColor(C01);
+      inclusiveResoLowTrackMix->SetFillColorAlpha(C03, 0.6); inclusiveResoLowTrackMix->SetLineColor(C03);
+      inclusiveResoLowTrackBkg->SetFillColorAlpha(C02, 0.6); inclusiveResoLowTrackBkg->SetLineColor(C02);
 
       inclusivePurity = std::make_unique<TH1D>(
 	Form("purity_%s", filenameIDer.Data()),
@@ -1199,51 +1209,74 @@ namespace MyUtl {
 
   // ---------------------------------------------------------------------------
   // inclusivePlot
-  //   Plots the inclusive timing residual histogram for each AnalysisObj in
-  //   plts, overlaying a double-Gaussian fit (createDblFit) and annotating
-  //   with σ_1, σ_2 from the fit.  Supports linear and logarithmic y-axis
-  //   (controlled by logScale) and custom x-axis range (xMin, xMax).  Each
-  //   AnalysisObj gets its own page in the output PDF.
+  //   Plots a stacked inclusive timing residual histogram for each AnalysisObj
+  //   in plts, decomposed by cluster purity into three layers:
+  //     Signal (purity > 75%, blue) / Mixed (50-75%, yellow) / Bkg (<50%, red)
+  //   A double-Gaussian fit on the total is overlaid.  Each AnalysisObj gets
+  //   its own PDF page.
   // ---------------------------------------------------------------------------
+  using ResoTriple = std::array<TH1D*, 3>;  // {sig, mix, bkg}
+
   void inclusivePlot(
     const char* fname,
     bool logScale, bool fixBkg,
     double xMin, double xMax,
-    TCanvas *canvas,
+    TCanvas* canvas,
     const std::vector<AnalysisObj*>& plts,
-    std::function<TH1D*(AnalysisObj*)> histGetter =
-        [](AnalysisObj* a){ return a->inclusiveReso.get(); }
+    std::function<ResoTriple(AnalysisObj*)> tripleGetter =
+        [](AnalysisObj* a) -> ResoTriple {
+          return { a->inclusiveResoSig.get(),
+                   a->inclusiveResoMix.get(),
+                   a->inclusiveResoBkg.get() }; }
   ) {
     TLatex latex;
     latex.SetTextSize(0.04);
     latex.SetTextAlign(13);
-    canvas->Print(Form("%s[",fname));
+    canvas->Print(Form("%s[", fname));
     canvas->SetLogy(logScale);
-    for (const auto& plt: plts) {
-      TH1D* hist = (TH1D*)histGetter(plt)->Clone();
-      // hist->Print();
-      // std::cout << "Resolution Integral " << hist->Integral() << std::endl;
-      TF1* fit1 = createDblFit(hist,true);
-      TLegend* inclusiveLegend = new TLegend(0.65, 0.75, 0.85, 0.9);
-      StyleLegend(inclusiveLegend);
+    for (const auto& plt : plts) {
+      auto [hSig, hMix, hBkg] = tripleGetter(plt);
 
-      inclusiveLegend->AddEntry(hist,Form("%s: %s",toString(plt->score), plt->timetypeIDer.c_str()), "l");
-      inclusiveLegend->AddEntry(fit1,"Double Gaussian Fit", "l");
-    
-      hist->GetXaxis()->SetRangeUser(xMin, xMax);
-      hist->Draw("HIST");
+      // Clone so originals are not modified
+      TH1D* cSig = (TH1D*)hSig->Clone();
+      TH1D* cMix = (TH1D*)hMix->Clone();
+      TH1D* cBkg = (TH1D*)hBkg->Clone();
+
+      // Build total for fitting (bkg + mix + sig)
+      TH1D* cTotal = (TH1D*)cBkg->Clone(Form("_total_%p", (void*)plt));
+      cTotal->Add(cMix);
+      cTotal->Add(cSig);
+      TF1* fit1 = createDblFit(cTotal, true);
+
+      // Stack: bkg at bottom, mix in middle, sig on top
+      THStack* stack = new THStack(Form("stk_%p", (void*)plt), "");
+      stack->Add(cBkg);
+      stack->Add(cMix);
+      stack->Add(cSig);
+
+      TLegend* leg = new TLegend(0.63, 0.68, 0.88, 0.90);
+      StyleLegend(leg);
+      leg->AddEntry(cSig, Form("%s  Signal (>75%%)",  toString(plt->score)), "f");
+      leg->AddEntry(cMix, "Mixed (50#minus75%)",                              "f");
+      leg->AddEntry(cBkg, "Background (<50%)",                                "f");
+      leg->AddEntry(fit1, "Double Gaussian Fit",                              "l");
+
+      stack->Draw("HIST");
+      stack->GetXaxis()->SetRangeUser(xMin, xMax);
+      stack->GetXaxis()->SetTitle("#Delta t [ps]");
+      stack->GetYaxis()->SetTitle("Entries");
       fit1->Draw("SAME");
-      inclusiveLegend->Draw("SAME");
-    
+      leg->Draw("SAME");
+
       double dgSigma1 = fit1->GetParameter("Sigma1");
       double dgSigma2 = fit1->GetParameter("Sigma2");
-      latex.DrawLatexNDC(0.18, 0.70,Form("#sigma_{1}^{dgaus}=%.2f",dgSigma1));
-      latex.DrawLatexNDC(0.18, 0.65,Form("#sigma_{2}^{dgaus}=%.2f",dgSigma2));
+      latex.DrawLatexNDC(0.18, 0.70, Form("#sigma_{1}^{dgaus}=%.2f", dgSigma1));
+      latex.DrawLatexNDC(0.18, 0.65, Form("#sigma_{2}^{dgaus}=%.2f", dgSigma2));
       ATLASLabel(0.18, 0.88, "Simulation Internal");
       ATLASEnergyLabel(0.18, 0.82);
       canvas->Print(fname);
     }
-    canvas->Print(Form("%s]",fname));
+    canvas->Print(Form("%s]", fname));
   }
 
   // ---------------------------------------------------------------------------

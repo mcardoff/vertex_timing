@@ -730,6 +730,8 @@ namespace MyUtl {
       // at efficiency-check time in event_processing.h (both pass and total fills).
       this->scores[Score::TEST_MISCL] = this->scores.at(Score::TRKPTZ);
       this->scores[Score::TEST_MISAS] = this->scores.at(Score::TRKPTZ);
+      this->scores[Score::Z_REFINED]   = this->scores.at(Score::TRKPTZ);
+      this->scores[Score::ZT_REFINED]  = this->scores.at(Score::TRKPTZ);
     }
     
     // -----------------------------------------------------------------------
@@ -795,6 +797,14 @@ namespace MyUtl {
 
       // return nHSTrack > 0;
     }
+
+    // -----------------------------------------------------------------------
+    // calculateTime
+    //   Returns the time to use for diff/resolution plots and passEfficiency
+    //   for the given score.  Implemented out-of-line in event_processing.h
+    //   (after passTrackVertexAssociation is defined) to avoid circular includes.
+    // -----------------------------------------------------------------------
+    double calculateTime(Score score, BranchPointerWrapper* branch) const;
 
     // -----------------------------------------------------------------------
     // calcFeatures

@@ -49,8 +49,10 @@ auto buildAnalysisMap(
   // m.emplace(Score::TESTML,     AnalysisObj(label, Score::TESTML    ));
   // m.emplace(Score::PASS,       AnalysisObj(label, Score::PASS      ));
   m.emplace(Score::TEST_MISCL, AnalysisObj(label, Score::TEST_MISCL));
+  m.emplace(Score::Z_REFINED,  AnalysisObj(label, Score::Z_REFINED ));
+  m.emplace(Score::ZT_REFINED, AnalysisObj(label, Score::ZT_REFINED));
+  m.emplace(Score::REFINED,    AnalysisObj(label, Score::REFINED   ));
   // m.emplace(Score::TEST_MISAS, AnalysisObj(label, Score::TEST_MISAS ));
-  // m.emplace(Score::REFINED,    AnalysisObj(label, Score::REFINED    ));
 
   // Scores active only in the real-HGTD scenario
   if (scenario == Scenario::HGTD) {
@@ -126,13 +128,28 @@ void makeComparisonPlots(
                 &mapHGTD.at(Score::TRKPTZ)
 	    });
 
-  // HGTD algo vs TRKPTZ vs REFINED (cone + iterative refinement)
-  // moneyPlot(Form("%s/refined_%s.pdf", compSubdir.c_str(), key), key, canvas,
-  //           {
-  //               &mapHGTD.at(Score::HGTD),
-  //               &mapHGTD.at(Score::TRKPTZ),
-  //               &mapHGTD.at(Score::REFINED)
-  // 	    });
+  // HGTD vs TRKPTZ vs REFINED vs Z_REFINED
+  moneyPlot(Form("%s/z_refined_%s.pdf", compSubdir.c_str(), key), key, canvas,
+            {
+                &mapHGTD.at(Score::HGTD),
+                &mapHGTD.at(Score::TRKPTZ),
+                &mapHGTD.at(Score::REFINED),
+                &mapHGTD.at(Score::Z_REFINED),
+                // &mapHGTD.at(Score::ZT_REFINED),
+                // &mapIdealRes.at(Score::REFINED),
+                // &mapIdealRes.at(Score::Z_REFINED)
+            });
+
+  moneyPlot(Form("%s/z_refined_ideal_%s.pdf", compSubdir.c_str(), key), key, canvas,
+            {
+                // &mapHGTD.at(Score::HGTD),
+                &mapIdealRes.at(Score::TRKPTZ),
+                // &mapHGTD.at(Score::REFINED),
+                // &mapHGTD.at(Score::Z_REFINED),
+                // &mapHGTD.at(Score::ZT_REFINED),
+                &mapIdealRes.at(Score::REFINED),
+                &mapIdealRes.at(Score::Z_REFINED)
+            });
 
   // // HGTD algo vs TRKPTZ vs HGTD_SORT (pT-sorted simultaneous + BDT)
   // moneyPlot(Form("%s/hgtd_sort_%s.pdf", compSubdir.c_str(), key), key, canvas,
@@ -353,6 +370,8 @@ auto main() -> int {
   for (auto* m : allMaps)
       for (auto& [k, analysis] : *m)
 	analysis.printEfficiencyStats("hs_track");
+	// analysis.printResolutionStats("hs_track");
+
 
   std::cout << "\nFINISHED PROCESSING\n";
 
@@ -376,7 +395,10 @@ auto main() -> int {
 		false, false, -200, 200, canvas, RESO_SET);
 
   // Low-track (nHSTrack <= 5) inclusive plots
-  auto lowTrackGetter = [](AnalysisObj* a){ return a->inclusiveResoLowTrack.get(); };
+  auto lowTrackGetter = [](AnalysisObj* a) -> ResoTriple {
+    return { a->inclusiveResoLowTrackSig.get(),
+             a->inclusiveResoLowTrackMix.get(),
+             a->inclusiveResoLowTrackBkg.get() }; };
   inclusivePlot(Form("%s/inclusive/inclusivereso_lowtrack_logscale.pdf", SAVE_DIR),
 		true,  false, -400, 400, canvas, RESO_SET, lowTrackGetter);
   inclusivePlot(Form("%s/inclusive/inclusivereso_lowtrack_linscale.pdf", SAVE_DIR),

@@ -88,6 +88,56 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
+  // 3b. Cluster::calculateTime — out-of-line implementation
+  //   Defined here (after passTrackVertexAssociation) to avoid circular includes:
+  //   clustering_structs.h cannot include event_processing.h.
+  // ---------------------------------------------------------------------------
+  inline double Cluster::calculateTime(Score score, BranchPointerWrapper* branch) const {
+    if (score == Score::HGTD)
+      return branch->recoVtxTime[0];
+
+    // Z_REFINED: precision-weighted mean of tracks passing z₀ TVA at 1.0 σ
+    if (score == Score::Z_REFINED) {
+      double sumW = 0.0, sumWT = 0.0;
+      for (size_t i = 0; i < trackIndices.size(); ++i) {
+        int idx = trackIndices[i];
+        if (!passTrackVertexAssociation(idx, 0, branch, 1.0)) continue;
+        double t = allTimes[i];
+        double s = (double)branch->trackTimeRes[idx];
+        if (s <= 0.0) continue;
+        double w = 1.0 / (s * s);
+        sumW += w; sumWT += w * t;
+      }
+      if (sumW > 0.0) return sumWT / sumW;
+      return values[0];  // fallback: no tracks survived z₀ TVA
+    }
+
+    // ZT_REFINED: precision-weighted mean of tracks passing BOTH
+    //   (a) z₀ TVA at 1.0 σ, AND
+    //   (b) timing distance |t − t_clust| / √(σ_t² + σ_clust²) < DIST_CUT_REFINE
+    if (score == Score::ZT_REFINED) {
+      double t_clust = values[0];
+      double s_clust = sigmas[0];
+      double sumW = 0.0, sumWT = 0.0;
+      for (size_t i = 0; i < trackIndices.size(); ++i) {
+        int idx = trackIndices[i];
+        if (!passTrackVertexAssociation(idx, 0, branch, 1.0)) continue;
+        double t = allTimes[i];
+        double s = (double)branch->trackTimeRes[idx];
+        if (s <= 0.0) continue;
+        double denom = std::sqrt(s * s + s_clust * s_clust);
+        if (denom <= 0.0 || std::abs(t - t_clust) / denom >= DIST_CUT_REFINE) continue;
+        double w = 1.0 / (s * s);
+        sumW += w; sumWT += w * t;
+      }
+      if (sumW > 0.0) return sumWT / sumW;
+      return values[0];  // fallback: no tracks survived combined cut
+    }
+
+    return values[0];
+  }
+
+  // ---------------------------------------------------------------------------
   // 4. pileupRemoval
   //   Removes tracks that are significantly associated with a non-HS reco
   //   vertex.  For each track the nearest reco vertex (stored in
@@ -629,26 +679,33 @@ namespace MyUtl {
       if (DEBUG) std::cout << "Filling: " << toString(score) << '\n';
 
       // Skip scores with invalid or missing cluster data
-      if (branch->recoVtxValid[0] == 0 && score == Score::HGTD)  continue;
-      // if (clusters.empty() && !score.usesOwnCollection)           continue;
+      if (branch->recoVtxValid[0] == 0 && score == Score::HGTD)   continue;
+      if (clusters.empty() && !score.usesOwnCollection)           continue;
       if (!chosen.count(score) && score != Score::HGTD)           continue;
 
       Cluster& scored    = chosen[score];
-      double t           = (score == Score::HGTD) ? branch->recoVtxTime[0]
-                                                   : scored.values.at(0);
+      double t           = scored.calculateTime(score, branch);
+      scored.values[0]   = t;   // keep passEfficiency consistent with diff
       double purity      = clusters.empty() ? 0.0 : scored.purity;
       double diff        = t - branch->truthVtxTime[0];
 
       // Expose time for the caller's event-display collection
       if (score == Score::TRKPTZ || score.requiresPurity) returnVal = t;
 
-      // Inclusive timing resolution and purity (purity-gated for requiresPurity scores)
-      if (!score.requiresPurity || purity > 0.75) {
-        analysis.inclusiveReso->Fill(diff);
-        analysis.inclusivePurity->Fill(purity);
-        if (ev.nForwardTrackHS <= 5)
-          analysis.inclusiveResoLowTrack->Fill(diff);
-      }
+      // Inclusive resolution split by cluster purity; fill all events (no score gate)
+      analysis.inclusivePurity->Fill(purity);
+      auto fillResoStack = [&](TH1D* sig, TH1D* mix, TH1D* bkg) {
+        if      (purity > 0.75)  sig->Fill(diff);
+        else if (purity >= 0.50) mix->Fill(diff);
+        else                     bkg->Fill(diff);
+      };
+      fillResoStack(analysis.inclusiveResoSig.get(),
+                    analysis.inclusiveResoMix.get(),
+                    analysis.inclusiveResoBkg.get());
+      if (ev.nForwardTrackHS <= 5)
+        fillResoStack(analysis.inclusiveResoLowTrackSig.get(),
+                      analysis.inclusiveResoLowTrackMix.get(),
+                      analysis.inclusiveResoLowTrackBkg.get());
 
       // Efficiency check: base timing window, plus optional score threshold.
       // For requiresPurity scores threshold encodes the purity cut, not a cluster
