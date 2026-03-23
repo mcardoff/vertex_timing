@@ -175,8 +175,8 @@ int main() {
   h_score_pu[Score::TRKPT]  = new TH1D("h_score_pu_trkpt",  "PU Cluster Score (TRKPT);Score;Clusters",  50, 0, 200);
   h_score_hs[Score::TRKPTZ] = new TH1D("h_score_hs_trkptz", "HS Cluster Score (TRKPTZ);Score;Clusters", 50, 0, 200);
   h_score_pu[Score::TRKPTZ] = new TH1D("h_score_pu_trkptz", "PU Cluster Score (TRKPTZ);Score;Clusters", 50, 0, 200);
-  h_score_hs[Score::TESTML] = new TH1D("h_score_hs_dnn",    "HS Cluster Score (DNN);DNN Score;Clusters", 50, 0, 1);
-  h_score_pu[Score::TESTML] = new TH1D("h_score_pu_dnn",    "PU Cluster Score (DNN);DNN Score;Clusters", 50, 0, 1);
+  h_score_hs[Score::TEST_ML] = new TH1D("h_score_hs_dnn",    "HS Cluster Score (DNN);DNN Score;Clusters", 50, 0, 1);
+  h_score_pu[Score::TEST_ML] = new TH1D("h_score_pu_dnn",    "PU Cluster Score (DNN);DNN Score;Clusters", 50, 0, 1);
 
   // DNN-based HS cluster ranking and score ratio (parallel to existing TRKPTZ quantities)
   TH1D *h_hs_cluster_rank_dnn = new TH1D("h_hs_cluster_rank_dnn",
@@ -733,16 +733,16 @@ int main() {
       // Fill score distributions (TRKPT, TRKPTZ, and DNN)
       double score_trkpt  = cluster.scores[Score::TRKPT];
       double score_trkptz = cluster.scores[Score::TRKPTZ];
-      double score_dnn    = cluster.scores[Score::TESTML];
+      double score_dnn    = cluster.scores[Score::TEST_ML];
 
       if (is_hs_cluster) {
 	h_score_hs[Score::TRKPT]->Fill(score_trkpt);
 	h_score_hs[Score::TRKPTZ]->Fill(score_trkptz);
-	h_score_hs[Score::TESTML]->Fill(score_dnn);
+	h_score_hs[Score::TEST_ML]->Fill(score_dnn);
       } else {
 	h_score_pu[Score::TRKPT]->Fill(score_trkpt);
 	h_score_pu[Score::TRKPTZ]->Fill(score_trkptz);
-	h_score_pu[Score::TESTML]->Fill(score_dnn);
+	h_score_pu[Score::TEST_ML]->Fill(score_dnn);
       }
     }
 
@@ -759,8 +759,8 @@ int main() {
     }
 
     // Determine selection outcome based on time resolution
-    // An event passes if |selected_time - truth_time| <= 3 * PASS_SIGMA (60 ps)
-    const double PASS_THRESHOLD = 3.0 * PASS_SIGMA;  // 60 ps
+    // An event passes if |selected_time - truth_time| <= PASS_SIGMA
+    const double PASS_THRESHOLD = PASS_SIGMA;
     double vtx_time_truth = branch.truthVtxTime[0];
     double selected_time = (selected_cluster.values.size() > 0) ? selected_cluster.values[0] : -999.0;
     double time_residual = selected_time - vtx_time_truth;
@@ -781,7 +781,7 @@ int main() {
     // -------------------------------------------------------
     // DNN (TESTML) parallel selection for Error Source 2
     // -------------------------------------------------------
-    Cluster dnn_selected_cluster = chooseCluster(clusters, Score::TESTML);
+    Cluster dnn_selected_cluster = chooseCluster(clusters, Score::TEST_ML);
     int dnn_selected_idx = -1;
     for (int ic = 0; ic < (int)clusters.size(); ic++) {
       if (clusters[ic] == dnn_selected_cluster) { dnn_selected_idx = ic; break; }
@@ -812,7 +812,7 @@ int main() {
     if (hs_exists) {
       std::vector<std::pair<double, int>> dnn_ranking;
       for (int ic = 0; ic < (int)clusters.size(); ic++)
-        dnn_ranking.push_back({clusters[ic].scores[Score::TESTML], ic});
+        dnn_ranking.push_back({clusters[ic].scores[Score::TEST_ML], ic});
       std::sort(dnn_ranking.begin(), dnn_ranking.end(), std::greater<>());
 
       int dnn_rank = 1;
@@ -940,9 +940,9 @@ int main() {
       // updateScores sets TESTML (and TEST_MISCL) on every cluster; calcPurity is
       // already called in the cluster-identity loop above.
       // chooseCluster with TESTML picks the cluster with the highest DNN score.
-      Cluster dnn_cluster = chooseCluster(clusters, Score::TESTML);
+      Cluster dnn_cluster = chooseCluster(clusters, Score::TEST_ML);
 
-      double dnn_score    = dnn_cluster.scores.at(Score::TESTML);
+      double dnn_score    = dnn_cluster.scores.at(Score::TEST_ML);
       double dnn_purity   = dnn_cluster.purity;
       double dnn_time     = (dnn_cluster.values.size() > 0) ? dnn_cluster.values[0] : -999.0;
       double dnn_diff     = dnn_time - vtx_time_truth;
@@ -1086,7 +1086,7 @@ int main() {
       if (clusters[ic].values.size() > 0) {
 	double cluster_time = clusters[ic].values[0];
 	double cluster_residual = std::abs(cluster_time - vtx_time_truth);
-	if (cluster_residual <= 3.0 * PASS_SIGMA) {
+	if (cluster_residual <= PASS_SIGMA) {
 	  n_clusters_passing_eff++;
 	}
       }
@@ -1519,15 +1519,15 @@ int main() {
 
   c4->cd(3);
   gPad->SetLogy();
-  h_score_hs[Score::TESTML]->SetLineColor(C01);
-  h_score_hs[Score::TESTML]->SetFillColorAlpha(C01, 0.3);
-  h_score_hs[Score::TESTML]->SetLineWidth(2);
-  h_score_hs[Score::TESTML]->Draw("HIST");
+  h_score_hs[Score::TEST_ML]->SetLineColor(C01);
+  h_score_hs[Score::TEST_ML]->SetFillColorAlpha(C01, 0.3);
+  h_score_hs[Score::TEST_ML]->SetLineWidth(2);
+  h_score_hs[Score::TEST_ML]->Draw("HIST");
 
-  h_score_pu[Score::TESTML]->SetLineColor(C02);
-  h_score_pu[Score::TESTML]->SetFillColorAlpha(C02, 0.3);
-  h_score_pu[Score::TESTML]->SetLineWidth(2);
-  h_score_pu[Score::TESTML]->Draw("HIST SAME");
+  h_score_pu[Score::TEST_ML]->SetLineColor(C02);
+  h_score_pu[Score::TEST_ML]->SetFillColorAlpha(C02, 0.3);
+  h_score_pu[Score::TEST_ML]->SetLineWidth(2);
+  h_score_pu[Score::TEST_ML]->Draw("HIST SAME");
   leg4->Draw();
 
   c4->SaveAs("error_analysis_plots/plot4_cluster_scores.pdf");

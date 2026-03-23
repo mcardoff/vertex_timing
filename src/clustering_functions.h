@@ -616,12 +616,13 @@ namespace MyUtl {
       if (score.usesOwnCollection)
 	continue;
 
-      // FILTJET, ITERATIVE, CONE_BDT, REFINED, TEST_MISAS, and TEST_HS each use
-      // their own pre-built collection or custom selection method; chosen via the
+      // FILTJET, CONE, CONE_BDT, T_REFINED, and TEST_HS each use their own
+      // pre-built collection or custom selection method; chosen via the
       // single-score or BDT overload in selectClusters.
-      if (score == Score::FILTJET || score == Score::ITERATIVE ||
-          score == Score::CONE_BDT || score == Score::REFINED ||
-          score == Score::TEST_MISAS || score == Score::TEST_HS)
+      // TEST_MISAS now uses the main collection (same as TEST_MISCL).
+      if (score == Score::FILTJET || score == Score::CONE ||
+          score == Score::CONE_BDT || score == Score::T_REFINED ||
+          score == Score::TEST_HS)
 	continue;
 
       if (score == Score::PASS) {

@@ -22,7 +22,7 @@
 //   n_hs_tracks          : number of forward HS tracks in the event with a valid HGTD time
 //                          (event-level: identical for all clusters with the same event_num)
 //   label                : 1 if the cluster passes the timing efficiency window
-//                          (|delta_t| < 3*PASS_SIGMA = 60 ps) AND has_hs == 1, else 0
+//                          (|delta_t| < PASS_SIGMA) AND has_hs == 1, else 0
 //
 // Event selection mirrors clustering_dt / event_processing.h exactly:
 //   passBasicCuts() + passJetPtCut(), track association at MAX_NSIGMA (3.0),
@@ -239,7 +239,7 @@ auto main() -> int {
             }
 
             // label: cluster time is within timing efficiency window of truth HS
-            int label = (has_hs && (std::abs(delta_t) < 3.f * static_cast<float>(PASS_SIGMA))) ? 1 : 0;
+            int label = (has_hs && (std::abs(delta_t) < static_cast<float>(PASS_SIGMA))) ? 1 : 0;
 
             csv << evtNum              << ","
                 << delta_t             << ","

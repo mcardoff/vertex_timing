@@ -331,8 +331,8 @@ static void plotFailures(const std::vector<BinData>& bins) {
   auto* eff_sel    = new TEfficiency(*h_sel,    *h_fail);
   auto* eff_teff   = new TEfficiency(*h_teff,   *h_fail);
 
-  for (auto* e : {eff_fail, eff_miscl, eff_timing, eff_sel, eff_teff})
-    e->SetStatisticOption(TEfficiency::kFNormal);
+  // for (auto* e : {eff_fail, eff_miscl, eff_timing, eff_sel, eff_teff})
+    // e->SetStatisticOption(TEfficiency::kFNormal);
 
   // Total failure: gray dashed
   eff_fail  ->SetLineColor(COLORS[3]);  eff_fail  ->SetLineStyle(7); eff_fail  ->SetLineWidth(3);

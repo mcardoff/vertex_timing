@@ -16,19 +16,19 @@ The project performs timing-based vertex reconstruction using:
 
 ```
 vertex_timing/
-├── src/                           # Analysis executables and core library headers
+├── src/                           # Core library headers + main analysis executable
 │   ├── clustering_constants.h    # Analysis constants, Score enum, ClusteringMethod enum
 │   ├── clustering_functions.h    # Clustering algorithms; ML model loaded here (line 294)
 │   ├── clustering_includes.h     # Common ROOT/C++ includes
 │   ├── clustering_structs.h      # Data structures; ML feature extraction (line 328)
 │   ├── event_processing.h        # Event loop: setupChain, getAssociatedTracks, processEvent
 │   ├── plotting_utilities.h      # Visualization tools (overlay histogram, money plots)
-│   ├── sweep_utilities.h         # Shared helpers for 1-D parameter sweep executables
 │   ├── ml_model.h                # Standalone C++ neural network
 │   ├── AtlasLabels.h / AtlasStyle.h  # ATLAS plot style utilities
 │   ├── json.hpp                  # JSON parser for model weights
-│   │
-│   ├── clustering_dt.cxx         # Main analysis (3 timing scenarios × multiple scores)
+│   └── clustering_dt.cxx         # Main analysis (3 timing scenarios × multiple scores)
+├── util/                          # Diagnostic, sweep, and ML utility executables
+│   ├── sweep_utilities.h         # Shared helpers for 1-D parameter sweep executables
 │   ├── failure_decomposition.cxx # Failure mode categorisation + pie chart
 │   ├── rate_diagnostics.cxx      # Selection-agnostic misclustering/misassignment rates
 │   ├── hgtd_matching.cxx         # Low-level track/cluster matching diagnostics
@@ -66,21 +66,22 @@ vertex_timing/
 ## Main Executables
 
 ### Primary Analysis
-- **clustering_dt.cxx** (`src/`): Main clustering analysis comparing HGTD times, ideal resolution, and efficiency scenarios. Evaluates `Score::HGTD`, `TRKPTZ`, `REFINED`, and optionally `TESTML`.
+- **clustering_dt.cxx** (`src/`): Main clustering analysis comparing HGTD times, ideal resolution, and efficiency scenarios. Evaluates `Score::HGTD`, `TRKPTZ`, `T_REFINED`, `Z_REFINED`, `ZT_REFINED`, and optionally `TEST_ML`. Iterative clustering is the default for all TRKPTZ-based scores.
+
 - **vertex_time.cxx**: Vertex timing distribution analysis with forward jet selection.
 
 ### Diagnostics & Failure Analysis
-- **failure_decomposition.cxx** (`src/`): Classifies every TRKPTZ failure into four non-exclusive categories (see section below). Primary diagnostic tool.
-- **rate_diagnostics.cxx** (`src/`): Selection-agnostic rates — misclustering (purity > 75%?) and timing misassignment (HGTD vs Ideal Res. PASS oracle). Binned tables matching clustering_dt style.
-- **hgtd_matching.cxx** (`src/`): Low-level track/cluster matching diagnostics. Quantifies wrong HGTD matching, wrong cluster selection, and insufficient track count failure modes.
-- **extract_error_metrics.cxx** (`src/`): Extracts quantitative metrics from hgtd_matching output.
+- **failure_decomposition.cxx** (`util/`): Classifies every TRKPTZ failure into four non-exclusive categories (see section below). Primary diagnostic tool.
+- **rate_diagnostics.cxx** (`util/`): Selection-agnostic rates — misclustering (purity > 75%?) and timing misassignment (HGTD vs Ideal Res. PASS oracle). Binned tables matching clustering_dt style.
+- **hgtd_matching.cxx** (`util/`): Low-level track/cluster matching diagnostics. Quantifies wrong HGTD matching, wrong cluster selection, and insufficient track count failure modes.
+- **extract_error_metrics.cxx** (`util/`): Extracts quantitative metrics from hgtd_matching output.
 
 ### Parameter Sweeps
-All sweep executables live in `src/` and share helpers from `sweep_utilities.h`.
+All sweep executables live in `util/` and share helpers from `util/sweep_utilities.h`.
 - **distcut_sweep.cxx**: Sweeps `DIST_CUT_CONE` (0.5 σ – 5 σ).
 - **mintrackpt_sweep.cxx** / **maxtrackpt_sweep.cxx**: pT threshold sweeps.
-- **cone_iter_k_sweep.cxx**: Sweeps `CONE_ITER_K` (top-K cone clusters for REFINED pooling).
-- **dist_refine_sweep.cxx**: Sweeps `DIST_CUT_REFINE` (iterative distance cut in REFINED stage).
+- **cone_iter_k_sweep.cxx**: Sweeps `CONE_ITER_K` (top-K clusters for T_REFINED pooling).
+- **dist_refine_sweep.cxx**: Sweeps `DIST_CUT_REFINE` (iterative distance cut in T_REFINED stage).
 
 ### ML Tools
 - **test_ml_model.cxx**: Validates the loaded neural network model.
@@ -88,26 +89,28 @@ All sweep executables live in `src/` and share helpers from `sweep_utilities.h`.
 - **export_training_data.cxx**: Exports 8-feature CSV rows + labels for DNN retraining.
 
 ### Utilities
-- **runHGTD_Clustering.cxx** (root dir): Interactive per-event clustering. Runs CONE at 3.0 σ then applies the REFINED stage (top-`CONE_ITER_K` cone clusters re-clustered with ITERATIVE at `DIST_CUT_REFINE`). To revert to plain cone output comment out the `===== REFINED STAGE =====` block. Output format is consumed by `event_display.py`.
+- **runHGTD_Clustering.cxx** (root dir): Interactive per-event clustering. Runs CONE at 3.0 σ then applies the T_REFINED stage (top-`CONE_ITER_K` cone clusters re-clustered with ITERATIVE at `DIST_CUT_REFINE`). To revert to plain cone output comment out the `===== REFINED STAGE =====` block. Output format is consumed by `event_display.py`.
 - **generate_rpt.cxx**: Report generation with timing distributions.
 - **check_jet_sorting.cxx**: Verifies jet pT ordering in ntuples.
 
-## REFINED Clustering Algorithm
+## T_REFINED Clustering Algorithm
 
-REFINED is a two-stage approach implemented in `src/event_processing.h` and mirrored in `runHGTD_Clustering.cxx`:
+`Score::T_REFINED` is a two-stage approach implemented in `src/event_processing.h` and mirrored in `runHGTD_Clustering.cxx`:
 
-1. **Stage 1 (Cone)**: Standard cone clustering at `DIST_CUT_CONE = 3.0 σ` on all forward tracks.
-2. **Stage 2 (Iterative refinement)**: Filter cone clusters to those with `≥ MIN_CLUSTER_TRACKS` tracks, sort by TRKPTZ score descending, pool the track indices of the top `CONE_ITER_K = 3` clusters, then re-cluster the pooled tracks using `ClusteringMethod::ITERATIVE` at the tighter `DIST_CUT_REFINE = 2.0 σ`. The ITERATIVE method updates the centroid after each merge, preventing PU track absorption that plagues CONE in spread events.
+1. **Stage 1 (Iterative)**: Iterative nearest-neighbour clustering at `DIST_CUT_CONE = 3.0 σ` on all forward tracks. This is now also the default for all TRKPTZ-based scores.
+2. **Stage 2 (Timing refinement)**: Filter clusters to those with `≥ MIN_CLUSTER_TRACKS` tracks, sort by TRKPTZ score descending, pool the track indices of the top `CONE_ITER_K = 3` clusters, then re-cluster the pooled tracks using `ClusteringMethod::ITERATIVE` at the tighter `DIST_CUT_REFINE = 1.5 σ`. The ITERATIVE method updates the centroid after each merge, preventing PU track absorption.
+
+`Score::CONE` uses legacy cone clustering (`ClusteringMethod::CONE`) at `DIST_CUT_CONE = 3.0 σ` and is preserved as a comparison baseline.
 
 Relevant constants in `src/clustering_constants.h`:
 ```cpp
-DIST_CUT_CONE   = 3.0   // Stage 1 cone distance
-DIST_CUT_REFINE = 2.0   // Stage 2 iterative distance
-CONE_ITER_K     = 3     // Top-K cone clusters to pool
-MIN_CLUSTER_TRACKS = 2  // Minimum tracks to qualify a cluster
+DIST_CUT_CONE   = 3.0   // Main iterative distance (also used for CONE comparison)
+DIST_CUT_REFINE = 1.5   // T_REFINED stage 2 iterative distance
+CONE_ITER_K     = 3     // Top-K clusters to pool for T_REFINED
+MIN_CLUSTER_TRACKS = 0  // Minimum tracks to qualify a cluster
 ```
 
-Score enum: `Score::REFINED` — selected by TRKPTZ among the refined sub-clusters.
+Score enum: `Score::T_REFINED` (id=4) — selected by TRKPTZ among the refined sub-clusters.
 
 ## Failure Decomposition
 
@@ -117,7 +120,7 @@ Score enum: `Score::REFINED` — selected by TRKPTZ among the refined sub-cluste
 |---|------|-----------|
 | 1 | Selection failure | Another qualifying HGTD cluster passes the efficiency window |
 | 2 | Timing misassignment | Re-running with ideal timing resolution fixes it |
-| 3 | Misclustering | No HGTD cluster has purity > 75% **OR** the REFINED algorithm fixes it |
+| 3 | Misclustering | No HGTD cluster has purity > 75% **OR** the T_REFINED algorithm fixes it |
 | 4 | Track efficiency loss | Ideal resolution + ideal efficiency fixes it (but ideal resolution alone does not) |
 
 Categories 2 and 4 are mutually exclusive by construction.
@@ -138,12 +141,12 @@ followed by the full cluster dump (time, score, purity, tracks, passes?).
 
 From `src/clustering_constants.h`:
 ```cpp
-MIN_TRACK_PT     = 0.5   // GeV — track selection floor
+MIN_TRACK_PT     = 1.0   // GeV — track selection floor
 MAX_TRACK_PT     = 30.0  // GeV — track selection ceiling
-DIST_CUT_CONE    = 3.0   // σ — cone clustering distance
-DIST_CUT_REFINE  = 2.0   // σ — REFINED iterative distance
-CONE_ITER_K      = 3     // top-K cone clusters for REFINED pooling
-IDEAL_TRACK_RES  = 10.0  // ps — flat per-track resolution for ideal scenarios
+DIST_CUT_CONE    = 3.0   // σ — main iterative clustering distance (also CONE comparison)
+DIST_CUT_REFINE  = 1.5   // σ — T_REFINED stage 2 iterative distance
+CONE_ITER_K      = 3     // top-K clusters for T_REFINED pooling
+IDEAL_TRACK_RES  = 1.0   // ps — flat per-track resolution for ideal scenarios
 PASS_SIGMA       = 20.0  // pass threshold for efficiency oracle
 ```
 
@@ -189,7 +192,7 @@ Internally calls `runHGTD_Clustering.cxx` and parses its stdout to produce a 2-p
 - **Architecture**: 8 → 128 → 64 → 32 → 1 (ReLU hidden, Sigmoid output; 11 521 parameters)
 - **Features**: delta_z, delta_z_resunits, cluster_z_sigma, cluster_d0, cluster_d0_sigma, cluster_qOverP, cluster_qOverP_sigma, cluster_sumpt
 - **Loading**: Lazy static init in `src/clustering_functions.h:294` — once per run, ~0.01 ms per inference
-- **Score**: `Score::TESTML`
+- **Score**: `Score::TEST_ML`
 - **Files**: `share/models/model_weights.json`, `model.onnx`, `normalization_params.json`
 
 ### Retraining Workflow

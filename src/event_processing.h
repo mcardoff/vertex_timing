@@ -245,60 +245,39 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
-  // 5b. filterTruthMatchedTracks
-  //   Returns the subset of tracks whose HGTD-measured time is consistent with
-  //   their true production time, thereby removing tracks with a misassigned
-  //   HGTD hit.  Misassignment can affect both HS and PU tracks — any track
-  //   whose reconstructed HGTD time is inconsistent with its origin vertex is
-  //   removed.  Three categories are handled:
+  // 5b. calcHSTimingPurity
+  //   Computes the fraction of forward HS track pT whose HGTD time is consistent
+  //   with the truth vertex (|pull| < HS_TIMING_QUALITY_CUT).
+  //   Used as an event-level gate for Score::TEST_MISAS: only events where
+  //   >= 75% of HS pT has a good timing measurement enter its denominator.
+  //   Returns 1.0 (vacuously clean) when no HS tracks with valid HGTD time exist.
   //
-  //     (1) Has truth PARTICLE link (Track_truthPart_idx != -1):
-  //           Use particleT (production vertex time) as the reference.
-  //           Keep if |trackTime - particleT| / trackTimeRes < pullCut.
-  //     (2) No particle link but has truth VERTEX link (Track_truthVtx_idx != -1):
-  //           Track is a secondary (hadronic interaction product) from that vertex.
-  //           Use truthVtxTime[vtxIdx] as the reference.
-  //           Keep if |trackTime - truthVtxTime| / trackTimeRes < pullCut.
-  //     (3) No truth link at all: genuine fake track — always remove.
-  //
-  //   Tracks without a valid HGTD time (trackTimeValid != 1) are also removed
-  //   since there is no measured time to check.
-  //
-  //   Used to build the TEST_MISAS collection: TRKPTZ clustering on a pool free
-  //   of any misassigned tracks, isolating the misassignment error source.
+  //   Truth time resolution:
+  //     Primary tracks   (trackToParticle != -1): use particleT (most precise).
+  //     Secondary tracks (no particle link, vtxIdx != -1): use truthVtxTime.
+  //     Unlinked fakes   (vtxIdx == -1): excluded from denominator.
   // ---------------------------------------------------------------------------
-  std::vector<int> filterTruthMatchedTracks(
+  float calcHSTimingPurity(
     const std::vector<int>& tracks,
-    BranchPointerWrapper* branch,
-    double pullCut
+    BranchPointerWrapper* branch
   ) {
-    std::vector<int> output;
-    output.reserve(tracks.size());
+    double num = 0.0, denom = 0.0;
     for (int idx : tracks) {
-      if (branch->trackTimeValid[idx] != 1) continue;  // no HGTD measurement
+      if (branch->trackToTruthvtx[idx] != 0) continue;  // not HS
+      if (branch->trackTimeValid[idx]  != 1) continue;  // no HGTD measurement
 
-      // Determine the truth time for this track.
-      // Primary tracks: use the truth particle's production vertex time (most precise).
-      // Secondary tracks (hadronic interaction products, no direct particle link):
-      //   fall back to the parent truth vertex time — they are real tracks from that
-      //   vertex and their HGTD time should be consistent with it.
-      // Completely unlinked tracks (no vertex link either) are genuine fakes: remove.
-      double truthTime = NAN;
-      int partIdx = branch->trackToParticle[idx];
-      if (partIdx != -1) {
-        truthTime = branch->particleT[partIdx];
-      } else {
-        int vtxIdx = branch->trackToTruthvtx[idx];
-        if (vtxIdx == -1) continue;                   // completely fake → remove
-        truthTime = branch->truthVtxTime[vtxIdx];
-      }
+      int    partIdx   = branch->trackToParticle[idx];
+      double truthTime = (partIdx != -1)
+                         ? branch->particleT[partIdx]
+                         : branch->truthVtxTime[branch->trackToTruthvtx[idx]];
 
       double pull = std::abs(branch->trackTime[idx] - truthTime)
                     / branch->trackTimeRes[idx];
-      if (pull >= pullCut) continue;                   // HGTD time inconsistent → misassigned
-      output.push_back(idx);
+      double pT   = branch->trackPt[idx];
+      denom += pT;
+      if (pull < HS_TIMING_QUALITY_CUT) num += pT;
     }
-    return output;
+    return (denom > 0.0) ? static_cast<float>(num / denom) : 1.0f;
   }
 
   // ---------------------------------------------------------------------------
@@ -310,9 +289,6 @@ namespace MyUtl {
   //   Note: HS tracks can still carry a misassigned HGTD hit; this filter does
   //   NOT apply a pull check.  TEST_HS therefore isolates the effect of PU
   //   contamination and misclustering, leaving HS-track misassignment in place.
-  //   Comparing TEST_MISAS with TEST_HS separates the two error sources:
-  //     TRKPTZ  → TEST_MISAS : effect of fixing time misassignment (any origin)
-  //     TRKPTZ  → TEST_HS    : effect of removing PU tracks from the pool
   // ---------------------------------------------------------------------------
   std::vector<int> filterHSTracks(
     const std::vector<int>& tracks,
@@ -431,9 +407,8 @@ namespace MyUtl {
     BranchPointerWrapper*              branch,
     const std::map<Score,AnalysisObj>& analyses,
     const std::vector<Cluster>&        filtjetClusters,
-    const std::vector<Cluster>&        iterativeClusters,
+    const std::vector<Cluster>&        coneClusters,
     const std::vector<Cluster>&        refinedClusters,
-    const std::vector<Cluster>&        testMisasClusters,
     const std::vector<Cluster>&        testHsClusters
   ) -> std::map<Score,Cluster> {
     std::map<Score,Cluster> chosen;
@@ -463,26 +438,18 @@ namespace MyUtl {
         chosen[Score::FILTJET] = chooseCluster(qualFilt, Score::TRKPTZ);
     }
 
-    // ITERATIVE: nearest-neighbour iterative clustering, best selected by TRKPTZ
-    if (!iterativeClusters.empty()) {
-      auto qualIter = filterClusters(iterativeClusters);
-      if (!qualIter.empty())
-        chosen[Score::ITERATIVE] = chooseCluster(qualIter, Score::TRKPTZ);
+    // CONE: legacy cone clustering comparison, best selected by TRKPTZ
+    if (!coneClusters.empty()) {
+      auto qualCone = filterClusters(coneClusters);
+      if (!qualCone.empty())
+        chosen[Score::CONE] = chooseCluster(qualCone, Score::TRKPTZ);
     }
 
-    // REFINED: iterative sub-clusters of top-k cone clusters, selected by TRKPTZ
+    // T_REFINED: iterative sub-clusters of top-k cone clusters, selected by TRKPTZ
     if (!refinedClusters.empty()) {
       auto qualRefined = filterClusters(refinedClusters);
       if (!qualRefined.empty())
-        chosen[Score::REFINED] = chooseCluster(qualRefined, Score::TRKPTZ);
-    }
-
-    // TEST_MISAS: cone-clustering on non-misassigned tracks only (HS or PU).
-    // Selection by TRKPTZ score; isolates the misassignment error source.
-    if (!testMisasClusters.empty()) {
-      auto qualMisas = filterClusters(testMisasClusters);
-      if (!qualMisas.empty())
-        chosen[Score::TEST_MISAS] = chooseCluster(qualMisas, Score::TRKPTZ);
+        chosen[Score::T_REFINED] = chooseCluster(qualRefined, Score::TRKPTZ);
     }
 
     // TEST_HS: cone-clustering on HS-truth-linked tracks only. Removes PU
@@ -587,13 +554,13 @@ namespace MyUtl {
           return !passTrackVertexAssociation(trk, 0, branch, MAX_NSIGMA);
         }), tracks.end());
 
-    // ── D. Main cone clustering ─────────────────────────────────────────────
+    // ── D. Main iterative clustering ─────────────────────────────────────────
     // Purity is only computed when TEST_MISCL is active (it is expensive).
-    
+
     const bool NEEDS_PURITY = analyses.count(Score::TEST_MISCL) > 0;
     auto clusters = clusterTracksInTime(tracks, branch, DIST_CUT_CONE,
                                         useSmearedTimes, checkValidTimes, IDEAL_TRACK_RES,
-                                        ClusteringMethod::CONE, useZ0,
+                                        ClusteringMethod::ITERATIVE, useZ0,
                                         /*sortTracks=*/false, NEEDS_PURITY);
 
     // ── E. FILTJET filtered collection ──────────────────────────────────────
@@ -605,12 +572,13 @@ namespace MyUtl {
                                             ClusteringMethod::CONE, useZ0);
     }
 
-    // ── E-2. ITERATIVE collection ────────────────────────────────────────────
-    std::vector<Cluster> iterativeClusters;
-    if (analyses.count(Score::ITERATIVE)) {
-      iterativeClusters = clusterTracksInTime(tracks, branch, DIST_CUT_ITER,
-                                              useSmearedTimes, checkValidTimes, IDEAL_TRACK_RES,
-                                              ClusteringMethod::ITERATIVE, useZ0);
+    // ── E-2. CONE comparison collection ─────────────────────────────────────
+    // Legacy cone clustering preserved as a comparison score.
+    std::vector<Cluster> coneClusters;
+    if (analyses.count(Score::CONE)) {
+      coneClusters = clusterTracksInTime(tracks, branch, DIST_CUT_CONE,
+                                         useSmearedTimes, checkValidTimes, IDEAL_TRACK_RES,
+                                         ClusteringMethod::CONE, useZ0);
     }
 
     // ── E-3. REFINED collection ──────────────────────────────────────────────
@@ -619,28 +587,13 @@ namespace MyUtl {
     // using only the subset of its tracks that are within DIST_CUT_REFINE σ of
     // the centroid.  No re-clustering; only values[0]/sigmas[0] are updated.
     std::vector<Cluster> refinedClusters;
-    if (analyses.count(Score::REFINED) && !clusters.empty()) {
+    if (analyses.count(Score::T_REFINED) && !clusters.empty()) {
       auto bestIt = std::max_element(clusters.begin(), clusters.end(),
           [](const Cluster& a, const Cluster& b) {
             return a.scores.at(Score::TRKPTZ) < b.scores.at(Score::TRKPTZ);
           });
       double iRes = useSmearedTimes ? IDEAL_TRACK_RES : -1.0;
       refinedClusters = { refineClusterTiming(*bestIt, branch, DIST_CUT_REFINE, iRes) };
-    }
-
-    // ── E-4. TEST_MISAS collection ───────────────────────────────────────────
-    // Cone clustering on non-misassigned tracks only (any origin — HS or PU).
-    // Removes tracks whose HGTD time pull vs truth exceeds TRUTH_PULL_CUT.
-    // Only built when TEST_MISAS is active (real-HGTD scenario).
-    std::vector<Cluster> testMisasClusters;
-    if (analyses.count(Score::TEST_MISAS)) {
-      auto misasTracks = filterTruthMatchedTracks(tracks, branch, TRUTH_PULL_CUT);
-      if (!misasTracks.empty())
-        testMisasClusters = clusterTracksInTime(misasTracks, branch, DIST_CUT_CONE,
-                                                useSmearedTimes, checkValidTimes, IDEAL_TRACK_RES,
-                                                ClusteringMethod::CONE, useZ0,false,
-						NEEDS_PURITY
-						);
     }
 
     // ── E-5. TEST_HS collection ──────────────────────────────────────────────
@@ -665,9 +618,14 @@ namespace MyUtl {
 
     // ── G. Select best cluster for each score ───────────────────────────────
     auto chosen = selectClusters(clusters, tracks, branch, analyses,
-                                 filtjetClusters, iterativeClusters, refinedClusters,
-                                 testMisasClusters, testHsClusters);
+                                 filtjetClusters, coneClusters, refinedClusters,
+                                 testHsClusters);
     if (DEBUG) std::cout << "Chose clusters\n";
+
+    // ── G½. HS timing purity for TEST_MISAS gate ────────────────────────────
+    float hsTimingPurity = 1.0f;
+    if (analyses.count(Score::TEST_MISAS))
+      hsTimingPurity = calcHSTimingPurity(tracks, branch);
 
     // ── H. Per-score histogram filling ──────────────────────────────────────
     int    returnCode = 0;
@@ -719,13 +677,20 @@ namespace MyUtl {
       // falls back to 0.75.  Each score tracks its own in-denominator flag so that
       // returnCode=2 (MISCL) and returnCode=3 (MISAS) stay independent.
       if (score.requiresPurity) {
-        float purityCut = score.hasThreshold() ? score.threshold : 0.75f;
-        if (purity > purityCut) {
+        bool passesGate;
+        if (score == Score::TEST_MISAS) {
+          // Gate on event-level HS timing purity: ≥75% of HS pT must have |pull|<3σ
+          passesGate = (hsTimingPurity > 0.75f);
+        } else {
+          float purityCut = score.hasThreshold() ? score.threshold : 0.75f;
+          passesGate = (purity > purityCut);
+        }
+        if (passesGate) {
           if (score == Score::TEST_MISCL) misclInDenominator = true;
           if (score == Score::TEST_MISAS) misasInDenominator = true;
           fillTotals(analysis, ev);
         } else {
-          passes = false;  // impure cluster: skip numerator entirely
+          passes = false;
         }
       }
 
@@ -749,12 +714,11 @@ namespace MyUtl {
     // returnCode == 2: event was in TEST_MISCL denominator but failed timing window
     if (misclInDenominator && !passesMiscl) returnCode = 2;
 
-    // returnCode == 3: TRKPTZ passes but TEST_MISAS selected a pure cluster that
-    // still fails the timing window.  Only fires when TEST_MISAS entered the
-    // denominator (purity > 0.75) — impure clusters and null selections are excluded.
-    // Only meaningful in the HGTD scenario where TEST_MISAS is active.
+    // returnCode == 3: event has clean HS timing (hsTimingPurity > 0.75, in TEST_MISAS
+    // denominator) but TRKPTZ still fails — the failure is not caused by timing
+    // misassignment.  Only meaningful in the HGTD scenario where TEST_MISAS is active.
     if (analyses.count(Score::TEST_MISAS) &&
-        misasInDenominator && passesMine && !passesMisas) returnCode = 3;
+        misasInDenominator && !passesMine) returnCode = 3;
 
     return {returnCode, returnVal};
   }

@@ -55,7 +55,7 @@ inline TStyle* AtlasStyle() {
   atlasStyle->SetLineStyleString(2, "[12 12]");  // dashed line style 2
 
   // — Error bars ————————————————————————————————————————————————————————————
-  atlasStyle->SetErrorX(0.5);         // half-bin-width horizontal error bars
+  atlasStyle->SetErrorX(0);
   atlasStyle->SetEndErrorSize(0.);
 
   // — Suppress statistics/title/fit boxes ———————————————————————————————————

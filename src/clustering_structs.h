@@ -636,7 +636,7 @@ namespace MyUtl {
 //   Member methods:
 //     operator== / !=  — equality by (values[0], sigmas[0], nConstituents)
 //     calcPurity        — fraction of cluster pT belonging to truth HS vertex
-//     updateScores      — computes TRKPTZ, CALO*, TESTML, TEST_MISCL scores
+//     updateScores      — computes TRKPTZ, CALO*, TEST_ML, TEST_MISCL scores
 //     timeSpread        — std-dev of raw track times within the cluster
 //     zSpread           — std-dev of track z₀ values within the cluster
 //     passEfficiency    — true if cluster time is within 3·PASS_SIGMA of truth
@@ -699,7 +699,7 @@ namespace MyUtl {
     //              When z₀ is available as values[1] it is used directly;
     //              otherwise a precision-weighted average over track z₀ is
     //              computed on the fly.
-    //   TESTML   — Output of the DNN (MLModel::predict) on the 8 normalised
+    //   TEST_ML  — Output of the DNN (MLModel::predict) on the 8 normalised
     //              features returned by calcFeatures.
     //   TEST_MISCL — Copies TRKPTZ so that the same selection is used; the
     //              purity gate is applied later in event_processing.h.
@@ -722,9 +722,9 @@ namespace MyUtl {
           this->scores.at(Score::TRKPT) * std::exp(-1.5 * std::abs(rawDeltaZ));
       }
 
-      // ML score for TESTML
+      // ML score for TEST_ML
       float mlScore = mlModel->predict(features);
-      this->scores[Score::TESTML] = mlScore;
+      this->scores[Score::TEST_ML] = mlScore;
 
       // TEST_MISCL uses TRKPTZ as its selection score; the purity gate is applied
       // at efficiency-check time in event_processing.h (both pass and total fills).
@@ -773,7 +773,7 @@ namespace MyUtl {
     // -----------------------------------------------------------------------
     // passEfficiency
     //   Returns true if the cluster's weighted-mean time is within
-    //   3 · PASS_SIGMA of the truth hard-scatter vertex time.
+    //   PASS_SIGMA of the truth hard-scatter vertex time.
     //   This is the primary efficiency criterion used when filling the
     //   pass/total histograms in event_processing.h.
     // -----------------------------------------------------------------------
@@ -783,10 +783,10 @@ namespace MyUtl {
 	return false;
 
       double diff = std::abs(this->values.at(0)-branch->truthVtxTime[0]);
-      if (diff > 3*PASS_SIGMA)
+      if (diff > PASS_SIGMA)
 	return false;
 
-      // return diff < 3*PASS_SIGMA;
+      // return diff < PASS_SIGMA;
 
       return true;
       // int nHSTrack = 0;

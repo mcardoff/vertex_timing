@@ -69,7 +69,7 @@ namespace MyUtl {
   const double MIN_TRACK_PT       = 1.0;   // clustered track_pt > 1.0 GeV
   const double MAX_TRACK_PT       = 30.0;  // clustered track_pt < 30.0 GeV
   const double MIN_TRACK_PT_COUNT = 1.0;   // track_pt > 1.0 GeV for histgramming
-  const double PASS_SIGMA         = 20.0;  // Pass threshold for efficiency
+  const double PASS_SIGMA         = 60.0; // Pass threshold for efficiency (ps)
   const double PILEUP_SMEAR       = 175.0; // Pileup track resolution
 
   const double MAX_TRK_VTX_SIG    = 3.0;   // Pileup removal sigma
@@ -80,6 +80,7 @@ namespace MyUtl {
   const double DIST_CUT_REFINE    = 1.5;   // Tighter iterative cut for REFINED score
   const int    CONE_ITER_K        = 3;     // Top cone clusters to refine (REFINED score)
   const double TRUTH_PULL_CUT     = 2.0;   // |pull| < cut keeps track as truth-matched
+  const double HS_TIMING_QUALITY_CUT = 1.0;   // |pull| < cut → HS track timing is good (TEST_MISAS gate)
   // Per-track timing resolution used for Ideal Resolution/Efficiency scenarios.
   // Flat per-track value (independent of hit count), representing a hypothetically
   // better detector.  Contrast with real HGTD: ~30 ps/hit → 30/√nHits ≈ 15–21 ps/track.
@@ -111,13 +112,13 @@ namespace MyUtl {
   const double PURITY_MIN = 0, PURITY_MAX = 1;
   const double PURITY_WIDTH = 0.05;
 
-  const double FJET_MIN = 0, FJET_MAX = 31.5, FOLD_FJET = 5;
+  const double FJET_MIN = -0.5, FJET_MAX = 31.5, FOLD_FJET = 5;
   const double FJET_WIDTH = 1.0;
 
   const double VTX_DZ_MIN = 0, VTX_DZ_MAX = 5.0, FOLD_VTX_DZ = 2.0;
   const double VTX_DZ_WIDTH = 0.1;
 
-  const double TRACK_MIN = 0, TRACK_MAX = 100.5, FOLD_TRACK = 10;
+  const double TRACK_MIN = -0.5, TRACK_MAX = 100.5, FOLD_TRACK = 10;
   const double TRACK_WIDTH = 1.0;
 
   const double PU_TRACK_MIN = TRACK_MIN, PU_TRACK_MAX = TRACK_MAX, FOLD_HS_TRACK = FOLD_TRACK;  
@@ -166,16 +167,26 @@ namespace MyUtl {
   // ---------------------------------------------------------------------------
   struct Score {
     int id;
-    const char* longName;
+    std::string longName;
     const char* shortName;
     bool usesOwnCollection = false;
     bool requiresPurity    = false;
     float threshold        = -1.f;
 
+    Score() = default;
+    Score(int id, const char*  ln, const char* sn,
+          bool own=false, bool pur=false, float thr=-1.f)
+      : id(id), longName(ln), shortName(sn),
+        usesOwnCollection(own), requiresPurity(pur), threshold(thr) {}
+    Score(int id, std::string  ln, const char* sn,
+          bool own=false, bool pur=false, float thr=-1.f)
+      : id(id), longName(std::move(ln)), shortName(sn),
+        usesOwnCollection(own), requiresPurity(pur), threshold(thr) {}
+
     bool operator<(const Score& o)  const { return id < o.id; }
     bool operator==(const Score& o) const { return id == o.id; }
     bool operator!=(const Score& o) const { return id != o.id; }
-    const char* toString()      const { return longName; }
+    const char* toString()      const { return longName.c_str(); }
     const char* toStringShort() const { return shortName; }
     bool hasThreshold()         const { return threshold >= 0.f; }
 
@@ -183,41 +194,44 @@ namespace MyUtl {
     static const Score TRKPT;
     static const Score TRKPTZ;
     static const Score PASS;
-    static const Score FILTJET;
-    static const Score TESTML;
-    static const Score TEST_MISCL;
-    static const Score HGTD_SORT;
-    static const Score ITERATIVE;
-    static const Score CONE_BDT;
-    static const Score REFINED;
-    static const Score TEST_MISAS;
-    static const Score TEST_HS;
+    static const Score T_REFINED;
     static const Score Z_REFINED;
     static const Score ZT_REFINED;
+    static const Score CONE;
+    static const Score FILTJET;
+    static const Score HGTD_SORT;
+    static const Score TEST_ML;
+    static const Score TEST_MISCL;
+    static const Score CONE_BDT;
+    static const Score TEST_MISAS;
+    static const Score TEST_HS;
   };
 
-  //                                         id  longName                          shortName    own    purity thresh.
-  inline const Score Score::HGTD         = {  0, "HGTD Algorithm",                "HGTD",      true , false, -1.f  };
-  inline const Score Score::TRKPT        = {  1, "#Sigma p_{T}",                  "TRKPT",     false, false, -1.f  };
-  inline const Score Score::TRKPTZ       = {  2, "#Sigma p_{T}e^{-|#Delta z|}",  "TRKPTZ",    false, false, -1.f  };
-  inline const Score Score::PASS         = {  3, "Pass Cluster",                  "PASS",      false, false, -1.f  };
-  inline const Score Score::FILTJET      = { 10, "Filter Tracks in Jets",         "FILTJET",   false, false, -1.f  };
-  inline const Score Score::TESTML       = { 11, "DNN Selection",                 "TESTML",    false, false,  0.3f };
-  inline const Score Score::TEST_MISCL   = { 12, "#Sigma p_{T}e^{-|#Delta z|} (pure)","MISCL",     false, true , -1.f  };
-  inline const Score Score::HGTD_SORT    = { 13, "HGTD BDT (pT-sorted)",          "HGTD_SORT", true , false,  0.3f };
-  inline const Score Score::ITERATIVE    = { 14, "Iterative",                     "ITERATIVE", false, false, -1.f  };
-  inline const Score Score::CONE_BDT     = { 15, "Cone (BDT)",                    "CONE_BDT",  false, false,  0.3f };
-  inline const Score Score::REFINED      = { 16, "2#sigma t Refinement",          "REFINED",   false, false, -1.f  };
-  inline const Score Score::TEST_MISAS   = { 17, "#Sigma p_{T}e^{-|#Delta z|} (misassign. removed)",   "MISAS",     false, false ,  -1.f };
-  inline const Score Score::TEST_HS      = { 18, "#Sigma p_{T}e^{-|#Delta z|} (HS tracks only)",       "TEST_HS",   false, false, -1.f  };
-  inline const Score Score::Z_REFINED    = { 19, "1#sigma z Refinement", "Z_REFINED",  false, false, -1.f  };
-  inline const Score Score::ZT_REFINED   = { 20, "ZT-Refined Timing", "ZT_REFINED", false, false, -1.f  };
+
+  inline const std::string STR_TRKPTZ = "#Sigma p_{T}e^{-|#Delta z|}";
+  //                                         id  longName                      shortName    own    purity thresh.
+  inline const Score Score::HGTD         = {  0, "HGTD Algorithm"            , "HGTD",      true , false, -1.f  };
+  inline const Score Score::TRKPT        = {  1, "#Sigma p_{T}"              , "TRKPT",     false, false, -1.f  };
+  inline const Score Score::TRKPTZ       = {  2, STR_TRKPTZ                  , "TRKPTZ",    false, false, -1.f  };
+  inline const Score Score::PASS         = {  3, "Pass Cluster"              , "PASS",      false, false, -1.f  };
+  inline const Score Score::T_REFINED    = {  4, "2#sigma t Refinement"      , "T_REFINED", false, false, -1.f  };
+  inline const Score Score::Z_REFINED    = {  5, "1#sigma z Refinement"      , "Z_REFINED", false, false, -1.f  };
+  inline const Score Score::ZT_REFINED   = {  6, "ZT-Refined Timing"         , "ZT_REFINED",false, false, -1.f  };
+  inline const Score Score::CONE         = {  7, "Cone"                      , "CONE",      false, false, -1.f  };
+  inline const Score Score::CONE_BDT     = {  8, "Cone (BDT)"                , "CONE_BDT",  false, false,  0.3f };
+  inline const Score Score::FILTJET      = {  9, "Filter Tracks in Jets"     , "FILTJET",   false, false, -1.f  };
+  inline const Score Score::HGTD_SORT    = { 10, "HGTD BDT (pT-sorted)"      , "HGTD_SORT", true , false,  0.3f };
+  inline const Score Score::TEST_ML      = { 11, "DNN Selection"             , "TEST_ML",   false, false,  0.3f };
+  inline const Score Score::TEST_MISCL   = { 12, STR_TRKPTZ + " (pure clust)", "MISCL",     false, true , -1.f  };
+  inline const Score Score::TEST_MISAS   = { 13, STR_TRKPTZ + " (no t misassign.)",  "MISAS",   false, true , -1.f  };
+  inline const Score Score::TEST_HS      = { 14, STR_TRKPTZ + " (HS only)"   , "TEST_HS",   false, false, -1.f  };
 
   inline const std::vector<Score> SCORE_REGISTRY = {
-    Score::HGTD, Score::PASS, Score::TRKPT, Score::TRKPTZ,
-    Score::FILTJET, Score::TESTML, Score::TEST_MISCL, Score::HGTD_SORT,
-    Score::ITERATIVE, Score::CONE_BDT, Score::REFINED, Score::TEST_MISAS,
-    Score::TEST_HS, Score::Z_REFINED, Score::ZT_REFINED,
+    Score::HGTD,      Score::TRKPT,     Score::TRKPTZ,    Score::PASS,
+    Score::T_REFINED, Score::Z_REFINED, Score::ZT_REFINED, Score::CONE,
+    Score::FILTJET,   Score::HGTD_SORT,
+    Score::TEST_ML,   Score::TEST_MISCL, Score::CONE_BDT,
+    Score::TEST_MISAS, Score::TEST_HS,
   };
 
   // Backward-compatible free-function wrappers (existing callsites unchanged)

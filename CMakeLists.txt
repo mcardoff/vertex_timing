@@ -23,20 +23,20 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=native -DNDEBUG \
 
 # Add your executables, specifying the path to the source files
 add_executable(clustering_dt src/clustering_dt.cxx)
-add_executable(hgtd_matching src/hgtd_matching.cxx)
-add_executable(extract_error_metrics src/extract_error_metrics.cxx)
-add_executable(test_ml_model src/test_ml_model.cxx)
-add_executable(generate_rpt src/generate_rpt.cxx)
+add_executable(hgtd_matching util/hgtd_matching.cxx)
+add_executable(extract_error_metrics util/extract_error_metrics.cxx)
+add_executable(test_ml_model util/test_ml_model.cxx)
+add_executable(generate_rpt util/generate_rpt.cxx)
 add_executable(test_vbf_selection test_vbf_selection.cxx)
-add_executable(evaluate_ml_lowtrack src/evaluate_ml_lowtrack.cxx)
-add_executable(export_training_data src/export_training_data.cxx)
-add_executable(distcut_sweep src/distcut_sweep.cxx)
-add_executable(maxtrackpt_sweep src/maxtrackpt_sweep.cxx)
-add_executable(mintrackpt_sweep src/mintrackpt_sweep.cxx)
-add_executable(cone_iter_k_sweep src/cone_iter_k_sweep.cxx)
-add_executable(dist_refine_sweep src/dist_refine_sweep.cxx)
-add_executable(rate_diagnostics src/rate_diagnostics.cxx)
-add_executable(failure_decomposition src/failure_decomposition.cxx)
+add_executable(evaluate_ml_lowtrack util/evaluate_ml_lowtrack.cxx)
+add_executable(export_training_data util/export_training_data.cxx)
+add_executable(distcut_sweep util/distcut_sweep.cxx)
+add_executable(maxtrackpt_sweep util/maxtrackpt_sweep.cxx)
+add_executable(mintrackpt_sweep util/mintrackpt_sweep.cxx)
+add_executable(cone_iter_k_sweep util/cone_iter_k_sweep.cxx)
+add_executable(dist_refine_sweep util/dist_refine_sweep.cxx)
+add_executable(rate_diagnostics util/rate_diagnostics.cxx)
+add_executable(failure_decomposition util/failure_decomposition.cxx)
 
 # Specify the include directories for your header files
 target_include_directories(clustering_dt
@@ -90,30 +90,35 @@ target_include_directories(export_training_data
 target_include_directories(distcut_sweep
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/util
         ${ROOT_INCLUDE_DIRS}
 )
 
 target_include_directories(maxtrackpt_sweep
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/util
         ${ROOT_INCLUDE_DIRS}
 )
 
 target_include_directories(mintrackpt_sweep
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/util
         ${ROOT_INCLUDE_DIRS}
 )
 
 target_include_directories(cone_iter_k_sweep
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/util
         ${ROOT_INCLUDE_DIRS}
 )
 
 target_include_directories(dist_refine_sweep
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/util
         ${ROOT_INCLUDE_DIRS}
 )
 

@@ -6,15 +6,8 @@ HGTD vertex timing reconstruction and clustering analysis for ATLAS.
 
 ```
 vertex_timing/
-├── src/                          # Analysis executables and core library headers
+├── src/                          # Core library headers + main analysis executable
 │   ├── clustering_dt.cxx         # Main clustering analysis (primary entry point)
-│   ├── hgtd_matching.cxx         # Error analysis: quantifies failure modes
-│   ├── extract_error_metrics.cxx # Post-processor: generates failure mode summary table
-│   ├── test_ml_model.cxx         # ML model smoke test
-│   ├── generate_rpt.cxx          # ROC curve / timing distribution report generator
-│   ├── evaluate_ml_lowtrack.cxx  # ML performance in low-track-count events
-│   ├── export_training_data.cxx  # Exports cluster features to CSV for DNN retraining
-│   ├── distcut_sweep.cxx         # Parameter sweep over cone clustering distance cuts
 │   ├── clustering_constants.h    # Analysis constants, cuts, Score enum
 │   ├── clustering_functions.h    # Core clustering and scoring algorithms
 │   ├── clustering_includes.h     # Aggregated ROOT/Boost/STL includes
@@ -22,8 +15,23 @@ vertex_timing/
 │   ├── event_processing.h        # High-level event loop orchestration
 │   ├── plotting_utilities.h      # Gaussian fitting and plot generation utilities
 │   ├── ml_model.h                # Standalone C++ neural network (8→128→64→32→1)
-│   ├── suppress_stdout.h         # RAII stdout suppressor for noisy ROOT messages
+│   ├── AtlasLabels.h / AtlasStyle.h  # ATLAS plot style utilities
 │   └── json.hpp                  # Header-only JSON parser for model weight loading
+├── util/                         # Diagnostic, sweep, and ML utility executables
+│   ├── sweep_utilities.h         # Shared helpers for 1-D parameter sweep executables
+│   ├── hgtd_matching.cxx         # Error analysis: quantifies failure modes
+│   ├── extract_error_metrics.cxx # Post-processor: generates failure mode summary table
+│   ├── test_ml_model.cxx         # ML model smoke test
+│   ├── generate_rpt.cxx          # ROC curve / timing distribution report generator
+│   ├── evaluate_ml_lowtrack.cxx  # ML performance in low-track-count events
+│   ├── export_training_data.cxx  # Exports cluster features to CSV for DNN retraining
+│   ├── failure_decomposition.cxx # Failure mode categorisation + pie chart
+│   ├── rate_diagnostics.cxx      # Selection-agnostic misclustering/misassignment rates
+│   ├── distcut_sweep.cxx         # Sweep: cone distance cut
+│   ├── mintrackpt_sweep.cxx      # Sweep: minimum track pT
+│   ├── maxtrackpt_sweep.cxx      # Sweep: maximum track pT
+│   ├── cone_iter_k_sweep.cxx     # Sweep: CONE_ITER_K
+│   └── dist_refine_sweep.cxx     # Sweep: DIST_CUT_REFINE
 ├── share/
 │   ├── models/
 │   │   ├── model.onnx                  # Original ONNX model (8 input features)
@@ -54,14 +62,14 @@ The following targets are defined in `CMakeLists.txt` and built in the `build/` 
 | Executable | Source | Description |
 |---|---|---|
 | `clustering_dt` | `src/clustering_dt.cxx` | Main analysis. Runs timing-based vertex reconstruction across three scenarios (real HGTD, ideal resolution, ideal efficiency) and multiple scoring algorithms (HGTD, TRKPTZ, TESTML). Generates comparison plots in `figs/`. |
-| `hgtd_matching` | `src/hgtd_matching.cxx` | Error analysis tool. Quantifies three failure modes: wrong HGTD track-time matching, wrong hard-scatter cluster selection, and insufficient forward tracks. Produces 11 diagnostic plots and a ROOT histogram file. |
-| `extract_error_metrics` | `src/extract_error_metrics.cxx` | Reads histograms from `hgtd_matching_analysis.root` and prints a quantitative breakdown of each failure mode's contribution to overall inefficiency. |
-| `test_ml_model` | `src/test_ml_model.cxx` | Loads the neural network from `share/models/model_weights.json` and runs inference on dummy inputs to verify the C++ ML implementation is functioning correctly. |
-| `generate_rpt` | `src/generate_rpt.cxx` | Generates timing distribution plots and two-sample ROC curves comparing pT-weighted and pT+time-weighted track timing for hard-scatter vs. pileup separation. |
+| `hgtd_matching` | `util/hgtd_matching.cxx` | Error analysis tool. Quantifies three failure modes: wrong HGTD track-time matching, wrong hard-scatter cluster selection, and insufficient forward tracks. Produces 11 diagnostic plots and a ROOT histogram file. |
+| `extract_error_metrics` | `util/extract_error_metrics.cxx` | Reads histograms from `hgtd_matching_analysis.root` and prints a quantitative breakdown of each failure mode's contribution to overall inefficiency. |
+| `test_ml_model` | `util/test_ml_model.cxx` | Loads the neural network from `share/models/model_weights.json` and runs inference on dummy inputs to verify the C++ ML implementation is functioning correctly. |
+| `generate_rpt` | `util/generate_rpt.cxx` | Generates timing distribution plots and two-sample ROC curves comparing pT-weighted and pT+time-weighted track timing for hard-scatter vs. pileup separation. |
 | `test_vbf_selection` | `test_vbf_selection.cxx` | Applies the full VBF signal region cut sequence (jet multiplicity, pT, η, Δφ, Δη, dijet mass, forward jets) and reports per-step pass rates. |
-| `evaluate_ml_lowtrack` | `src/evaluate_ml_lowtrack.cxx` | Evaluates ML model performance specifically on low-track-multiplicity events (N_HS ≤ 4), producing score distributions and purity/efficiency curves in this challenging regime. |
-| `export_training_data` | `src/export_training_data.cxx` | Exports per-cluster feature vectors (delta_z, uncertainties, sumpt, label) to a CSV file for use in retraining the neural network. Mirrors the event selection of `clustering_dt`. |
-| `distcut_sweep` | `src/distcut_sweep.cxx` | Sweeps over cone clustering distance cut values and plots efficiency, timing resolution (from a double-Gaussian fit), and mean cluster count as a function of cut threshold. |
+| `evaluate_ml_lowtrack` | `util/evaluate_ml_lowtrack.cxx` | Evaluates ML model performance specifically on low-track-multiplicity events (N_HS ≤ 4), producing score distributions and purity/efficiency curves in this challenging regime. |
+| `export_training_data` | `util/export_training_data.cxx` | Exports per-cluster feature vectors (delta_z, uncertainties, sumpt, label) to a CSV file for use in retraining the neural network. Mirrors the event selection of `clustering_dt`. |
+| `distcut_sweep` | `util/distcut_sweep.cxx` | Sweeps over cone clustering distance cut values and plots efficiency, timing resolution (from a double-Gaussian fit), and mean cluster count as a function of cut threshold. |
 
 ---
 

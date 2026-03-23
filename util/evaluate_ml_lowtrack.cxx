@@ -107,9 +107,9 @@ auto main() -> int {
 
     // Find the chosen cluster (highest ML score)
     Cluster chosenCluster = clusters[0];
-    double maxMLScore = chosenCluster.scores.at(Score::TESTML);
+    double maxMLScore = chosenCluster.scores.at(Score::TEST_ML);
     for (auto& cluster : clusters) {
-      double mlScore = cluster.scores.at(Score::TESTML);
+      double mlScore = cluster.scores.at(Score::TEST_ML);
       if (mlScore > maxMLScore) {
         maxMLScore = mlScore;
         chosenCluster = cluster;
@@ -140,7 +140,7 @@ auto main() -> int {
 
     // Fill histograms for all clusters
     for (auto& cluster : clusters) {
-      double mlScore = cluster.scores.at(Score::TESTML);
+      double mlScore = cluster.scores.at(Score::TEST_ML);
       double purity = cluster.purity;
 
       h_ml_score_all->Fill(mlScore);

@@ -46,20 +46,20 @@ auto buildAnalysisMap(
 
   // Scores active in all scenarios
   m.emplace(Score::TRKPTZ,     AnalysisObj(label, Score::TRKPTZ    ));
-  // m.emplace(Score::TESTML,     AnalysisObj(label, Score::TESTML    ));
+  // m.emplace(Score::TEST_ML,    AnalysisObj(label, Score::TEST_ML   ));
   // m.emplace(Score::PASS,       AnalysisObj(label, Score::PASS      ));
   m.emplace(Score::TEST_MISCL, AnalysisObj(label, Score::TEST_MISCL));
   m.emplace(Score::Z_REFINED,  AnalysisObj(label, Score::Z_REFINED ));
   m.emplace(Score::ZT_REFINED, AnalysisObj(label, Score::ZT_REFINED));
-  m.emplace(Score::REFINED,    AnalysisObj(label, Score::REFINED   ));
-  // m.emplace(Score::TEST_MISAS, AnalysisObj(label, Score::TEST_MISAS ));
+  m.emplace(Score::T_REFINED,  AnalysisObj(label, Score::T_REFINED ));
+  m.emplace(Score::TEST_MISAS, AnalysisObj(label, Score::TEST_MISAS));
 
   // Scores active only in the real-HGTD scenario
   if (scenario == Scenario::HGTD) {
     m.emplace(Score::HGTD,       AnalysisObj(label, Score::HGTD      ));
     // m.emplace(Score::TEST_HS,    AnalysisObj(label, Score::TEST_HS    ));
     // m.emplace(Score::HGTD_SORT, AnalysisObj(label, Score::HGTD_SORT));
-    // m.emplace(Score::ITERATIVE,  AnalysisObj(label, Score::ITERATIVE ));
+    // m.emplace(Score::CONE,       AnalysisObj(label, Score::CONE      ));
     // m.emplace(Score::CONE_BDT,  AnalysisObj(label, Score::CONE_BDT ));
     // m.emplace(Score::FILTJET,   AnalysisObj(label, Score::FILTJET  ));
   }
@@ -114,11 +114,10 @@ void makeComparisonPlots(
 
   moneyPlot(Form("%s/theplot_%s.pdf",compSubdir.c_str(), key), key, canvas,
 	    {
-	      &mapHGTD.at(Score::HGTD),           // HGTD Base Performance
-	      &mapHGTD.at(Score::TRKPTZ),         // TRKPTZ Base Performance
-	      &mapHGTD.at(Score::TEST_MISCL),     // TRKPTZ Fix Misclustering
-	      &mapIdealRes.at(Score::TRKPTZ),     // TRKPTZ Fix Misclustering
-	      &mapIdealRes.at(Score::TEST_MISCL), // TRKPTZ Fix Misclustering
+	      &mapHGTD.at(Score::HGTD),
+	      &mapHGTD.at(Score::TRKPTZ),
+	      &mapHGTD.at(Score::TEST_MISCL),
+	      &mapHGTD.at(Score::TEST_MISAS),
 	    });
   
   // HGTD algo vs TRKPTZ
@@ -128,15 +127,15 @@ void makeComparisonPlots(
                 &mapHGTD.at(Score::TRKPTZ)
 	    });
 
-  // HGTD vs TRKPTZ vs REFINED vs Z_REFINED
+  // HGTD vs TRKPTZ vs T_REFINED vs Z_REFINED
   moneyPlot(Form("%s/z_refined_%s.pdf", compSubdir.c_str(), key), key, canvas,
             {
                 &mapHGTD.at(Score::HGTD),
                 &mapHGTD.at(Score::TRKPTZ),
-                &mapHGTD.at(Score::REFINED),
+                &mapHGTD.at(Score::T_REFINED),
                 &mapHGTD.at(Score::Z_REFINED),
                 // &mapHGTD.at(Score::ZT_REFINED),
-                // &mapIdealRes.at(Score::REFINED),
+                // &mapIdealRes.at(Score::T_REFINED),
                 // &mapIdealRes.at(Score::Z_REFINED)
             });
 
@@ -144,10 +143,10 @@ void makeComparisonPlots(
             {
                 // &mapHGTD.at(Score::HGTD),
                 &mapIdealRes.at(Score::TRKPTZ),
-                // &mapHGTD.at(Score::REFINED),
+                // &mapHGTD.at(Score::T_REFINED),
                 // &mapHGTD.at(Score::Z_REFINED),
                 // &mapHGTD.at(Score::ZT_REFINED),
-                &mapIdealRes.at(Score::REFINED),
+                &mapIdealRes.at(Score::T_REFINED),
                 &mapIdealRes.at(Score::Z_REFINED)
             });
 
@@ -165,7 +164,7 @@ void makeComparisonPlots(
   //               &mapHGTD.at(Score::HGTD),
   //               &mapHGTD.at(Score::TRKPTZ),
   //               &mapHGTD.at(Score::HGTD_SORT),
-  // 		&mapHGTD.at(Score::ITERATIVE)
+  // 		&mapHGTD.at(Score::CONE)
   // 	    });
 
   // // HGTD base times: TRKPTZ vs DNN
@@ -173,7 +172,7 @@ void makeComparisonPlots(
   //           {
   //               &mapHGTD.at(Score::HGTD),
   //               &mapHGTD.at(Score::TRKPTZ),
-  //               &mapHGTD.at(Score::TESTML)
+  //               &mapHGTD.at(Score::TEST_ML)
   // 	    });
 
   // // TRKPTZ full sample vs TRKPTZ restricted to highly pure clusters
@@ -223,7 +222,7 @@ void makeComparisonPlots(
   //           {
   //               &mapHGTD.at(Score::HGTD),
   //               &mapHGTD.at(Score::TRKPTZ),
-  //               &mapHGTD.at(Score::ITERATIVE)
+  //               &mapHGTD.at(Score::CONE)
   // 	    });
 
   // HGTD BDT on cone clusters vs HGTD_SORT (BDT on pT-sorted simultaneous) vs TRKPTZ
@@ -254,7 +253,7 @@ void makeComparisonPlots(
   //           {
   //               &mapHGTD.at(Score::HGTD),
   //               &mapIdealRes.at(Score::TRKPTZ),
-  //               &mapIdealRes.at(Score::TESTML)
+  //               &mapIdealRes.at(Score::TEST_ML)
   // 	    });
 
   // // Ideal-efficiency times: TRKPTZ vs DNN
@@ -262,7 +261,7 @@ void makeComparisonPlots(
   //           {
   //               &mapHGTD.at(Score::HGTD),
   //               &mapIdealEff.at(Score::TRKPTZ),
-  //               &mapIdealEff.at(Score::TESTML)
+  //               &mapIdealEff.at(Score::TEST_ML)
   // 	    });
 
   // // Full ideal comparison: HGTD → TRKPTZ → IdealRes → IdealEff
@@ -384,7 +383,7 @@ auto main() -> int {
   // --- Inclusive resolution plots ---
   const std::initializer_list<AnalysisObj*> RESO_SET = {
     &mapHGTD.at(Score::HGTD), &mapHGTD.at(Score::TRKPTZ), &mapHGTD.at(Score::TEST_MISCL), &mapIdealRes.at(Score::TRKPTZ)
-    // &mapHGTD.at(Score::REFINED)
+    // &mapHGTD.at(Score::T_REFINED)
     // &mapHGTD.at(Score::TEST_MISAS), &mapHGTD.at(Score::TEST_HS),
     // &mapIdealRes.at(Score::TRKPTZ),
     // &mapIdealEff.at(Score::TRKPTZ), &mapIdealEff.at(Score::PASS),

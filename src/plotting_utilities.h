@@ -448,7 +448,7 @@ namespace MyUtl {
       effEstimate = std::make_unique<TH1D>(
         Form("effest_%s_%s_%s", name.Data(), toString(score), times),
 	Form("Fraction in #pm%d ps vs %s (%s);%s;Fraction",
-	     (int)(3*PASS_SIGMA), title, times, title),
+	     (int)(PASS_SIGMA), title, times, title),
 	fbins, xMin, foldMax);
       effEstimate->SetLineWidth(2);
       effEstimate->SetLineColor(COLORS[score.id % COLORS.size()]);
@@ -544,10 +544,10 @@ namespace MyUtl {
 
 	params->fillRMS(j, hSlice.get());
 
-	// Efficiency estimate: fraction of residuals within ±3*PASS_SIGMA
+	// Efficiency estimate: fraction of residuals within ±PASS_SIGMA
 	{
-	  int b1 = hSlice->FindBin(-3.0 * PASS_SIGMA);
-	  int b2 = hSlice->FindBin( 3.0 * PASS_SIGMA) - 1;  // exclude bin starting at +3σ edge
+	  int b1 = hSlice->FindBin(-PASS_SIGMA);
+	  int b2 = hSlice->FindBin( PASS_SIGMA) - 1;  // exclude bin starting at +PASS_SIGMA edge
 	  double num = hSlice->Integral(b1, b2);
 	  double den = hSlice->GetEntries();
 	  if (den > 0.0) {
@@ -565,7 +565,7 @@ namespace MyUtl {
       }
 
       std::unique_ptr<TEfficiency> eff = std::make_unique<TEfficiency>(*this->effPass, *this->effTotal);
-      eff->SetStatisticOption(TEfficiency::kFNormal);
+      // eff->SetStatisticOption(TEfficiency::kFNormal);
       eff->SetTitle(Form("Efficiency vs %s (%s);%s;Efficiency", this->xtitle, this->times, this->xtitle));
       eff->SetLineColor(MyUtl::COLORS[this->scoreToUse.id % COLORS.size()]);
       eff->SetLineWidth(2);
@@ -597,8 +597,10 @@ namespace MyUtl {
       efficiency->GetPaintedGraph()->GetYaxis()->SetRangeUser(EFF_YMIN, EFF_YMAX);
       efficiency->GetPaintedGraph()->GetXaxis()->SetLimits(xMin, foldMax);
       efficiency->GetPaintedGraph()->GetXaxis()->SetRangeUser(xMin, foldMax);
-      auto nDiv = (500) + efficiency->GetTotalHistogram()->GetNbinsX();
-      efficiency->GetPaintedGraph()->GetXaxis()->SetNdivisions(nDiv, kFALSE);
+      // auto* xax = efficiency->GetPaintedGraph()->GetXaxis();
+      // int   nBins = efficiency->GetTotalHistogram()->GetNbinsX();
+      // xax->SetNdivisions(500 + nBins, kFALSE);
+      // xax->CenterLabels(kTRUE);
       gPad->Update();
 
       TLegend* efflegend = new TLegend(0.65, 0.75, 0.9, 0.9);
@@ -612,7 +614,7 @@ namespace MyUtl {
       maxEffLine->Draw("SAME");
       effEstimate->Draw("HIST SAME");
       efflegend->AddEntry(effEstimate.get(),
-                          Form("Fraction in #pm%d ps", (int)(3*PASS_SIGMA)), "l");
+                          Form("Fraction in #pm%d ps", (int)(PASS_SIGMA)), "l");
       efflegend->Draw("SAME");
       ATLASLabel(0.18, 0.88, "Simulation Internal");
       ATLASEnergyLabel(0.18, 0.82);
@@ -623,7 +625,8 @@ namespace MyUtl {
 	TH1D *hist = params->fromEnum(key);
 	hist->Draw();
 	// auto nDiv = (500) + hist->GetNbinsX();
-	hist->GetXaxis()->SetNdivisions(nDiv, kFALSE);
+	// hist->GetXaxis()->SetNdivisions(500 + hist->GetNbinsX(), kFALSE);
+	// hist->GetXaxis()->CenterLabels(kTRUE);
 	if (key == SIGMA) {
 	  hist->GetYaxis()->SetRangeUser(RES_YMIN, RES_YMAX);
 	  TLegend* resoLegend = new TLegend(0.65, 0.75, 0.9, 0.9);
@@ -928,7 +931,7 @@ namespace MyUtl {
 	FJET_MIN  , FJET_MAX  , FJET_WIDTH  ,
 	DIFF_MIN  , DIFF_MAX  , DIFF_WIDTH  ,
 	PURITY_MIN, PURITY_MAX, PURITY_WIDTH,
-	FOLD_FJET, FOLD_FJET+FJET_WIDTH     );
+	FOLD_FJET, FOLD_FJET+FJET_WIDTH/2.0 );
 
       dataObjects["vtx_dz"] = std::make_unique<PlotObj>(
         "|Reco HS z - Truth HS z| (mm)", timetypeIDer,
@@ -946,7 +949,7 @@ namespace MyUtl {
 	TRACK_MIN , TRACK_MAX , TRACK_WIDTH ,
 	DIFF_MIN  , DIFF_MAX  , DIFF_WIDTH  ,
 	PURITY_MIN, PURITY_MAX, PURITY_WIDTH,
-	FOLD_TRACK, FOLD_TRACK+TRACK_WIDTH  );
+	FOLD_TRACK, FOLD_TRACK+TRACK_WIDTH/2.0);
   
       dataObjects["pu_frac"] = std::make_unique<PlotObj>(
         "Pile Up Fraction", timetypeIDer, 
@@ -964,7 +967,7 @@ namespace MyUtl {
 	HS_TRACK_MIN, HS_TRACK_MAX, HS_TRACK_WIDTH ,
 	DIFF_MIN    , DIFF_MAX    , DIFF_WIDTH     ,
 	PURITY_MIN  , PURITY_MAX  , PURITY_WIDTH   ,
-	FOLD_HS_TRACK, FOLD_HS_TRACK+HS_TRACK_WIDTH);
+	FOLD_HS_TRACK, FOLD_HS_TRACK+HS_TRACK_WIDTH/2.0);
   
       dataObjects["pu_track"] = std::make_unique<PlotObj>(
         "n Forward PU Tracks", timetypeIDer, 
@@ -973,7 +976,7 @@ namespace MyUtl {
 	PU_TRACK_MIN, PU_TRACK_MAX, PU_TRACK_WIDTH ,
 	DIFF_MIN    , DIFF_MAX    , DIFF_WIDTH     ,
 	PURITY_MIN  , PURITY_MAX  , PURITY_WIDTH   ,
-	FOLD_PU_TRACK, FOLD_PU_TRACK+PU_TRACK_WIDTH);
+	FOLD_PU_TRACK, FOLD_PU_TRACK+PU_TRACK_WIDTH/2.0);
 
       // Helper to construct one inclusive-reso histogram
       auto makeResoHist = [&](const char* prefix, const char* catLabel) {
@@ -1091,23 +1094,17 @@ namespace MyUtl {
 	// legend->AddEntry(obj, Form("#splitline{%s}{%s}", toString(plt->scoreToUse), plt->times), "lep");
 	legend->AddEntry(obj, Form("%s (%s)", toString(plt->scoreToUse), plt->times), "lep");
 
-	int subdivs = 5, nDiv;
 	if (first) {
 	  obj->SetTitle(Form("%s vs %s", title, plt->xtitle));
 	  obj->Draw("E1");
 	  if constexpr (std::is_same_v<decltype(obj), TEfficiency*> || std::is_same_v<decltype(obj), std::shared_ptr<TEfficiency>>) {
 	    gPad->Update();
 
-	    nDiv = (subdivs * 100) + obj->GetTotalHistogram()->GetNbinsX();
-	    
 	    obj->GetPaintedGraph()->GetXaxis()->SetRangeUser(xMin, xMax);
-	    obj->GetPaintedGraph()->GetXaxis()->SetNdivisions(nDiv, kFALSE);
 	    obj->GetPaintedGraph()->GetYaxis()->SetRangeUser(yMin, yMax);
 	  } else {
 
-	    nDiv = (subdivs * 100) + obj->GetNbinsX();
 	    obj->GetXaxis()->SetRangeUser(xMin, xMax);
-	    obj->GetXaxis()->SetNdivisions(nDiv, kFALSE);
 	    obj->GetYaxis()->SetRangeUser(yMin, yMax);
 	  }
 	  first = false;
@@ -1194,7 +1191,7 @@ namespace MyUtl {
     // Plot Efficiency Estimate (fraction of residuals within ±3*PASS_SIGMA)
     plotWithLegend(
         [](auto& plt) { return plt->effEstimate.get(); },
-	Form("Fraction in #pm%d ps", (int)(3*PASS_SIGMA)), EFF_YMIN, EFF_YMAX,
+	Form("Fraction in #pm%d ps", (int)(PASS_SIGMA)), EFF_YMIN, EFF_YMAX,
 	0.99, "99%");
     canvas->Print(fname);
 
