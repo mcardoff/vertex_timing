@@ -647,7 +647,7 @@ namespace MyUtl {
     std::vector<double> sigmas;
     std::vector<double> allTimes;
     std::vector<int> trackIndices;
-    std::map<Score,double> scores;
+    std::unordered_map<int,double> scores;
     double purity = 0.0;
     bool maxPtCluster = false;
     bool wasMerged = false;
@@ -714,24 +714,27 @@ namespace MyUtl {
       if (this->values.size() > 1) {
         // Clustering was done with z₀ as a second dimension: use that value.
         double dz = std::abs(this->values.at(1) - branch->recoVtxZ[0]);
-        double oldscore = std::pow(this->scores.at(Score::TRKPT), 0.9);
-        this->scores[Score::TRKPTZ] = oldscore * std::exp(-1.5 * dz);
+        double oldscore = std::pow(this->scores.at(Score::TRKPT.id), 0.9);
+        this->scores[Score::TRKPTZ.id] = oldscore * std::exp(-1.5 * dz);
       } else {
         // Common case (usez0=false): reuse deltaZ already computed by calcFeatures.
-        this->scores[Score::TRKPTZ] =
-          this->scores.at(Score::TRKPT) * std::exp(-1.5 * std::abs(rawDeltaZ));
+        this->scores[Score::TRKPTZ.id] =
+          this->scores.at(Score::TRKPT.id) * std::exp(-1.5 * std::abs(rawDeltaZ));
       }
 
       // ML score for TEST_ML
       float mlScore = mlModel->predict(features);
-      this->scores[Score::TEST_ML] = mlScore;
+      this->scores[Score::TEST_ML.id] = mlScore;
 
       // TEST_MISCL uses TRKPTZ as its selection score; the purity gate is applied
       // at efficiency-check time in event_processing.h (both pass and total fills).
-      this->scores[Score::TEST_MISCL] = this->scores.at(Score::TRKPTZ);
-      this->scores[Score::TEST_MISAS] = this->scores.at(Score::TRKPTZ);
-      this->scores[Score::Z_REFINED]   = this->scores.at(Score::TRKPTZ);
-      this->scores[Score::ZT_REFINED]  = this->scores.at(Score::TRKPTZ);
+      this->scores[Score::TEST_MISCL.id] = this->scores.at(Score::TRKPTZ.id);
+      this->scores[Score::TEST_MISAS.id] = this->scores.at(Score::TRKPTZ.id);
+      this->scores[Score::TEST_CTIME.id] = this->scores.at(Score::TRKPTZ.id);
+      this->scores[Score::PERF_EVT.id]   = this->scores.at(Score::TRKPTZ.id);
+      this->scores[Score::PERF_CLT.id]   = this->scores.at(Score::TRKPTZ.id);
+      this->scores[Score::Z_REFINED.id]  = this->scores.at(Score::TRKPTZ.id);
+      this->scores[Score::ZT_REFINED.id] = this->scores.at(Score::TRKPTZ.id);
     }
     
     // -----------------------------------------------------------------------
@@ -804,7 +807,7 @@ namespace MyUtl {
     //   for the given score.  Implemented out-of-line in event_processing.h
     //   (after passTrackVertexAssociation is defined) to avoid circular includes.
     // -----------------------------------------------------------------------
-    double calculateTime(Score score, BranchPointerWrapper* branch) const;
+    double calculateTime(Score score, BranchPointerWrapper* branch, double idealRes = -1.0) const;
 
     // -----------------------------------------------------------------------
     // calcFeatures

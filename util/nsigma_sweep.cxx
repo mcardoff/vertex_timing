@@ -1,4 +1,4 @@
-// distcut_sweep.cxx
+// nsigma_sweep.cxx
 //
 // 1D parameter sweep over the cone clustering distance cut.
 // For each value of distCut in [DIST_MIN, DIST_MAX] (step DIST_STEP) we:
@@ -30,18 +30,18 @@ using namespace MyUtl;
 
 // ── Sweep configuration ───────────────────────────────────────────────────────
 static constexpr Long64_t MAX_EVENTS    = -1;  // -1 = full sample
-static constexpr double   DIST_MIN      = 0.2;
-static constexpr double   DIST_MAX      = 4.0;
-static constexpr double   DIST_STEP     = 0.1;
+static constexpr double   NSIGMA_MIN      = 0.2;
+static constexpr double   NSIGMA_MAX      = 4.2;
+static constexpr double   NSIGMA_STEP     = 0.1;
 static constexpr int      HS_TRACK_SPLIT = 5;  // ≤ this → "low HS" region
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── Helper: build the list of cut values ─────────────────────────────────────
 std::vector<double> makeCutValues() {
   std::vector<double> cuts;
-  int n = (int)std::round((DIST_MAX - DIST_MIN) / DIST_STEP) + 1;
+  int n = (int)std::round((NSIGMA_MAX - NSIGMA_MIN) / NSIGMA_STEP) + 1;
   for (int i = 0; i < n; ++i)
-    cuts.push_back(DIST_MIN + i * DIST_STEP);
+    cuts.push_back(NSIGMA_MIN + i * NSIGMA_STEP);
   return cuts;
 }
 
@@ -94,12 +94,12 @@ int main() {
     for (int ic = 0; ic < nCuts; ++ic) {
       pullHist[r][ic] = new TH1D(
         Form("pull_r%d_cut%.2f", r, cuts[ic]),
-        Form("Track Time Pull (%s, distCut=%.2f#sigma);(t_{trk}-t_{clust})/#sigma_{t,trk};Normalised Entries",
+        Form("Track Time Pull (%s, n#sigma=%.2f#sigma);(t_{trk}-t_{clust})/#sigma_{t,trk};Normalised Entries",
              regionLabel[r].c_str(), cuts[ic]),
         80, -8.0, 8.0);
       resHists[r][ic] = new TH1D(
         Form("res_r%d_cut%.2f", r, cuts[ic]),
-        Form("TRKPTZ #Deltat (%s, distCut=%.2f);#Delta t [ps];Entries",
+        Form("TRKPTZ #Deltat (%s, n#sigma=%.2f);#Delta t [ps];Entries",
              regionLabel[r].c_str(), cuts[ic]),
         nResBins, RES_MIN, RES_MAX);
     }
@@ -123,14 +123,7 @@ int main() {
 
     // ── Track collection ─────────────────────────────────────────────────────
     std::vector<int> tracks =
-      getAssociatedTracks(&branch, MIN_TRACK_PT, MAX_TRACK_PT, 3.0);
-
-    if (MAX_NSIGMA != 3.0)
-      tracks.erase(
-        std::remove_if(tracks.begin(), tracks.end(), [&](int trk) {
-          return !passTrackVertexAssociation(trk, 0, &branch, MAX_NSIGMA);
-        }),
-        tracks.end());
+      getAssociatedTracks(&branch, MIN_TRACK_PT, MAX_TRACK_PT, NSIGMA_MAX);
 
     // ── Determine HS region ──────────────────────────────────────────────────
     int nFTrack = 0, nFTrackHS = 0, nFTrackPU = 0;
@@ -138,10 +131,16 @@ int main() {
     const int region = (nFTrackHS <= HS_TRACK_SPLIT) ? 0 : 1;
 
     // ── Per-cut clustering ───────────────────────────────────────────────────
-    for (int ic = 0; ic < nCuts; ++ic) {
+    for (int ic = nCuts-1; ic >= 0 ; --ic) {
+      tracks.erase(
+        std::remove_if(tracks.begin(), tracks.end(), [&](int trk) {
+          return !passTrackVertexAssociation(trk, 0, &branch, cuts[ic]);
+        }),
+        tracks.end());
+      
       std::vector<Cluster> clusters =
         clusterTracksInTime(
-          tracks, &branch, cuts[ic],
+          tracks, &branch, 3.0,
           /*useSmearedTimes=*/false,
           /*checkTimeValid=*/true,
           /*smearRes=*/10.0,
@@ -238,8 +237,8 @@ int main() {
   const std::string outFile = std::string(OUT_DIR) + "/distcut_sweep.pdf";
   canvas->Print((outFile + "[").c_str());
 
-  const double xLo = DIST_MIN - DIST_STEP * 0.5;
-  const double xHi = DIST_MAX + DIST_STEP * 0.5;
+  const double xLo = NSIGMA_MIN - NSIGMA_STEP * 0.5;
+  const double xHi = NSIGMA_MAX + NSIGMA_STEP * 0.5;
   const char*  xtitle = "Distance Cut [#sigma]";
 
   // Plot 1: Efficiency vs distCut (both regions overlaid)

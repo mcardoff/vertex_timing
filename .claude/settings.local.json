@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(clang++ --print-resource-dir)",
+      "Read(//Users/mcard/include/c++/v1/**)"
+    ]
+  }
+}

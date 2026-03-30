@@ -11,15 +11,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Find the ROOT and Boost libraries
 # Assumes ROOT and Boost are installed and discoverable by find_package
-find_package(ROOT REQUIRED COMPONENTS RIO Core Gpad Graf Hist Tree TMVA)
+find_package(ROOT REQUIRED COMPONENTS RIO Core Gpad Graf Hist Tree)
+# TMVA excluded: HGTD_SORT/CONE_BDT are disabled. Re-add when re-enabling those scores.
 find_package(Boost COMPONENTS filesystem REQUIRED)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=native -DNDEBUG \
-  -fno-math-errno \
-  -fno-trapping-math \
-  -ffp-contract=fast \
-  -flto=thin \
-")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=native -g")
 
 # Add your executables, specifying the path to the source files
 add_executable(clustering_dt src/clustering_dt.cxx)
@@ -35,6 +31,7 @@ add_executable(maxtrackpt_sweep util/maxtrackpt_sweep.cxx)
 add_executable(mintrackpt_sweep util/mintrackpt_sweep.cxx)
 add_executable(cone_iter_k_sweep util/cone_iter_k_sweep.cxx)
 add_executable(dist_refine_sweep util/dist_refine_sweep.cxx)
+add_executable(nsigma_sweep util/nsigma_sweep.cxx)
 add_executable(rate_diagnostics util/rate_diagnostics.cxx)
 add_executable(failure_decomposition util/failure_decomposition.cxx)
 
@@ -109,6 +106,13 @@ target_include_directories(mintrackpt_sweep
 )
 
 target_include_directories(cone_iter_k_sweep
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/util
+        ${ROOT_INCLUDE_DIRS}
+)
+
+target_include_directories(nsigma_sweep
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/util
@@ -210,6 +214,12 @@ target_link_libraries(cone_iter_k_sweep
 )
 
 target_link_libraries(dist_refine_sweep
+    PRIVATE
+        ${ROOT_LIBRARIES}
+        Boost::filesystem
+)
+
+target_link_libraries(nsigma_sweep
     PRIVATE
         ${ROOT_LIBRARIES}
         Boost::filesystem

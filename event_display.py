@@ -26,7 +26,8 @@ args = parser.parse_args()
 event_num, file_num = args.event_num, args.file_num
 
 IDEALEFF = False
-filename = f'event_displays/refine_event_display_{file_num}_{event_num:04d}.pdf'
+filename = f'event_displays/passing_5/event_display_{file_num}_{event_num:04d}.pdf'
+# filename = f'event_displays/failing_5/event_display_{file_num}_{event_num:04d}.pdf'
 
 def generate_cluster_colors(n):
     """Generate n perceptually distinct colors using golden-ratio HSV spacing."""
@@ -361,11 +362,12 @@ for i_cluster, weights in enumerate(pt_wghts):
     if i_cluster not in legend_index_set:
         continue
     total_weight = sum(weights)
-    pt_label = f'Σpt = {total_weight:.2f}'
-    dz_label = f'dz={np.abs(reco_hs_z-cluster_zs[i_cluster]):.2f}'
+    dz = np.abs(reco_hs_z - cluster_zs[i_cluster])
+    score = total_weight * np.exp(-1.5 * dz)
+    score_label = f'score = {score:.3f}'
     t_label  = f't={cluster_times[i_cluster]:.2f}'
     suffix   = ' [ΔT closest]' if i_cluster == truth_closest_idx and truth_closest_idx not in ranked_indices[:4] else ''
-    FULL_LABEL = f'{pt_label}\n{dz_label}\n{t_label}{suffix}'
+    FULL_LABEL = f'{score_label}\n{t_label}{suffix}'
     patch = mpatches.Patch(facecolor=cluster_colors[i_cluster], label=FULL_LABEL)
     weight_legend_patches.append(patch)
 

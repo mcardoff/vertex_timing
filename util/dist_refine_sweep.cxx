@@ -163,7 +163,7 @@ int main() {
     }
 
     std::sort(qualClusters.begin(), qualClusters.end(), [](const Cluster& a, const Cluster& b) {
-      return a.scores.at(Score::TRKPTZ) > b.scores.at(Score::TRKPTZ);
+      return a.scores.at(Score::TRKPTZ.id) > b.scores.at(Score::TRKPTZ.id);
     });
 
     // Pool trackIndices from top CONE_ITER_K qualifying clusters (cut-independent)

@@ -182,10 +182,10 @@ namespace MyUtl {
         Cluster cluster;
         if (usez0)
           cluster = {{trkTime,trkZ0}, {trkRes,trkResZ0}, {trkTime}, {idx},
-                     {{Score::HGTD, 0.0}, {Score::TRKPT, trkPt}}};
+                     {{Score::HGTD.id, 0.0}, {Score::TRKPT.id, trkPt}}};
         else
           cluster = {{trkTime}, {trkRes}, {trkTime}, {idx},
-                     {{Score::HGTD, 0.0}, {Score::TRKPT, trkPt}}};
+                     {{Score::HGTD.id, 0.0}, {Score::TRKPT.id, trkPt}}};
         simpleClusters.push_back(std::move(cluster));
       }
     }
@@ -270,7 +270,7 @@ namespace MyUtl {
       for (int i=0; i < collection->size(); ++i) {
         if (collection->at(i).wasMerged) { continue; }
 	const Cluster& check = collection->at(i);
-	double checkValue = check.scores.at(Score::TRKPT);
+	double checkValue = check.scores.at(Score::TRKPT.id);
 	
 	if (seedValue < checkValue) {
 	  seedValue = checkValue;
@@ -353,7 +353,7 @@ namespace MyUtl {
       double maxPt = -1.0;
       for (int i = 0; i < N; ++i) {
         if (consumed[i]) continue;
-        double pt = (*collection)[i].scores.at(Score::TRKPT);
+        double pt = (*collection)[i].scores.at(Score::TRKPT.id);
         if (pt > maxPt) { maxPt = pt; seedIdx = i; }
       }
       if (seedIdx == -1) break; // all clusters consumed
@@ -499,95 +499,15 @@ namespace MyUtl {
   }
   
   // ---------------------------------------------------------------------------
-  // 9. chooseHGTDSortCluster
-  //   Evaluates each cluster with the ATLAS HGTD TMVA BDT and returns the
-  //   cluster with the highest BDT output.  The BDT score is stored in
-  //   cluster.scores[Score::HGTD_SORT] so the caller can apply the 0.3
-  //   confidence threshold.
-  //
-  //   TMVA variables (order must match weights XML exactly):
-  //     m_delta_z          — cluster z minus primary vertex z (mm)
-  //     m_z_sigma          — cluster z uncertainty (mm)
-  //     m_q_over_p         — precision-weighted charge-over-momentum
-  //     m_q_over_p_sigma   — q/p uncertainty
-  //     m_delta_z_resunits — delta_z in cluster z-resolution units
-  //     m_cluster_sumpt2   — sum of constituent track pT² (GeV²)
-  //     m_d0               — precision-weighted transverse impact parameter (mm)
-  //     m_d0_sigma         — d0 uncertainty (mm)
-  //
-  //   The TMVA::Reader is initialised once (static) — safe for the serial
-  //   TTreeReader event loop in clustering_dt.cxx.
+  // 9. chooseHGTDSortCluster  (stub — HGTD_SORT/CONE_BDT currently disabled)
+  //   Full TMVA BDT implementation lives in git history.  Re-enable by
+  //   restoring TMVA includes in clustering_includes.h and TMVA component in
+  //   CMakeLists.txt, then replacing this stub with the full implementation.
   // ---------------------------------------------------------------------------
   auto chooseHGTDSortCluster(
-    const std::vector<Cluster>& collection,
-    BranchPointerWrapper* branch
-  ) -> Cluster {
-    if (collection.empty()) return Cluster{};
-
-    // Static floats: TMVA Reader holds float* pointers to these, so they must
-    // have stable addresses.  Initialised to 0 by the C++ standard.
-    static float m_delta_z, m_z_sigma, m_q_over_p, m_q_over_p_sigma;
-    static float m_delta_z_resunits, m_cluster_sumpt2, m_d0, m_d0_sigma;
-
-    // Initialise TMVA Reader once; variable order must match the weights XML.
-    static TMVA::Reader* reader = []() {
-      TMVA::Tools::Instance();
-      TMVA::Reader* r = new TMVA::Reader("!Color:!Silent");
-      r->AddVariable("m_delta_z",          &m_delta_z);
-      r->AddVariable("m_z_sigma",          &m_z_sigma);
-      r->AddVariable("m_q_over_p",         &m_q_over_p);
-      r->AddVariable("m_q_over_p_sigma",   &m_q_over_p_sigma);
-      r->AddVariable("m_delta_z_resunits", &m_delta_z_resunits);
-      r->AddVariable("m_cluster_sumpt2",   &m_cluster_sumpt2);
-      r->AddVariable("m_d0",               &m_d0);
-      r->AddVariable("m_d0_sigma",         &m_d0_sigma);
-      r->BookMVA("BDT", "../share/models/TMVA.VBFinv.mu200.Step3p1.8var.weights.xml");
-      std::cout << "✓ HGTD BDT loaded (one-time initialization)" << std::endl;
-      return r;
-    }();
-
-    Cluster best;
-    double bestScore = -1e50;
-    float refVtxZ = branch->recoVtxZ[0];
-
-    for (const Cluster& cluster : collection) {
-      float znum = 0., zden = 0., dnum = 0., dden = 0., qpnum = 0., qpden = 0.;
-      float sumpt2 = 0.;
-
-      for (auto trk : cluster.trackIndices) {
-        float trkZ   = branch->trackZ0[trk],  trkVarZ = branch->trackVarZ0[trk];
-        float trkD   = branch->trackD0[trk],  trkVarD = branch->trackVarD0[trk];
-        float trkQ   = branch->trackQP[trk],  trkVarQ = branch->trackVarQp[trk];
-        float trkPt  = branch->trackPt[trk];
-        znum  += trkZ / trkVarZ;  zden  += 1.f / trkVarZ;
-        dnum  += trkD / trkVarD;  dden  += 1.f / trkVarD;
-        qpnum += trkQ / trkVarQ;  qpden += 1.f / trkVarQ;
-        sumpt2 += trkPt * trkPt;
-      }
-
-      float clusterZ        = znum / zden;
-      float clusterZSigma   = 1.f / std::sqrt(zden);
-      float deltaZ          = clusterZ - refVtxZ;
-
-      m_delta_z          = deltaZ;
-      m_z_sigma          = clusterZSigma;
-      m_q_over_p         = qpnum / qpden;
-      m_q_over_p_sigma   = 1.f / std::sqrt(qpden);
-      m_delta_z_resunits = deltaZ / clusterZSigma;
-      m_cluster_sumpt2   = sumpt2;
-      m_d0               = dnum / dden;
-      m_d0_sigma         = 1.f / std::sqrt(dden);
-
-      double bdtScore = reader->EvaluateMVA("BDT");
-      if (bdtScore > bestScore) {
-        bestScore = bdtScore;
-        best = cluster;
-      }
-    }
-
-    best.scores[Score::HGTD_SORT] = bestScore;
-    return best;
-  }
+    const std::vector<Cluster>&,
+    BranchPointerWrapper*
+  ) -> Cluster { return Cluster{}; }
 
   // ---------------------------------------------------------------------------
   // 10. chooseCluster  [all-scores overload]
@@ -606,8 +526,8 @@ namespace MyUtl {
   auto chooseCluster(
     const std::vector<Cluster>& collection,
     BranchPointerWrapper *branch
-  ) -> std::map<Score, Cluster> {
-    std::map<Score,Cluster> output;
+  ) -> std::unordered_map<int, Cluster> {
+    std::unordered_map<int,Cluster> output;
     if (DEBUG) std::cout << "Choosing score\n";
 
     for (Score score: SCORE_REGISTRY) {
@@ -616,35 +536,32 @@ namespace MyUtl {
       if (score.usesOwnCollection)
 	continue;
 
-      // FILTJET, CONE, CONE_BDT, T_REFINED, and TEST_HS each use their own
-      // pre-built collection or custom selection method; chosen via the
-      // single-score or BDT overload in selectClusters.
-      // TEST_MISAS now uses the main collection (same as TEST_MISCL).
-      if (score == Score::FILTJET || score == Score::CONE ||
-          score == Score::CONE_BDT || score == Score::T_REFINED ||
-          score == Score::TEST_HS)
-	continue;
+      // Scores with usesOwnCollection=true have a dedicated cluster collection
+      // (built in the auxCollections table or directly in selectClusters) and
+      // must not be selected from the main collection here.
+      if (score.usesOwnCollection)
+        continue;
 
       if (score == Score::PASS) {
 	if (DEBUG) std::cout << "Choosing pass score\n";
         for (const Cluster& cluster : collection)
           if (cluster.passEfficiency(branch))
-	    output[score] = cluster;
+	    output[score.id] = cluster;
 	continue;
       }
 
       // Track the best cluster via pointer — only copy the winner once at the end.
       const Cluster* best = &collection[0];
-      double maxScore = best->scores.at(score);
+      double maxScore = best->scores.at(score.id);
 
       for (const Cluster& cluster: collection) {
-	double compScore = cluster.scores.at(score);
+	double compScore = cluster.scores.at(score.id);
 	if (compScore > maxScore) {
 	  maxScore = compScore;
 	  best = &cluster;
 	}
       }
-      output[score] = *best;
+      output[score.id] = *best;
     }
     return output;
   }
@@ -668,10 +585,10 @@ namespace MyUtl {
     // }
 
     Cluster output = collection[0]; // final time we are giving to the user
-    double maxScore = output.scores.at(score);
-    
+    double maxScore = output.scores.at(score.id);
+
     for (const Cluster& cluster: collection) {
-      double compScore = cluster.scores.at(score);
+      double compScore = cluster.scores.at(score.id);
       bool query = compScore > maxScore;
 	
       if (query) {

@@ -63,6 +63,9 @@ inline TStyle* AtlasStyle() {
   atlasStyle->SetOptStat(0);
   atlasStyle->SetOptFit(0);
 
+  // — Suppress horizontal (bin-width) error bars globally ———————————————————
+  atlasStyle->SetErrorX(0);
+
   // — Tick marks on all four sides of each pad ——————————————————————————————
   atlasStyle->SetPadTickX(1);
   atlasStyle->SetPadTickY(1);

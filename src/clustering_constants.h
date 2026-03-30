@@ -69,7 +69,7 @@ namespace MyUtl {
   const double MIN_TRACK_PT       = 1.0;   // clustered track_pt > 1.0 GeV
   const double MAX_TRACK_PT       = 30.0;  // clustered track_pt < 30.0 GeV
   const double MIN_TRACK_PT_COUNT = 1.0;   // track_pt > 1.0 GeV for histgramming
-  const double PASS_SIGMA         = 60.0; // Pass threshold for efficiency (ps)
+  const double PASS_SIGMA         = 100.0; // Pass threshold for efficiency (ps)
   const double PILEUP_SMEAR       = 175.0; // Pileup track resolution
 
   const double MAX_TRK_VTX_SIG    = 3.0;   // Pileup removal sigma
@@ -77,10 +77,12 @@ namespace MyUtl {
   const double DIST_CUT_CONE      = 3.0;   // Distance cut for cone clustering
   const double DIST_CUT_SIMUL     = 3.0;   // Distance cut for simul. clustering
   const double DIST_CUT_ITER      = 3.0;   // Distance cut for iterative clustering
-  const double DIST_CUT_REFINE    = 1.5;   // Tighter iterative cut for REFINED score
+  const double DIST_CUT_REFINE    = 2.0;   // Timing distance cut used by ZT_REFINED (legacy)
+  const double DIST_CUT_T_REFINED = 2.0;   // Re-clustering distance cut for T_REFINED and ZT_REFINED
+  const double TVA_CUT_Z_REFINED  = 2.0;   // z₀ TVA significance cut for Z_REFINED and ZT_REFINED
   const int    CONE_ITER_K        = 3;     // Top cone clusters to refine (REFINED score)
   const double TRUTH_PULL_CUT     = 2.0;   // |pull| < cut keeps track as truth-matched
-  const double HS_TIMING_QUALITY_CUT = 1.0;   // |pull| < cut → HS track timing is good (TEST_MISAS gate)
+  const double HS_TIMING_QUALITY_CUT = 3.0;   // |pull| < cut → HS track timing is good (TEST_MISAS / TEST_CTIME gate)
   // Per-track timing resolution used for Ideal Resolution/Efficiency scenarios.
   // Flat per-track value (independent of hit count), representing a hypothetically
   // better detector.  Contrast with real HGTD: ~30 ps/hit → 30/√nHits ≈ 15–21 ps/track.
@@ -101,6 +103,18 @@ namespace MyUtl {
   };
 
   // ---------------------------------------------------------------------------
+  // 3c. Track pre-filter selector
+  //   Used by CollSpec to describe which subset of forward tracks a dedicated
+  //   collection is built from.  The actual filtering functions are called at
+  //   runtime inside processEventData via a switch on this enum.
+  //     ALL      — full forward track list (no pre-filtering)
+  //     JET      — tracks falling inside a forward jet cone (FILTJET)
+  //     Z0_TVA   — tracks passing z₀ TVA at TVA_CUT_Z_REFINED (ZT_REFINED)
+  //     HS_ONLY  — truth-HS-linked tracks only (TEST_HS)
+  // ---------------------------------------------------------------------------
+  enum class TrackFilterType { ALL, JET, Z0_TVA, HS_ONLY };
+
+  // ---------------------------------------------------------------------------
   // 4. Histogram axis ranges and fold values
   //   xMin/xMax define the full histogram axis.  FOLD_* values mark the
   //   point at which overflow is collapsed into the last visible bin so that
@@ -118,7 +132,7 @@ namespace MyUtl {
   const double VTX_DZ_MIN = 0, VTX_DZ_MAX = 5.0, FOLD_VTX_DZ = 2.0;
   const double VTX_DZ_WIDTH = 0.1;
 
-  const double TRACK_MIN = -0.5, TRACK_MAX = 100.5, FOLD_TRACK = 10;
+  const double TRACK_MIN = -0.5, TRACK_MAX = 100.5, FOLD_TRACK = 20;
   const double TRACK_WIDTH = 1.0;
 
   const double PU_TRACK_MIN = TRACK_MIN, PU_TRACK_MAX = TRACK_MAX, FOLD_HS_TRACK = FOLD_TRACK;  
@@ -133,55 +147,60 @@ namespace MyUtl {
   const double Z_MIN = -200, Z_MAX = 200, FOLD_Z = 100;
   const double Z_WIDTH = 10.0;
 
-  const double EFF_YMIN = 0.0, EFF_YMAX = 1.8;
+  const double EFF_YMIN = 0.0, EFF_YMAX = 1.25;
   const double PUR_YMIN = 0.0, PUR_YMAX = 1.5;
   const double RES_YMIN = 0.0, RES_YMAX = 40.0;
   const double BKG_RES_YMIN = 90.0, BKG_RES_YMAX = 500.0;
 
   // ---------------------------------------------------------------------------
   // 5. Score struct
-  //   Self-describing configuration for each cluster-selection algorithm.
-  //   Each named instance carries display strings and behavioural flags so
-  //   that adding a new score requires only one spot (declare + define below)
-  //   rather than touching four switch-statement functions.
+  //   Single source of truth for every cluster-selection algorithm.
+  //   Each named instance carries display metadata, behavioural flags, and —
+  //   for scores with a dedicated cluster collection — the full clustering
+  //   spec so that processEventData can drive everything from SCORE_REGISTRY
+  //   without a separate CollSpec table.
   //
-  //   Fields:
+  //   Display / behaviour fields:
   //     id               — stable integer identity (map key, COLORS index)
   //     longName         — ROOT-LaTeX label for plot titles
   //     shortName        — compact identifier for histogram names / tables
-  //     usesOwnCollection— true: score has a dedicated cluster collection
-  //                        (HGTD, HGTD_SORT); skip main-collection guards
-  //     requiresPurity   — true: fills are gated on cluster purity > 0.75
-  //                        (TEST_MISCL pattern)
-  //     threshold        — ≥ 0: passesEfficiency requires score > threshold
-  //                        (TESTML = 0.3, HGTD_SORT = 0.3); -1 = no gate
+  //     usesOwnCollection— true: skipped by the all-scores chooseCluster
+  //                        overload; collection built in section E (when
+  //                        distCut ≥ 0) or directly in selectClusters
+  //                        (HGTD, HGTD_SORT, CONE_BDT where distCut = -1).
+  //     requiresPurity   — true: fills gated on cluster purity (TEST_MISCL)
+  //     threshold        — score gate for passEfficiency; -1 = no gate
   //
-  //   Member helpers:
-  //     toString()      — returns longName
-  //     toStringShort() — returns shortName
-  //     hasThreshold()  — returns threshold >= 0
+  //   Collection spec fields (only used when usesOwnCollection && distCut≥0):
+  //     distCut  — Mahalanobis distance cut for clusterTracksInTime
+  //     method   — clustering algorithm (CONE or ITERATIVE)
+  //     useZ0    — true: 2D (z₀,t) metric; false: 1D time-only metric
+  //     filter   — track pre-filter applied before clustering
   //
-  //   SCORE_REGISTRY replaces ENUM_VEC as the canonical iteration order.
-  //   Free-function wrappers toString(Score) / toStringShort(Score) are kept
-  //   for backward compatibility with existing callsites.
+  //   Adding a new dedicated-collection score: one declare + one define
+  //   in this file.  No other file needs touching.
   // ---------------------------------------------------------------------------
   struct Score {
     int id;
     std::string longName;
     const char* shortName;
-    bool usesOwnCollection = false;
-    bool requiresPurity    = false;
-    float threshold        = -1.f;
+    bool             usesOwnCollection = false;
+    bool             requiresPurity    = false;
+    float            threshold         = -1.f;
+    // Collection spec — meaningful only when usesOwnCollection && distCut >= 0
+    double           distCut           = -1.0;
+    ClusteringMethod method            = ClusteringMethod::ITERATIVE;
+    bool             useZ0             = false;
+    TrackFilterType  filter            = TrackFilterType::ALL;
 
     Score() = default;
-    Score(int id, const char*  ln, const char* sn,
-          bool own=false, bool pur=false, float thr=-1.f)
-      : id(id), longName(ln), shortName(sn),
-        usesOwnCollection(own), requiresPurity(pur), threshold(thr) {}
-    Score(int id, std::string  ln, const char* sn,
-          bool own=false, bool pur=false, float thr=-1.f)
-      : id(id), longName(std::move(ln)), shortName(sn),
-        usesOwnCollection(own), requiresPurity(pur), threshold(thr) {}
+    Score(int id_, std::string ln, const char* sn,
+          bool own=false, bool pur=false, float thr=-1.f,
+          double dc=-1.0, ClusteringMethod m=ClusteringMethod::ITERATIVE,
+          bool z0=false, TrackFilterType f=TrackFilterType::ALL)
+      : id(id_), longName(std::move(ln)), shortName(sn),
+        usesOwnCollection(own), requiresPurity(pur), threshold(thr),
+        distCut(dc), method(m), useZ0(z0), filter(f) {}
 
     bool operator<(const Score& o)  const { return id < o.id; }
     bool operator==(const Score& o) const { return id == o.id; }
@@ -189,6 +208,8 @@ namespace MyUtl {
     const char* toString()      const { return longName.c_str(); }
     const char* toStringShort() const { return shortName; }
     bool hasThreshold()         const { return threshold >= 0.f; }
+    // True when this score's collection is built via SCORE_REGISTRY in section E
+    bool buildsCollection()     const { return usesOwnCollection && distCut >= 0.0; }
 
     static const Score HGTD;
     static const Score TRKPT;
@@ -205,33 +226,47 @@ namespace MyUtl {
     static const Score CONE_BDT;
     static const Score TEST_MISAS;
     static const Score TEST_HS;
+    static const Score TEST_CTIME;
+    static const Score ZT_ITER;
+    static const Score PERF_EVT;
+    static const Score PERF_CLT;
   };
 
-
   inline const std::string STR_TRKPTZ = "#Sigma p_{T}e^{-|#Delta z|}";
-  //                                         id  longName                      shortName    own    purity thresh.
-  inline const Score Score::HGTD         = {  0, "HGTD Algorithm"            , "HGTD",      true , false, -1.f  };
-  inline const Score Score::TRKPT        = {  1, "#Sigma p_{T}"              , "TRKPT",     false, false, -1.f  };
-  inline const Score Score::TRKPTZ       = {  2, STR_TRKPTZ                  , "TRKPTZ",    false, false, -1.f  };
-  inline const Score Score::PASS         = {  3, "Pass Cluster"              , "PASS",      false, false, -1.f  };
-  inline const Score Score::T_REFINED    = {  4, "2#sigma t Refinement"      , "T_REFINED", false, false, -1.f  };
-  inline const Score Score::Z_REFINED    = {  5, "1#sigma z Refinement"      , "Z_REFINED", false, false, -1.f  };
-  inline const Score Score::ZT_REFINED   = {  6, "ZT-Refined Timing"         , "ZT_REFINED",false, false, -1.f  };
-  inline const Score Score::CONE         = {  7, "Cone"                      , "CONE",      false, false, -1.f  };
-  inline const Score Score::CONE_BDT     = {  8, "Cone (BDT)"                , "CONE_BDT",  false, false,  0.3f };
-  inline const Score Score::FILTJET      = {  9, "Filter Tracks in Jets"     , "FILTJET",   false, false, -1.f  };
-  inline const Score Score::HGTD_SORT    = { 10, "HGTD BDT (pT-sorted)"      , "HGTD_SORT", true , false,  0.3f };
-  inline const Score Score::TEST_ML      = { 11, "DNN Selection"             , "TEST_ML",   false, false,  0.3f };
-  inline const Score Score::TEST_MISCL   = { 12, STR_TRKPTZ + " (pure clust)", "MISCL",     false, true , -1.f  };
-  inline const Score Score::TEST_MISAS   = { 13, STR_TRKPTZ + " (no t misassign.)",  "MISAS",   false, true , -1.f  };
-  inline const Score Score::TEST_HS      = { 14, STR_TRKPTZ + " (HS only)"   , "TEST_HS",   false, false, -1.f  };
+
+  // Columns: id  longName  shortName  own    pur    thr     distCut           method                        useZ0  filter
+  //          ──  ────────  ─────────  ─────  ─────  ──────  ────────────────  ──────────────────────────    ─────  ──────────────────────
+  // Scores without a dedicated collection (distCut omitted → -1, ignored)
+  inline const Score Score::HGTD       = {  0, "HGTD Algorithm"             , "HGTD",     true , false, -1.f };
+  inline const Score Score::TRKPT      = {  1, "#Sigma p_{T}"               , "TRKPT",    false, false, -1.f };
+  inline const Score Score::TRKPTZ     = {  2, STR_TRKPTZ                   , "TRKPTZ",   false, false, -1.f };
+  inline const Score Score::PASS       = {  3, "Pass Cluster"               , "PASS",     false, false, -1.f };
+  inline const Score Score::Z_REFINED  = {  5, "2#sigma z Refinement"       , "Z_REFINED",false, false, -1.f };
+  inline const Score Score::CONE_BDT   = {  8, "Cone (BDT)"                 , "CONE_BDT", true , false,  0.3f};
+  inline const Score Score::HGTD_SORT  = { 10, "HGTD BDT (pT-sorted)"       , "HGTD_SORT",true , false,  0.3f};
+  inline const Score Score::TEST_ML    = { 11, "DNN Selection"              , "TEST_ML",  false, false,  0.3f};
+  inline const Score Score::TEST_MISCL = { 12, STR_TRKPTZ + " (Pure Clusters)" , "MISCL",    false, true , -1.f };
+  inline const Score Score::TEST_MISAS = { 13, STR_TRKPTZ + " (Perfect Evt Times)", "MISAS",false, true , -1.f };
+  inline const Score Score::TEST_CTIME = { 15, STR_TRKPTZ + " (Perfect Clust. Times)", "CTIME",   false, true , -1.f };
+  inline const Score Score::PERF_EVT   = { 17, STR_TRKPTZ + " (Pure Cluster+Evt Times)", "PERF_EVT", false, true, -1.f };
+  inline const Score Score::PERF_CLT   = { 18, STR_TRKPTZ + " (Pure Cluster+Clust. Times)", "PERF_CLT", false, true, -1.f }; // gate: CTIME ∧ MISCL
+
+  // Scores with a dedicated collection (distCut ≥ 0 → buildsCollection() = true)
+  inline const Score Score::CONE       = {  7, "Cone"                       , "CONE",     true , false, -1.f, DIST_CUT_CONE,      ClusteringMethod::CONE      };
+  inline const Score Score::FILTJET    = {  9, "Filter Tracks in Jets"      , "FILTJET",  true , false, -1.f, DIST_CUT_CONE,      ClusteringMethod::CONE,      false, TrackFilterType::JET     };
+  inline const Score Score::TEST_HS    = { 14, STR_TRKPTZ + " (HS only)"   , "TEST_HS",  true , false, -1.f, DIST_CUT_CONE,      ClusteringMethod::CONE,      false, TrackFilterType::HS_ONLY };
+  inline const Score Score::T_REFINED  = {  4, "2#sigma t Reclustering"     , "T_REFINED",true , false, -1.f, DIST_CUT_T_REFINED, ClusteringMethod::ITERATIVE };
+  inline const Score Score::ZT_REFINED = {  6, "2#sigma z+t Reclustering"   , "ZT_REFINED",true, false, -1.f, DIST_CUT_T_REFINED, ClusteringMethod::ITERATIVE, false, TrackFilterType::Z0_TVA  };
+  inline const Score Score::ZT_ITER    = { 16, "2D (z_{0},t) Iterative"     , "ZT_ITER",  true , false, -1.f, DIST_CUT_CONE,      ClusteringMethod::ITERATIVE, true  };
 
   inline const std::vector<Score> SCORE_REGISTRY = {
     Score::HGTD,      Score::TRKPT,     Score::TRKPTZ,    Score::PASS,
     Score::T_REFINED, Score::Z_REFINED, Score::ZT_REFINED, Score::CONE,
     Score::FILTJET,   Score::HGTD_SORT,
     Score::TEST_ML,   Score::TEST_MISCL, Score::CONE_BDT,
-    Score::TEST_MISAS, Score::TEST_HS,
+    Score::TEST_MISAS, Score::TEST_HS,  Score::TEST_CTIME,
+    Score::ZT_ITER,
+    Score::PERF_EVT,   Score::PERF_CLT,
   };
 
   // Backward-compatible free-function wrappers (existing callsites unchanged)

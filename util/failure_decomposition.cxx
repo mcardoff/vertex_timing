@@ -87,9 +87,9 @@ static const int NBINS = static_cast<int>(FOLD_HS_TRACK) + 1;
 static const Cluster* chooseTRKPTZ(const std::vector<Cluster>& qual) {
   if (qual.empty()) return nullptr;
   const Cluster* best = &qual[0];
-  double maxScore = best->scores.at(Score::TRKPTZ);
+  double maxScore = best->scores.at(Score::TRKPTZ.id);
   for (const auto& c : qual) {
-    double s = c.scores.at(Score::TRKPTZ);
+    double s = c.scores.at(Score::TRKPTZ.id);
     if (s > maxScore) { maxScore = s; best = &c; }
   }
   return best;
@@ -630,7 +630,7 @@ auto main() -> int {
       if (!qualHGTD.empty()) {
         auto bestIt = std::max_element(qualHGTD.begin(), qualHGTD.end(),
             [](const Cluster& a, const Cluster& b) {
-              return a.scores.at(Score::TRKPTZ) < b.scores.at(Score::TRKPTZ);
+              return a.scores.at(Score::TRKPTZ.id) < b.scores.at(Score::TRKPTZ.id);
             });
         Cluster refined = refineClusterTiming(*bestIt, &branch, DIST_CUT_REFINE);
         refined_fixes = refined.passEfficiency(&branch);
@@ -687,7 +687,7 @@ auto main() -> int {
         std::cout << "---------\n";
         std::cout << "t: " << c.values.at(0) << "\n";
         if (c.values.size() > 1) std::cout << "z: " << c.values.at(1) << "\n";
-        std::cout << "score: " << c.scores.at(Score::TRKPTZ) << "\n";
+        std::cout << "score: " << c.scores.at(Score::TRKPTZ.id) << "\n";
         std::cout << "purity: " << c.purity << " (" << c.nConstituents << " tracks)\n";
         for (size_t i = 0; i < c.trackIndices.size(); ++i)
           std::cout << c.trackIndices[i] << "," << c.allTimes[i] << "\n";

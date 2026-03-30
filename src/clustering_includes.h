@@ -38,8 +38,10 @@
 #include <TLine.h>
 #include <TProfile.h>
 #include <TMath.h>
-#include "TMVA/Tools.h"
-#include "TMVA/Reader.h"
+// TMVA headers intentionally excluded: HGTD_SORT/CONE_BDT are disabled.
+// Re-enable when those scores are re-activated (and restore in CMakeLists.txt).
+// #include "TMVA/Tools.h"
+// #include "TMVA/Reader.h"
 #include <TTreeReader.h>
 #include <TTreeReaderArray.h>
 #include <TString.h>

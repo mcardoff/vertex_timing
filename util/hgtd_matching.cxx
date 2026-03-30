@@ -731,9 +731,9 @@ int main() {
       }
 
       // Fill score distributions (TRKPT, TRKPTZ, and DNN)
-      double score_trkpt  = cluster.scores[Score::TRKPT];
-      double score_trkptz = cluster.scores[Score::TRKPTZ];
-      double score_dnn    = cluster.scores[Score::TEST_ML];
+      double score_trkpt  = cluster.scores[Score::TRKPT.id];
+      double score_trkptz = cluster.scores[Score::TRKPTZ.id];
+      double score_dnn    = cluster.scores[Score::TEST_ML.id];
 
       if (is_hs_cluster) {
 	h_score_hs[Score::TRKPT]->Fill(score_trkpt);
@@ -812,7 +812,7 @@ int main() {
     if (hs_exists) {
       std::vector<std::pair<double, int>> dnn_ranking;
       for (int ic = 0; ic < (int)clusters.size(); ic++)
-        dnn_ranking.push_back({clusters[ic].scores[Score::TEST_ML], ic});
+        dnn_ranking.push_back({clusters[ic].scores[Score::TEST_ML.id], ic});
       std::sort(dnn_ranking.begin(), dnn_ranking.end(), std::greater<>());
 
       int dnn_rank = 1;
@@ -942,7 +942,7 @@ int main() {
       // chooseCluster with TESTML picks the cluster with the highest DNN score.
       Cluster dnn_cluster = chooseCluster(clusters, Score::TEST_ML);
 
-      double dnn_score    = dnn_cluster.scores.at(Score::TEST_ML);
+      double dnn_score    = dnn_cluster.scores.at(Score::TEST_ML.id);
       double dnn_purity   = dnn_cluster.purity;
       double dnn_time     = (dnn_cluster.values.size() > 0) ? dnn_cluster.values[0] : -999.0;
       double dnn_diff     = dnn_time - vtx_time_truth;
@@ -1160,7 +1160,7 @@ int main() {
     if (hs_exists) {
       std::vector<std::pair<double, int>> score_ranking;
       for (int ic = 0; ic < clusters.size(); ic++) {
-	score_ranking.push_back({clusters[ic].scores[Score::TRKPTZ], ic});
+	score_ranking.push_back({clusters[ic].scores[Score::TRKPTZ.id], ic});
       }
       std::sort(score_ranking.begin(), score_ranking.end(), std::greater<>());
 

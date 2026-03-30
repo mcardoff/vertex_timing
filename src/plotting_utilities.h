@@ -178,34 +178,34 @@ namespace MyUtl {
     FitParams(const char* title, const char* times, const char* name, 
 	      double xMin, double foldVal, double foldMax,
 	      double xWidth, int color) {
-      auto fullTitle = Form("%%s vs %s (%s);%s;%%s", title, times, title);
+      auto fullTitle = TString::Format("%%s vs %s (%s);%s;%%s", title, times, title);
       int nbins = (int)((foldMax - xMin) / xWidth);
-      meanDist      = new TH1D(Form("mean_dist_%s", name),
-			       Form(fullTitle, "Common #mu", "#mu"),
+      meanDist      = new TH1D(TString::Format("mean_dist_%s", name),
+			       TString::Format(fullTitle, "Common #mu", "#mu"),
 			       nbins, xMin, foldMax);
 
-      sigmaDist     = new TH1D(Form("sigma_dist_%s", name),
-			       Form(fullTitle, "Core #sigma", "Core #sigma"),
+      sigmaDist     = new TH1D(TString::Format("sigma_dist_%s", name),
+			       TString::Format(fullTitle, "Core #sigma", "Core #sigma"),
 			       nbins, xMin, foldMax);
 
-      rmsDist       = new TH1D(Form("rms_dist_%s", name),
-			       Form(fullTitle, "#Delta t RMS", "#Delta t RMS"),
+      rmsDist       = new TH1D(TString::Format("rms_dist_%s", name),
+			       TString::Format(fullTitle, "#Delta t RMS", "#Delta t RMS"),
 			       nbins, xMin, foldMax);
 
-      bkgSigmaDist  = new TH1D(Form("bkg_sigma_dist_%s", name),
-			       Form(fullTitle, "Background #sigma", "Background #sigma"),
+      bkgSigmaDist  = new TH1D(TString::Format("bkg_sigma_dist_%s", name),
+			       TString::Format(fullTitle, "Background #sigma", "Background #sigma"),
 			       nbins, xMin, foldMax);
 
-      coreAmpDist   = new TH1D(Form("amp1_dist_%s", name),
-			       Form(fullTitle, "Core Amplitude", "Core Amplitude"),
+      coreAmpDist   = new TH1D(TString::Format("amp1_dist_%s", name),
+			       TString::Format(fullTitle, "Core Amplitude", "Core Amplitude"),
 			       nbins, xMin, foldMax);
 
-      backAmpDist   = new TH1D(Form("amp2_dist_%s", name),
-			       Form(fullTitle, "Bkg Amplitude", "Background Amplitude"),
+      backAmpDist   = new TH1D(TString::Format("amp2_dist_%s", name),
+			       TString::Format(fullTitle, "Bkg Amplitude", "Background Amplitude"),
 			       nbins, xMin, foldMax);
 
-      ampRatioDist  = new TH1D(Form("ampratio_dist_%s", name),
-			       Form(fullTitle, "Core Amp/Bkg Amp", "Core/Background"),
+      ampRatioDist  = new TH1D(TString::Format("ampratio_dist_%s", name),
+			       TString::Format(fullTitle, "Core Amp/Bkg Amp", "Core/Background"),
 			       nbins, xMin, foldMax);
 
       for (const auto& hist: {meanDist, bkgSigmaDist, sigmaDist, coreAmpDist, backAmpDist, ampRatioDist, rmsDist}) {
@@ -315,13 +315,13 @@ namespace MyUtl {
     void fillBkgGaus(int idx, TF1* bkgFit) const {
       // std::cout << bkgFit->GetNpar() << '\n';
       const char* paramNum = bkgFit->GetNpar() == 5 ? "2" : "1";
-      double sigma1 = bkgFit->GetParameter(Form("Sigma%s", paramNum));
+      double sigma1 = bkgFit->GetParameter(TString::Format("Sigma%s", paramNum));
 
       bkgSigmaDist->SetBinContent(idx+1,sigma1);
-      bkgSigmaDist->SetBinError(idx+1,bkgFit->GetParError(Form("Sigma%s", paramNum)));
+      bkgSigmaDist->SetBinError(idx+1,bkgFit->GetParError(TString::Format("Sigma%s", paramNum)));
 
-      double amp1    = bkgFit->GetParameter(Form("Norm%s", paramNum));
-      double amp1Err = bkgFit->GetParError (Form("Norm%s", paramNum));
+      double amp1    = bkgFit->GetParameter(TString::Format("Norm%s", paramNum));
+      double amp1Err = bkgFit->GetParError (TString::Format("Norm%s", paramNum));
     
       backAmpDist->SetBinContent(idx+1,amp1);   
       backAmpDist->SetBinError(idx+1,amp1Err);
@@ -344,7 +344,7 @@ namespace MyUtl {
     //   Used in plotLogic to iterate over fit parameter distributions in
     //   the canonical FITPARAM_VEC order.
     // -----------------------------------------------------------------------
-    auto fromEnum(FitParamFields fit) const -> TH1D* {
+    TH1D* operator[](FitParamFields fit) const {
       switch (fit) {
       case FitParamFields::MEAN:   return meanDist;
       case FitParamFields::SIGMA:  return sigmaDist;
@@ -356,6 +356,8 @@ namespace MyUtl {
       default:                     return nullptr;
       }
     }
+    TH1D* at(FitParamFields fit) const { return (*this)[fit]; }
+    
   };
 
   // ---------------------------------------------------------------------------
@@ -424,30 +426,30 @@ namespace MyUtl {
       int pbins = (int)((pMax - pMin) / pWid);
       int fbins = (int)((foldMax - xMin) / xWid);
       hist = std::make_unique<TH2D>(
-        Form("%s_%s_%s", name.Data(), toString(score),times),
-	Form("%s t_{0} - TruthVtx t_{0} vs %s (%s);%s;#Delta t[ps]",
+				    TString::Format("%s_%s_%s", name.Data(), toString(score),times),
+				    TString::Format("%s t_{0} - TruthVtx t_{0} vs %s (%s);%s;#Delta t[ps]",
 	toString(score), title, times, title),
 	fbins, xMin, foldMax, ybins, yMin, yMax);
 
       effPass = std::make_unique<TH1D>(
-        Form("good_%s_%s_%s", name.Data(), toString(score), times),
-	Form("%s Eff. Events Count vs %s (%s);Entries;%s", 
+				       TString::Format("good_%s_%s_%s", name.Data(), toString(score), times),
+				       TString::Format("%s Eff. Events Count vs %s (%s);Entries;%s", 
 	     toString(score), title, times, title),
 	fbins, xMin, foldMax);
       
       effTotal = std::make_unique<TH1D>(
-        Form("flat_%s_%s_%s", name.Data(), toString(score), times),
-	Form("%s Eff. Events Count vs %s (%s);Entries;%s", 
+					TString::Format("flat_%s_%s_%s", name.Data(), toString(score), times),
+					TString::Format("%s Eff. Events Count vs %s (%s);Entries;%s", 
 	     toString(score), title, times, title),
 	fbins, xMin, foldMax);
       
       params = std::make_unique<FitParams>(
-        title, times, Form("%s_%s_%s", name.Data(), toString(score),times),
+					   title, times, TString::Format("%s_%s_%s", name.Data(), toString(score),times),
 	xMin, foldVal, foldMax, xWid,COLORS[score.id % COLORS.size()]);
 
       effEstimate = std::make_unique<TH1D>(
-        Form("effest_%s_%s_%s", name.Data(), toString(score), times),
-	Form("Fraction in #pm%d ps vs %s (%s);%s;Fraction",
+					   TString::Format("effest_%s_%s_%s", name.Data(), toString(score), times),
+					   TString::Format("Core Fraction (#pm%d ps) vs %s (%s);%s;Core Fraction",
 	     (int)(PASS_SIGMA), title, times, title),
 	fbins, xMin, foldMax);
       effEstimate->SetLineWidth(2);
@@ -455,8 +457,8 @@ namespace MyUtl {
       effEstimate->SetLineStyle(1);
 
       purity = std::make_unique<TH2D>(
-        Form("cluster_purity_%s_%s_%s", name.Data(), toString(score),times),
-	Form("%s Cluster Purity vs %s (%s);%s;Cluster Purity",
+				      TString::Format("cluster_purity_%s_%s_%s", name.Data(), toString(score),times),
+				      TString::Format("%s Cluster Purity vs %s (%s);%s;Cluster Purity",
 	     toString(score), title, times, title),
 	xbins, xMin, xMax, pbins, pMin, pMax);
       purity->SetLineColor(COLORS[score.id % COLORS.size()]);
@@ -490,14 +492,14 @@ namespace MyUtl {
     inline void plotPostProcessing() {
       for(int j = 0; j < hist->GetNbinsX(); ++j) {
 	auto color = COLORS[j % COLORS.size()];
-	auto name = Form("%s_slice%d",hist->GetName(),j);
+	auto name = TString::Format("%s_slice%d",hist->GetName(),j);
 
 	int right = hist->GetXaxis()->GetBinLowEdge(j+1) >= foldValue
 	  ? hist->GetNbinsX()+1 : j+1;
 
 	std::unique_ptr<TH1D> hSlice = std::unique_ptr<TH1D>((TH1D*)hist->ProjectionY(name, j+1, right)->Clone());
 
-	if (hSlice->Integral() == 0 || hSlice->GetEntries() < 6) {
+	if (hSlice->Integral() == 0 || hSlice->GetEntries() < 50) {
 	  continue;
 	}
 
@@ -512,7 +514,7 @@ namespace MyUtl {
 	if (rightEdge < 1.0 && rightEdge > 0.0)
 	  rightEdge *= 100;
 
-	hSlice->SetTitle(Form("%s #in [%d,%d);%s;A.U.",
+	hSlice->SetTitle(TString::Format("%s #in [%d,%d);%s;A.U.",
 			      hist->GetTitle(),
 			      (int)leftEdge,(int)rightEdge,
 			      this->ytitle));
@@ -525,13 +527,12 @@ namespace MyUtl {
 	double percErrCore = dgausFit->GetParError("Sigma1")/dgausFit->GetParameter("Sigma1");
 	double percErrBack = dgausFit->GetParError("Sigma2")/dgausFit->GetParameter("Sigma2");
 
-	// if (percErrCore < 0.10) {
-	  // std::cout << "\n ENTERING FILLCOREGAUS FUNC DOUBLE\n";
+	// Only store the fit result when the core-σ is well-constrained.
+	// With fixbkg=true, Sigma2 is fixed at 175 ps, so Sigma1 is always
+	// the core; percErrCore is its relative uncertainty from the fitter.
+	if (percErrCore < 0.5) {
 	  params->fillEach(j, dgausFit.get());
-	// } else {
-	  // std::cout << "\n ENTERING FILLCOREGAUS FUNC SINGLE\n";
-	  // params->fillCoreGaus(j, sgausFitCore.get());
-	// }
+	}
 
 	// if (percErrBack < 0.20) {
 	  // std::cout << "\n ENTERING FILLBACKGAUS FUNC DOUBLE\n";
@@ -566,7 +567,7 @@ namespace MyUtl {
 
       std::unique_ptr<TEfficiency> eff = std::make_unique<TEfficiency>(*this->effPass, *this->effTotal);
       // eff->SetStatisticOption(TEfficiency::kFNormal);
-      eff->SetTitle(Form("Efficiency vs %s (%s);%s;Efficiency", this->xtitle, this->times, this->xtitle));
+      eff->SetTitle(TString::Format("Efficiency vs %s (%s);%s;Efficiency", this->xtitle, this->times, this->xtitle));
       eff->SetLineColor(MyUtl::COLORS[this->scoreToUse.id % COLORS.size()]);
       eff->SetLineWidth(2);
       efficiency = std::move(eff);
@@ -585,7 +586,7 @@ namespace MyUtl {
     //   Requires plotPostProcessing() to have been called first.
     // -----------------------------------------------------------------------
     inline void plotLogic(TCanvas *canvas) {
-      canvas->Print(Form("%s[",fname.Data()));
+      canvas->Print(TString::Format("%s[",fname.Data()));
       TH2D* hist = (TH2D*)this->hist->Clone();
       hist->GetXaxis()->SetRangeUser(xMin, foldMax);
       hist->Draw("COLZ");
@@ -614,7 +615,7 @@ namespace MyUtl {
       maxEffLine->Draw("SAME");
       effEstimate->Draw("HIST SAME");
       efflegend->AddEntry(effEstimate.get(),
-                          Form("Fraction in #pm%d ps", (int)(PASS_SIGMA)), "l");
+                          TString::Format("Core Fraction (#pm%d ps)", (int)(PASS_SIGMA)), "l");
       efflegend->Draw("SAME");
       ATLASLabel(0.18, 0.88, "Simulation Internal");
       ATLASEnergyLabel(0.18, 0.82);
@@ -622,7 +623,7 @@ namespace MyUtl {
 
       // Draw Resolution
       for (auto key: FITPARAM_VEC) {
-	TH1D *hist = params->fromEnum(key);
+	TH1D *hist = params->at(key);
 	hist->Draw();
 	// auto nDiv = (500) + hist->GetNbinsX();
 	// hist->GetXaxis()->SetNdivisions(500 + hist->GetNbinsX(), kFALSE);
@@ -668,19 +669,19 @@ namespace MyUtl {
 	StyleLegend(thislegend);
 	TString restext;
 	if (fit->GetNpar() == 5) { // Double Gaussian
-	  restext = Form("#sigma_{1}^{dgaus}=%.2f(%.2f%%), #sigma_{2}^{dgaus}=%.2f(%.2f%%)",
+	  restext = TString::Format("#sigma_{1}^{dgaus}=%.2f(%.2f%%), #sigma_{2}^{dgaus}=%.2f(%.2f%%)",
 			 fit->GetParameter("Sigma1"),100*fit->GetParError("Sigma1")/fit->GetParameter("Sigma1"),
 			 fit->GetParameter("Sigma2"),100*fit->GetParError("Sigma2")/fit->GetParameter("Sigma2"));
 	  thislegend->AddEntry(fit.get(),"Double Gaussian Fit", "l");
 	} else {
-	  restext = Form("#sigma_{1}^{gaus}=%.2f(%.2f%%)",
+	  restext = TString::Format("#sigma_{1}^{gaus}=%.2f(%.2f%%)",
 			 fit->GetParameter(2),100*fit->GetParError(2)/fit->GetParameter(2));
 	  thislegend->AddEntry(fit.get(),"Gaussian Fit", "l");
 	}
 
 	thislegend->AddEntry(hSlice.get(),"Histogram", "l");
 
-	auto chi2text = Form("#chi^{2}=%.2f",fit->GetChisquare()/fit->GetNDF());
+	auto chi2text = TString::Format("#chi^{2}=%.2f",fit->GetChisquare()/fit->GetNDF());
 	  
 	hSlice->GetYaxis()->SetTitleOffset(1.4);
 	hSlice->Draw("HIST");
@@ -702,7 +703,7 @@ namespace MyUtl {
 	canvas->Print(fname); // slices
 	canvas->SetLogy(false);
       }
-      canvas->Print(Form("%s]",fname.Data()));
+      canvas->Print(TString::Format("%s]",fname.Data()));
     }
 
     // -----------------------------------------------------------------------
@@ -871,12 +872,12 @@ namespace MyUtl {
     // Cached raw pointers for the six standard fill keys.
     // Populated at the end of the constructor so that fill helpers can avoid
     // std::map string lookups (O(log N) string comparison) on every event.
-    PlotObj* ptr_fjet     = nullptr;
-    PlotObj* ptr_vtx_dz   = nullptr;
-    PlotObj* ptr_ftrack   = nullptr;
-    PlotObj* ptr_pu_frac  = nullptr;
-    PlotObj* ptr_hs_track = nullptr;
-    PlotObj* ptr_pu_track = nullptr;
+    PlotObj* ptrFjet    = nullptr;
+    PlotObj* ptrVtxDz   = nullptr;
+    PlotObj* ptrFtrack  = nullptr;
+    PlotObj* ptrPuFrac  = nullptr;
+    PlotObj* ptrHSTrack = nullptr;
+    PlotObj* ptrPUTrack = nullptr;
 
     Score score;
     std::string timetypeIDer;
@@ -926,7 +927,7 @@ namespace MyUtl {
   
       dataObjects["fjet"] = std::make_unique<PlotObj>(
         "n Forward Jets", timetypeIDer,
-	Form("../figs/fullplots/%s_nfjet.pdf",filenameIDer.Data()),
+	TString::Format("../figs/fullplots/%s_nfjet.pdf",filenameIDer.Data()),
 	score,
 	FJET_MIN  , FJET_MAX  , FJET_WIDTH  ,
 	DIFF_MIN  , DIFF_MAX  , DIFF_WIDTH  ,
@@ -935,7 +936,7 @@ namespace MyUtl {
 
       dataObjects["vtx_dz"] = std::make_unique<PlotObj>(
         "|Reco HS z - Truth HS z| (mm)", timetypeIDer,
-	Form("../figs/fullplots/%s_vtx_dz.pdf",filenameIDer.Data()),
+	TString::Format("../figs/fullplots/%s_vtx_dz.pdf",filenameIDer.Data()),
 	score,
 	VTX_DZ_MIN  , VTX_DZ_MAX  , VTX_DZ_WIDTH,
 	DIFF_MIN    , DIFF_MAX    , DIFF_WIDTH  ,
@@ -944,7 +945,7 @@ namespace MyUtl {
   
       dataObjects["ftrack"] = std::make_unique<PlotObj>(
         "n Forward Tracks", timetypeIDer,
-	Form("../figs/fullplots/%s_ntrack.pdf",filenameIDer.Data()),
+	TString::Format("../figs/fullplots/%s_ntrack.pdf",filenameIDer.Data()),
 	score,
 	TRACK_MIN , TRACK_MAX , TRACK_WIDTH ,
 	DIFF_MIN  , DIFF_MAX  , DIFF_WIDTH  ,
@@ -953,7 +954,7 @@ namespace MyUtl {
   
       dataObjects["pu_frac"] = std::make_unique<PlotObj>(
         "Pile Up Fraction", timetypeIDer, 
-        Form("../figs/fullplots/%s_pufrac.pdf",filenameIDer.Data()),
+        TString::Format("../figs/fullplots/%s_pufrac.pdf",filenameIDer.Data()),
 	score,
 	PU_FRAC_MIN , PU_FRAC_MAX, PU_FRAC_WIDTH,
 	DIFF_MIN    , DIFF_MAX   , DIFF_WIDTH   ,
@@ -962,7 +963,7 @@ namespace MyUtl {
   
       dataObjects["hs_track"] = std::make_unique<PlotObj>(
         "n Forward HS Tracks", timetypeIDer, 
-	Form("../figs/fullplots/%s_nhstrack.pdf",filenameIDer.Data()),
+	TString::Format("../figs/fullplots/%s_nhstrack.pdf",filenameIDer.Data()),
 	score,
 	HS_TRACK_MIN, HS_TRACK_MAX, HS_TRACK_WIDTH ,
 	DIFF_MIN    , DIFF_MAX    , DIFF_WIDTH     ,
@@ -971,7 +972,7 @@ namespace MyUtl {
   
       dataObjects["pu_track"] = std::make_unique<PlotObj>(
         "n Forward PU Tracks", timetypeIDer, 
-	Form("../figs/fullplots/%s_nputrack.pdf",filenameIDer.Data()),
+	TString::Format("../figs/fullplots/%s_nputrack.pdf",filenameIDer.Data()),
 	score,
 	PU_TRACK_MIN, PU_TRACK_MAX, PU_TRACK_WIDTH ,
 	DIFF_MIN    , DIFF_MAX    , DIFF_WIDTH     ,
@@ -981,8 +982,8 @@ namespace MyUtl {
       // Helper to construct one inclusive-reso histogram
       auto makeResoHist = [&](const char* prefix, const char* catLabel) {
         return std::make_unique<TH1D>(
-          Form("%s_%s", prefix, filenameIDer.Data()),
-          Form("%s %s t_{0}-TruthVtx t_{0} (%s);#Delta t[ps];Entries",
+				      TString::Format("%s_%s", prefix, filenameIDer.Data()),
+				      TString::Format("%s %s t_{0}-TruthVtx t_{0} (%s);#Delta t[ps];Entries",
                catLabel, toString(score), timetypeIDer),
           (int)((DIFF_MAX-DIFF_MIN)/DIFF_WIDTH), DIFF_MIN, DIFF_MAX);
       };
@@ -1001,17 +1002,17 @@ namespace MyUtl {
       inclusiveResoLowTrackBkg->SetFillColorAlpha(C02, 0.6); inclusiveResoLowTrackBkg->SetLineColor(C02);
 
       inclusivePurity = std::make_unique<TH1D>(
-	Form("purity_%s", filenameIDer.Data()),
-	Form("%s Purity (%s);Purity;Entries", toString(score), timetypeIDer),
+					       TString::Format("purity_%s", filenameIDer.Data()),
+					       TString::Format("%s Purity (%s);Purity;Entries", toString(score), timetypeIDer),
 	(int)((PURITY_MAX-PURITY_MIN)/PURITY_WIDTH), PURITY_MIN, PURITY_MAX);
 
       // Cache raw PlotObj* pointers for fast per-event fill access (no map lookup)
-      ptr_fjet     = dataObjects["fjet"    ].get();
-      ptr_vtx_dz   = dataObjects["vtx_dz" ].get();
-      ptr_ftrack   = dataObjects["ftrack"  ].get();
-      ptr_pu_frac  = dataObjects["pu_frac" ].get();
-      ptr_hs_track = dataObjects["hs_track"].get();
-      ptr_pu_track = dataObjects["pu_track"].get();
+      ptrFjet     = dataObjects["fjet"    ].get();
+      ptrFtrack   = dataObjects["ftrack"  ].get();
+      ptrHSTrack  = dataObjects["hs_track"].get();
+      ptrPUTrack  = dataObjects["pu_track"].get();
+      ptrPuFrac   = dataObjects["pu_frac" ].get();
+      ptrVtxDz    = dataObjects["vtx_dz"  ].get();
     }
 
     // -----------------------------------------------------------------------
@@ -1078,38 +1079,72 @@ namespace MyUtl {
     auto plotWithLegend = [&](
         auto getter, const char* title,
 	double yMin, double yMax,
-	double refVal = -1, const char* refLabel = nullptr
+	double refVal = -1, const char* refLabel = nullptr,
+	bool logY = false,
+	double legX1 = 0.60, double legY1 = 0.20,
+	double legX2 = 0.95, double legY2 = 0.50
     ) {
-      TLegend* legend = new TLegend(0.60, 0.65, 0.95, 0.92);
+      gPad->SetLogy(logY);
+      TLegend* legend = new TLegend(legX1, legY1, legX2, legY2);
       StyleLegend(legend, 0.025);
       bool first = true;
       int counter = 0;
-      bool isEfficiency = false;
       for (const auto& ana : plts) {
 	const auto& plt = ana->get(key);
 	auto obj = getter(plt);
 	auto colorIdx = counter++;
-	obj->SetLineColor(COLORS[colorIdx % COLORS.size()]);
-	obj->SetMarkerColor(COLORS[colorIdx % COLORS.size()]);
-	// legend->AddEntry(obj, Form("#splitline{%s}{%s}", toString(plt->scoreToUse), plt->times), "lep");
-	legend->AddEntry(obj, Form("%s (%s)", toString(plt->scoreToUse), plt->times), "lep");
 
-	if (first) {
-	  obj->SetTitle(Form("%s vs %s", title, plt->xtitle));
-	  obj->Draw("E1");
-	  if constexpr (std::is_same_v<decltype(obj), TEfficiency*> || std::is_same_v<decltype(obj), std::shared_ptr<TEfficiency>>) {
-	    gPad->Update();
-
-	    obj->GetPaintedGraph()->GetXaxis()->SetRangeUser(xMin, xMax);
-	    obj->GetPaintedGraph()->GetYaxis()->SetRangeUser(yMin, yMax);
+	if constexpr (std::is_same_v<std::decay_t<decltype(obj)>, TEfficiency*>) {
+	  // Convert TEfficiency → TGraphAsymmErrors with x-errors explicitly
+	  // zeroed.  Drawing the converted graph bypasses TEfficiency::PaintGraph,
+	  // which reconstructs bin-width x-errors on every paint call and ignores
+	  // gStyle->SetErrorX(0) in some ROOT versions.
+	  auto* gr = new TGraphAsymmErrors();
+	  const int nBins = obj->GetTotalHistogram()->GetNbinsX();
+	  int pt = 0;
+	  for (int b = 1; b <= nBins; ++b) {
+	    if (obj->GetTotalHistogram()->GetBinContent(b) == 0) continue;
+	    gr->SetPoint(pt, obj->GetTotalHistogram()->GetBinCenter(b),
+	                 obj->GetEfficiency(b));
+	    gr->SetPointError(pt, 0., 0.,
+	      obj->GetEfficiencyErrorLow(b), obj->GetEfficiencyErrorUp(b));
+	    ++pt;
+	  }
+	  gr->SetLineColor(COLORS[colorIdx % COLORS.size()]);
+	  gr->SetMarkerColor(COLORS[colorIdx % COLORS.size()]);
+	  gr->SetMarkerStyle(obj->GetMarkerStyle());
+	  gr->SetMarkerSize(obj->GetMarkerSize());
+	  gr->SetLineWidth(obj->GetLineWidth());
+	  // legend->AddEntry(gr, TString::Format("%s (%s)", toString(plt->scoreToUse), plt->times), "lep");
+	  legend->AddEntry(gr, TString::Format("%s", toString(plt->scoreToUse)), "lep");
+	  if (first) {
+	    gr->SetTitle(TString::Format("%s vs %s", title, plt->xtitle));
+	    gr->Draw("AP");
+	    gr->GetXaxis()->SetLimits(xMin, xMax);
+	    gr->GetXaxis()->SetTitle(plt->xtitle);
+	    gr->SetMinimum(yMin);
+	    gr->SetMaximum(yMax);
+	    gr->GetYaxis()->SetTitle(title);
+	    first = false;
 	  } else {
-
+	    gr->Draw("P SAME");
+	  }
+	} else {
+	  obj->SetLineColor(COLORS[colorIdx % COLORS.size()]);
+	  obj->SetMarkerColor(COLORS[colorIdx % COLORS.size()]);
+	  // legend->AddEntry(obj, TString::Format("%s (%s)", toString(plt->scoreToUse), plt->times), "lep");
+	  legend->AddEntry(obj, TString::Format("%s", toString(plt->scoreToUse)), "lep");
+	  if (first) {
+	    obj->SetTitle(TString::Format("%s vs %s", title, plt->xtitle));
+	    obj->Draw("E1");
 	    obj->GetXaxis()->SetRangeUser(xMin, xMax);
 	    obj->GetYaxis()->SetRangeUser(yMin, yMax);
+	    obj->GetYaxis()->SetTitle(title);
+	    first = false;
+	  } else {
+	    obj->Draw("E1 SAME");
 	  }
-	  first = false;
-	} else
-	  obj->Draw("E1 SAME");
+	}
       }
 
       // Draw the event-count total distribution on a transparent linear-scale overlay pad so
@@ -1161,38 +1196,50 @@ namespace MyUtl {
       ATLASLabel(0.18, 0.88, "Simulation Internal");
       ATLASEnergyLabel(0.18, 0.82);
       gPad->Update();
+      gPad->SetLogy(false);  // reset so subsequent plots are unaffected
     };
 
-    canvas->Print(Form("%s[", fname));
+    canvas->Print(TString::Format("%s[", fname));
 
     // Plot Resolution
     plotWithLegend(
         [](auto& plt) { return plt->params->sigmaDist; },
 	"Core #sigma", RES_YMIN, RES_YMAX,
-	15.0, "15ps Resolution");
+	15.0, "15ps Resolution",
+	false,                     // logY
+	0.60, 0.65, 0.95, 0.92);  // top-right: avoids tall σ bars at low track count
     canvas->Print(fname);
 
     // Plot Background Resolution
-    plotWithLegend(
-        [](auto& plt) { return plt->params->bkgSigmaDist; },
-	"Background #sigma", BKG_RES_YMIN, BKG_RES_YMAX,
-        175.0, "175ps");
-    canvas->Print(fname);
+    // plotWithLegend(
+    //     [](auto& plt) { return plt->params->bkgSigmaDist; },
+    // 	"Background #sigma", BKG_RES_YMIN, BKG_RES_YMAX,
+    //     175.0, "175ps");
+    // canvas->Print(fname);
 
-    // Plot Efficiency
-    // canvas->SetLogy(true);
+    // Plot Efficiency — log scale
     plotWithLegend(
         [](auto& plt) { return plt->efficiency.get(); },
-	"Efficiency", EFF_YMIN, EFF_YMAX,
-	0.99, "99% Efficiency");
+	"Core Fraction", EFF_YMIN, EFF_YMAX,
+	0.99, "99% Core Fraction",
+	true,                      // logY
+	0.60, 0.20, 0.95, 0.50);
     canvas->Print(fname);
-    // canvas->SetLogy(false);
 
-    // Plot Efficiency Estimate (fraction of residuals within ±3*PASS_SIGMA)
+    // Plot Efficiency — linear scale
+    plotWithLegend(
+        [](auto& plt) { return plt->efficiency.get(); },
+	"Core Fraction", EFF_YMIN, EFF_YMAX,
+	0.99, "99% Core Fraction",
+	false,                     // logY
+	0.60, 0.20, 0.95, 0.50);
+    canvas->Print(fname);
+
+    // Plot Core Fraction estimate (fraction of residuals within ±PASS_SIGMA)
     plotWithLegend(
         [](auto& plt) { return plt->effEstimate.get(); },
-	Form("Fraction in #pm%d ps", (int)(PASS_SIGMA)), EFF_YMIN, EFF_YMAX,
-	0.99, "99%");
+	TString::Format("Core Fraction (#pm%d ps)", (int)(PASS_SIGMA)), EFF_YMIN, EFF_YMAX,
+	0.99, "99% Core Fraction");
     canvas->Print(fname);
 
     plotWithLegend(
@@ -1200,7 +1247,7 @@ namespace MyUtl {
 	"#Delta t RMS", 0, 250);
     canvas->Print(fname);
     
-    canvas->Print(Form("%s]", fname));
+    canvas->Print(TString::Format("%s]", fname));
   }
 
 
@@ -1229,7 +1276,7 @@ namespace MyUtl {
     TLatex latex;
     latex.SetTextSize(0.04);
     latex.SetTextAlign(13);
-    canvas->Print(Form("%s[", fname));
+    canvas->Print(TString::Format("%s[", fname));
     canvas->SetLogy(logScale);
     for (const auto& plt : plts) {
       auto [hSig, hMix, hBkg] = tripleGetter(plt);
@@ -1240,23 +1287,30 @@ namespace MyUtl {
       TH1D* cBkg = (TH1D*)hBkg->Clone();
 
       // Build total for fitting (bkg + mix + sig)
-      TH1D* cTotal = (TH1D*)cBkg->Clone(Form("_total_%p", (void*)plt));
+      TH1D* cTotal = (TH1D*)cBkg->Clone(TString::Format("_total_%p", (void*)plt));
       cTotal->Add(cMix);
       cTotal->Add(cSig);
+
+      // Skip scores with no entries (e.g. very tight denominator cuts)
+      if (cTotal->GetEntries() == 0) {
+        delete cSig; delete cMix; delete cBkg; delete cTotal;
+        continue;
+      }
+
       TF1* fit1 = createDblFit(cTotal, true);
 
       // Stack: bkg at bottom, mix in middle, sig on top
-      THStack* stack = new THStack(Form("stk_%p", (void*)plt), "");
+      THStack* stack = new THStack(TString::Format("stk_%p", (void*)plt), "");
       stack->Add(cBkg);
       stack->Add(cMix);
       stack->Add(cSig);
 
       TLegend* leg = new TLegend(0.63, 0.68, 0.88, 0.90);
       StyleLegend(leg);
-      leg->AddEntry(cSig, Form("%s  Signal (>75%%)",  toString(plt->score)), "f");
-      leg->AddEntry(cMix, "Mixed (50#minus75%)",                              "f");
-      leg->AddEntry(cBkg, "Background (<50%)",                                "f");
-      leg->AddEntry(fit1, "Double Gaussian Fit",                              "l");
+      leg->AddEntry(cSig, "Signal (>75%)",  "f");
+      leg->AddEntry(cMix, "Mixed (50#minus75%)", "f");
+      leg->AddEntry(cBkg, "Background (<50%)"  , "f");
+      leg->AddEntry(fit1, "Double Gaussian Fit", "l");
 
       stack->Draw("HIST");
       stack->GetXaxis()->SetRangeUser(xMin, xMax);
@@ -1267,13 +1321,18 @@ namespace MyUtl {
 
       double dgSigma1 = fit1->GetParameter("Sigma1");
       double dgSigma2 = fit1->GetParameter("Sigma2");
-      latex.DrawLatexNDC(0.18, 0.70, Form("#sigma_{1}^{dgaus}=%.2f", dgSigma1));
-      latex.DrawLatexNDC(0.18, 0.65, Form("#sigma_{2}^{dgaus}=%.2f", dgSigma2));
+      double sigMixInt = cSig->Integral() + cMix->Integral();
+      double bkgInt    = cBkg->Integral();
+      double sigBkgRatio = 100* sigMixInt / (bkgInt+sigMixInt);
       ATLASLabel(0.18, 0.88, "Simulation Internal");
       ATLASEnergyLabel(0.18, 0.82);
+      latex.DrawLatexNDC(0.20, 0.76, toString(plt->score));
+      latex.DrawLatexNDC(0.20, 0.70, TString::Format("#sigma_{1}^{dgaus}=%.2f", dgSigma1));
+      latex.DrawLatexNDC(0.20, 0.64, TString::Format("#sigma_{2}^{dgaus}=%.2f", dgSigma2));
+      latex.DrawLatexNDC(0.20, 0.58, TString::Format("(S+M)/B=%.2f", sigBkgRatio));
       canvas->Print(fname);
     }
-    canvas->Print(Form("%s]", fname));
+    canvas->Print(TString::Format("%s]", fname));
   }
 
   // ---------------------------------------------------------------------------
@@ -1290,7 +1349,7 @@ namespace MyUtl {
     TLegend* legend,
     const std::map<Score,TH1D*>& purityMap
   ) {
-    canvas->Print(Form("%s[",fname));
+    canvas->Print(TString::Format("%s[",fname));
     double maxval = 0.4;
     bool first = true;
     canvas->SetLogy(logscale);
@@ -1312,8 +1371,8 @@ namespace MyUtl {
     }
     canvas->SetLogy(false);
     legend->Draw("SAME");
-    canvas->Print(Form("%s",fname));
-    canvas->Print(Form("%s]",fname));
+    canvas->Print(TString::Format("%s",fname));
+    canvas->Print(TString::Format("%s]",fname));
   }
 }
 #endif // PLOTTING_UTILITIES_H

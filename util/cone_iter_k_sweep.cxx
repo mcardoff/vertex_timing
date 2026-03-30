@@ -164,7 +164,7 @@ int main() {
 
     // Sort qualifying clusters by TRKPTZ descending — this order defines ranks
     std::sort(qualClusters.begin(), qualClusters.end(), [](const Cluster& a, const Cluster& b) {
-      return a.scores.at(Score::TRKPTZ) > b.scores.at(Score::TRKPTZ);
+      return a.scores.at(Score::TRKPTZ.id) > b.scores.at(Score::TRKPTZ.id);
     });
 
     // ── HS cone-cluster rank (filled once per event) ─────────────────────────
