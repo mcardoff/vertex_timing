@@ -94,41 +94,24 @@ namespace MyUtl {
   BranchPointerWrapper(TTreeReader& r)
     : reader (r),
       weight (r, "weight"),
-      trackD0 (r, "Track_d0"),
-      trackZ0 (r, "Track_z0"),
-      trackPt (r, "Track_pt"),
-      trackEta (r, "Track_eta"),
-      trackQP (r, "Track_qOverP"),
-      trackTheta (r, "Track_theta"),
-      trackPhi (r, "Track_phi"),
-      trackVarD0 (r, "Track_var_d0"),
-      trackVarZ0 (r, "Track_var_z0"),
-      trackVarQp (r, "Track_var_qOverP"),
-      trackVarTheta (r, "Track_var_theta"),
-      trackTime (r, "Track_time"),
-      trackTimeRes (r, "Track_timeRes"),
-      trackTimeValid (r, "Track_hasValidTime"),
-      trackQuality (r, "Track_quality"),
+      trackD0 (r, "Track_d0"), trackZ0 (r, "Track_z0"), trackPt (r, "Track_pt"),
+      trackEta (r, "Track_eta"), trackQP (r, "Track_qOverP"),
+      trackTheta (r, "Track_theta"), trackPhi (r, "Track_phi"),
+      trackVarD0 (r, "Track_var_d0"), trackVarZ0 (r, "Track_var_z0"),
+      trackVarQp (r, "Track_var_qOverP"), trackVarTheta (r, "Track_var_theta"),
+      trackTime (r, "Track_time"), trackTimeRes (r, "Track_timeRes"),
+      trackTimeValid (r, "Track_hasValidTime"), trackQuality (r, "Track_quality"),
       trackToTruthvtx (r, "Track_truthVtx_idx"),
       trackToParticle (r, "Track_truthPart_idx"),
       trackHgtdHits (r, "Track_nHGTDHits"),
       trackPrimHits (r, "Track_nHGTDPrimaryHits"),
-      trackNearIdx (r, "Track_nearestVtx_idx"),
-      trackNearZ0sin (r, "Track_nearestVtx_z0SinTheta"),
-      trackNearZ0sinUnc (r, "Track_nearestVtx_z0SinThetaUncertainty"),
-      trackNearSig (r, "Track_nearestVtx_sig"),
-      truthVtxZ (r, "TruthVtx_z"),
-      truthVtxTime (r, "TruthVtx_time"),
-      truthVtxIshs (r, "TruthVtx_isHS"),
-      recoVtxZ (r, "RecoVtx_z"),
-      recoVtxTime (r, "RecoVtx_time"),
-      recoVtxTimeRes (r, "RecoVtx_timeRes"),
-      recoVtxValid (r, "RecoVtx_hasValidTime"),
-      topoJetPt (r, "AntiKt4EMTopoJets_pt"),
+      truthVtxZ (r, "TruthVtx_z"), truthVtxTime (r, "TruthVtx_time"),
+      truthVtxIshs (r, "TruthVtx_isHS"), recoVtxZ (r, "RecoVtx_z"),
+      recoVtxTime (r, "RecoVtx_time"), recoVtxTimeRes (r, "RecoVtx_timeRes"),
+      recoVtxValid (r, "RecoVtx_hasValidTime"), topoJetPt (r, "AntiKt4EMTopoJets_pt"),
       topoJetEta (r, "AntiKt4EMTopoJets_eta"),
       topoJetPhi (r, "AntiKt4EMTopoJets_phi"),
-      truthHSJetPt (r, "TruthHSJet_pt"),
-      truthHSJetEta (r, "TruthHSJet_eta"),
+      truthHSJetPt (r, "TruthHSJet_pt"), truthHSJetEta (r, "TruthHSJet_eta"),
       topoJetTruthHSIdx (r, "AntiKt4EMTopoJets_truthHSJet_idx"),
       particleT (r, "TruthPart_prodVtx_time")
     {}
@@ -624,24 +607,61 @@ namespace MyUtl {
     }
   };
 
-// ---------------------------------------------------------------------------
-// Cluster
-//   Represents a single time(-z₀) cluster produced by doSimultaneousClustering
-//   or doConeClustering.  The weighted-mean position is stored in values[],
-//   with per-dimension uncertainties in sigmas[].  allTimes holds the raw
-//   track times for spread diagnostics.  trackIndices lists the original
-//   track indices from the branch arrays so that truth-matching and feature
-//   extraction can look up any per-track quantity.
-//
-//   Member methods:
-//     operator== / !=  — equality by (values[0], sigmas[0], nConstituents)
-//     calcPurity        — fraction of cluster pT belonging to truth HS vertex
-//     updateScores      — computes TRKPTZ, CALO*, TEST_ML, TEST_MISCL scores
-//     timeSpread        — std-dev of raw track times within the cluster
-//     zSpread           — std-dev of track z₀ values within the cluster
-//     passEfficiency    — true if cluster time is within 3·PASS_SIGMA of truth
-//     calcFeatures      — extracts and normalises the 10 ML input features
-// ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // EventCounts
+  //   Holds all per-event counts and pre-folded histogram fill values
+  //   derived from a 3σ track selection.  Computed once at the top of
+  //   processEventData and passed to the histogram fill helpers below.
+  // ---------------------------------------------------------------------------
+  struct EventCounts {
+    // Raw forward track/jet counts
+    int nForwardJet      = 0;
+    int nForwardTrack    = 0;
+    int nForwardTrackHS  = 0;
+    int nForwardTrackPU  = 0;
+    double puRatio       = 0.0;
+    // Pre-folded x-values for efficiency / purity histograms
+    int    effFillValFjet;
+    int    effFillValTrack;
+    int    effFillValHSTrack;
+    int    effFillValPUTrack;
+    double effFillValPURatio;
+    double effFillValVtxDz;
+
+    EventCounts(BranchPointerWrapper* branch,
+                const std::vector<int>& tracks,
+                bool checkValidTimes) {
+      branch->countForwardJets(nForwardJet);
+      branch->countForwardTracks(nForwardTrack, nForwardTrackHS, nForwardTrackPU,
+                                 tracks, checkValidTimes);
+      puRatio          = (double)nForwardTrackPU / (double)nForwardTrack;
+      effFillValFjet    = folded(nForwardJet,     (int)FOLD_FJET);
+      effFillValTrack   = folded(nForwardTrack,   (int)FOLD_TRACK);
+      effFillValHSTrack = folded(nForwardTrackHS, (int)FOLD_HS_TRACK);
+      effFillValPUTrack = folded(nForwardTrackPU, (int)FOLD_PU_TRACK);
+      effFillValPURatio = folded(puRatio,         FOLD_PU_FRAC);
+      effFillValVtxDz   = std::abs(branch->recoVtxZ[0] - branch->truthVtxZ[0]);
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // Cluster
+  //   Represents a single time(-z₀) cluster produced by doSimultaneousClustering
+  //   or doConeClustering.  The weighted-mean position is stored in values[],
+  //   with per-dimension uncertainties in sigmas[].  allTimes holds the raw
+  //   track times for spread diagnostics.  trackIndices lists the original
+  //   track indices from the branch arrays so that truth-matching and feature
+  //   extraction can look up any per-track quantity.
+  //
+  //   Member methods:
+  //     operator== / !=  — equality by (values[0], sigmas[0], nConstituents)
+  //     calcPurity        — fraction of cluster pT belonging to truth HS vertex
+  //     updateScores      — computes TRKPTZ, CALO*, TEST_ML, TEST_MISCL scores
+  //     timeSpread        — std-dev of raw track times within the cluster
+  //     zSpread           — std-dev of track z₀ values within the cluster
+  //     passEfficiency    — true if cluster time is within 3·PASS_SIGMA of truth
+  //     calcFeatures      — extracts and normalises the 10 ML input features
+  // ---------------------------------------------------------------------------
   struct Cluster {
     std::vector<double> values;
     std::vector<double> sigmas;
@@ -704,7 +724,10 @@ namespace MyUtl {
     //   TEST_MISCL — Copies TRKPTZ so that the same selection is used; the
     //              purity gate is applied later in event_processing.h.
     // -----------------------------------------------------------------------
-    void updateScores(BranchPointerWrapper *branch, MLModel *mlModel) {
+    void updateScores(
+      BranchPointerWrapper *branch,
+      MLModel *mlModel
+    ) {
       // Call calcFeatures once — it returns the normalised feature vector and
       // the raw deltaZ (cluster z − reco vertex z).  Reusing the returned
       // deltaZ avoids a second precision-weighted z-average pass over tracks.
@@ -807,7 +830,11 @@ namespace MyUtl {
     //   for the given score.  Implemented out-of-line in event_processing.h
     //   (after passTrackVertexAssociation is defined) to avoid circular includes.
     // -----------------------------------------------------------------------
-    double calculateTime(Score score, BranchPointerWrapper* branch, double idealRes = -1.0) const;
+    double calculateTime(
+        Score score,
+	BranchPointerWrapper* branch,
+	double idealRes = -1.0
+    ) const;
 
     // -----------------------------------------------------------------------
     // calcFeatures

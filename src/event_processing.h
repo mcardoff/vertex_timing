@@ -12,10 +12,8 @@
 //     4. pileupRemoval              — reject tracks near a non-HS vertex
 //     5. filterTracksInJets         — keep only tracks within ΔR of a jet
 //     6. getAssociatedTracks        — full HGTD-acceptance + pTV selection
-//     7. EventCounts                — per-event count and histogram-fill values
-//     8. Histogram fill helpers     — fillTotals / fillPasses / fillDiffs / fillPurities
-//     9. selectClusters             — choose best cluster for every active score
-//    10. processEventData           — main per-event analysis orchestrator
+//     7. selectClusters             — choose best cluster for every active score
+//     8. processEventData           — main per-event analysis orchestrator
 // ---------------------------------------------------------------------------
 
 #include "clustering_includes.h"
@@ -317,88 +315,7 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
-  // 7. EventCounts
-  //   Holds all per-event counts and pre-folded histogram fill values
-  //   derived from a 3σ track selection.  Computed once at the top of
-  //   processEventData and passed to the histogram fill helpers below.
-  // ---------------------------------------------------------------------------
-  struct EventCounts {
-    // Raw forward track/jet counts
-    int nForwardJet      = 0;
-    int nForwardTrack    = 0;
-    int nForwardTrackHS  = 0;
-    int nForwardTrackPU  = 0;
-    double puRatio       = 0.0;
-    // Pre-folded x-values for efficiency / purity histograms
-    int    effFillValFjet;
-    int    effFillValTrack;
-    int    effFillValHSTrack;
-    int    effFillValPUTrack;
-    double effFillValPURatio;
-    double effFillValVtxDz;
-
-    EventCounts(BranchPointerWrapper* branch,
-                const std::vector<int>& tracks,
-                bool checkValidTimes) {
-      branch->countForwardJets(nForwardJet);
-      branch->countForwardTracks(nForwardTrack, nForwardTrackHS, nForwardTrackPU,
-                                 tracks, checkValidTimes);
-      puRatio          = (double)nForwardTrackPU / (double)nForwardTrack;
-      effFillValFjet    = folded(nForwardJet,     (int)FOLD_FJET);
-      effFillValTrack   = folded(nForwardTrack,   (int)FOLD_TRACK);
-      effFillValHSTrack = folded(nForwardTrackHS, (int)FOLD_HS_TRACK);
-      effFillValPUTrack = folded(nForwardTrackPU, (int)FOLD_PU_TRACK);
-      effFillValPURatio = folded(puRatio,         FOLD_PU_FRAC);
-      effFillValVtxDz   = std::abs(branch->recoVtxZ[0] - branch->truthVtxZ[0]);
-    }
-  };
-
-  // ---------------------------------------------------------------------------
-  // 8. Histogram fill helpers
-  //   Each function fills one histogram operation (total/pass/diff/purity)
-  //   across all six analysis sub-categories (fjet, vtx_dz, ftrack, pu_frac,
-  //   hs_track, pu_track) in a single call, eliminating the repeated pattern
-  //   of six individual fill calls at each call site.
-  // ---------------------------------------------------------------------------
-
-  void fillTotals(AnalysisObj& a, const EventCounts& ev) {
-    a.ptrFjet->    fillTotal(ev.effFillValFjet   );
-    a.ptrVtxDz->   fillTotal(ev.effFillValVtxDz  );
-    a.ptrFtrack->  fillTotal(ev.effFillValTrack  );
-    a.ptrPuFrac->  fillTotal(ev.effFillValPURatio);
-    a.ptrHSTrack-> fillTotal(ev.effFillValHSTrack);
-    a.ptrPUTrack-> fillTotal(ev.effFillValPUTrack);
-  }
-
-  void fillPasses(AnalysisObj& a, const EventCounts& ev) {
-    a.ptrFjet->    fillPass(ev.effFillValFjet   );
-    a.ptrVtxDz->   fillPass(ev.effFillValVtxDz  );
-    a.ptrFtrack->  fillPass(ev.effFillValTrack  );
-    a.ptrPuFrac->  fillPass(ev.effFillValPURatio);
-    a.ptrHSTrack-> fillPass(ev.effFillValHSTrack);
-    a.ptrPUTrack-> fillPass(ev.effFillValPUTrack);
-  }
-
-  void fillDiffs(AnalysisObj& a, const EventCounts& ev, double diff) {
-    a.ptrFjet->    fillDiff(ev.effFillValFjet,    diff);
-    a.ptrVtxDz->   fillDiff(ev.effFillValVtxDz,  diff);
-    a.ptrFtrack->  fillDiff(ev.effFillValTrack,   diff);
-    a.ptrPuFrac->  fillDiff(ev.effFillValPURatio, diff);
-    a.ptrHSTrack-> fillDiff(ev.effFillValHSTrack, diff);
-    a.ptrPUTrack-> fillDiff(ev.effFillValPUTrack, diff);
-  }
-
-  void fillPurities(AnalysisObj& a, const EventCounts& ev, double purity) {
-    a.ptrFjet->    fillPurity(ev.nForwardJet,     purity);
-    a.ptrVtxDz->   fillPurity(ev.effFillValVtxDz, purity);
-    a.ptrFtrack->  fillPurity(ev.nForwardTrack,   purity);
-    a.ptrPuFrac->  fillPurity(ev.puRatio,         purity);
-    a.ptrHSTrack-> fillPurity(ev.nForwardTrackHS, purity);
-    a.ptrPUTrack-> fillPurity(ev.nForwardTrackPU, purity);
-  }
-
-  // ---------------------------------------------------------------------------
-  // 9. selectClusters
+  // 7. selectClusters
   //   Chooses the best cluster for every active score and returns a map of
   //   Score.id → Cluster.  Two collection types:
   //     main clusters   — iterative clustering on all tracks; all scores with
@@ -470,7 +387,7 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
-  // 10. processEventData
+  // 8. processEventData
   //   Main per-event analysis orchestrator.  Called once per event per timing
   //   scenario (HGTD / IdealRes / IdealEff).  Pipeline:
   //     A) Event selection — passBasicCuts, passJetPtCut.
@@ -572,7 +489,7 @@ namespace MyUtl {
     // TEST_MISCL denominator is deferred to step H where cluster purity is known.
     for (auto& [score, analysis] : analyses)
       if (!score.requiresPurity)
-        fillTotals(analysis, ev);
+        analysis.fillTotals(ev);
 
     // ── G. Select best cluster for each score ───────────────────────────────
     auto chosen = selectClusters(clusters, tracks, branch, analyses, auxCollections);
@@ -655,7 +572,7 @@ namespace MyUtl {
           if (score == Score::TEST_CTIME) ctimeInDenominator = true;
           if (score == Score::PERF_EVT)   perfEvtInDenominator = true;
           if (score == Score::PERF_CLT)   perfCltInDenominator = true;
-          fillTotals(analysis, ev);
+          analysis.fillTotals(ev);
         } else {
           passes = false;
         }
@@ -674,7 +591,7 @@ namespace MyUtl {
       }
 
       if (passes) {
-        fillPasses(analysis, ev);
+        analysis.fillPasses(ev);
         if (score == Score::TRKPTZ)     passesMine  = true;
         if (score == Score::TEST_MISCL) passesMiscl = true;
         if (score == Score::TEST_MISAS) passesMisas = true;
@@ -688,8 +605,8 @@ namespace MyUtl {
           (score == Score::TEST_CTIME && ctimeInDenominator) ||
           (score == Score::PERF_EVT  && perfEvtInDenominator) ||
           (score == Score::PERF_CLT  && perfCltInDenominator)) {
-        fillDiffs   (analysis, ev, diff);
-        fillPurities(analysis, ev, purity);
+        analysis.fillDiffs   (ev, diff);
+        analysis.fillPurities(ev, purity);
       }
     }
 

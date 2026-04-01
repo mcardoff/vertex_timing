@@ -616,11 +616,11 @@ namespace MyUtl {
   //   filter (degenerate edge case).
   // ---------------------------------------------------------------------------
   inline Cluster refineClusterTiming(
-      const Cluster&          c,
-      BranchPointerWrapper*   branch,
-      double                  dist_cut,
-      double                  idealRes = -1.0)
-  {
+    const Cluster& c,
+    BranchPointerWrapper* branch,
+    double dist_cut,
+    double idealRes = -1.0
+  ) {
     Cluster result  = c;
     double  t_clust = c.values[0];
     double  s_clust = c.sigmas[0];

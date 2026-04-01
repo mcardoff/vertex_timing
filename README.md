@@ -61,15 +61,22 @@ The following targets are defined in `CMakeLists.txt` and built in the `build/` 
 
 | Executable | Source | Description |
 |---|---|---|
-| `clustering_dt` | `src/clustering_dt.cxx` | Main analysis. Runs timing-based vertex reconstruction across three scenarios (real HGTD, ideal resolution, ideal efficiency) and multiple scoring algorithms (HGTD, TRKPTZ, TESTML). Generates comparison plots in `figs/`. |
-| `hgtd_matching` | `util/hgtd_matching.cxx` | Error analysis tool. Quantifies three failure modes: wrong HGTD track-time matching, wrong hard-scatter cluster selection, and insufficient forward tracks. Produces 11 diagnostic plots and a ROOT histogram file. |
+| `clustering_dt` | `src/clustering_dt.cxx` | Main analysis. Runs timing-based vertex reconstruction across three scenarios (real HGTD, ideal resolution, ideal efficiency) and ten+ scoring algorithms. Generates six groups of comparison PDFs in `figs/`. |
+| `failure_decomposition` | `util/failure_decomposition.cxx` | Classifies every TRKPTZ-failing event into four failure categories (selection, timing misassignment, misclustering, track efficiency). Produces efficiency curves + pie chart. |
+| `rate_diagnostics` | `util/rate_diagnostics.cxx` | Selection-agnostic misclustering and timing-misassignment rates binned by n forward HS tracks. |
+| `hgtd_matching` | `util/hgtd_matching.cxx` | Error analysis tool. Quantifies three failure modes: wrong HGTD track-time matching, wrong hard-scatter cluster selection, and insufficient forward tracks. |
 | `extract_error_metrics` | `util/extract_error_metrics.cxx` | Reads histograms from `hgtd_matching_analysis.root` and prints a quantitative breakdown of each failure mode's contribution to overall inefficiency. |
 | `test_ml_model` | `util/test_ml_model.cxx` | Loads the neural network from `share/models/model_weights.json` and runs inference on dummy inputs to verify the C++ ML implementation is functioning correctly. |
 | `generate_rpt` | `util/generate_rpt.cxx` | Generates timing distribution plots and two-sample ROC curves comparing pT-weighted and pT+time-weighted track timing for hard-scatter vs. pileup separation. |
-| `test_vbf_selection` | `test_vbf_selection.cxx` | Applies the full VBF signal region cut sequence (jet multiplicity, pT, η, Δφ, Δη, dijet mass, forward jets) and reports per-step pass rates. |
-| `evaluate_ml_lowtrack` | `util/evaluate_ml_lowtrack.cxx` | Evaluates ML model performance specifically on low-track-multiplicity events (N_HS ≤ 4), producing score distributions and purity/efficiency curves in this challenging regime. |
-| `export_training_data` | `util/export_training_data.cxx` | Exports per-cluster feature vectors (delta_z, uncertainties, sumpt, label) to a CSV file for use in retraining the neural network. Mirrors the event selection of `clustering_dt`. |
-| `distcut_sweep` | `util/distcut_sweep.cxx` | Sweeps over cone clustering distance cut values and plots efficiency, timing resolution (from a double-Gaussian fit), and mean cluster count as a function of cut threshold. |
+| `evaluate_ml_lowtrack` | `util/evaluate_ml_lowtrack.cxx` | Evaluates ML model performance specifically on low-track-multiplicity events (N_HS ≤ 4). |
+| `export_training_data` | `util/export_training_data.cxx` | Exports per-cluster feature vectors to CSV for DNN retraining. |
+| `distcut_sweep` | `util/distcut_sweep.cxx` | Sweeps `DIST_CUT_CONE` (0.5–5 σ). |
+| `mintrackpt_sweep` | `util/mintrackpt_sweep.cxx` | Sweeps minimum track pT threshold. |
+| `maxtrackpt_sweep` | `util/maxtrackpt_sweep.cxx` | Sweeps maximum track pT threshold. |
+| `cone_iter_k_sweep` | `util/cone_iter_k_sweep.cxx` | Sweeps `CONE_ITER_K` (top-K clusters for T_REFINED pooling, 1–6). |
+| `dist_refine_sweep` | `util/dist_refine_sweep.cxx` | Sweeps `DIST_CUT_T_REFINED` (0.5–3.0 σ). |
+| `nsigma_sweep` | `util/nsigma_sweep.cxx` | Sweeps the distance cut in σ units. |
+| `test_vbf_selection` | `test_vbf_selection.cxx` | Applies the full VBF signal region cut sequence and reports per-step pass rates. |
 
 ---
 
@@ -80,7 +87,7 @@ The following targets are defined in `CMakeLists.txt` and built in the `build/` 
 | File | Description |
 |---|---|
 | `vertex_time.cxx` | Vertex timing distribution analysis. Selects forward jets and the hard-scatter vertex, fits timing residuals with single- and double-Gaussian models, and produces resolution vs. forward jet multiplicity plots. |
-| `runHGTD_Clustering.cxx` | Single-event clustering wrapper for interactive debugging. Loads one event, runs cone-time clustering with configurable parameters, and prints cluster details (time, z, score, track list, pass/fail). |
+| `runHGTD_Clustering.cxx` | Single-event clustering wrapper for interactive debugging. Loads one event, runs iterative-time clustering, and prints cluster details (time, z, score, track list, pass/fail). Output is consumed by `event_display.py`. |
 | `check_jet_sorting.cxx` | Diagnostic tool. Checks whether jets in input ROOT files are stored in descending-pT order and prints a per-event summary plus aggregate pass rate. |
 | `test_vbf_selection.cxx` | Validates the VBF selection cut chain against the ntuple data and reports per-cut pass rates. (Also a CMake build target — see above.) |
 | `test_vbf_integration.cxx` | Integration test checking that `processEventData()` correctly rejects non-VBF events, with printed pass-rate statistics. |
@@ -126,8 +133,8 @@ make
 ./hgtd_matching
 ./extract_error_metrics   # prints quantitative breakdown
 
-# Visualize an event
-python ../event_display.py --file_num 0 --event_num 42
+# Visualize an event (script lives at project root)
+python event_display.py --file_num 000009 --event_num 1856 --extra_time 0.0
 ```
 
 ## Scoring Algorithms
@@ -136,16 +143,22 @@ Each run of `clustering_dt` evaluates several scoring algorithms simultaneously.
 
 | Short name | Long name | Description |
 |---|---|---|
-| `HGTD` | HGTD Algorithm | Selects the cluster chosen by the HGTD detector's own timing algorithm. Uses the HGTD-seeded cluster collection; only active in the real-HGTD scenario. |
-| `TRKPT` | ΣpT | Scores each cluster by the scalar sum of track pT. Selects the highest-scoring cluster. |
-| `TRKPTZ` | ΣpT·exp(−\|Δz\|) | Like `TRKPT` but weights each track's pT by exp(−\|Δz\|/σ_z) so tracks closer to the vertex in z contribute more. |
-| `PASS` | Pass Cluster | Selects the first cluster that passes all quality requirements, without using a score. |
-| `FILTJET` | Filter Tracks in Jets | Re-clusters using only tracks within ΔR < 0.4 of a reconstructed jet before scoring with TRKPTZ. Only active in the real-HGTD scenario. |
-| `TESTML` | DNN Selection | Scores clusters with a neural network (8→128→64→32→1, ReLU/sigmoid). Applies a score threshold of 0.3. Weights loaded from `share/models/model_weights.json`. |
-| `MISCL` | TRKPTZ (pure clusters) | Runs TRKPTZ but only fills histograms for events where the selected cluster is "pure" (≥80% hard-scatter tracks). Isolates the intrinsic timing resolution from cluster-selection errors. |
-| `HGTD_SORT` | HGTD BDT (pT-sorted) | Like `HGTD` but sorts tracks by pT before clustering (order-sensitive cone algorithm) and applies a TMVA BDT post-selection with threshold 0.3. |
+| `HGTD` | HGTD Algorithm | Selects the cluster chosen by the HGTD detector's own timing algorithm. Own collection; only active in the real-HGTD scenario. |
+| `TRKPT` | ΣpT | Scalar sum of track pT. |
+| `TRKPTZ` | ΣpTe^{−\|Δz\|} | Primary score. Weights pT by exp(−\|Δz\|/σ_z); tracks closer in z contribute more. |
+| `T_REFINED` | 2σ t Reclustering | Two-stage: iterative at 3σ then re-cluster top-3 cone clusters at `DIST_CUT_T_REFINED = 2σ`. |
+| `Z_REFINED` | 2σ z Refinement | z-based refinement variant. |
+| `ZT_REFINED` | 2σ z+t Reclustering | Two-stage with Z0_TVA track filter. |
+| `ZT_ITER` | 2D (z₀,t) Iterative | Iterative clustering with 2D Mahalanobis distance √((Δt/σt)²+(Δz₀/σz₀)²). |
+| `FILTJET` | Filter Tracks in Jets | Re-clusters using only tracks within ΔR < 0.4 of a jet, then TRKPTZ. |
+| `TEST_ML` | DNN Selection | Neural network (8→128→64→32→1, ReLU/sigmoid) with threshold 0.3. |
+| `MISCL` | TRKPTZ (pure clust) | **Oracle**: fills only for events where cluster purity **> 75%**. |
+| `MISAS` | TRKPTZ (no t misassign.) | **Oracle**: fills only when 100% of all fwd HS tracks have \|pull\| < 3σ (no timing misassignment). |
+| `CTIME` | TRKPTZ (clust t pure) | **Oracle**: fills only when 100% of the selected cluster's HS tracks have \|pull\| < 3σ. |
+| `PERF_EVT` | TRKPTZ (Pure Clust+Evt Times) | **Combined oracle**: MISCL ∧ MISAS — near-perfect event-level ceiling. |
+| `PERF_CLT` | TRKPTZ (Pure Clust+Clust. Times) | **Combined oracle**: MISCL ∧ CTIME — near-perfect cluster-level ceiling (~3× more statistics than PERF_EVT). |
 
-Scores that set `usesOwnCollection = true` (`HGTD`, `HGTD_SORT`) bypass the main cone-clustering output and select from their own pre-built collections. Scores with `requiresPurity = true` (`MISCL`) only fill histograms when the selected cluster passes a purity check.
+Scores with `requiresPurity = true` (oracle scores) gate their denominator — events outside the gate are excluded entirely. All oracle functions return `0.0f` when no qualifying HS tracks exist, so zero-HS-track events are excluded from all oracle denominators.
 
 ---
 

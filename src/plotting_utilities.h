@@ -58,12 +58,12 @@ namespace MyUtl {
   //   sgausFitFunc — single Gaussian: amplitude [0], mean [1] (fixed to 0),
   //                  width [2].
   // ---------------------------------------------------------------------------
-  TF1 *tgausFitFunc = new TF1("tgaus", "[1]*TMath::Exp(-0.5 * ((x - [0]) / [4])^2) + "
+  TF1* tgausFitFunc = new TF1("tgaus", "[1]*TMath::Exp(-0.5 * ((x - [0]) / [4])^2) + "
 			               "[2]*TMath::Exp(-0.5 * ((x - [0]) / [5])^2) + "
 			               "[3]*TMath::Exp(-0.5 * ((x - [0]) / [6])^2)"  );
-  TF1 *dgausFitFunc = new TF1("dgaus", "[1]*TMath::Exp(-0.5 * ((x - [0]) / [3])^2) + "
+  TF1* dgausFitFunc = new TF1("dgaus", "[1]*TMath::Exp(-0.5 * ((x - [0]) / [3])^2) + "
                                        "[2]*TMath::Exp(-0.5 * ((x - [0]) / [4])^2)");
-  TF1 *sgausFitFunc = new TF1("sgaus", "[1]*TMath::Exp(-0.5 * ((x - [0]) / [2])^2)");
+  TF1* sgausFitFunc = new TF1("sgaus", "[1]*TMath::Exp(-0.5 * ((x - [0]) / [2])^2)");
 
   // ---------------------------------------------------------------------------
   // createTrpFit
@@ -175,9 +175,16 @@ namespace MyUtl {
     TH1D* backAmpDist;
     TH1D* ampRatioDist;
 
-    FitParams(const char* title, const char* times, const char* name, 
-	      double xMin, double foldVal, double foldMax,
-	      double xWidth, int color) {
+    FitParams(
+      const char* title,
+      const char* times,
+      const char* name, 
+      double xMin,
+      double foldVal,
+      double foldMax,
+      double xWidth,
+      int color
+    ) {
       auto fullTitle = TString::Format("%%s vs %s (%s);%s;%%s", title, times, title);
       int nbins = (int)((foldMax - xMin) / xWidth);
       meanDist      = new TH1D(TString::Format("mean_dist_%s", name),
@@ -491,6 +498,7 @@ namespace MyUtl {
     // -----------------------------------------------------------------------
     inline void plotPostProcessing() {
       for(int j = 0; j < hist->GetNbinsX(); ++j) {
+
 	auto color = COLORS[j % COLORS.size()];
 	auto name = TString::Format("%s_slice%d",hist->GetName(),j);
 
@@ -1051,6 +1059,47 @@ namespace MyUtl {
     // -----------------------------------------------------------------------
     inline void printResolutionStats(std::string key) {
       dataObjects[key]->printResolutionStats();
+    }
+
+    // -----------------------------------------------------------------------
+    // Histogram fill helpers
+    //   Each method fills one histogram operation (total/pass/diff/purity)
+    //   across all six standard analysis sub-categories in a single call.
+    // -----------------------------------------------------------------------
+    void fillTotals(const EventCounts& ev) {
+      ptrFjet->    fillTotal(ev.effFillValFjet   );
+      ptrVtxDz->   fillTotal(ev.effFillValVtxDz  );
+      ptrFtrack->  fillTotal(ev.effFillValTrack  );
+      ptrPuFrac->  fillTotal(ev.effFillValPURatio);
+      ptrHSTrack-> fillTotal(ev.effFillValHSTrack);
+      ptrPUTrack-> fillTotal(ev.effFillValPUTrack);
+    }
+
+    void fillPasses(const EventCounts& ev) {
+      ptrFjet->    fillPass(ev.effFillValFjet   );
+      ptrVtxDz->   fillPass(ev.effFillValVtxDz  );
+      ptrFtrack->  fillPass(ev.effFillValTrack  );
+      ptrPuFrac->  fillPass(ev.effFillValPURatio);
+      ptrHSTrack-> fillPass(ev.effFillValHSTrack);
+      ptrPUTrack-> fillPass(ev.effFillValPUTrack);
+    }
+
+    void fillDiffs(const EventCounts& ev, double diff) {
+      ptrFjet->    fillDiff(ev.effFillValFjet,    diff);
+      ptrVtxDz->   fillDiff(ev.effFillValVtxDz,  diff);
+      ptrFtrack->  fillDiff(ev.effFillValTrack,   diff);
+      ptrPuFrac->  fillDiff(ev.effFillValPURatio, diff);
+      ptrHSTrack-> fillDiff(ev.effFillValHSTrack, diff);
+      ptrPUTrack-> fillDiff(ev.effFillValPUTrack, diff);
+    }
+
+    void fillPurities(const EventCounts& ev, double purity) {
+      ptrFjet->    fillPurity(ev.nForwardJet,     purity);
+      ptrVtxDz->   fillPurity(ev.effFillValVtxDz, purity);
+      ptrFtrack->  fillPurity(ev.nForwardTrack,   purity);
+      ptrPuFrac->  fillPurity(ev.puRatio,         purity);
+      ptrHSTrack-> fillPurity(ev.nForwardTrackHS, purity);
+      ptrPUTrack-> fillPurity(ev.nForwardTrackPU, purity);
     }
   };
 
