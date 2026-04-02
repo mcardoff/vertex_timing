@@ -66,10 +66,6 @@ namespace MyUtl {
     TTreeReaderArray<bool>  trackQuality;
     TTreeReaderArray<int>   trackHgtdHits;
     TTreeReaderArray<int>   trackPrimHits;
-    TTreeReaderArray<float> trackNearIdx;
-    TTreeReaderArray<float> trackNearZ0sin;
-    TTreeReaderArray<float> trackNearZ0sinUnc;
-    TTreeReaderArray<float> trackNearSig;
 
     TTreeReaderArray<float> truthVtxZ;
     TTreeReaderArray<float> truthVtxTime;
@@ -753,9 +749,7 @@ namespace MyUtl {
       // at efficiency-check time in event_processing.h (both pass and total fills).
       this->scores[Score::TEST_MISCL.id] = this->scores.at(Score::TRKPTZ.id);
       this->scores[Score::TEST_MISAS.id] = this->scores.at(Score::TRKPTZ.id);
-      this->scores[Score::TEST_CTIME.id] = this->scores.at(Score::TRKPTZ.id);
       this->scores[Score::PERF_EVT.id]   = this->scores.at(Score::TRKPTZ.id);
-      this->scores[Score::PERF_CLT.id]   = this->scores.at(Score::TRKPTZ.id);
       this->scores[Score::Z_REFINED.id]  = this->scores.at(Score::TRKPTZ.id);
       this->scores[Score::ZT_REFINED.id] = this->scores.at(Score::TRKPTZ.id);
     }

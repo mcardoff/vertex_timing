@@ -34,13 +34,13 @@ namespace MyUtl {
   const Color_t C01 = kP10Blue  ;
   const Color_t C02 = kP10Red   ;
   const Color_t C03 = kP10Yellow;
-  const Color_t C04 = kP10Gray  ;
-  const Color_t C05 = kP10Violet;
+  const Color_t C04 = kP10Violet;
+  const Color_t C05 = kP10Cyan  ;
   const Color_t C06 = kP10Brown ;
   const Color_t C07 = kP10Orange;
   const Color_t C08 = kP10Green ;
   const Color_t C09 = kP10Ash   ;
-  const Color_t C10 = kP10Cyan  ;
+  const Color_t C10 = kP10Gray  ;
   const Color_t C11 = kP6Blue   ;
   const std::vector<Color_t> COLORS = {C01, C02, C03, C04, C05, C06,
                                        C07, C08, C09, C10, C11};  
@@ -82,7 +82,7 @@ namespace MyUtl {
   const double TVA_CUT_Z_REFINED  = 2.0;   // z₀ TVA significance cut for Z_REFINED and ZT_REFINED
   const int    CONE_ITER_K        = 3;     // Top cone clusters to refine (REFINED score)
   const double TRUTH_PULL_CUT     = 2.0;   // |pull| < cut keeps track as truth-matched
-  const double HS_TIMING_QUALITY_CUT = 3.0;   // |pull| < cut → HS track timing is good (TEST_MISAS / TEST_CTIME gate)
+  const double HS_TIMING_QUALITY_CUT = 3.0;   // |pull| < cut → HS track timing is good (TEST_MISAS gate)
   // Per-track timing resolution used for Ideal Resolution/Efficiency scenarios.
   // Flat per-track value (independent of hit count), representing a hypothetically
   // better detector.  Contrast with real HGTD: ~30 ps/hit → 30/√nHits ≈ 15–21 ps/track.
@@ -121,7 +121,7 @@ namespace MyUtl {
   //   sparse high-multiplicity tails don't dominate the plots.
   // ---------------------------------------------------------------------------
   const double DIFF_MIN = -1000.0, DIFF_MAX = 1000.0;
-  const double DIFF_WIDTH = 2.0;
+  const double DIFF_WIDTH = 4.0;
 
   const double PURITY_MIN = 0, PURITY_MAX = 1;
   const double PURITY_WIDTH = 0.05;
@@ -226,10 +226,8 @@ namespace MyUtl {
     static const Score CONE_BDT;
     static const Score TEST_MISAS;
     static const Score TEST_HS;
-    static const Score TEST_CTIME;
     static const Score ZT_ITER;
     static const Score PERF_EVT;
-    static const Score PERF_CLT;
   };
 
   inline const std::string STR_TRKPTZ = "#Sigma p_{T}e^{-|#Delta z|}";
@@ -237,26 +235,25 @@ namespace MyUtl {
   // Columns: id  longName  shortName  own    pur    thr     distCut           method                        useZ0  filter
   //          ──  ────────  ─────────  ─────  ─────  ──────  ────────────────  ──────────────────────────    ─────  ──────────────────────
   // Scores without a dedicated collection (distCut omitted → -1, ignored)
-  inline const Score Score::HGTD       = {  0, "HGTD Algorithm"             , "HGTD",     true , false, -1.f };
-  inline const Score Score::TRKPT      = {  1, "#Sigma p_{T}"               , "TRKPT",    false, false, -1.f };
-  inline const Score Score::TRKPTZ     = {  2, STR_TRKPTZ                   , "TRKPTZ",   false, false, -1.f };
-  inline const Score Score::PASS       = {  3, "Pass Cluster"               , "PASS",     false, false, -1.f };
-  inline const Score Score::Z_REFINED  = {  5, "2#sigma z Refinement"       , "Z_REFINED",false, false, -1.f };
-  inline const Score Score::CONE_BDT   = {  8, "Cone (BDT)"                 , "CONE_BDT", true , false,  0.3f};
-  inline const Score Score::HGTD_SORT  = { 10, "HGTD BDT (pT-sorted)"       , "HGTD_SORT",true , false,  0.3f};
-  inline const Score Score::TEST_ML    = { 11, "DNN Selection"              , "TEST_ML",  false, false,  0.3f};
-  inline const Score Score::TEST_MISCL = { 12, STR_TRKPTZ + " (Pure Clusters)" , "MISCL",    false, true , -1.f };
-  inline const Score Score::TEST_MISAS = { 13, STR_TRKPTZ + " (Perfect Evt Times)", "MISAS",false, true , -1.f };
-  inline const Score Score::TEST_CTIME = { 15, STR_TRKPTZ + " (Perfect Clust. Times)", "CTIME",   false, true , -1.f };
-  inline const Score Score::PERF_EVT   = { 17, STR_TRKPTZ + " (Pure Cluster+Evt Times)", "PERF_EVT", false, true, -1.f };
-  inline const Score Score::PERF_CLT   = { 18, STR_TRKPTZ + " (Pure Cluster+Clust. Times)", "PERF_CLT", false, true, -1.f }; // gate: CTIME ∧ MISCL
+  inline const Score Score::HGTD       = {  0, "HGTD Algorithm"                , "HGTD"     , true , false, -1.0f };
+  inline const Score Score::TRKPT      = {  1, "#Sigma p_{T}"                  , "TRKPT"    , false, false, -1.0f };
+  inline const Score Score::TRKPTZ     = {  2, STR_TRKPTZ + " [Baseline Algorithm]" , "TRKPTZ"   , false, false, -1.0f };
+  inline const Score Score::PASS       = {  3, "Pass Cluster"                  , "PASS"     , false, false, -1.0f };
+  inline const Score Score::Z_REFINED  = {  5, "2#sigma z_{0} Refinement"      , "Z_REFINED", false, false, -1.0f };
+  inline const Score Score::CONE_BDT   = {  8, "Cone (BDT)"                    , "CONE_BDT" , true , false,  0.3f};
+  inline const Score Score::HGTD_SORT  = { 10, "HGTD BDT (pT-sorted)"          , "HGTD_SORT", true , false,  0.3f};
+  inline const Score Score::TEST_ML    = { 11, "DNN Selection"                 , "TEST_ML"  , false, false,  0.3f};
+
+  inline const Score Score::TEST_MISCL = { 12, STR_TRKPTZ + " [Events with Pure Clusters]"   , "MISCL",    false, true, -1.f };
+  inline const Score Score::TEST_MISAS = { 13, STR_TRKPTZ + " [Events with Perfect Timing]"  , "MISAS",    false, true, -1.f };
+  inline const Score Score::PERF_EVT   = { 17, STR_TRKPTZ + " [Pure Clusters + Perf. Timing]", "PERF_EVT", false, true, -1.f };
 
   // Scores with a dedicated collection (distCut ≥ 0 → buildsCollection() = true)
   inline const Score Score::CONE       = {  7, "Cone"                       , "CONE",     true , false, -1.f, DIST_CUT_CONE,      ClusteringMethod::CONE      };
   inline const Score Score::FILTJET    = {  9, "Filter Tracks in Jets"      , "FILTJET",  true , false, -1.f, DIST_CUT_CONE,      ClusteringMethod::CONE,      false, TrackFilterType::JET     };
   inline const Score Score::TEST_HS    = { 14, STR_TRKPTZ + " (HS only)"   , "TEST_HS",  true , false, -1.f, DIST_CUT_CONE,      ClusteringMethod::CONE,      false, TrackFilterType::HS_ONLY };
-  inline const Score Score::T_REFINED  = {  4, "2#sigma t Reclustering"     , "T_REFINED",true , false, -1.f, DIST_CUT_T_REFINED, ClusteringMethod::ITERATIVE };
-  inline const Score Score::ZT_REFINED = {  6, "2#sigma z+t Reclustering"   , "ZT_REFINED",true, false, -1.f, DIST_CUT_T_REFINED, ClusteringMethod::ITERATIVE, false, TrackFilterType::Z0_TVA  };
+  inline const Score Score::T_REFINED  = {  4, "2#sigma t Re-clustering"    , "T_REFINED",true , false, -1.f, DIST_CUT_T_REFINED, ClusteringMethod::ITERATIVE };
+  inline const Score Score::ZT_REFINED = {  6, "2#sigma z_{0}+t Re-clustering", "ZT_REFINED",true, false, -1.f, DIST_CUT_T_REFINED, ClusteringMethod::ITERATIVE, false, TrackFilterType::Z0_TVA  };
   inline const Score Score::ZT_ITER    = { 16, "2D (z_{0},t) Iterative"     , "ZT_ITER",  true , false, -1.f, DIST_CUT_CONE,      ClusteringMethod::ITERATIVE, true  };
 
   inline const std::vector<Score> SCORE_REGISTRY = {
@@ -264,9 +261,9 @@ namespace MyUtl {
     Score::T_REFINED, Score::Z_REFINED, Score::ZT_REFINED, Score::CONE,
     Score::FILTJET,   Score::HGTD_SORT,
     Score::TEST_ML,   Score::TEST_MISCL, Score::CONE_BDT,
-    Score::TEST_MISAS, Score::TEST_HS,  Score::TEST_CTIME,
+    Score::TEST_MISAS, Score::TEST_HS,
     Score::ZT_ITER,
-    Score::PERF_EVT,   Score::PERF_CLT,
+    Score::PERF_EVT,
   };
 
   // Backward-compatible free-function wrappers (existing callsites unchanged)

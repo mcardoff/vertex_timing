@@ -60,9 +60,7 @@ auto buildAnalysisMap(
   m.emplace(Score::T_REFINED,  AnalysisObj(label, Score::T_REFINED ));
   m.emplace(Score::ZT_ITER,    AnalysisObj(label, Score::ZT_ITER   ));
   m.emplace(Score::TEST_MISAS, AnalysisObj(label, Score::TEST_MISAS));
-  m.emplace(Score::TEST_CTIME, AnalysisObj(label, Score::TEST_CTIME));
   m.emplace(Score::PERF_EVT,   AnalysisObj(label, Score::PERF_EVT  ));
-  m.emplace(Score::PERF_CLT,   AnalysisObj(label, Score::PERF_CLT  ));
 
   // Scores active only in the real-HGTD scenario
   if (scenario == Scenario::HGTD) {
@@ -130,25 +128,13 @@ void makeComparisonPlots(
 	      &mapHGTD.at(Score::TEST_MISAS),
 	    });
   
-  // Timing oracle comparison: MISAS (event-level) vs CTIME (cluster-level)
-  moneyPlot(TString::Format("%s/timing_oracle_%s.pdf", compSubdir.c_str(), key), key, canvas,
+  moneyPlot(TString::Format("%s/perfect_timing_%s.pdf", compSubdir.c_str(), key), key, canvas,
             {
                 &mapHGTD.at(Score::HGTD),
                 &mapHGTD.at(Score::TRKPTZ),
                 &mapHGTD.at(Score::TEST_MISCL),
                 &mapHGTD.at(Score::TEST_MISAS),
-                // &mapHGTD.at(Score::TEST_CTIME),
-            });
-
-  moneyPlot(TString::Format("%s/perfect_timing_oracle_%s.pdf", compSubdir.c_str(), key), key, canvas,
-            {
-                &mapHGTD.at(Score::HGTD),
-                &mapHGTD.at(Score::TRKPTZ),
-                &mapHGTD.at(Score::TEST_MISCL),
-                &mapHGTD.at(Score::TEST_MISAS),
-                // &mapHGTD.at(Score::TEST_CTIME),
                 &mapHGTD.at(Score::PERF_EVT),
-                // &mapHGTD.at(Score::PERF_CLT),
             });
 
   // HGTD algo vs TRKPTZ
@@ -429,7 +415,7 @@ auto main() -> int {
   // --- Inclusive resolution plots ---
   const std::initializer_list<AnalysisObj*> RESO_SET = {
     &mapHGTD.at(Score::HGTD), &mapHGTD.at(Score::TRKPTZ), &mapHGTD.at(Score::TEST_MISCL),
-    &mapHGTD.at(Score::TEST_MISAS), &mapHGTD.at(Score::TEST_CTIME),
+    &mapHGTD.at(Score::TEST_MISAS),
   };
   inclusivePlot(TString::Format("%s/inclusive/inclusivereso_logscale.pdf", SAVE_DIR),
 		true,  false, -400, 400, canvas, RESO_SET);
@@ -445,6 +431,75 @@ auto main() -> int {
 		true,  false, -400, 400, canvas, RESO_SET, lowTrackGetter);
   inclusivePlot(TString::Format("%s/inclusive/inclusivereso_lowtrack_linscale.pdf", SAVE_DIR),
 		false, false, -200, 200, canvas, RESO_SET, lowTrackGetter);
+
+  // --- nHSTrack CDF / survival diagnostic ---
+  // Shows what fraction of events fall below (CDF) or above (survival) each
+  // nHSTrack threshold.  Answers: "is the nHSTrack < N region worth optimising?"
+  {
+    gSystem->mkdir(TString::Format("%s/diagnostics", SAVE_DIR), true);
+    TH1D* hRaw = mapHGTD.at(Score::TRKPTZ).ptrHSTrack->effTotal.get();
+    auto* hCDF = static_cast<TH1D*>(hRaw->GetCumulative());
+    double total = hCDF->GetBinContent(hCDF->GetNbinsX());
+
+    // Build CDF and survival TGraphs
+    std::vector<double> xs, yCDF, ySurv;
+    if (total > 0) {
+      for (int b = 1; b <= hCDF->GetNbinsX(); ++b) {
+        double cdf = hCDF->GetBinContent(b) / total;
+        xs   .push_back(hCDF->GetBinCenter(b));
+        yCDF .push_back(cdf);
+        ySurv.push_back(1.0 - cdf);
+      }
+    }
+    delete hCDF;
+
+    int n = (int)xs.size();
+    TGraph grCDF (n, xs.data(), yCDF .data());
+    TGraph grSurv(n, xs.data(), ySurv.data());
+
+    grCDF .SetLineColor(kBlue+1); grCDF .SetLineWidth(2);
+    grSurv.SetLineColor(kRed+1);  grSurv.SetLineWidth(2);
+    grCDF .SetMarkerColor(kBlue+1); grCDF .SetMarkerStyle(20); grCDF .SetMarkerSize(0.6);
+    grSurv.SetMarkerColor(kRed+1);  grSurv.SetMarkerStyle(20); grSurv.SetMarkerSize(0.6);
+
+    canvas->cd();
+    grCDF.SetTitle(";N_{HS tracks} (forward);Fraction of events");
+    grCDF.GetXaxis()->SetRangeUser(0, 20);
+    grCDF.GetYaxis()->SetRangeUser(0, 1.2);
+    grCDF.Draw("APL");
+    grSurv.Draw("PL SAME");
+
+    // Reference lines and labels at N=5 and N=10
+    auto drawRef = [&](int N, double yC, double yS) {
+      TLine* vl = new TLine(N, 0, N, yC);
+      vl->SetLineStyle(2); vl->SetLineColor(kGray+1); vl->Draw();
+      TLatex lat;
+      lat.SetTextSize(0.028); lat.SetTextColor(kBlue+1);
+      lat.DrawLatex(N + 0.2, yC + 0.01, TString::Format("%.1f%%", yC * 100));
+      lat.SetTextColor(kRed+1);
+      lat.DrawLatex(N + 0.2, yS - 0.03, TString::Format("%.1f%%", yS * 100));
+    };
+    // find CDF values at N=5 and N=10
+    auto cdfAt = [&](int N) -> double {
+      for (int i = 0; i < n; ++i)
+        if ((int)std::round(xs[i]) == N) return yCDF[i];
+      return -1;
+    };
+    for (int refN : {5, 10}) {
+      double c = cdfAt(refN);
+      if (c >= 0) drawRef(refN, c, 1.0 - c);
+    }
+
+    TLegend leg(0.60, 0.82, 0.80, 0.92);
+    leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.032);
+    leg.AddEntry(&grCDF,  "CDF: frac. with #leq N", "lp");
+    leg.AddEntry(&grSurv, "Survival: frac. with > N", "lp");
+    leg.Draw();
+
+    ATLASLabel(0.18, 0.88, "Simulation Internal");
+    canvas->SaveAs(TString::Format("%s/diagnostics/hs_track_cdf.pdf", SAVE_DIR));
+    canvas->Clear();
+  }
 
   std::cout << "FINISHED PLOT PRINTING\n";
 

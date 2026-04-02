@@ -527,36 +527,22 @@ namespace MyUtl {
 			      (int)leftEdge,(int)rightEdge,
 			      this->ytitle));
 	
-	std::unique_ptr<TF1> dgausFit = std::unique_ptr<TF1>(createDblFit(hSlice.get(),true)); // varied bg
-	// std::unique_ptr<TF1> dgausFit = std::unique_ptr<TF1>(createTrpFit(hSlice.get())); // TRIPLE GAUS :O
-	std::unique_ptr<TF1> sgausFitCore = std::unique_ptr<TF1>(createSngFit(hSlice.get(), 60));
-	std::unique_ptr<TF1> sgausFitBack = std::unique_ptr<TF1>(createSngFit(hSlice.get(), 600));
+	std::unique_ptr<TF1> dgausFit = std::unique_ptr<TF1>(createDblFit(hSlice.get(),true));
 
 	double percErrCore = dgausFit->GetParError("Sigma1")/dgausFit->GetParameter("Sigma1");
-	double percErrBack = dgausFit->GetParError("Sigma2")/dgausFit->GetParameter("Sigma2");
+	double sigma1      = dgausFit->GetParameter("Sigma1");
 
-	// Only store the fit result when the core-σ is well-constrained.
-	// With fixbkg=true, Sigma2 is fixed at 175 ps, so Sigma1 is always
-	// the core; percErrCore is its relative uncertainty from the fitter.
-	if (percErrCore < 0.5) {
-	  params->fillEach(j, dgausFit.get());
-	}
-
-	// if (percErrBack < 0.20) {
-	  // std::cout << "\n ENTERING FILLBACKGAUS FUNC DOUBLE\n";
-	  // params->fillBkgGaus(j, dgausFit.get());
-	// } else {
-	  // std::cout << "\n ENTERING FILLBACKGAUS FUNC SINGLE\n";
-	  // params->fillBkgGaus(j, sgausFitBack.get());
-	  // slicesFits.push_back(std::move(sgausFitCore));
-	// }
+	// If the double-Gaussian core is unphysically narrow (< 5 ps), the fit
+	// has converged on noise rather than a real core.  Fall back to a single
+	// Gaussian over ±PASS_SIGMA and use fillCoreGaus instead.
+	bool useSingleGaus = (sigma1 < 5.0);
 
 	params->fillRMS(j, hSlice.get());
 
 	// Efficiency estimate: fraction of residuals within ±PASS_SIGMA
 	{
 	  int b1 = hSlice->FindBin(-PASS_SIGMA);
-	  int b2 = hSlice->FindBin( PASS_SIGMA) - 1;  // exclude bin starting at +PASS_SIGMA edge
+	  int b2 = hSlice->FindBin( PASS_SIGMA) - 1;
 	  double num = hSlice->Integral(b1, b2);
 	  double den = hSlice->GetEntries();
 	  if (den > 0.0) {
@@ -566,8 +552,22 @@ namespace MyUtl {
 	  }
 	}
 
-	slicesHists.push_back(std::move(hSlice));
-	slicesFits.push_back(std::move(dgausFit));
+	if (useSingleGaus) {
+	  std::unique_ptr<TF1> sgFit(createSngFit(hSlice.get(), PASS_SIGMA));
+	  double sgPercErr = sgFit->GetParError("Sigma1") / sgFit->GetParameter("Sigma1");
+	  if (sgPercErr < 0.5) {
+	    params->fillCoreGaus(j, sgFit.get());
+	  }
+	  slicesHists.push_back(std::move(hSlice));
+	  slicesFits.push_back(std::move(sgFit));
+	} else {
+	  // Only store the double-Gaussian result when the core-σ is well-constrained.
+	  if (percErrCore < 0.5) {
+	    params->fillEach(j, dgausFit.get());
+	  }
+	  slicesHists.push_back(std::move(hSlice));
+	  slicesFits.push_back(std::move(dgausFit));
+	}
 
 	if (right == hist->GetNbinsX()+1)
 	  break;
@@ -1131,7 +1131,7 @@ namespace MyUtl {
 	double refVal = -1, const char* refLabel = nullptr,
 	bool logY = false,
 	double legX1 = 0.60, double legY1 = 0.20,
-	double legX2 = 0.95, double legY2 = 0.50
+	double legX2 = 0.80, double legY2 = 0.50
     ) {
       gPad->SetLogy(logY);
       TLegend* legend = new TLegend(legX1, legY1, legX2, legY2);
@@ -1244,8 +1244,8 @@ namespace MyUtl {
       legend->Draw("SAME");
       ATLASLabel(0.18, 0.88, "Simulation Internal");
       ATLASEnergyLabel(0.18, 0.82);
+      gPad->Modified();
       gPad->Update();
-      gPad->SetLogy(false);  // reset so subsequent plots are unaffected
     };
 
     canvas->Print(TString::Format("%s[", fname));
@@ -1254,46 +1254,38 @@ namespace MyUtl {
     plotWithLegend(
         [](auto& plt) { return plt->params->sigmaDist; },
 	"Core #sigma", RES_YMIN, RES_YMAX,
-	15.0, "15ps Resolution",
-	false,                     // logY
-	0.60, 0.65, 0.95, 0.92);  // top-right: avoids tall σ bars at low track count
+	15.0, "15ps Resolution", false,                   // logY
+	0.60, 0.65, 0.80, 0.92); // top-right: avoids tall σ bars at low track count
     canvas->Print(fname);
-
-    // Plot Background Resolution
-    // plotWithLegend(
-    //     [](auto& plt) { return plt->params->bkgSigmaDist; },
-    // 	"Background #sigma", BKG_RES_YMIN, BKG_RES_YMAX,
-    //     175.0, "175ps");
-    // canvas->Print(fname);
 
     // Plot Efficiency — log scale
     plotWithLegend(
         [](auto& plt) { return plt->efficiency.get(); },
-	"Core Fraction", EFF_YMIN, EFF_YMAX,
-	0.99, "99% Core Fraction",
-	true,                      // logY
-	0.60, 0.20, 0.95, 0.50);
+	"Core Fraction", 0.9, 1.025,
+	0.99, "99% Core Fraction", true,                      // logY
+	0.60, 0.20, 0.80, 0.50);
     canvas->Print(fname);
 
     // Plot Efficiency — linear scale
     plotWithLegend(
         [](auto& plt) { return plt->efficiency.get(); },
 	"Core Fraction", EFF_YMIN, EFF_YMAX,
-	0.99, "99% Core Fraction",
-	false,                     // logY
-	0.60, 0.20, 0.95, 0.50);
+	0.99, "99% Core Fraction", false,                     // logY
+	0.60, 0.20, 0.80, 0.50);
     canvas->Print(fname);
 
     // Plot Core Fraction estimate (fraction of residuals within ±PASS_SIGMA)
     plotWithLegend(
         [](auto& plt) { return plt->effEstimate.get(); },
-	TString::Format("Core Fraction (#pm%d ps)", (int)(PASS_SIGMA)), EFF_YMIN, EFF_YMAX,
+        "Core Fraction", EFF_YMIN, EFF_YMAX,
 	0.99, "99% Core Fraction");
     canvas->Print(fname);
 
     plotWithLegend(
         [](auto& plt) { return plt->params->rmsDist; },
-	"#Delta t RMS", 0, 250);
+	"#Delta t RMS", 0, 250,
+	-1, "",	false,
+	0.60, 0.65, 0.80, 0.92);
     canvas->Print(fname);
     
     canvas->Print(TString::Format("%s]", fname));

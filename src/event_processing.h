@@ -9,11 +9,10 @@
 //     1. setupChain (directory overload) — add all ROOT files in a directory
 //     2. setupChain (single-file overload) — add one file by run number
 //     3. passTrackVertexAssociation — |z₀ - vtx_z| / σ significance cut
-//     4. pileupRemoval              — reject tracks near a non-HS vertex
-//     5. filterTracksInJets         — keep only tracks within ΔR of a jet
-//     6. getAssociatedTracks        — full HGTD-acceptance + pTV selection
-//     7. selectClusters             — choose best cluster for every active score
-//     8. processEventData           — main per-event analysis orchestrator
+//     4. filterTracksInJets         — keep only tracks within ΔR of a jet
+//     5. getAssociatedTracks        — full HGTD-acceptance + pTV selection
+//     6. selectClusters             — choose best cluster for every active score
+//     7. processEventData           — main per-event analysis orchestrator
 // ---------------------------------------------------------------------------
 
 #include "clustering_includes.h"
@@ -117,38 +116,7 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
-  // 4. pileupRemoval
-  //   Removes tracks that are significantly associated with a non-HS reco
-  //   vertex.  For each track the nearest reco vertex (stored in
-  //   Track_nearestVtx_idx) is identified; if that vertex is not vertex 0
-  //   (the HS vertex) and the track-to-nearest-vertex significance is below
-  //   significanceCut, the track is dropped.  Returns the surviving subset.
-  //   Note: z₀sinθ and its uncertainty are corrected back to plain z₀ using
-  //   the track's θ and θ variance.
-  // ---------------------------------------------------------------------------
-  std::vector<int> pileupRemoval(
-    const std::vector<int>& tracks,
-    BranchPointerWrapper *branch,
-    double significanceCut
-  ) {
-    std::vector<int> output;
-    for (const auto& trk: tracks) {
-      int near = (int)branch->trackNearIdx[trk];
-      double nearZ0 = branch->trackNearZ0sin[trk] / std::sin(branch->trackTheta[trk]);
-      double nearVarZ0 = (pow(branch->trackNearZ0sinUnc[trk],2)-pow(nearZ0*std::cos(branch->trackTheta[trk])*branch->trackVarTheta[trk],2))/std::sin(branch->trackTheta[trk])*std::sin(branch->trackTheta[trk]);
-
-      double sigNear = std::abs(nearZ0 - branch->recoVtxZ[near]) / std::sqrt(nearVarZ0);
-
-      if (near != 0 && sigNear < significanceCut)
-	continue;
-
-      output.push_back(trk);
-    }
-    return output;
-  }
-
-  // ---------------------------------------------------------------------------
-  // 5. filterTracksInJets
+  // 4. filterTracksInJets
   //   Retains only tracks that lie within minDRCut of at least one reco jet
   //   with pT > MIN_JET_PT.  ΔR is computed using the standard
   //   sqrt(Δη² + Δφ²) metric.  Used to build the FILTJET collection, which
@@ -260,38 +228,7 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
-  // 5b2. calcClusterHSTimingPurity
-  //   Cluster-scoped variant of calcHSTimingPurity.  Iterates only over the
-  //   tracks in `cluster.trackIndices`, returning the fraction of HS pT that
-  //   passes the |pull| < HS_TIMING_QUALITY_CUT check.  Returns 0.0 if no
-  //   qualifying HS tracks are found (pure PU cluster — excluded from CTIME
-  //   denominator since there is no HS timing to evaluate).
-  // ---------------------------------------------------------------------------
-  float calcClusterHSTimingPurity(
-    const Cluster& cluster,
-    BranchPointerWrapper* branch
-  ) {
-    double num = 0.0, denom = 0.0;
-    for (int idx : cluster.trackIndices) {
-      if (branch->trackToTruthvtx[idx] != 0) continue;
-      if (branch->trackTimeValid[idx]  != 1) continue;
-
-      int    partIdx   = branch->trackToParticle[idx];
-      double truthTime = (partIdx != -1)
-                         ? branch->particleT[partIdx]
-                         : branch->truthVtxTime[branch->trackToTruthvtx[idx]];
-
-      double pull = std::abs(branch->trackTime[idx] - truthTime)
-                    / branch->trackTimeRes[idx];
-      double pT   = branch->trackPt[idx];
-      denom += pT;
-      if (pull < HS_TIMING_QUALITY_CUT) num += pT;
-    }
-    return (denom > 0.0) ? static_cast<float>(num / denom) : 0.0f;
-  }
-
-  // ---------------------------------------------------------------------------
-  // 5c. filterHSTracks
+  // 5b2. filterHSTracks
   //   Returns the subset of tracks that truth-link to the hard-scatter vertex
   //   (Track_truthVtx_idx == 0) and have a valid HGTD time measurement.
   //   Removes all pileup-origin and unlinked (fake) tracks from the pool.
@@ -497,15 +434,15 @@ namespace MyUtl {
 
     // ── G½. HS timing purity for TEST_MISAS gate ────────────────────────────
     float hsTimingPurity = 1.0f;
-    if (analyses.count(Score::TEST_MISAS) || analyses.count(Score::TEST_CTIME))
+    if (analyses.count(Score::TEST_MISAS))
       hsTimingPurity = calcHSTimingPurity(tracks, branch);
 
     // ── H. Per-score histogram filling ──────────────────────────────────────
     int    returnCode = 0;
     double returnVal  = -1.;
     bool passesMine = false, passesMiscl = false, passesMisas = false;
-    bool misclInDenominator = false, misasInDenominator = false, ctimeInDenominator = false;
-    bool perfEvtInDenominator = false, perfCltInDenominator = false;
+    bool misclInDenominator = false, misasInDenominator = false;
+    bool perfEvtInDenominator = false;
 
     for (auto& [score, analysis] : analyses) {
       if (DEBUG) std::cout << "Filling: " << toString(score) << '\n';
@@ -547,20 +484,10 @@ namespace MyUtl {
         bool passesGate;
         if (score == Score::TEST_MISAS) {
           // Gate on event-level HS timing purity: 100% of HS pT must have |pull|<3σ
-          passesGate = (hsTimingPurity >= 1.0f);
-        } else if (score == Score::TEST_CTIME) {
-          // Gate on cluster-level HS timing purity: 100% of HS pT must have |pull|<3σ
-          float cp = calcClusterHSTimingPurity(scored, branch);
-          passesGate = (cp >= 1.0f);
+          passesGate = (hsTimingPurity >= 0.95f);
         } else if (score == Score::PERF_EVT) {
           // MISCL ∧ MISAS: pure cluster AND all event-level HS tracks correctly timed
-          passesGate = (purity > 0.75f) && (hsTimingPurity >= 1.0f);
-        } else if (score == Score::PERF_CLT) {
-          // CTIME ∧ MISCL: cluster HS tracks correctly timed AND cluster is pure (>75% HS)
-          // Note: CTIME ∧ MISAS is trivially equivalent to MISAS alone because MISAS
-          // (event-level 100% timing) strictly implies CTIME (cluster is a subset).
-          float cp = calcClusterHSTimingPurity(scored, branch);
-          passesGate = (cp >= 1.0f) && (purity > 0.75f);
+          passesGate = (purity > 0.75f) && (hsTimingPurity >= 0.95f);
         } else {
           float purityCut = score.hasThreshold() ? score.threshold : 0.75f;
           passesGate = (purity > purityCut);
@@ -569,9 +496,7 @@ namespace MyUtl {
         if (passesGate) {
           if (score == Score::TEST_MISCL) misclInDenominator = true;
           if (score == Score::TEST_MISAS) misasInDenominator = true;
-          if (score == Score::TEST_CTIME) ctimeInDenominator = true;
           if (score == Score::PERF_EVT)   perfEvtInDenominator = true;
-          if (score == Score::PERF_CLT)   perfCltInDenominator = true;
           analysis.fillTotals(ev);
         } else {
           passes = false;
@@ -602,9 +527,7 @@ namespace MyUtl {
       if (!score.requiresPurity ||
           (score == Score::TEST_MISCL && misclInDenominator) ||
           (score == Score::TEST_MISAS && misasInDenominator) ||
-          (score == Score::TEST_CTIME && ctimeInDenominator) ||
-          (score == Score::PERF_EVT  && perfEvtInDenominator) ||
-          (score == Score::PERF_CLT  && perfCltInDenominator)) {
+          (score == Score::PERF_EVT  && perfEvtInDenominator)) {
         analysis.fillDiffs   (ev, diff);
         analysis.fillPurities(ev, purity);
       }

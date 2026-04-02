@@ -60,7 +60,7 @@ inline void ATLASLabel(Double_t x, Double_t y,
 /// @param text  LaTeX string (default: "#sqrt{s} = 14 TeV")
 /// @param color Text colour (default: black = 1)
 inline void ATLASEnergyLabel(Double_t x, Double_t y,
-                             const char* text = "#sqrt{s} = 14 TeV HL-LHC",
+                             const char* text = "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv.",
                              Color_t color = 1) {
   TLatex p;
   p.SetNDC();
