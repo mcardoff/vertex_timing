@@ -433,29 +433,29 @@ namespace MyUtl {
       int pbins = (int)((pMax - pMin) / pWid);
       int fbins = (int)((foldMax - xMin) / xWid);
       hist = std::make_unique<TH2D>(
-				    TString::Format("%s_%s_%s", name.Data(), toString(score),times),
+				    TString::Format("%s_%s_%s", name.Data(), score.toString(),times),
 				    TString::Format("%s t_{0} - TruthVtx t_{0} vs %s (%s);%s;#Delta t[ps]",
-	toString(score), title, times, title),
+	score.toString(), title, times, title),
 	fbins, xMin, foldMax, ybins, yMin, yMax);
 
       effPass = std::make_unique<TH1D>(
-				       TString::Format("good_%s_%s_%s", name.Data(), toString(score), times),
+				       TString::Format("good_%s_%s_%s", name.Data(), score.toString(), times),
 				       TString::Format("%s Eff. Events Count vs %s (%s);Entries;%s", 
-	     toString(score), title, times, title),
+	     score.toString(), title, times, title),
 	fbins, xMin, foldMax);
       
       effTotal = std::make_unique<TH1D>(
-					TString::Format("flat_%s_%s_%s", name.Data(), toString(score), times),
+					TString::Format("flat_%s_%s_%s", name.Data(), score.toString(), times),
 					TString::Format("%s Eff. Events Count vs %s (%s);Entries;%s", 
-	     toString(score), title, times, title),
+	     score.toString(), title, times, title),
 	fbins, xMin, foldMax);
       
       params = std::make_unique<FitParams>(
-					   title, times, TString::Format("%s_%s_%s", name.Data(), toString(score),times),
+					   title, times, TString::Format("%s_%s_%s", name.Data(), score.toString(),times),
 	xMin, foldVal, foldMax, xWid,COLORS[score.id % COLORS.size()]);
 
       effEstimate = std::make_unique<TH1D>(
-					   TString::Format("effest_%s_%s_%s", name.Data(), toString(score), times),
+					   TString::Format("effest_%s_%s_%s", name.Data(), score.toString(), times),
 					   TString::Format("Core Fraction (#pm%d ps) vs %s (%s);%s;Core Fraction",
 	     (int)(PASS_SIGMA), title, times, title),
 	fbins, xMin, foldMax);
@@ -464,9 +464,9 @@ namespace MyUtl {
       effEstimate->SetLineStyle(1);
 
       purity = std::make_unique<TH2D>(
-				      TString::Format("cluster_purity_%s_%s_%s", name.Data(), toString(score),times),
+				      TString::Format("cluster_purity_%s_%s_%s", name.Data(), score.toString(),times),
 				      TString::Format("%s Cluster Purity vs %s (%s);%s;Cluster Purity",
-	     toString(score), title, times, title),
+	     score.toString(), title, times, title),
 	xbins, xMin, xMax, pbins, pMin, pMax);
       purity->SetLineColor(COLORS[score.id % COLORS.size()]);
     }
@@ -728,7 +728,7 @@ namespace MyUtl {
 
       // Header
       std::cout << '\n' << SEP << '\n';
-      std::string headerLabel = std::string(this->times) + "  " + toStringShort(this->scoreToUse);
+      std::string headerLabel = std::string(this->times) + "  " + this->scoreToUse.toStringShort();
       // The data columns ("Pass", "Total", "Fail", "Eff (%)") are each w_col wide
       // and must end at the same position as the separator (w_bin + w_col*4).
       // Compute the width of the first column header field so it starts right
@@ -795,7 +795,7 @@ namespace MyUtl {
 
       // Header
       std::cout << '\n' << SEP << '\n';
-      std::string headerLabel = std::string(this->times) + "  " + toStringShort(this->scoreToUse);
+      std::string headerLabel = std::string(this->times) + "  " + this->scoreToUse.toStringShort();
       int firstColW = (W_BIN + W_COL) - (int)headerLabel.size();
       if (firstColW < 1) firstColW = 1;
       std::cout << headerLabel
@@ -918,7 +918,7 @@ namespace MyUtl {
       timeIDer.ReplaceAll("+", "");
       timeIDer.ToLower();
 
-      TString scoreIDer(toStringShort(score));
+      TString scoreIDer(score.toStringShort());
       scoreIDer.ReplaceAll("_", "");
       scoreIDer.ReplaceAll(" ", "_");
       scoreIDer.ReplaceAll(".", "");
@@ -992,7 +992,7 @@ namespace MyUtl {
         return std::make_unique<TH1D>(
 				      TString::Format("%s_%s", prefix, filenameIDer.Data()),
 				      TString::Format("%s %s t_{0}-TruthVtx t_{0} (%s);#Delta t[ps];Entries",
-               catLabel, toString(score), timetypeIDer),
+               catLabel, score.toString(), timetypeIDer),
           (int)((DIFF_MAX-DIFF_MIN)/DIFF_WIDTH), DIFF_MIN, DIFF_MAX);
       };
       inclusiveResoSig         = makeResoHist("reso_sig",    "Signal");
@@ -1011,7 +1011,7 @@ namespace MyUtl {
 
       inclusivePurity = std::make_unique<TH1D>(
 					       TString::Format("purity_%s", filenameIDer.Data()),
-					       TString::Format("%s Purity (%s);Purity;Entries", toString(score), timetypeIDer),
+					       TString::Format("%s Purity (%s);Purity;Entries", score.toString(), timetypeIDer),
 	(int)((PURITY_MAX-PURITY_MIN)/PURITY_WIDTH), PURITY_MIN, PURITY_MAX);
 
       // Cache raw PlotObj* pointers for fast per-event fill access (no map lookup)
@@ -1164,8 +1164,8 @@ namespace MyUtl {
 	  gr->SetMarkerStyle(obj->GetMarkerStyle());
 	  gr->SetMarkerSize(obj->GetMarkerSize());
 	  gr->SetLineWidth(obj->GetLineWidth());
-	  // legend->AddEntry(gr, TString::Format("%s (%s)", toString(plt->scoreToUse), plt->times), "lep");
-	  legend->AddEntry(gr, TString::Format("%s", toString(plt->scoreToUse)), "lep");
+	  // legend->AddEntry(gr, TString::Format("%s (%s)", plt->scoreToUse.toString(), plt->times), "lep");
+	  legend->AddEntry(gr, TString::Format("%s", plt->scoreToUse.toString()), "lep");
 	  if (first) {
 	    gr->SetTitle(TString::Format("%s vs %s", title, plt->xtitle));
 	    gr->Draw("AP");
@@ -1181,8 +1181,8 @@ namespace MyUtl {
 	} else {
 	  obj->SetLineColor(COLORS[colorIdx % COLORS.size()]);
 	  obj->SetMarkerColor(COLORS[colorIdx % COLORS.size()]);
-	  // legend->AddEntry(obj, TString::Format("%s (%s)", toString(plt->scoreToUse), plt->times), "lep");
-	  legend->AddEntry(obj, TString::Format("%s", toString(plt->scoreToUse)), "lep");
+	  // legend->AddEntry(obj, TString::Format("%s (%s)", plt->scoreToUse.toString(), plt->times), "lep");
+	  legend->AddEntry(obj, TString::Format("%s", plt->scoreToUse.toString()), "lep");
 	  if (first) {
 	    obj->SetTitle(TString::Format("%s vs %s", title, plt->xtitle));
 	    obj->Draw("E1");
@@ -1354,6 +1354,7 @@ namespace MyUtl {
       leg->AddEntry(fit1, "Double Gaussian Fit", "l");
 
       stack->Draw("HIST");
+      stack->SetMaximum(stack->GetMaximum() * (logScale ? 8.0 : 1.4));
       stack->GetXaxis()->SetRangeUser(xMin, xMax);
       stack->GetXaxis()->SetTitle("#Delta t [ps]");
       stack->GetYaxis()->SetTitle("Entries");
@@ -1367,7 +1368,7 @@ namespace MyUtl {
       double sigBkgRatio = 100* sigMixInt / (bkgInt+sigMixInt);
       ATLASLabel(0.18, 0.88, "Simulation Internal");
       ATLASEnergyLabel(0.18, 0.82);
-      latex.DrawLatexNDC(0.20, 0.76, toString(plt->score));
+      latex.DrawLatexNDC(0.20, 0.76, plt->score.toStringShort());
       latex.DrawLatexNDC(0.20, 0.70, TString::Format("#sigma_{1}^{dgaus}=%.2f", dgSigma1));
       latex.DrawLatexNDC(0.20, 0.64, TString::Format("#sigma_{2}^{dgaus}=%.2f", dgSigma2));
       latex.DrawLatexNDC(0.20, 0.58, TString::Format("(S+M)/B=%.2f", sigBkgRatio));

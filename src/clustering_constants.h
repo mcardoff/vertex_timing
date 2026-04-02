@@ -235,18 +235,42 @@ namespace MyUtl {
   // Columns: id  longName  shortName  own    pur    thr     distCut           method                        useZ0  filter
   //          ──  ────────  ─────────  ─────  ─────  ──────  ────────────────  ──────────────────────────    ─────  ──────────────────────
   // Scores without a dedicated collection (distCut omitted → -1, ignored)
-  inline const Score Score::HGTD       = {  0, "HGTD Algorithm"                , "HGTD"     , true , false, -1.0f };
-  inline const Score Score::TRKPT      = {  1, "#Sigma p_{T}"                  , "TRKPT"    , false, false, -1.0f };
-  inline const Score Score::TRKPTZ     = {  2, STR_TRKPTZ + " [Baseline Algorithm]" , "TRKPTZ"   , false, false, -1.0f };
-  inline const Score Score::PASS       = {  3, "Pass Cluster"                  , "PASS"     , false, false, -1.0f };
-  inline const Score Score::Z_REFINED  = {  5, "2#sigma z_{0} Refinement"      , "Z_REFINED", false, false, -1.0f };
-  inline const Score Score::CONE_BDT   = {  8, "Cone (BDT)"                    , "CONE_BDT" , true , false,  0.3f};
-  inline const Score Score::HGTD_SORT  = { 10, "HGTD BDT (pT-sorted)"          , "HGTD_SORT", true , false,  0.3f};
-  inline const Score Score::TEST_ML    = { 11, "DNN Selection"                 , "TEST_ML"  , false, false,  0.3f};
+  inline const Score Score::HGTD       = {
+    0, "HGTD Algorithm", "HGTD",
+    true , false, -1.0f
+  };
+  inline const Score Score::TRKPT      = {
+    1, "#Sigma p_{T}", "TRKPT",
+    false, false, -1.0f
+  };
+  inline const Score Score::TRKPTZ     = {  
+    2, STR_TRKPTZ + " [Baseline Algorithm]", "TRKPTZ",
+    false, false, -1.0f
+  };
+  inline const Score Score::PASS       = {  
+    3, "Pass Cluster", "PASS",
+    false, false, -1.0f
+  };
+  inline const Score Score::Z_REFINED  = {  
+    5, "2#sigma z_{0} Refinement","Z_REFINED",
+    false, false, -1.0f
+  };
+  inline const Score Score::CONE_BDT   = {  
+    8, "Cone (BDT)", "CONE_BDT",
+    true , false,  0.3f
+  };
+  inline const Score Score::HGTD_SORT  = { 
+    10, "HGTD BDT (pT-sorted)", "HGTD_SORT",
+    true , false,  0.3f
+  };
+  inline const Score Score::TEST_ML    = { 
+    11, "DNN Selection", "TEST_ML",
+    false, false,  0.3f
+  };
 
-  inline const Score Score::TEST_MISCL = { 12, STR_TRKPTZ + " [Events with Pure Clusters]"   , "MISCL",    false, true, -1.f };
-  inline const Score Score::TEST_MISAS = { 13, STR_TRKPTZ + " [Events with Perfect Timing]"  , "MISAS",    false, true, -1.f };
-  inline const Score Score::PERF_EVT   = { 17, STR_TRKPTZ + " [Pure Clusters + Perf. Timing]", "PERF_EVT", false, true, -1.f };
+  inline const Score Score::TEST_MISCL = { 12, STR_TRKPTZ + " [Events with Pure Clusters]"   , "TRKPTZ Pure Clust.",    false, true, -1.f };
+  inline const Score Score::TEST_MISAS = { 13, STR_TRKPTZ + " [Events with Perfect Timing]"  , "TRKPTZ Perf. Time",    false, true, -1.f };
+  inline const Score Score::PERF_EVT   = { 17, STR_TRKPTZ + " [Pure Clusters + Perf. Timing]", "TRKPTZ Pure Clust./Perf. Time", false, true, -1.f };
 
   // Scores with a dedicated collection (distCut ≥ 0 → buildsCollection() = true)
   inline const Score Score::CONE       = {  7, "Cone"                       , "CONE",     true , false, -1.f, DIST_CUT_CONE,      ClusteringMethod::CONE      };
@@ -265,10 +289,6 @@ namespace MyUtl {
     Score::ZT_ITER,
     Score::PERF_EVT,
   };
-
-  // Backward-compatible free-function wrappers (existing callsites unchanged)
-  inline const char* toString(Score s)      { return s.toString(); }
-  inline const char* toStringShort(Score s) { return s.toStringShort(); }
 
   // ---------------------------------------------------------------------------
   // 6. FitParamFields enum + string converter

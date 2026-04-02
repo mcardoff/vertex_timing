@@ -17,6 +17,10 @@ find_package(Boost COMPONENTS filesystem REQUIRED)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=native -g")
 
+# Export compile commands so clangd (lsp-mode, clangd, etc.) can resolve
+# ROOT and Boost include paths without manual configuration.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # Add your executables, specifying the path to the source files
 add_executable(clustering_dt src/clustering_dt.cxx)
 add_executable(hgtd_matching util/hgtd_matching.cxx)
@@ -32,6 +36,7 @@ add_executable(mintrackpt_sweep util/mintrackpt_sweep.cxx)
 add_executable(cone_iter_k_sweep util/cone_iter_k_sweep.cxx)
 add_executable(dist_refine_sweep util/dist_refine_sweep.cxx)
 add_executable(nsigma_sweep util/nsigma_sweep.cxx)
+add_executable(trkptz_alpha_sweep util/trkptz_alpha_sweep.cxx)
 add_executable(rate_diagnostics util/rate_diagnostics.cxx)
 add_executable(failure_decomposition util/failure_decomposition.cxx)
 
@@ -113,6 +118,13 @@ target_include_directories(cone_iter_k_sweep
 )
 
 target_include_directories(nsigma_sweep
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/util
+        ${ROOT_INCLUDE_DIRS}
+)
+
+target_include_directories(trkptz_alpha_sweep
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/util
@@ -220,6 +232,12 @@ target_link_libraries(dist_refine_sweep
 )
 
 target_link_libraries(nsigma_sweep
+    PRIVATE
+        ${ROOT_LIBRARIES}
+        Boost::filesystem
+)
+
+target_link_libraries(trkptz_alpha_sweep
     PRIVATE
         ${ROOT_LIBRARIES}
         Boost::filesystem

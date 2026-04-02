@@ -172,8 +172,10 @@ inline void saveGraphPair(
   double        yMin,
   double        yMax,
   int           hsSplit,
-  double        refVal   = -1,
-  const char*   refLabel = nullptr)
+  double        refVal    = -1,      // horizontal reference line (y value); <0 = off
+  const char*   refLabel  = nullptr,
+  double        vRefVal   = -1,      // vertical reference line (x value); <0 = off
+  const char*   vRefLabel = nullptr)
 {
   canvas->cd();
 
@@ -210,6 +212,17 @@ inline void saveGraphPair(
     refLine->Draw("SAME");
     leg->AddEntry(refLine, refLabel, "l");
   }
+
+  bool hasVRef = (vRefVal >= 0 && vRefLabel != nullptr);
+  if (hasVRef) {
+    TLine* vLine = new TLine(vRefVal, yMin, vRefVal, yMax);
+    vLine->SetLineColor(kGray + 2);
+    vLine->SetLineWidth(2);
+    vLine->SetLineStyle(7);
+    vLine->Draw("SAME");
+    leg->AddEntry(vLine, vRefLabel, "l");
+  }
+
   leg->Draw("SAME");
 
   canvas->Print(fname.c_str());

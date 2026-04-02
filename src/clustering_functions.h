@@ -532,7 +532,7 @@ namespace MyUtl {
 
     for (Score score: SCORE_REGISTRY) {
       if (DEBUG)
-        std::cout << "SCORE: " << toString(score) << '\n';
+        std::cout << "SCORE: " << score.toString() << '\n';
       if (score.usesOwnCollection)
 	continue;
 

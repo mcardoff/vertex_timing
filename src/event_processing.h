@@ -304,7 +304,7 @@ namespace MyUtl {
     if (branch->recoVtxValid[0] == 1 && analyses.count(Score::HGTD)) {
       auto col = clusterTracksInTime(tracks, branch, 3.0,
                                      false, true, -1,
-                                     ClusteringMethod::SIMULTANEOUS, false);
+                                     ClusteringMethod::SIMULTANEOUS, false, false, true);
       auto qual = filterClusters(col);
       if (!qual.empty())
         chosen[Score::HGTD.id] = chooseHGTDCluster(qual, branch);
@@ -445,7 +445,7 @@ namespace MyUtl {
     bool perfEvtInDenominator = false;
 
     for (auto& [score, analysis] : analyses) {
-      if (DEBUG) std::cout << "Filling: " << toString(score) << '\n';
+      if (DEBUG) std::cout << "Filling: " << score.toString() << '\n';
 
       // Skip scores with invalid or missing cluster data
       if (branch->recoVtxValid[0] == 0 && score == Score::HGTD)   continue;
