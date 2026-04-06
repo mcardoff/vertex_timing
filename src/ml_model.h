@@ -7,9 +7,9 @@
 //   selection.  No external inference framework is required; weights are
 //   loaded from a JSON file exported by temp-conversion-dir/convert_model.py.
 //
-//   Architecture: 11 → 128 → 64 → 32 → 1
+//   Architecture: 8 → 128 → 64 → 32 → 1
 //   Activations:  ReLU on hidden layers, Sigmoid on the output layer.
-//   Parameters:   11,841
+//   Parameters:   11,521
 //
 //   Performance design:
 //     • Weight matrices are stored as flat row-major 1D vectors for cache
@@ -50,7 +50,7 @@ private:
     //   Compile-time constants; must match the exported model exactly.
     //   Changing these requires retraining and re-exporting weights.
     // -----------------------------------------------------------------------
-    static constexpr int N_IN  = 11;
+    static constexpr int N_IN  = 8;
     static constexpr int N_H1  = 128;
     static constexpr int N_H2  = 64;
     static constexpr int N_H3  = 32;

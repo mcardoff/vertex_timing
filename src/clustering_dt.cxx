@@ -52,7 +52,7 @@ auto buildAnalysisMap(
 
   // Scores active in all scenarios
   m.emplace(Score::TRKPTZ,     AnalysisObj(label, Score::TRKPTZ    ));
-  // m.emplace(Score::TEST_ML,    AnalysisObj(label, Score::TEST_ML   ));
+  m.emplace(Score::TEST_ML,    AnalysisObj(label, Score::TEST_ML   ));
   // m.emplace(Score::PASS,       AnalysisObj(label, Score::PASS      ));
   m.emplace(Score::TEST_MISCL, AnalysisObj(label, Score::TEST_MISCL));
   m.emplace(Score::Z_REFINED,  AnalysisObj(label, Score::Z_REFINED ));
@@ -191,13 +191,13 @@ void makeComparisonPlots(
   // 		&mapHGTD.at(Score::CONE)
   // 	    });
 
-  // // HGTD base times: TRKPTZ vs DNN
-  // moneyPlot(TString::Format("%s/trkptz_dnn_hgtd_%s.pdf", compSubdir.c_str(), key), key, canvas,
-  //           {
-  //               &mapHGTD.at(Score::HGTD),
-  //               &mapHGTD.at(Score::TRKPTZ),
-  //               &mapHGTD.at(Score::TEST_ML)
-  // 	    });
+  // HGTD base times: TRKPTZ vs DNN
+  moneyPlot(TString::Format("%s/trkptz_dnn_hgtd_%s.pdf", compSubdir.c_str(), key), key, canvas,
+            {
+                &mapHGTD.at(Score::HGTD),
+                &mapHGTD.at(Score::TRKPTZ),
+                &mapHGTD.at(Score::TEST_ML)
+	    });
 
   // // TRKPTZ full sample vs TRKPTZ restricted to highly pure clusters
   // moneyPlot(TString::Format("%s/pure_clusters_%s.pdf", compSubdir.c_str(), key), key, canvas,

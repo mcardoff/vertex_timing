@@ -147,7 +147,7 @@ namespace MyUtl {
   const double Z_MIN = -200, Z_MAX = 200, FOLD_Z = 100;
   const double Z_WIDTH = 10.0;
 
-  const double EFF_YMIN = 0.0, EFF_YMAX = 1.25;
+  const double EFF_YMIN = 0.7, EFF_YMAX = 1.08;
   const double PUR_YMIN = 0.0, PUR_YMAX = 1.5;
   const double RES_YMIN = 0.0, RES_YMAX = 40.0;
   const double BKG_RES_YMIN = 90.0, BKG_RES_YMAX = 500.0;

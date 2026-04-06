@@ -37,6 +37,7 @@ add_executable(cone_iter_k_sweep util/cone_iter_k_sweep.cxx)
 add_executable(dist_refine_sweep util/dist_refine_sweep.cxx)
 add_executable(nsigma_sweep util/nsigma_sweep.cxx)
 add_executable(trkptz_alpha_sweep util/trkptz_alpha_sweep.cxx)
+add_executable(trkptz_resunits_sweep util/trkptz_resunits_sweep.cxx)
 add_executable(rate_diagnostics util/rate_diagnostics.cxx)
 add_executable(failure_decomposition util/failure_decomposition.cxx)
 
@@ -125,6 +126,13 @@ target_include_directories(nsigma_sweep
 )
 
 target_include_directories(trkptz_alpha_sweep
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/util
+        ${ROOT_INCLUDE_DIRS}
+)
+
+target_include_directories(trkptz_resunits_sweep
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/util
@@ -238,6 +246,12 @@ target_link_libraries(nsigma_sweep
 )
 
 target_link_libraries(trkptz_alpha_sweep
+    PRIVATE
+        ${ROOT_LIBRARIES}
+        Boost::filesystem
+)
+
+target_link_libraries(trkptz_resunits_sweep
     PRIVATE
         ${ROOT_LIBRARIES}
         Boost::filesystem

@@ -24,6 +24,8 @@
 
 #define debug false
 
+using namespace MyUtl;
+
 // cut variables
 auto min_jets          =  2;    // min number of jets
 auto min_jetpt         =  30.0; // self explanatory
@@ -40,7 +42,7 @@ auto t_cut = 60;
 TGraph* generate_roc(TH1D* PU_hist, TH1D* HS_hist) {
   int bin = PU_hist->GetNbinsX();
   std::vector<float> vector_x, vector_y;
-  for (int i = 2; i <= bin; ++i) {
+  for (int i = 1; i <= bin; ++i) {
     double HS_eff = HS_hist->Integral(i, bin+1) / HS_hist->Integral();
     double PU_mistag = PU_hist->Integral(i, bin+1) / PU_hist->Integral();
     
@@ -260,22 +262,25 @@ int main() {
     // Perform clustering to get vertex time
     std::vector<int> hgtd_track_indices;
     for(int track_idx = 0; track_idx < branch.trackEta.GetSize(); track_idx++) {
-      double this_eta = branch.trackEta[track_idx];
+      double this_eta = std::abs(branch.trackEta[track_idx]);
+      double this_pt  = branch.trackPt[track_idx];
       bool hasValidTime = branch.trackTimeValid[track_idx] == 1;
       bool quality = branch.trackQuality[track_idx];
 
-      // HGTD acceptance: 2.38 < |η| < 4.0
-      bool in_hgtd_acceptance = std::abs(this_eta) > 2.38 && std::abs(this_eta) < 4.0;
+      bool in_hgtd_acceptance = this_eta > MIN_ABS_ETA_TRACK && this_eta < MAX_ABS_ETA_TRACK;
+      bool passes_pt = this_pt > MIN_TRACK_PT && this_pt < MAX_TRACK_PT;
 
-      if (in_hgtd_acceptance && hasValidTime && quality) {
+      if (in_hgtd_acceptance && passes_pt && hasValidTime && quality) {
         hgtd_track_indices.push_back(track_idx);
       }
     }
 
     // Run clustering on HGTD tracks
     // Create simple clusters (one per track)
-    std::map<int, double> emptyMap; // empty maps for non-smeared times
-    std::vector<MyUtl::Cluster> all_clusters = MyUtl::clusterTracksInTime(hgtd_track_indices, &branch, 3.0, false, true, 30.0, MyUtl::ClusteringMethod::CONE, false);
+    std::vector<MyUtl::Cluster> all_clusters = MyUtl::clusterTracksInTime(
+      hgtd_track_indices, &branch,
+      DIST_CUT_CONE, /*useSmearedTimes=*/false, /*checkTimeValid=*/true,
+      IDEAL_TRACK_RES, MyUtl::ClusteringMethod::ITERATIVE, /*usez0=*/false);
 
     
     // Get best cluster time (highest TRKPT scoring cluster)
@@ -333,15 +338,13 @@ int main() {
     }
 
     for(int track_idx = 0; track_idx < branch.trackEta.GetSize(); track_idx++) {
-      double this_pt = branch.trackPt[track_idx];
+      double this_pt  = branch.trackPt[track_idx];
+      double this_eta = std::abs(branch.trackEta[track_idx]);
 
-      if (this_pt < 1.0)
+      if (this_pt < MIN_TRACK_PT || this_pt > MAX_TRACK_PT)
         continue;
 
-      if (std::abs(branch.trackEta[track_idx]) < 2.38)
-        continue;
-
-      if (std::abs(branch.trackEta[track_idx]) > 4.0)
+      if (this_eta < MIN_ABS_ETA_TRACK || this_eta > MAX_ABS_ETA_TRACK)
         continue;
 
       if (not(branch.trackQuality[track_idx] == true))

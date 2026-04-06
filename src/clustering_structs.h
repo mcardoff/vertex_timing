@@ -832,9 +832,9 @@ namespace MyUtl {
 
     // -----------------------------------------------------------------------
     // calcFeatures
-    //   Extracts the 10 features used as DNN input and applies the stored
-    //   normalisation (means/stds from training) to return a unit-normalised
-    //   feature vector.  Features (in training order):
+    //   Extracts the 8 features used as DNN input and applies stored
+    //   normalisation (means/stds from normalization_params.json) to return a
+    //   unit-normalised feature vector.  Features (in training order):
     //     0  delta_z              — cluster z relative to reco primary vertex
     //     1  delta_z_resunits     — delta_z in units of cluster_z_sigma
     //     2  cluster_z_sigma      — precision-weighted z₀ uncertainty
@@ -843,132 +843,69 @@ namespace MyUtl {
     //     5  cluster_qOverP       — precision-weighted charge-over-momentum
     //     6  cluster_qOverP_sigma — q/p uncertainty
     //     7  cluster_sumpt        — scalar sum of constituent track pT
-    //     8  cluster_time_sigma   — precision-weighted HGTD time uncertainty
-    //                               (= sigmas[0], analogous to cluster_z_sigma)
-    //     9  cluster_n_tracks     — number of constituent tracks
-    //   Normalisation parameters are stored as static arrays so they are
-    //   allocated only once regardless of how many clusters are evaluated.
     //
-    //     10 cluster_dR           — min ΔR between the pT-weighted cluster
-    //                               centroid (η,φ) and the nearest topo jet
-    //                               passing MIN_JET_PT
-    //   NOTE: MEANS[10], STDS[10] are placeholders — update from
-    //   normalization_params.json after retraining with the new feature.
-    // -----------------------------------------------------------------------
-    // -----------------------------------------------------------------------
-    // calcFeatures
     //   Returns {normalised feature vector, raw deltaZ}.
-    //   The raw deltaZ is returned alongside the features so updateScores can
-    //   compute TRKPTZ without repeating the z weighted-average loop.
-    //
-    //   Single-pass optimisation: the two original track loops (one for
-    //   z/d0/q/p/sumpt, one for pT-weighted centroid η/φ) are merged into a
-    //   single scan over trackIndices so each branch array is read once.
+    //   The raw deltaZ is returned alongside so updateScores can compute
+    //   TRKPTZ without repeating the z weighted-average loop.
     // -----------------------------------------------------------------------
     std::pair<std::vector<float>, float> calcFeatures(BranchPointerWrapper *branch) {
       float znum  = 0.f, zden  = 0.f;
       float dnum  = 0.f, dden  = 0.f;
       float qpnum = 0.f, qpden = 0.f;
       float sumpt = 0.f;
-      float etaSum = 0.f, phiSum = 0.f; // for pT-weighted centroid
 
-      // Single pass: accumulate all per-track quantities together
       for (auto trk: trackIndices) {
-        float trkZ   = branch->trackZ0[trk],  trkVarZ = branch->trackVarZ0[trk];
-        float trkD   = branch->trackD0[trk],  trkVarD = branch->trackVarD0[trk];
-        float trkQ   = branch->trackQP[trk],  trkVarQ = branch->trackVarQp[trk];
-        float trkPt  = branch->trackPt[trk];
-        float trkEta = branch->trackEta[trk];
-        float trkPhi = branch->trackPhi[trk];
+        float trkVarZ = branch->trackVarZ0[trk];
+        float trkVarD = branch->trackVarD0[trk];
+        float trkVarQ = branch->trackVarQp[trk];
 
-        znum += trkZ / trkVarZ;  zden += 1.f / trkVarZ;
-        dnum += trkD / trkVarD;  dden += 1.f / trkVarD;
-        qpnum += trkQ / trkVarQ; qpden += 1.f / trkVarQ;
-        sumpt   += trkPt;
-        etaSum  += trkPt * trkEta;
-        phiSum  += trkPt * trkPhi;
+        znum  += branch->trackZ0[trk] / trkVarZ;  zden  += 1.f / trkVarZ;
+        dnum  += branch->trackD0[trk] / trkVarD;  dden  += 1.f / trkVarD;
+        qpnum += branch->trackQP[trk] / trkVarQ;  qpden += 1.f / trkVarQ;
+        sumpt += branch->trackPt[trk];
       }
 
-      // Calculate cluster properties
-      float clusterZ = znum / zden;
-      float clusterZSigma = 1.0f / std::sqrt(zden);
-      float clusterD0 = dnum / dden;
-      float clusterD0Sigma = 1.0f / std::sqrt(dden);
-      float clusterQOverP = qpnum / qpden;
+      float clusterZ           = znum / zden;
+      float clusterZSigma      = 1.0f / std::sqrt(zden);
+      float clusterD0          = dnum / dden;
+      float clusterD0Sigma     = 1.0f / std::sqrt(dden);
+      float clusterQOverP      = qpnum / qpden;
       float clusterQOverPSigma = 1.0f / std::sqrt(qpden);
 
-      // Feature 8: precision-weighted time uncertainty
-      // sigmas[0] is set by makeSimpleClusters to 1/sqrt(sum(1/sigma_t^2))
-      float clusterTimeSigma = static_cast<float>(this->sigmas.at(0));
-
-      // Feature 9: constituent track multiplicity
-      float clusterNTracks   = static_cast<float>(this->trackIndices.size());
-
-      // Feature 10: min ΔR between pT-weighted cluster centroid and nearest jet
-      // sumpt > 0 always (at least one track), so no guard needed.
-      float clusterDR = -1.0f;
-      {
-        float cEta = etaSum / sumpt;
-        float cPhi = phiSum / sumpt;
-        double minDR = 1e9;
-        for (int j = 0; j < (int)branch->topoJetPt.GetSize(); ++j) {
-          if (branch->topoJetPt[j] < MIN_JET_PT) continue;
-          double deta = branch->topoJetEta[j] - cEta;
-          double dphi = TVector2::Phi_mpi_pi(branch->topoJetPhi[j] - cPhi);
-          double dR   = std::sqrt(deta*deta + dphi*dphi);
-          if (dR < minDR) minDR = dR;
-        }
-        if (minDR < 1e8) clusterDR = static_cast<float>(minDR);
-      }
-
-      // Reference vertex (primary vertex)
-      float refVtxZ = branch->recoVtxZ[0];
-
-      // Calculate delta_z and delta_z in resolution units
-      float deltaZ = clusterZ - refVtxZ;
+      float deltaZ         = clusterZ - branch->recoVtxZ[0];
       float deltaZResunits = deltaZ / clusterZSigma;
 
-      // Normalization parameters (static: allocated once, never reconstructed)
-      static const float MEANS[11] = {
-        0.000181542369520147,  // delta_z mean
-        0.0022696158408701665,  // delta_z_resunits mean
-        1.0721281960578108,  // cluster_z_sigma mean
-        -0.0025243291487635593,  // cluster_d0 mean
-        0.08665513919653857,  // cluster_d0_sigma mean
-        1.9620804663321413e-07,  // cluster_qOverP mean
-        4.9269252726781045e-06,  // cluster_qOverP_sigma mean
-        14.154102551101227,  // cluster_sumpt mean
-        17.277764049475678,  // cluster_time_sigma mean
-        5.649361497551156,  // cluster_n_tracks mean
-        1.7420735517923134  // cluster_dR mean
+      // Normalization parameters from share/models/normalization_params.json
+      static const float MEANS[8] = {
+        0.005726042277307877f,    // delta_z
+        0.006149715420260727f,    // delta_z_resunits
+        0.46085691198392087f,     // cluster_z_sigma
+        0.00011167975881416954f,  // cluster_d0
+        0.039828664684699776f,    // cluster_d0_sigma
+        2.329788124947659e-07f,   // cluster_qOverP
+        2.30744214610725e-06f,    // cluster_qOverP_sigma
+        24.63328638861904f        // cluster_sumpt
       };
-      static const float STDS[11] = {
-        2.7448773941025766,  // delta_z std
-        1.7700623344292996,  // delta_z_resunits std
-        1.1223853949974232,  // cluster_z_sigma std
-        0.42576499860027983,  // cluster_d0 std
-        0.11750566161560266,  // cluster_d0_sigma std
-        4.238450693042457e-05,  // cluster_qOverP std
-        4.359020547359499e-06,  // cluster_qOverP_sigma std
-        21.517411638686664,  // cluster_sumpt std
-        9.664553181701693,  // cluster_time_sigma std
-        6.224281332216253,  // cluster_n_tracks std
-        1.0543692647024774  // cluster_dR std
+      static const float STDS[8] = {
+        1.2622023289815198f,      // delta_z
+        1.8759820827764306f,      // delta_z_resunits
+        0.40770942660123427f,     // cluster_z_sigma
+        0.15233806240610898f,     // cluster_d0
+        0.026736835863846682f,    // cluster_d0_sigma
+        2.1710355733359864e-05f,  // cluster_qOverP
+        1.5295933099799435e-06f,  // cluster_qOverP_sigma
+        25.339092790412018f       // cluster_sumpt
       };
 
-      // Return normalized features in training order
       std::vector<float> features = {
-        (deltaZ             - MEANS[0])  / STDS[0],   // Feature 0
-        (deltaZResunits     - MEANS[1])  / STDS[1],   // Feature 1
-        (clusterZSigma      - MEANS[2])  / STDS[2],   // Feature 2
-        (clusterD0          - MEANS[3])  / STDS[3],   // Feature 3
-        (clusterD0Sigma     - MEANS[4])  / STDS[4],   // Feature 4
-        (clusterQOverP      - MEANS[5])  / STDS[5],   // Feature 5
-        (clusterQOverPSigma - MEANS[6])  / STDS[6],   // Feature 6
-        (sumpt              - MEANS[7])  / STDS[7],   // Feature 7
-        (clusterTimeSigma   - MEANS[8])  / STDS[8],   // Feature 8
-        (clusterNTracks     - MEANS[9])  / STDS[9],   // Feature 9
-        (clusterDR          - MEANS[10]) / STDS[10],  // Feature 10
+        (deltaZ             - MEANS[0]) / STDS[0],
+        (deltaZResunits     - MEANS[1]) / STDS[1],
+        (clusterZSigma      - MEANS[2]) / STDS[2],
+        (clusterD0          - MEANS[3]) / STDS[3],
+        (clusterD0Sigma     - MEANS[4]) / STDS[4],
+        (clusterQOverP      - MEANS[5]) / STDS[5],
+        (clusterQOverPSigma - MEANS[6]) / STDS[6],
+        (sumpt              - MEANS[7]) / STDS[7],
       };
 
       return {features, deltaZ};

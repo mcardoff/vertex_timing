@@ -1258,28 +1258,20 @@ namespace MyUtl {
 	0.60, 0.65, 0.80, 0.92); // top-right: avoids tall σ bars at low track count
     canvas->Print(fname);
 
-    // Plot Efficiency — log scale
-    plotWithLegend(
-        [](auto& plt) { return plt->efficiency.get(); },
-	"Core Fraction", 0.9, 1.025,
-	0.99, "99% Core Fraction", true,                      // logY
-	0.60, 0.20, 0.80, 0.50);
-    canvas->Print(fname);
-
     // Plot Efficiency — linear scale
     plotWithLegend(
         [](auto& plt) { return plt->efficiency.get(); },
 	"Core Fraction", EFF_YMIN, EFF_YMAX,
 	0.99, "99% Core Fraction", false,                     // logY
-	0.60, 0.20, 0.80, 0.50);
+	0.60, 0.30, 0.80, 0.60);
     canvas->Print(fname);
 
     // Plot Core Fraction estimate (fraction of residuals within ±PASS_SIGMA)
-    plotWithLegend(
-        [](auto& plt) { return plt->effEstimate.get(); },
-        "Core Fraction", EFF_YMIN, EFF_YMAX,
-	0.99, "99% Core Fraction");
-    canvas->Print(fname);
+    // plotWithLegend(
+    //     [](auto& plt) { return plt->effEstimate.get(); },
+    //     "Core Fraction", EFF_YMIN, EFF_YMAX,
+    // 	0.99, "99% Core Fraction");
+    // canvas->Print(fname);
 
     plotWithLegend(
         [](auto& plt) { return plt->params->rmsDist; },
