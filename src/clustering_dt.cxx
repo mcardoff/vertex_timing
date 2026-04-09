@@ -21,12 +21,19 @@ static constexpr const char* EVTDISPLAY_FMT =
   "python3 event_display.py --file_num %s --event_num %lld --extra_time %.2f";
 
 // Set to true to print event display commands to stdout after the event loop.
-static constexpr bool PRINT_EVENT_DISPLAYS = false;
+static constexpr bool PRINT_EVENT_DISPLAYS = true;
 
 // Max event-display commands to print per low-multiplicity category.
 static constexpr int N_LOW_MULT_DISPLAY = 20;
 // HS-track count defining "low multiplicity" for the event-display sample.
 static constexpr int LOW_MULT_NHS = 5;
+
+// Max commands for each new diagnostic category.
+// (All three are gated on PRINT_EVENT_DISPLAYS; comment out individual blocks below
+//  to disable a specific category without disabling the others.)
+static constexpr int N_T_REFINED_UNCHANGED = 10;  // TRKPTZ↔T_REFINED status agrees
+static constexpr int N_MISCL_PASS          =  5;  // pure cluster, PASSES timing window
+static constexpr int N_MISAS_PASS          =  5;  // clean HS timing, PASSES timing window
 
 // ---------------------------------------------------------------------------
 // Helper: build one analysis map for a given scenario label.
@@ -161,7 +168,6 @@ void makeComparisonPlots(
                 &mapHGTD.at(Score::TRKPTZ),
 		&mapHGTD.at(Score::ZT_ITER),
 	    });
-
 
   // moneyPlot(TString::Format("%s/z_refined_ideal_%s.pdf", compSubdir.c_str(), key), key, canvas,
   //           {
@@ -354,6 +360,13 @@ auto main() -> int {
   std::vector<TString> evtDisplayHGTD, evtDisplayIdealRes, evtDisplayIdealEff;
   // Low-multiplicity (nFwdHS == LOW_MULT_NHS) pass and fail, HGTD scenario
   std::vector<TString> lowMultPass, lowMultFail;
+  // New diagnostic categories — pass and fail variants
+  std::vector<TString> tRefinedUnchanged;  // TRKPTZ & T_REFINED have the same pass/fail
+  std::vector<TString> tRefinedChanged;    // TRKPTZ & T_REFINED disagree (T_REFINED flipped outcome)
+  std::vector<TString> misclPassEvents;    // in TEST_MISCL denominator and PASSES
+  std::vector<TString> misclFailEvents;    // in TEST_MISCL denominator and FAILS  (returnCode==2)
+  std::vector<TString> misasPassEvents;    // in TEST_MISAS denominator and PASSES
+  std::vector<TString> misasFailEvents;    // in TEST_MISAS denominator and FAILS   (returnCode==3)
 
   // --- Event loop ---
   std::cout << "Starting Event Loop\n";
@@ -386,6 +399,31 @@ auto main() -> int {
     if (resHGTD.code >= 0 && resHGTD.nFwdHS == LOW_MULT_NHS) {
       TString cmd = TString::Format(EVTDISPLAY_FMT, fileNum.Data(), EVENT_NUM, resHGTD.time);
       (resHGTD.trkptzPass ? lowMultPass : lowMultFail).push_back(cmd);
+    }
+
+    if (resHGTD.code >= 0) {
+      TString cmd = TString::Format(EVTDISPLAY_FMT, fileNum.Data(), EVENT_NUM, resHGTD.time);
+
+      // Category 1: TRKPTZ and T_REFINED agree (both pass or both fail)
+      if (resHGTD.trkptzPass == resHGTD.tRefinedPass)
+        tRefinedUnchanged.push_back(cmd);
+      // Category 1 fail: T_REFINED flipped the outcome relative to TRKPTZ
+      else
+        tRefinedChanged.push_back(cmd);
+
+      // Category 2: event is in TEST_MISCL denominator (pure cluster) and PASSES
+      if (resHGTD.misclPass)
+        misclPassEvents.push_back(cmd);
+      // Category 2 fail: event did NOT enter the TEST_MISCL denominator (cluster purity ≤ 75%)
+      if (!resHGTD.misclInDenom)
+        misclFailEvents.push_back(cmd);
+
+      // Category 3: event is in TEST_MISAS denominator (clean HS timing) and PASSES
+      if (resHGTD.misasPass)
+        misasPassEvents.push_back(cmd);
+      // Category 3 fail: event did NOT enter the TEST_MISAS denominator (hsTimingPurity < 95%)
+      if (!resHGTD.misasInDenom)
+        misasFailEvents.push_back(cmd);
     }
   }
 
@@ -440,6 +478,8 @@ auto main() -> int {
     TH1D* hRaw = mapHGTD.at(Score::TRKPTZ).ptrHSTrack->effTotal.get();
     auto* hCDF = static_cast<TH1D*>(hRaw->GetCumulative());
     double total = hCDF->GetBinContent(hCDF->GetNbinsX());
+
+    std::cout << "RAWMEAN OF HSTRACKS: " << hRaw->GetMean() << std::endl;
 
     // Build CDF and survival TGraphs
     std::vector<double> xs, yCDF, ySurv;
@@ -508,27 +548,71 @@ auto main() -> int {
   // printEventDisplays("Ideal Res.: TRKPTZ passes, TEST_MISAS fails (misassignment)", evtDisplayIdealRes);
   // printEventDisplays("Ideal Eff.: TRKPTZ passes, TEST_MISAS fails (misassignment)", evtDisplayIdealEff);
 
-  // --- Low-multiplicity event displays (always printed, random subsample) ---
-  if (PRINT_EVENT_DISPLAYS) {
-    std::mt19937 rng(std::random_device{}());  // non-deterministic seed — different sample each run
-    auto subsample = [&](std::vector<TString>& v) {
-      std::shuffle(v.begin(), v.end(), rng);
-      if ((int)v.size() > N_LOW_MULT_DISPLAY)
-        v.resize(N_LOW_MULT_DISPLAY);
-    };
-    subsample(lowMultPass);
-    subsample(lowMultFail);
+  // Shared helpers for all random-subsample blocks below.
+  // Each block is guarded by PRINT_EVENT_DISPLAYS and can be independently
+  // commented out without affecting the others.
+  std::mt19937 rng(std::random_device{}());  // non-deterministic seed
+  auto subsampleN = [&](std::vector<TString>& v, int n) {
+    std::shuffle(v.begin(), v.end(), rng);
+    if ((int)v.size() > n) v.resize(n);
+  };
+  auto printGroup = [](const char* header, const std::vector<TString>& cmds) {
+    std::cout << "\n=== " << header << " (" << cmds.size() << " events) ===\n";
+    for (const auto& c : cmds) std::cout << c << '\n';
+  };
 
-    auto printGroup = [](const char* header, const std::vector<TString>& cmds) {
-      std::cout << "\n=== " << header << " (" << cmds.size() << " events) ===\n";
-      for (const auto& c : cmds) std::cout << c << '\n';
-    };
+  // --- Low-multiplicity (comment out this block to disable) ---
+  if (PRINT_EVENT_DISPLAYS) {
+    subsampleN(lowMultPass, N_LOW_MULT_DISPLAY);
+    subsampleN(lowMultFail, N_LOW_MULT_DISPLAY);
     printGroup(
       TString::Format("Low-mult (nFwdHS==%d, HGTD) — TRKPTZ PASS", LOW_MULT_NHS).Data(),
       lowMultPass);
     printGroup(
       TString::Format("Low-mult (nFwdHS==%d, HGTD) — TRKPTZ FAIL", LOW_MULT_NHS).Data(),
       lowMultFail);
+  }
+
+  // --- TRKPTZ / T_REFINED status unchanged (comment out this block to disable) ---
+  if (PRINT_EVENT_DISPLAYS) {
+    subsampleN(tRefinedUnchanged, N_T_REFINED_UNCHANGED);
+    printGroup("T_REFINED unchanged — TRKPTZ↔T_REFINED both PASS or both FAIL",
+               tRefinedUnchanged);
+  }
+
+  // --- TRKPTZ / T_REFINED status changed (comment out this block to disable) ---
+  if (PRINT_EVENT_DISPLAYS) {
+    subsampleN(tRefinedChanged, N_T_REFINED_UNCHANGED);
+    printGroup("T_REFINED changed — TRKPTZ and T_REFINED DISAGREE (outcome flipped)",
+               tRefinedChanged);
+  }
+
+  // --- TEST_MISCL passes: pure cluster, passes timing window (comment out to disable) ---
+  if (PRINT_EVENT_DISPLAYS) {
+    subsampleN(misclPassEvents, N_MISCL_PASS);
+    printGroup("TEST_MISCL: pure cluster (purity>75%), PASSES timing window",
+               misclPassEvents);
+  }
+
+  // --- TEST_MISCL not in filter: impure cluster, excluded from denominator (comment out to disable) ---
+  if (PRINT_EVENT_DISPLAYS) {
+    subsampleN(misclFailEvents, N_MISCL_PASS);
+    printGroup("TEST_MISCL: EXCLUDED from filter (cluster purity ≤ 75%)",
+               misclFailEvents);
+  }
+
+  // --- TEST_MISAS passes: clean HS timing, passes timing window (comment out to disable) ---
+  if (PRINT_EVENT_DISPLAYS) {
+    subsampleN(misasPassEvents, N_MISAS_PASS);
+    printGroup("TEST_MISAS: clean HS timing (hsTimingPurity≥95%), PASSES timing window",
+               misasPassEvents);
+  }
+
+  // --- TEST_MISAS not in filter: dirty HS timing, excluded from denominator (comment out to disable) ---
+  if (PRINT_EVENT_DISPLAYS) {
+    subsampleN(misasFailEvents, N_MISAS_PASS);
+    printGroup("TEST_MISAS: EXCLUDED from filter (hsTimingPurity < 95%)",
+               misasFailEvents);
   }
 
   return 0;

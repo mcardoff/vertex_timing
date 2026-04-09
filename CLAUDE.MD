@@ -199,11 +199,37 @@ Internally calls `runHGTD_Clustering.cxx` and parses its stdout to produce a 2-p
 - **Files**: `share/models/model_weights.json`, `model.onnx`, `normalization_params.json`
 
 ### Retraining Workflow
-1. Train in Python, export to ONNX: `tf2onnx.convert.from_keras()`
-2. Save normalization params (`scaler.mean_`, `scaler.scale_`)
-3. `python share/scripts/inspect_onnx_model.py --model share/models/model.onnx --export-weights`
-4. Copy new files to `share/models/`
-5. `cd build && make`
+
+Training happens in `~/project/clusterclassification/neural-net.ipynb` (CERN SWAN or local Jupyter).
+The notebook saves a TF SavedModel to `~/project/clusterclassification/saved_model_dir/` and writes
+`normalization_params.json` alongside it.  Then run the conversion script from `vertex_timing`:
+
+```bash
+# 1. Activate a venv that has tensorflow, tf2onnx, onnx (see Dependencies above)
+#    The venv used during initial setup lives at:
+#    ~/project/temp-conversion-dir/venv_conv/
+
+# 2. Run the all-in-one pipeline (from vertex_timing root):
+python share/scripts/export_onnx_model.py
+#    --saved-model-dir  ~/project/clusterclassification/saved_model_dir  (default)
+#    --dest-dir         ~/project/vertex_timing/share/models              (default)
+
+# 3. Rebuild
+cd build && make
+```
+
+The script performs four steps automatically:
+1. **SavedModel → ONNX** via `python -m tf2onnx.convert --saved-model ... --opset 13`
+2. **ONNX → model_weights.json** with stable `w1/b1/w2/b2/…` keys (layer order inferred
+   from tensor shapes; values row-major to match `ml_model.h`)
+3. **normalization_params.json** → updates `MEANS[N]` / `STDS[N]` arrays in
+   `src/clustering_structs.h` in-place, then copies the JSON to `share/models/`
+4. **Installs** `model_weights.json` → `share/models/`
+
+If the feature set changes (different number of inputs), also update:
+- `src/ml_model.h` — `N_INPUT` constant and network layer sizes
+- `src/clustering_structs.h` — `getFeatures()` extraction order
+- `util/export_training_data.cxx` — CSV column list
 
 ## Common Workflows
 

@@ -26,7 +26,7 @@ args = parser.parse_args()
 event_num, file_num = args.event_num, args.file_num
 
 IDEALEFF = False
-filename = f'event_displays/passing_5/event_display_{file_num}_{event_num:04d}.pdf'
+filename = f'event_displays/fail_filter_misas/event_display_{file_num}_{event_num:04d}.pdf'
 # filename = f'event_displays/failing_5/event_display_{file_num}_{event_num:04d}.pdf'
 
 def generate_cluster_colors(n):

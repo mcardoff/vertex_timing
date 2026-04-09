@@ -19,7 +19,7 @@ void runHGTD_Clustering(std::string number, Long64_t eventNum) {
 
   reader.SetEntry(eventNum);
   
-  std::vector<int> tracks = getAssociatedTracks(&branch, MIN_TRACK_PT,MAX_TRACK_PT, 3.0);
+  std::vector<int> tracks = getAssociatedTracks(&branch, MIN_TRACK_PT, MAX_TRACK_PT, 3.0);
 
   bool useSmearTimes = false, useValidTimesOnly = true, useZ0 = false;
 

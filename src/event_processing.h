@@ -340,17 +340,27 @@ namespace MyUtl {
   //
   // ---------------------------------------------------------------------------
   // EventResult — returned by processEventData
-  //   code        — -1: rejected by selection; 0: normal; 2: MISCL fail;
-  //                 3: MISAS fail
-  //   time        — TRKPTZ-selected (or TEST_MISCL) cluster time
-  //   nFwdHS      — n forward HS tracks (3σ counting step)
-  //   trkptzPass  — true if TRKPTZ passed the PASS_SIGMA timing window
+  //   code           — -1: rejected by selection; 0: normal; 2: MISCL fail;
+  //                    3: MISAS fail
+  //   time           — TRKPTZ-selected (or TEST_MISCL) cluster time
+  //   nFwdHS         — n forward HS tracks (3σ counting step)
+  //   trkptzPass     — true if TRKPTZ passed the PASS_SIGMA timing window
+  //   tRefinedPass   — true if T_REFINED passed the PASS_SIGMA timing window
+  //   misclInDenom   — true if event entered the TEST_MISCL denominator (cluster purity > 75%)
+  //   misasInDenom   — true if event entered the TEST_MISAS denominator (hsTimingPurity ≥ 95%)
+  //   misclPass      — true if event was in TEST_MISCL denominator AND passed
+  //   misasPass      — true if event was in TEST_MISAS denominator AND passed
   // ---------------------------------------------------------------------------
   struct EventResult {
-    int    code       = -1;
-    double time       = -1.0;
-    int    nFwdHS     =  0;
-    bool   trkptzPass = false;
+    int    code         = -1;
+    double time         = -1.0;
+    int    nFwdHS       =  0;
+    bool   trkptzPass   = false;
+    bool   tRefinedPass = false;
+    bool   misclInDenom = false;
+    bool   misasInDenom = false;
+    bool   misclPass    = false;
+    bool   misasPass    = false;
   };
 
   EventResult processEventData(
@@ -440,7 +450,8 @@ namespace MyUtl {
     // ── H. Per-score histogram filling ──────────────────────────────────────
     int    returnCode = 0;
     double returnVal  = -1.;
-    bool passesMine = false, passesMiscl = false, passesMisas = false;
+    bool passesMine = false, passesTRefined = false;
+    bool passesMiscl = false, passesMisas = false;
     bool misclInDenominator = false, misasInDenominator = false;
     bool perfEvtInDenominator = false;
 
@@ -517,9 +528,10 @@ namespace MyUtl {
 
       if (passes) {
         analysis.fillPasses(ev);
-        if (score == Score::TRKPTZ)     passesMine  = true;
-        if (score == Score::TEST_MISCL) passesMiscl = true;
-        if (score == Score::TEST_MISAS) passesMisas = true;
+        if (score == Score::TRKPTZ)     passesMine    = true;
+        if (score == Score::T_REFINED)  passesTRefined = true;
+        if (score == Score::TEST_MISCL) passesMiscl   = true;
+        if (score == Score::TEST_MISAS) passesMisas   = true;
       }
 
       // 2D timing residual and purity distributions
@@ -542,7 +554,10 @@ namespace MyUtl {
     if (analyses.count(Score::TEST_MISAS) &&
         misasInDenominator && !passesMine) returnCode = 3;
 
-    return {returnCode, returnVal, ev.nForwardTrackHS, passesMine};
+    return {returnCode, returnVal, ev.nForwardTrackHS,
+            passesMine, passesTRefined,
+            misclInDenominator, misasInDenominator,
+            passesMiscl, passesMisas};
   }
 }
 #endif // EVENT_PROCESSING_H

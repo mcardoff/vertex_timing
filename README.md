@@ -113,8 +113,39 @@ These are legacy or utility scripts not built by CMake:
 | `testing_separation.cxx` | Tests vertex separation algorithms using common clustering utilities. |
 | `test_onnx_model.C` | ROOT macro that verifies ONNX model loading via ROOT's TMVA SOFIE interface. |
 | `inspect_onnx_model.py` | Inspects the ONNX model graph, prints layer shapes, and can export weights to `model_weights.json`. |
-| `export_onnx_model.py` | Helper for converting a trained Keras/TensorFlow model to ONNX format. |
+| `export_onnx_model.py` | All-in-one pipeline: converts a TF SavedModel → ONNX → `model_weights.json`, updates `clustering_structs.h` normalization arrays, and installs artifacts to `share/models/`. |
+| `inspect_onnx_model.py` | Inspects the ONNX model graph, prints layer shapes, and can export weights to `model_weights.json`. |
 | `model_evaluation_helper.py` | Guide and reference code for evaluating the ML model in Python and comparing against C++ inference. |
+
+---
+
+## ML Model Retraining Workflow
+
+The `TEST_ML` score uses a neural network (`8 → 128 → 64 → 32 → 1`, ReLU/Sigmoid).
+Training happens in `~/project/clusterclassification/neural-net.ipynb`.
+
+After training and saving a new model:
+
+```bash
+# Activate a Python environment with tensorflow, tf2onnx, onnx
+# (the venv used during initial setup: ~/project/temp-conversion-dir/venv_conv/)
+
+# Run from the vertex_timing root directory:
+python share/scripts/export_onnx_model.py
+#   --saved-model-dir  ~/project/clusterclassification/saved_model_dir  (default)
+#   --dest-dir         ~/project/vertex_timing/share/models              (default)
+
+# Rebuild
+cd build && make
+```
+
+The script does four things automatically:
+1. Converts `saved_model_dir/` → `model.onnx` via `tf2onnx` (opset 13)
+2. Exports weights to `model_weights.json` with stable `w1/b1/w2/b2/…` keys
+3. Updates `MEANS[N]` / `STDS[N]` in `src/clustering_structs.h` from `normalization_params.json`
+4. Installs `model_weights.json` and `normalization_params.json` to `share/models/`
+
+If the number of input features changes, also update `src/ml_model.h` (`N_INPUT`) and the feature extraction in `src/clustering_structs.h` (`getFeatures()`).
 
 ---
 

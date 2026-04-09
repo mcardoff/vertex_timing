@@ -69,7 +69,7 @@ namespace MyUtl {
   const double MIN_TRACK_PT       = 1.0;   // clustered track_pt > 1.0 GeV
   const double MAX_TRACK_PT       = 30.0;  // clustered track_pt < 30.0 GeV
   const double MIN_TRACK_PT_COUNT = 1.0;   // track_pt > 1.0 GeV for histgramming
-  const double PASS_SIGMA         = 100.0; // Pass threshold for efficiency (ps)
+  const double PASS_SIGMA         = 60.0;  // Pass threshold for efficiency (ps)
   const double PILEUP_SMEAR       = 175.0; // Pileup track resolution
 
   const double MAX_TRK_VTX_SIG    = 3.0;   // Pileup removal sigma
@@ -81,8 +81,7 @@ namespace MyUtl {
   const double DIST_CUT_T_REFINED = 2.0;   // Re-clustering distance cut for T_REFINED and ZT_REFINED
   const double TVA_CUT_Z_REFINED  = 2.0;   // z₀ TVA significance cut for Z_REFINED and ZT_REFINED
   const int    CONE_ITER_K        = 3;     // Top cone clusters to refine (REFINED score)
-  const double TRUTH_PULL_CUT     = 2.0;   // |pull| < cut keeps track as truth-matched
-  const double HS_TIMING_QUALITY_CUT = 3.0;   // |pull| < cut → HS track timing is good (TEST_MISAS gate)
+  const double TRUTH_PULL_CUT     = 3.0;   // |pull| < cut keeps track as truth-matched
   // Per-track timing resolution used for Ideal Resolution/Efficiency scenarios.
   // Flat per-track value (independent of hit count), representing a hypothetically
   // better detector.  Contrast with real HGTD: ~30 ps/hit → 30/√nHits ≈ 15–21 ps/track.
@@ -132,7 +131,7 @@ namespace MyUtl {
   const double VTX_DZ_MIN = 0, VTX_DZ_MAX = 5.0, FOLD_VTX_DZ = 2.0;
   const double VTX_DZ_WIDTH = 0.1;
 
-  const double TRACK_MIN = -0.5, TRACK_MAX = 100.5, FOLD_TRACK = 20;
+  const double TRACK_MIN = 2.5, TRACK_MAX = 100.5, FOLD_TRACK = 20;
   const double TRACK_WIDTH = 1.0;
 
   const double PU_TRACK_MIN = TRACK_MIN, PU_TRACK_MAX = TRACK_MAX, FOLD_HS_TRACK = FOLD_TRACK;  

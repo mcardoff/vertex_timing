@@ -877,24 +877,24 @@ namespace MyUtl {
 
       // Normalization parameters from share/models/normalization_params.json
       static const float MEANS[8] = {
-        0.005726042277307877f,    // delta_z
-        0.006149715420260727f,    // delta_z_resunits
-        0.46085691198392087f,     // cluster_z_sigma
-        0.00011167975881416954f,  // cluster_d0
-        0.039828664684699776f,    // cluster_d0_sigma
-        2.329788124947659e-07f,   // cluster_qOverP
-        2.30744214610725e-06f,    // cluster_qOverP_sigma
-        24.63328638861904f        // cluster_sumpt
+        0.005726042277307877,  // delta_z mean
+        0.006149715420260727,  // delta_z_resunits mean
+        0.46085691198392087,  // cluster_z_sigma mean
+        0.00011167975881416954,  // cluster_d0 mean
+        0.039828664684699776,  // cluster_d0_sigma mean
+        2.329788124947659e-07,  // cluster_qOverP mean
+        2.30744214610725e-06,  // cluster_qOverP_sigma mean
+        24.63328638861904  // cluster_sumpt mean
       };
       static const float STDS[8] = {
-        1.2622023289815198f,      // delta_z
-        1.8759820827764306f,      // delta_z_resunits
-        0.40770942660123427f,     // cluster_z_sigma
-        0.15233806240610898f,     // cluster_d0
-        0.026736835863846682f,    // cluster_d0_sigma
-        2.1710355733359864e-05f,  // cluster_qOverP
-        1.5295933099799435e-06f,  // cluster_qOverP_sigma
-        25.339092790412018f       // cluster_sumpt
+        1.2622023289815198,  // delta_z std
+        1.8759820827764306,  // delta_z_resunits std
+        0.40770942660123427,  // cluster_z_sigma std
+        0.15233806240610898,  // cluster_d0 std
+        0.026736835863846682,  // cluster_d0_sigma std
+        2.1710355733359864e-05,  // cluster_qOverP std
+        1.5295933099799435e-06,  // cluster_qOverP_sigma std
+        25.339092790412018  // cluster_sumpt std
       };
 
       std::vector<float> features = {

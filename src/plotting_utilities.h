@@ -1266,12 +1266,16 @@ namespace MyUtl {
 	0.60, 0.30, 0.80, 0.60);
     canvas->Print(fname);
 
-    // Plot Core Fraction estimate (fraction of residuals within ±PASS_SIGMA)
-    // plotWithLegend(
-    //     [](auto& plt) { return plt->effEstimate.get(); },
-    //     "Core Fraction", EFF_YMIN, EFF_YMAX,
-    // 	0.99, "99% Core Fraction");
-    // canvas->Print(fname);
+    // Mean cluster purity profile: ProfileX of the 2D purity histogram gives
+    // the mean purity (averaged over all events in that x bin).  This is a
+    // fast diagnostic for how "clean" the selected cluster is across the
+    // kinematic variable range.
+    plotWithLegend(
+        [](auto& plt) { return (TH1D*)plt->purity->ProfileX(); },
+	"Mean Cluster Purity", 0.5, 1.0,
+	0.75, "75% Purity", false,
+	0.60, 0.20, 0.80, 0.50);
+    canvas->Print(fname);
 
     plotWithLegend(
         [](auto& plt) { return plt->params->rmsDist; },
@@ -1279,7 +1283,7 @@ namespace MyUtl {
 	-1, "",	false,
 	0.60, 0.65, 0.80, 0.92);
     canvas->Print(fname);
-    
+
     canvas->Print(TString::Format("%s]", fname));
   }
 
