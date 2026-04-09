@@ -733,7 +733,7 @@ namespace MyUtl {
       if (this->values.size() > 1) {
         // Clustering was done with z₀ as a second dimension: use that value.
         double dz = std::abs(this->values.at(1) - branch->recoVtxZ[0]);
-        double oldscore = std::pow(this->scores.at(Score::TRKPT.id), 0.9);
+        double oldscore = Score::TRKPT.id;
         this->scores[Score::TRKPTZ.id] = oldscore * std::exp(-1.5 * dz);
       } else {
         // Common case (usez0=false): reuse deltaZ already computed by calcFeatures.

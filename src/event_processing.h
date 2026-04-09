@@ -222,7 +222,7 @@ namespace MyUtl {
                     / branch->trackTimeRes[idx];
       double pT   = branch->trackPt[idx];
       denom += pT;
-      if (pull < HS_TIMING_QUALITY_CUT) num += pT;
+      if (pull < TRUTH_PULL_CUT) num += pT;
     }
     return (denom > 0.0) ? static_cast<float>(num / denom) : 0.0f;
   }

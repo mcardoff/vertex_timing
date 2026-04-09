@@ -26,7 +26,7 @@ args = parser.parse_args()
 event_num, file_num = args.event_num, args.file_num
 
 IDEALEFF = False
-filename = f'event_displays/fail_filter_misas/event_display_{file_num}_{event_num:04d}.pdf'
+filename = f'event_displays/event_display_{file_num}_{event_num:04d}.pdf'
 # filename = f'event_displays/failing_5/event_display_{file_num}_{event_num:04d}.pdf'
 
 def generate_cluster_colors(n):
@@ -342,7 +342,7 @@ extended_max_time = max(all_times) + 0.05 * (max(all_times) - min(all_times))
 # Compute per-cluster scores and find the indices to show in the legend.
 # Score: sum(pt) * exp(-dz), same quantities already used for labels below.
 cluster_scores = [
-    sum(pt_wghts[i]) * np.exp(-np.abs(reco_hs_z - cluster_zs[i]))
+    sum(pt_wghts[i]) * np.exp(-1.5 * np.abs(reco_hs_z - cluster_zs[i]))
     for i in range(len(pt_wghts))
 ]
 
@@ -509,3 +509,83 @@ with PdfPages(filename) as pdf:
 
     pdf.savefig(fig2)
     plt.close(fig2)
+
+    # --- Page 3: η-φ cluster view ---
+    ETA_MIN, ETA_MAX = 2.38, 4.0
+    fig3, ax3 = plt.subplots(figsize=(12, 8))
+    fig3.subplots_adjust(bottom=0.22)   # room for legend below axes
+
+    # Per-cluster tracks in |η|-φ
+    for i_cl, cluster in enumerate(track_clusters):
+        col = cluster_colors[i_cl]
+        for idx in cluster:
+            eta = abs(float(branch.Track_eta[event_num][idx]))
+            phi = float(branch.Track_phi[event_num][idx])
+            pt  = float(branch.Track_pt[event_num][idx])
+            is_hs = branch.Track_truthVtx_idx[event_num][idx] == 0
+            ax3.scatter(eta, phi,
+                        s=max(20, pt * 8),
+                        color=col,
+                        edgecolors='blue' if is_hs else 'none',
+                        linewidths=0.8 if is_hs else 0,
+                        zorder=4 if is_hs else 3,
+                        marker='o')
+
+    # Cluster centroids: naive mean |η| and circular mean φ
+    for i_cl, cluster in enumerate(track_clusters):
+        col  = cluster_colors[i_cl]
+        etas = np.array([abs(float(branch.Track_eta[event_num][idx])) for idx in cluster])
+        phis = np.array([float(branch.Track_phi[event_num][idx]) for idx in cluster])
+        eta_c = np.mean(etas)
+        phi_c = np.arctan2(np.mean(np.sin(phis)), np.mean(np.cos(phis)))
+        ax3.scatter(eta_c, phi_c,
+                    s=350, marker='*', color=col,
+                    edgecolors='black', linewidths=0.7, zorder=6)
+
+    # Jets as ΔR = 0.4 circles (only those overlapping the HGTD |η| range)
+    for jet in jet_info:
+        abs_eta = abs(jet['eta'])
+        if abs_eta + 0.4 < ETA_MIN or abs_eta - 0.4 > ETA_MAX:
+            continue
+        jet_color = 'green' if jet['isHS'] else 'grey'
+        circle = plt.Circle((abs_eta, jet['phi']), 0.4,
+                             color=jet_color, fill=False,
+                             linewidth=1.5, linestyle='-',
+                             alpha=0.7, zorder=5)
+        ax3.add_patch(circle)
+        ax3.text(abs_eta + 0.02, jet['phi'],
+                 f" {jet['pt']:.0f} GeV",
+                 fontsize=8, color=jet_color, va='center', zorder=6)
+
+    # Legend below axes — only track type + jet type entries
+    leg_handles = [
+        mlines.Line2D([], [], marker='o', color='none',
+                      markerfacecolor='grey', markeredgecolor='blue',
+                      markersize=8, label='Hard Scatter track (blue edge)'),
+        mlines.Line2D([], [], marker='o', color='none',
+                      markerfacecolor='grey', markeredgecolor='none',
+                      markersize=8, label='Pile-up track'),
+        mlines.Line2D([], [], marker='*', color='none',
+                      markerfacecolor='grey', markeredgecolor='black',
+                      markersize=12, label='Cluster centroid (mean |η|, φ)'),
+        mpatches.Patch(facecolor='green', alpha=0.6, label='HS jet (ΔR=0.4)'),
+        mpatches.Patch(facecolor='grey',  alpha=0.5, label='PU jet (ΔR=0.4)'),
+    ]
+    ax3.legend(handles=leg_handles,
+               loc='upper center', bbox_to_anchor=(0.5, -0.14),
+               ncol=5, fontsize=9, framealpha=0.9)
+
+    ax3.set_xlim(ETA_MIN, ETA_MAX)
+    ax3.set_ylim(-np.pi, np.pi)
+    ax3.set_xlabel('|η|', fontsize=13)
+    ax3.set_ylabel('φ  (rad)', fontsize=13)
+    ax3.set_title(f'Event# {event_num}: |η|-φ Cluster View  (HGTD acceptance)', fontsize=13)
+    ax3.set_yticks([-np.pi, -np.pi/2, 0, np.pi/2, np.pi])
+    ax3.set_yticklabels(['-π', '-π/2', '0', 'π/2', 'π'])
+    ax3.grid(True, alpha=0.3)
+    ax3.text(0.01, 0.98, 'ATLAS Simulation Internal',
+             transform=ax3.transAxes, fontsize=11,
+             weight='bold', style='italic', va='top')
+
+    pdf.savefig(fig3)
+    plt.close(fig3)

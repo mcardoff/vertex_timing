@@ -29,11 +29,8 @@ void runHGTD_Clustering(std::string number, Long64_t eventNum) {
 
   std::vector<Cluster> clusters =
     clusterTracksInTime(tracks, &branch, 3.0,
-			useSmearTimes,
-			useValidTimesOnly,
-			30.0,
-			method,
-			useZ0);
+			useSmearTimes, useValidTimesOnly, 30.0,
+			method, useZ0);
 
   // ===== REFINED STAGE — comment out this block to revert to plain cone output =====
   // Two-pass timing refinement: find the TRKPTZ winner among the 3σ cone clusters,
