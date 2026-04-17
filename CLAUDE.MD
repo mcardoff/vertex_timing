@@ -42,7 +42,11 @@ vertex_timing/
 │   ├── maxtrackpt_sweep.cxx      # Sweep: maximum track pT
 │   ├── cone_iter_k_sweep.cxx     # Sweep: CONE_ITER_K (REFINED top-K parameter)
 │   ├── dist_refine_sweep.cxx     # Sweep: DIST_CUT_T_REFINED (REFINED iterative distance)
-│   └── nsigma_sweep.cxx          # Sweep: distance cut expressed in σ units
+│   ├── nsigma_sweep.cxx          # Sweep: distance cut expressed in σ units
+│   ├── trkptz_alpha_sweep.cxx    # Sweep: α in Σpₜ·exp(−α|Δz|); production uses α=1.5
+│   ├── trkptz_resunits_sweep.cxx # Sweep: α in resolution-normalised Σpₜ·exp(−α|Δz/σ_z|)
+│   ├── timing_diag.cxx           # Diagnostic: trackTimeRes distribution + |dt| HS vs PU
+│   └── vtx_diag.cxx              # Diagnostic: vertex-level diagnostics
 ├── event_display.py              # Event visualisation — calls runHGTD_Clustering.cxx, produces 2-page PDF
 ├── runHGTD_Clustering.cxx        # Interactive per-event clustering (root dir)
 ├── vertex_time.cxx               # Vertex timing distribution analysis with jet selection
@@ -67,7 +71,7 @@ vertex_timing/
 ## Main Executables
 
 ### Primary Analysis
-- **clustering_dt.cxx** (`src/`): Main clustering analysis comparing HGTD times, ideal resolution, and efficiency scenarios. Active scores: `TRKPTZ`, `T_REFINED`, `Z_REFINED`, `ZT_REFINED`, `ZT_ITER`, `TEST_MISCL`, `TEST_MISAS`, `TEST_CTIME`, `PERF_EVT`, `PERF_CLT` (plus `HGTD` in the HGTD scenario). Iterative clustering is the default for all TRKPTZ-based scores. Generates six groups of comparison PDFs (see Score Registry section). At end of run prints up to 20 random pass/fail event display commands for `nFwdHS == 2` events (non-deterministic seed).
+- **clustering_dt.cxx** (`src/`): Main clustering analysis comparing HGTD times, ideal resolution, and efficiency scenarios. Active scores: `TRKPTZ`, `TEST_ML`, `TEST_MISCL`, `Z_REFINED`, `ZT_REFINED`, `T_REFINED`, `ZT_ITER`, `TEST_MISAS`, `PERF_EVT` (plus `HGTD` in the HGTD scenario). Iterative clustering is the default for all TRKPTZ-based scores. Generates six groups of comparison PDFs (see Score Registry section). At end of run prints up to 20 random pass/fail event display commands for `nFwdHS == 2` events (non-deterministic seed).
 
 - **vertex_time.cxx**: Vertex timing distribution analysis with forward jet selection.
 
@@ -76,6 +80,8 @@ vertex_timing/
 - **rate_diagnostics.cxx** (`util/`): Selection-agnostic rates — misclustering (purity > 75%?) and timing misassignment (HGTD vs Ideal Res. PASS oracle). Binned tables matching clustering_dt style.
 - **hgtd_matching.cxx** (`util/`): Low-level track/cluster matching diagnostics. Quantifies wrong HGTD matching, wrong cluster selection, and insufficient track count failure modes.
 - **extract_error_metrics.cxx** (`util/`): Extracts quantitative metrics from hgtd_matching output.
+- **timing_diag.cxx** (`util/`): Prints `trackTimeRes` distribution and |dt| for HS vs PU tracks; used to cross-check Ideal t₀ ROC against ATL-HGTD-PUB-2022-001.
+- **vtx_diag.cxx** (`util/`): Vertex-level diagnostic utility.
 
 ### Parameter Sweeps
 All sweep executables live in `util/` and share helpers from `util/sweep_utilities.h`.
@@ -84,6 +90,8 @@ All sweep executables live in `util/` and share helpers from `util/sweep_utiliti
 - **cone_iter_k_sweep.cxx**: Sweeps `CONE_ITER_K` (top-K clusters for T_REFINED pooling).
 - **dist_refine_sweep.cxx**: Sweeps `DIST_CUT_T_REFINED` (iterative distance cut in T_REFINED stage).
 - **nsigma_sweep.cxx**: Sweeps the distance cut expressed in σ units.
+- **trkptz_alpha_sweep.cxx**: Sweeps α in `Σpₜ·exp(−α|Δz|)`; production uses α=1.5, explores range 1–5.
+- **trkptz_resunits_sweep.cxx**: Sweeps α in the resolution-normalized form `Σpₜ·exp(−α|Δz/σ_z|)`.
 
 ### ML Tools
 - **test_ml_model.cxx**: Validates the loaded neural network model.
@@ -149,8 +157,8 @@ DIST_CUT_CONE         = 3.0   // σ — main iterative clustering distance (also
 DIST_CUT_T_REFINED    = 2.0   // σ — T_REFINED / ZT_REFINED stage 2 iterative distance
 CONE_ITER_K           = 3     // top-K clusters for T_REFINED pooling
 IDEAL_TRACK_RES       = 1.0   // ps — flat per-track resolution for ideal scenarios
-PASS_SIGMA            = 100.0 // ps — ±window for "Core Fraction" efficiency oracle
-HS_TIMING_QUALITY_CUT = 3.0   // σ — |pull| threshold for oracle timing purity gates
+PASS_SIGMA            = 60.0  // ps — ±window for "Core Fraction" efficiency oracle
+TRUTH_PULL_CUT        = 3.0   // σ — |pull| threshold for oracle timing purity gates
 ```
 
 ## Build System
@@ -271,17 +279,15 @@ All scores are defined as `static const Score` members of the `Score` struct in 
 | 12 | MISCL | TRKPTZ (pure clust) | Oracle: cluster purity > 75% |
 | 13 | MISAS | TRKPTZ (no t misassign.) | Oracle: event-level HS timing purity = 100% |
 | 14 | TEST_HS | TRKPTZ (HS only) | HS_ONLY filter; truth-matched tracks only |
-| 15 | CTIME | TRKPTZ (clust t pure) | Oracle: cluster-level HS timing purity = 100% |
 | 16 | ZT_ITER | 2D (z₀,t) Iterative | `useZ0=true`; 2D Mahalanobis distance √((Δt/σt)²+(Δz₀/σz₀)²) |
 | 17 | PERF_EVT | TRKPTZ (Pure Clust+Evt Times) | Combined oracle: MISCL ∧ MISAS |
-| 18 | PERF_CLT | TRKPTZ (Pure Clust.+Clust. Times) | Combined oracle: MISCL ∧ CTIME |
 
-Oracle scores (`requiresPurity=true`) gate their denominator: events outside the gate are not counted. **Important:** both `calcHSTimingPurity` (event-level, used by MISAS) and `calcClusterHSTimingPurity` (cluster-level, used by CTIME) return `0.0f` — not `1.0f` — when no qualifying HS tracks exist, ensuring that events with zero forward HS tracks are excluded from all oracle denominators.
+Oracle scores (`requiresPurity=true`) gate their denominator: events outside the gate are not counted. **Important:** `calcHSTimingPurity` (event-level, used by MISAS) returns `0.0f` — not `1.0f` — when no qualifying HS tracks exist, ensuring that events with zero forward HS tracks are excluded from oracle denominators.
 
 Money plot groups produced by `clustering_dt`:
 - `theplot_*.pdf` — main score comparison
-- `timing_oracle_*.pdf` — MISAS vs CTIME
-- `perfect_timing_oracle_*.pdf` — PERF_EVT vs PERF_CLT
+- `timing_oracle_*.pdf` — MISAS oracle comparison
+- `perfect_timing_oracle_*.pdf` — PERF_EVT oracle comparison
 - `hgtd_trkptz_*.pdf` — HGTD vs TRKPTZ
 - `z_refined_*.pdf` — z/zt refinement variants
 - `2d_clust_*.pdf` — ZT_ITER comparison
@@ -305,7 +311,7 @@ Key structures and refactored entry points:
 - **`moneyPlot` / `plotWithLegend`**: the `plotWithLegend` lambda accepts optional legend coordinates `(legX1, legY1, legX2, legY2)` so each call can position the legend independently (bottom-right for efficiency plots, top-right for resolution plots).
 - **TEfficiency rendering**: `TEfficiency` objects are converted to `TGraphAsymmErrors` with x-errors explicitly set to 0 at construction — this avoids ROOT's repaint-time x-error restoration in `PaintGraph`. All efficiency plots are drawn this way.
 - **Fit quality guard**: `plotPostProcessing` skips slices with `< 50` entries (was 6) and only calls `fillEach` when `percErrCore < 0.5` (relative uncertainty on the core σ). Bins failing these guards are left empty rather than showing garbage fit results.
-- **y-axis labels**: efficiency-style plots use **"Core Fraction"**; the pass window is `PASS_SIGMA = 100 ps`.
+- **y-axis labels**: efficiency-style plots use **"Core Fraction"**; the pass window is `PASS_SIGMA = 60 ps`.
 - **`AtlasStyle.h`**: calls `atlasStyle->SetErrorX(0)` globally (effective for TH1/TGraphErrors; TEfficiency uses the conversion approach above).
 
 ## Development Notes
