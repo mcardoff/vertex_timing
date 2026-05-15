@@ -1272,7 +1272,7 @@ namespace MyUtl {
     // kinematic variable range.
     plotWithLegend(
         [](auto& plt) { return (TH1D*)plt->purity->ProfileX(); },
-	"Mean Cluster Purity", 0.5, 1.0,
+	"Mean Cluster Purity", PUR_YMIN, PUR_YMAX,
 	0.75, "75% Purity", false,
 	0.60, 0.20, 0.80, 0.50);
     canvas->Print(fname);
@@ -1369,6 +1369,47 @@ namespace MyUtl {
       latex.DrawLatexNDC(0.20, 0.64, TString::Format("#sigma_{2}^{dgaus}=%.2f", dgSigma2));
       latex.DrawLatexNDC(0.20, 0.58, TString::Format("(S+M)/B=%.2f", sigBkgRatio));
       canvas->Print(fname);
+
+      // Individual pages: signal, mixed, background
+      auto drawSingle = [&](TH1D* h, const char* label) {
+        if (h->GetEntries() == 0) return;
+        canvas->Clear();
+        canvas->SetLogy(logScale);
+        TH1D* c = (TH1D*)h->Clone();
+        TF1* fit = createDblFit(c, true);
+        c->Draw("HIST");
+        c->GetXaxis()->SetRangeUser(xMin, xMax);
+        c->GetXaxis()->SetTitle("#Delta t [ps]");
+        c->GetYaxis()->SetTitle("Entries");
+        c->SetMaximum(c->GetMaximum() * (logScale ? 8.0 : 1.4));
+        fit->Draw("SAME");
+        double s1   = fit->GetParameter("Sigma1");
+        double s2   = fit->GetParameter("Sigma2");
+        double amp1 = fit->GetParameter("Norm1");
+        double amp2 = fit->GetParameter("Norm2");
+        double chi2 = fit->GetChisquare();
+        int    ndf  = fit->GetNDF();
+        ATLASLabel(0.18, 0.88, "Simulation Internal");
+        ATLASEnergyLabel(0.18, 0.82);
+        latex.DrawLatexNDC(0.20, 0.76, plt->score.toStringShort());
+        latex.DrawLatexNDC(0.20, 0.70, label);
+        TLatex latexR;
+        latexR.SetTextSize(0.04);
+        latexR.SetTextAlign(33);
+        double ry = 0.88;
+        const double dy = 0.06;
+        latexR.DrawLatexNDC(0.88, ry, TString::Format("N = %.0f",              c->Integral())); ry -= dy;
+        latexR.DrawLatexNDC(0.88, ry, TString::Format("#sigma_{1} = %.2f ps",  s1));            ry -= dy;
+        latexR.DrawLatexNDC(0.88, ry, TString::Format("#sigma_{2} = %.2f ps",  s2));            ry -= dy;
+        latexR.DrawLatexNDC(0.88, ry, TString::Format("A_{1} = %.1f",          amp1));          ry -= dy;
+        latexR.DrawLatexNDC(0.88, ry, TString::Format("A_{2} = %.1f",          amp2));          ry -= dy;
+        latexR.DrawLatexNDC(0.88, ry, TString::Format("#chi^{2}/ndf = %.1f/%d", chi2, ndf));
+        canvas->Print(fname);
+        delete c; delete fit;
+      };
+      drawSingle(cSig, "Signal (>75%)");
+      drawSingle(cMix, "Mixed (50#minus75%)");
+      drawSingle(cBkg, "Background (<50%)");
     }
     canvas->Print(TString::Format("%s]", fname));
   }

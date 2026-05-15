@@ -95,7 +95,7 @@ static RawFeatures calcRawFeatures(
     float delta_z         = cluster_z - branch->recoVtxZ[0];
     float delta_z_ru      = delta_z / cluster_z_sigma;
 
-    float delta_t = static_cast<float>(cluster.values.at(0)) - branch->recoVtxTime[0];
+    float delta_t = static_cast<float>(cluster.values.at(0)) - branch->truthVtxTime[0];
 
     return { delta_z, delta_z_ru, cluster_z_sigma,
              cluster_d0, cluster_d0_sig,
@@ -176,11 +176,13 @@ auto main() -> int {
         int nFTrack = 0, nFTrackHS = 0, nFTrackPU = 0;
         branch.countForwardTracks(nFTrack, nFTrackHS, nFTrackPU, tracks, /*checkTimeValid=*/true);
 
+	if (nFTrackHS < 3) continue;
+
         // ---- One row per cluster ----
         for (const Cluster& cl : clusters) {
             if (cl.values.empty()) continue;
-	    if (cl.nConstituents < 3) continue;
-	    
+            if (cl.nConstituents < 3) continue;  // disabled for listwise training: keep all clusters so HS is never dropped and population matches inference
+
             RawFeatures f    = calcRawFeatures(cl, &branch);
             float purity     = static_cast<float>(cl.purity);
             int label_purity = (purity >= 0.2f) ? 1 : 0;

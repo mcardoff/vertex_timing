@@ -112,7 +112,82 @@ namespace MyUtl {
     // ZT_REFINED uses its own re-clustered collection (z₀-filtered tracks re-clustered
     // at DIST_CUT_T_REFINED); values[0] is already set correctly — fall through.
 
+    // JET_REFINED: precision-weighted mean using only constituent tracks that fall
+    // within dR < 0.4 of at least one truth-HS-matched reco jet.
+    // Selection is the same as TRKPTZ; only the time computation changes.
+    if (score == Score::JET_REFINED) {
+      // Collect (eta, phi) of truth-HS-matched reco jets
+      std::vector<std::pair<double,double>> hsJets;
+      const int nJets = (int)branch->topoJetTruthHSIdx.GetSize();
+      for (int j = 0; j < nJets; ++j) {
+        if (!branch->topoJetTruthHSIdx[j].empty())
+          hsJets.push_back({branch->topoJetEta[j], branch->topoJetPhi[j]});
+      }
+      double sumW = 0.0, sumWT = 0.0;
+      for (size_t i = 0; i < trackIndices.size(); ++i) {
+        int    idx     = trackIndices[i];
+        double trkEta  = branch->trackEta[idx];
+        double trkPhi  = branch->trackPhi[idx];
+        bool   inJet   = false;
+        for (auto& [jeta, jphi] : hsJets) {
+          double deta = trkEta - jeta;
+          double dphi = TVector2::Phi_mpi_pi(trkPhi - jphi);
+          if (std::hypot(deta, dphi) < 0.4) { inJet = true; break; }
+        }
+        if (!inJet) continue;
+        double t = allTimes[i];
+        double s = (idealRes > 0.0) ? idealRes
+                                    : static_cast<double>(branch->trackTimeRes[idx]);
+        if (s <= 0.0) continue;
+        double w = 1.0 / (s * s);
+        sumW += w;  sumWT += w * t;
+      }
+      if (sumW > 0.0) return sumWT / sumW;
+      return values[0];  // fallback: no tracks survived jet filter
+    }
+
     return values[0];
+  }
+
+  // ---------------------------------------------------------------------------
+  // 3c. Cluster::calculatePurity — out-of-line implementation
+  //   For most scores: returns the pre-computed this->purity (HS ΣpT fraction
+  //   of the full cluster).  For JET_REFINED: re-evaluates purity using only
+  //   the constituent tracks that pass dR < 0.4 to a truth-HS-matched jet,
+  //   so the reported purity matches the tracks actually used for timing.
+  // ---------------------------------------------------------------------------
+  inline double Cluster::calculatePurity(Score score, BranchPointerWrapper* branch) const {
+    if (score != Score::JET_REFINED)
+      return this->purity;
+
+    // Collect (eta, phi) of truth-HS-matched reco jets.
+    // Use topoJetTruthHSIdx.GetSize() as the loop bound — it may differ from
+    // topoJetPt.GetSize() in events where the truth-matching array is shorter.
+    std::vector<std::pair<double,double>> hsJets;
+    const int nJets = (int)branch->topoJetTruthHSIdx.GetSize();
+    for (int j = 0; j < nJets; ++j) {
+      if (!branch->topoJetTruthHSIdx[j].empty())
+        hsJets.push_back({branch->topoJetEta[j], branch->topoJetPhi[j]});
+    }
+
+    double sumPt = 0.0, hsPt = 0.0;
+    for (int idx : trackIndices) {
+      double trkEta = branch->trackEta[idx];
+      double trkPhi = branch->trackPhi[idx];
+      bool inJet = false;
+      for (auto& [jeta, jphi] : hsJets) {
+        double deta = trkEta - jeta;
+        double dphi = TVector2::Phi_mpi_pi(trkPhi - jphi);
+        if (std::hypot(deta, dphi) < 0.4) { inJet = true; break; }
+      }
+      if (!inJet) continue;
+      double pt = branch->trackPt[idx];
+      sumPt += pt;
+      // HS tracks have truthVtx index 0 — mirrors calcPurity() convention
+      if (branch->trackToTruthvtx[idx] == 0) hsPt += pt;
+    }
+    if (sumPt > 0.0) return hsPt / sumPt;
+    return this->purity;  // fallback: no in-jet tracks found
   }
 
   // ---------------------------------------------------------------------------
@@ -300,14 +375,15 @@ namespace MyUtl {
       chosen[Score::CONE_BDT.id] = std::move(c);
     }
 
-    // HGTD: simultaneous clustering on real HGTD times
+    // HGTD: simultaneous clustering on real HGTD times.
+    // HGTD selects by timing proximity to the reco vertex, not by TRKPTZ score, so
+    // MIN_CLUSTER_TRACKS does not apply — any non-empty cluster is valid.
     if (branch->recoVtxValid[0] == 1 && analyses.count(Score::HGTD)) {
       auto col = clusterTracksInTime(tracks, branch, 3.0,
                                      false, true, -1,
                                      ClusteringMethod::SIMULTANEOUS, false, false, true);
-      auto qual = filterClusters(col);
-      if (!qual.empty())
-        chosen[Score::HGTD.id] = chooseHGTDCluster(qual, branch);
+      if (!col.empty())
+        chosen[Score::HGTD.id] = chooseHGTDCluster(col, branch);
     }
 
     // HGTD_SORT: pT-sorted simultaneous clustering, TMVA BDT selector
@@ -467,7 +543,7 @@ namespace MyUtl {
       double iResH       = useSmearedTimes ? IDEAL_TRACK_RES : -1.0;
       double t           = scored.calculateTime(score, branch, iResH);
       scored.values[0]   = t;   // keep passEfficiency consistent with diff
-      double purity      = clusters.empty() ? 0.0 : scored.purity;
+      double purity      = clusters.empty() ? 0.0 : scored.calculatePurity(score, branch);
       double diff        = t - branch->truthVtxTime[0];
 
       // Expose time for the caller's event-display collection

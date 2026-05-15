@@ -104,7 +104,8 @@ namespace MyUtl {
       truthVtxZ (r, "TruthVtx_z"), truthVtxTime (r, "TruthVtx_time"),
       truthVtxIshs (r, "TruthVtx_isHS"), recoVtxZ (r, "RecoVtx_z"),
       recoVtxTime (r, "RecoVtx_time"), recoVtxTimeRes (r, "RecoVtx_timeRes"),
-      recoVtxValid (r, "RecoVtx_hasValidTime"), topoJetPt (r, "AntiKt4EMTopoJets_pt"),
+      recoVtxValid (r, "RecoVtx_hasValidTime"),
+      topoJetPt (r, "AntiKt4EMTopoJets_pt"),
       topoJetEta (r, "AntiKt4EMTopoJets_eta"),
       topoJetPhi (r, "AntiKt4EMTopoJets_phi"),
       truthHSJetPt (r, "TruthHSJet_pt"), truthHSJetEta (r, "TruthHSJet_eta"),
@@ -727,7 +728,7 @@ namespace MyUtl {
       // Call calcFeatures once — it returns the normalised feature vector and
       // the raw deltaZ (cluster z − reco vertex z).  Reusing the returned
       // deltaZ avoids a second precision-weighted z-average pass over tracks.
-      auto [features, rawDeltaZ] = this->calcFeatures(branch);
+      auto [features, rawDeltaZ, rawDeltaZResunits] = this->calcFeatures(branch);
 
       // TRKPTZ: score = TRKPT × exp(−1.5 · |Δz|)
       if (this->values.size() > 1) {
@@ -744,6 +745,10 @@ namespace MyUtl {
       // ML score for TEST_ML
       float mlScore = mlModel->predict(features);
       this->scores[Score::TEST_ML.id] = mlScore;
+
+      // JET_REFINED: same selection as TRKPTZ; calculateTime() re-filters
+      // constituent tracks to those within dR < 0.4 of a truth-HS-matched jet.
+      this->scores[Score::JET_REFINED.id] = this->scores.at(Score::TRKPTZ.id);
 
       // TEST_MISCL uses TRKPTZ as its selection score; the purity gate is applied
       // at efficiency-check time in event_processing.h (both pass and total fills).
@@ -831,6 +836,20 @@ namespace MyUtl {
     ) const;
 
     // -----------------------------------------------------------------------
+    // calculatePurity
+    //   Returns the purity to use for resolution and efficiency plots for the
+    //   given score.  For most scores this is the pre-computed this->purity
+    //   (fraction of cluster ΣpT from HS tracks).  For JET_REFINED, purity
+    //   is re-evaluated using only the constituent tracks that survive the
+    //   dR < 0.4 HS-jet filter, mirroring the time computation in calculateTime.
+    //   Implemented out-of-line in event_processing.h alongside calculateTime.
+    // -----------------------------------------------------------------------
+    double calculatePurity(
+        Score score,
+        BranchPointerWrapper* branch
+    ) const;
+
+    // -----------------------------------------------------------------------
     // calcFeatures
     //   Extracts the 8 features used as DNN input and applies stored
     //   normalisation (means/stds from normalization_params.json) to return a
@@ -848,7 +867,7 @@ namespace MyUtl {
     //   The raw deltaZ is returned alongside so updateScores can compute
     //   TRKPTZ without repeating the z weighted-average loop.
     // -----------------------------------------------------------------------
-    std::pair<std::vector<float>, float> calcFeatures(BranchPointerWrapper *branch) {
+    std::tuple<std::vector<float>, float, float> calcFeatures(BranchPointerWrapper *branch) {
       float znum  = 0.f, zden  = 0.f;
       float dnum  = 0.f, dden  = 0.f;
       float qpnum = 0.f, qpden = 0.f;
@@ -877,24 +896,24 @@ namespace MyUtl {
 
       // Normalization parameters from share/models/normalization_params.json
       static const float MEANS[8] = {
-        0.005726042277307877,  // delta_z mean
-        0.006149715420260727,  // delta_z_resunits mean
-        0.46085691198392087,  // cluster_z_sigma mean
-        0.00011167975881416954,  // cluster_d0 mean
-        0.039828664684699776,  // cluster_d0_sigma mean
-        2.329788124947659e-07,  // cluster_qOverP mean
-        2.30744214610725e-06,  // cluster_qOverP_sigma mean
-        24.63328638861904  // cluster_sumpt mean
+        0.005349026450717473,  // delta_z mean
+        0.006244652963375047,  // delta_z_resunits mean
+        0.47186453018432917,  // cluster_z_sigma mean
+        -0.00025930208416971584,  // cluster_d0 mean
+        0.041210234810337115,  // cluster_d0_sigma mean
+        2.497333134513254e-07,  // cluster_qOverP mean
+        2.399697181725376e-06,  // cluster_qOverP_sigma mean
+        22.605882118982347  // cluster_sumpt mean
       };
       static const float STDS[8] = {
-        1.2622023289815198,  // delta_z std
-        1.8759820827764306,  // delta_z_resunits std
-        0.40770942660123427,  // cluster_z_sigma std
-        0.15233806240610898,  // cluster_d0 std
-        0.026736835863846682,  // cluster_d0_sigma std
-        2.1710355733359864e-05,  // cluster_qOverP std
-        1.5295933099799435e-06,  // cluster_qOverP_sigma std
-        25.339092790412018  // cluster_sumpt std
+        1.2256897153543274,  // delta_z std
+        1.8559666108975377,  // delta_z_resunits std
+        0.3927622369867232,  // cluster_z_sigma std
+        0.15349002263169267,  // cluster_d0 std
+        0.025843144355708243,  // cluster_d0_sigma std
+        2.2377624188670666e-05,  // cluster_qOverP std
+        1.5046303393371763e-06,  // cluster_qOverP_sigma std
+        23.948572592936106  // cluster_sumpt std
       };
 
       std::vector<float> features = {
@@ -908,7 +927,7 @@ namespace MyUtl {
         (sumpt              - MEANS[7]) / STDS[7],
       };
 
-      return {features, deltaZ};
+      return {features, deltaZ, deltaZResunits};
     }
   };
   

@@ -147,6 +147,17 @@ def trkptz(c):
     mean_z0 = c['z0_num'] / c['z0_den']
     return c['pt'] * np.exp(-1.5 * abs(mean_z0 - reco_z))
 
+# Lookup: ntuple track index → time (ps)
+_track_t_map = {tr['idx']: tr['t'] for tr in hgtd_tracks}
+
+def time_spread(c):
+    """Population std dev of constituent track times (ps)."""
+    ts = [_track_t_map[i] for i in c['indices'] if i in _track_t_map]
+    if len(ts) < 2:
+        return 0.0
+    arr = np.array(ts)
+    return float(np.std(arr))
+
 # Initialise: one cluster per track
 C    = [dict(t=tr['t'], tres=tr['tres'],
              pt=tr['pt'],
@@ -427,8 +438,11 @@ def update(frame_idx):
                         markersize=ms, markeredgecolor=edge,
                         markeredgewidth=ew, zorder=11)
         n     = len(fc['indices'])
-        label_lines = [f" n={n}  t={fc['t']:.0f} ps",
-                       f" TRKPTZ={score:.2f}"]
+        st     = time_spread(fc)
+        score2 = score * np.exp(-st / 30.0)
+        label_lines = [f" n={n}  t={fc['t']:.0f} ps  σ={fc['tres']:.0f} ps",
+                       f" TRKPTZ={score:.2f}",
+                       f" TRKPTZ·exp(-σ_t/30ps)={score2:.2f}"]
         if is_winner:
             label_lines.append(" ◀ SELECTED")
         lbl   = ax.text(fc['t'] + 0.012*T_RANGE, cy,

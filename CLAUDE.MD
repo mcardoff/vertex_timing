@@ -313,6 +313,7 @@ Key structures and refactored entry points:
 - **Fit quality guard**: `plotPostProcessing` skips slices with `< 50` entries (was 6) and only calls `fillEach` when `percErrCore < 0.5` (relative uncertainty on the core σ). Bins failing these guards are left empty rather than showing garbage fit results.
 - **y-axis labels**: efficiency-style plots use **"Core Fraction"**; the pass window is `PASS_SIGMA = 60 ps`.
 - **`AtlasStyle.h`**: calls `atlasStyle->SetErrorX(0)` globally (effective for TH1/TGraphErrors; TEfficiency uses the conversion approach above).
+- **`inclusivePlot` page structure**: produces **4 pages per score** — (1) THStack (signal+mixed+background stacked), (2) signal only >75%, (3) mixed only 50–75%, (4) background only <50%. Each individual-category page has its own double-Gaussian fit. Pages for a category with zero entries are skipped. Applies to all four call sites in `clustering_dt.cxx` (log/lin × standard/low-track).
 
 ## Development Notes
 

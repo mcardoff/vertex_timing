@@ -21,7 +21,7 @@ static constexpr const char* EVTDISPLAY_FMT =
   "python3 event_display.py --file_num %s --event_num %lld --extra_time %.2f";
 
 // Set to true to print event display commands to stdout after the event loop.
-static constexpr bool PRINT_EVENT_DISPLAYS = true;
+static constexpr bool PRINT_EVENT_DISPLAYS = false;
 
 // Max event-display commands to print per low-multiplicity category.
 static constexpr int N_LOW_MULT_DISPLAY = 20;
@@ -59,6 +59,7 @@ auto buildAnalysisMap(
 
   // Scores active in all scenarios
   m.emplace(Score::TRKPTZ,     AnalysisObj(label, Score::TRKPTZ    ));
+  m.emplace(Score::JET_REFINED, AnalysisObj(label, Score::JET_REFINED));
   m.emplace(Score::TEST_ML,    AnalysisObj(label, Score::TEST_ML   ));
   // m.emplace(Score::PASS,       AnalysisObj(label, Score::PASS      ));
   m.emplace(Score::TEST_MISCL, AnalysisObj(label, Score::TEST_MISCL));
@@ -167,6 +168,14 @@ void makeComparisonPlots(
                 &mapHGTD.at(Score::HGTD),
                 &mapHGTD.at(Score::TRKPTZ),
 		&mapHGTD.at(Score::ZT_ITER),
+	    });
+
+  // TRKPTZ vs JET_REFINED (in-jet track time recomputation)
+  moneyPlot(TString::Format("%s/jet_refined_%s.pdf", compSubdir.c_str(), key), key, canvas,
+            {
+                &mapHGTD.at(Score::HGTD),
+                &mapHGTD.at(Score::TRKPTZ),
+                &mapHGTD.at(Score::JET_REFINED),
 	    });
 
   // moneyPlot(TString::Format("%s/z_refined_ideal_%s.pdf", compSubdir.c_str(), key), key, canvas,
@@ -453,7 +462,7 @@ auto main() -> int {
   // --- Inclusive resolution plots ---
   const std::initializer_list<AnalysisObj*> RESO_SET = {
     &mapHGTD.at(Score::HGTD), &mapHGTD.at(Score::TRKPTZ), &mapHGTD.at(Score::TEST_MISCL),
-    &mapHGTD.at(Score::TEST_MISAS),
+    &mapHGTD.at(Score::TEST_MISAS), &mapHGTD.at(Score::TEST_ML),
   };
   inclusivePlot(TString::Format("%s/inclusive/inclusivereso_logscale.pdf", SAVE_DIR),
 		true,  false, -400, 400, canvas, RESO_SET);

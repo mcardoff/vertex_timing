@@ -54,7 +54,7 @@ namespace MyUtl {
   const int    MIN_JETS           = 2;     // min n jets
   const int    MIN_PASSPT_JETS    = 2;     // min n jets >30 GeV
   const int    MIN_PASSETA_JETS   = 1;     // min n forward jets >30GeV
-  const int    MIN_CLUSTER_TRACKS = 0;     // min tracks required to select a cluster
+  const int    MIN_CLUSTER_TRACKS = 3;     // min tracks required to select a cluster
   const int    MIN_NHS_TRACK      = 2;     // testing only
   const int    MAX_NHS_TRACK      = 6;     // testing only
   const double VBS_JET_D_ETA      = 3.0;   // min eta separation for VBS Jets
@@ -147,7 +147,7 @@ namespace MyUtl {
   const double Z_WIDTH = 10.0;
 
   const double EFF_YMIN = 0.7, EFF_YMAX = 1.08;
-  const double PUR_YMIN = 0.0, PUR_YMAX = 1.5;
+  const double PUR_YMIN = 0.5, PUR_YMAX = 1.0;
   const double RES_YMIN = 0.0, RES_YMAX = 40.0;
   const double BKG_RES_YMIN = 90.0, BKG_RES_YMAX = 500.0;
 
@@ -227,6 +227,7 @@ namespace MyUtl {
     static const Score TEST_HS;
     static const Score ZT_ITER;
     static const Score PERF_EVT;
+    static const Score JET_REFINED;
   };
 
   inline const std::string STR_TRKPTZ = "#Sigma p_{T}e^{-|#Delta z|}";
@@ -270,6 +271,9 @@ namespace MyUtl {
   inline const Score Score::TEST_MISCL = { 12, STR_TRKPTZ + " [Events with Pure Clusters]"   , "TRKPTZ Pure Clust.",    false, true, -1.f };
   inline const Score Score::TEST_MISAS = { 13, STR_TRKPTZ + " [Events with Perfect Timing]"  , "TRKPTZ Perf. Time",    false, true, -1.f };
   inline const Score Score::PERF_EVT   = { 17, STR_TRKPTZ + " [Pure Clusters + Perf. Timing]", "TRKPTZ Pure Clust./Perf. Time", false, true, -1.f };
+  // JET_REFINED: same cluster as TRKPTZ, but calculateTime() re-weights using
+  // only constituent tracks within dR < 0.4 of a truth-HS-matched reco jet.
+  inline const Score Score::JET_REFINED = { 18, "TRKPTZ (In-Jet Tracks)", "JET_REFINED", false, false, -1.f };
 
   // Scores with a dedicated collection (distCut ≥ 0 → buildsCollection() = true)
   inline const Score Score::CONE       = {  7, "Cone"                       , "CONE",     true , false, -1.f, DIST_CUT_CONE,      ClusteringMethod::CONE      };
@@ -287,6 +291,7 @@ namespace MyUtl {
     Score::TEST_MISAS, Score::TEST_HS,
     Score::ZT_ITER,
     Score::PERF_EVT,
+    Score::JET_REFINED,
   };
 
   // ---------------------------------------------------------------------------
