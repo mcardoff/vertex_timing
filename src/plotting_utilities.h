@@ -12,9 +12,13 @@
 //     sgausFitFunc — single Gaussian
 //
 //   Fit factory functions:
-//     createTrpFit — configure and fit tgausFitFunc to a histogram
-//     createDblFit — configure and fit dgausFitFunc to a histogram
-//     createSngFit — configure and fit sgausFitFunc to a histogram
+//     createTrpFit  — configure and fit tgausFitFunc to a histogram
+//     createDblFit  — configure and fit dgausFitFunc to a histogram (legacy;
+//                     retained for backward compatibility, no longer used in
+//                     plotPostProcessing or inclusivePlot)
+//     createSngFit  — configure and fit sgausFitFunc to a histogram
+//     createDSCBFit — fit an asymmetric double-sided Crystal Ball; the active
+//                     model for per-bin slice fits and inclusivePlot
 //
 //   Structs:
 //     FitParams   — collection of per-bin resolution and amplitude histograms
@@ -147,7 +151,157 @@ namespace MyUtl {
     hist->Fit(fit,"RQ");
     return fit;
   }
-  
+
+  // ---------------------------------------------------------------------------
+  // dscbFunc
+  //   Symmetric double-sided Crystal Ball: Gaussian core with matched
+  //   power-law tails on both sides (αL = αR ≡ α, nL = nR ≡ n).  Five free
+  //   parameters; tails tied to reduce instability vs the fully asymmetric
+  //   form.  With t = (x - μ)/σ:
+  //     core (|t| ≤ α):  N · exp(-t²/2)
+  //     tail (|t| > α):  N · A · (B + |t|)^(-n)
+  //   where A = (n/α)^n · exp(-α²/2), B = n/α - α.  Requires n > 1, α > 0.
+  //
+  //   par[0]=N, par[1]=μ, par[2]=σ, par[3]=α, par[4]=n
+  // ---------------------------------------------------------------------------
+  inline double dscbFunc(double* x, double* par) {
+    double N      = par[0];
+    double mu     = par[1];
+    double sigma  = par[2];
+    double alpha  = par[3];
+    double n      = par[4];
+    double t      = (x[0] - mu) / sigma;
+    double absT   = std::abs(t);
+    if (absT <= alpha) {
+      return N * std::exp(-0.5 * t * t);
+    }
+    double A = std::pow(n/alpha, n) * std::exp(-0.5 * alpha * alpha);
+    double B = n/alpha - alpha;
+    return N * A * std::pow(B + absT, -n);
+  }
+
+  // ---------------------------------------------------------------------------
+  // gausDSCBFunc
+  //   Two-component model preserved for reference (not the active fit in this
+  //   build): a narrow Gaussian core stacked on a symmetric double-sided
+  //   Crystal Ball that absorbs the wider mixed/background population.  Both
+  //   components share a mean fixed to 0.  See createGausDSCBFit for limits;
+  //   reference inclusive PDFs from this model live in share/docs/
+  //   dscb_reference_plots/.
+  //
+  //   par[0] = N_g     (narrow Gaussian amplitude)
+  //   par[1] = sigma_g (narrow Gaussian width)
+  //   par[2] = N_d     (DSCB amplitude)
+  //   par[3] = sigma_d (DSCB width, > sigma_g)
+  //   par[4] = alpha   (DSCB cutoff)
+  //   par[5] = n       (DSCB tail power, > 1)
+  // ---------------------------------------------------------------------------
+  inline double gausDSCBFunc(double* x, double* par) {
+    double Ng = par[0];
+    double sg = par[1];
+    double Nd = par[2];
+    double sd = par[3];
+    double a  = par[4];
+    double n  = par[5];
+    double xv = x[0];
+
+    double tg    = xv / sg;
+    double gauss = Ng * std::exp(-0.5 * tg * tg);
+
+    double td    = xv / sd;
+    double absTd = std::abs(td);
+    double dscb;
+    if (absTd <= a) {
+      dscb = Nd * std::exp(-0.5 * td * td);
+    } else {
+      double A = std::pow(n/a, n) * std::exp(-0.5 * a * a);
+      double B = n/a - a;
+      dscb = Nd * A * std::pow(B + absTd, -n);
+    }
+    return gauss + dscb;
+  }
+
+  // ---------------------------------------------------------------------------
+  // createGausDSCBFit
+  //   Reference factory — not the active fit in this build.  Free Gaussian
+  //   narrow core + symmetric DSCB wider component.  Used during the
+  //   exploration that produced the inclusive plots in share/docs/
+  //   dscb_reference_plots/.  Sigma_g constrained narrower than Sigma_d so
+  //   the two components don't swap roles.  The `n` parameter often rails
+  //   at its lower bound on noisy categories — a known limitation reflecting
+  //   that the data's deep tail is flatter than any finite-n DSCB allows.
+  // ---------------------------------------------------------------------------
+  inline TF1* createGausDSCBFit(TH1D* hist, double fitRange = 1000.0) {
+    TString fname = TString::Format("gausdscb_fit_%s", hist->GetName());
+    TF1* fit = new TF1(fname, gausDSCBFunc, -fitRange, fitRange, 6);
+    fit->SetParName(0, "Norm_g");
+    fit->SetParName(1, "Sigma_g");
+    fit->SetParName(2, "Norm_d");
+    fit->SetParName(3, "Sigma_d");
+    fit->SetParName(4, "Alpha");
+    fit->SetParName(5, "N");
+
+    fit->SetParameters(
+      0.7  * hist->GetMaximum(),  // Norm_g
+      12.0,                        // Sigma_g (narrow core)
+      0.10 * hist->GetMaximum(),   // Norm_d
+      40.0,                        // Sigma_d (wider shoulder)
+      1.5,                         // Alpha
+      3.0                          // N
+    );
+    fit->SetParLimits(0, 0.0,  1.E7);
+    fit->SetParLimits(1, 1.0,  30.0);    // narrow component (~core)
+    fit->SetParLimits(2, 0.0,  1.E7);
+    fit->SetParLimits(3, 10.0, 500.0);   // wider component
+    fit->SetParLimits(4, 0.1,  10.0);
+    fit->SetParLimits(5, 1.01, 100.0);
+    fit->SetLineColor(kRed);
+    fit->SetLineWidth(2);
+    fit->SetNpx(1000);
+    // "I" → integrate fit function over each bin rather than evaluating at the
+    //       bin centre.  Important because σ_g ~ 10 ps ≲ bin width 10 ps,
+    //       so the narrow core varies sharply within a single bin.
+    hist->Fit(fit, "RQI");
+    return fit;
+  }
+
+  // ---------------------------------------------------------------------------
+  // createDSCBFit
+  //   Build and fit a symmetric double-sided Crystal Ball to hist.  The mean
+  //   is fixed to 0 (matching createDblFit's convention).  Returns the fitted
+  //   TF1*.  fitRange controls the half-width of the fit window — use a
+  //   smaller value (e.g. 100 ps) to focus on the core and ignore the
+  //   far-tail combinatorial background.
+  // ---------------------------------------------------------------------------
+  inline TF1* createDSCBFit(TH1D* hist, double fitRange = 1000.0) {
+    TString fname = TString::Format("dscb_fit_%s", hist->GetName());
+    TF1* fit = new TF1(fname, dscbFunc, -fitRange, fitRange, 5);
+    fit->SetParName(0, "Norm");
+    fit->SetParName(1, "Mu");
+    fit->SetParName(2, "Sigma");
+    fit->SetParName(3, "Alpha");
+    fit->SetParName(4, "N");
+
+    double sigmaSeed = std::max(20.0, 0.5 * hist->GetStdDev());
+    fit->SetParameters(
+      hist->GetMaximum(),  // Norm
+      0.0,                 // Mu (fixed below)
+      sigmaSeed,           // Sigma
+      1.5,                 // Alpha
+      3.0                  // N
+    );
+    fit->FixParameter(1, 0.0);             // Mu = 0
+    fit->SetParLimits(0, 0.0,  1.E7);      // Norm >= 0
+    fit->SetParLimits(2, 1.0,  500.0);     // Sigma in [1, 500] ps
+    fit->SetParLimits(3, 0.1,  10.0);      // Alpha > 0
+    fit->SetParLimits(4, 1.01, 100.0);     // N > 1 (formula divergence at N<=1)
+    fit->SetLineColor(kRed);
+    fit->SetLineWidth(2);
+    fit->SetNpx(1000);
+    hist->Fit(fit, "RQ");
+    return fit;
+  }
+
   // ---------------------------------------------------------------------------
   // FitParams
   //   Holds six TH1D* distributions (one per FitParamFields enum value)
@@ -174,6 +328,10 @@ namespace MyUtl {
     TH1D* coreAmpDist;
     TH1D* backAmpDist;
     TH1D* ampRatioDist;
+    // Symmetric DSCB tail-parameter diagnostic histograms (filled by fillDSCB).
+    // Not iterated in the FitParamFields enum — these are kept for debugging.
+    TH1D* alphaDist = nullptr;
+    TH1D* nDist     = nullptr;
 
     FitParams(
       const char* title,
@@ -215,7 +373,16 @@ namespace MyUtl {
 			       TString::Format(fullTitle, "Core Amp/Bkg Amp", "Core/Background"),
 			       nbins, xMin, foldMax);
 
-      for (const auto& hist: {meanDist, bkgSigmaDist, sigmaDist, coreAmpDist, backAmpDist, ampRatioDist, rmsDist}) {
+      alphaDist     = new TH1D(TString::Format("alpha_dist_%s", name),
+			       TString::Format(fullTitle, "DSCB #alpha", "#alpha"),
+			       nbins, xMin, foldMax);
+
+      nDist         = new TH1D(TString::Format("n_dist_%s", name),
+			       TString::Format(fullTitle, "DSCB n", "n"),
+			       nbins, xMin, foldMax);
+
+      for (const auto& hist: {meanDist, bkgSigmaDist, sigmaDist, coreAmpDist, backAmpDist, ampRatioDist, rmsDist,
+                              alphaDist, nDist}) {
 	hist->SetLineWidth(2);
 	hist->SetLineColor(color);
       }
@@ -340,9 +507,59 @@ namespace MyUtl {
     // -----------------------------------------------------------------------
     void fillRMS(int idx, TH1D* slice) const {
       double rms = slice->GetRMS();
-      double rmsError = slice->GetRMSError(); 
+      double rmsError = slice->GetRMSError();
       rmsDist->SetBinContent(idx+1,rms);
       rmsDist->SetBinError(idx+1,rmsError);
+    }
+
+    // -----------------------------------------------------------------------
+    // fillDSCB
+    //   Extracts σ + amplitude + asymmetric tail parameters from a 7-parameter
+    //   double-sided Crystal Ball fit and fills the corresponding bin idx of
+    //   the diagnostic histograms.  The single DSCB σ is treated as the
+    //   "core σ" (sigmaDist).  bkgSigmaDist / backAmpDist / ampRatioDist
+    //   are intentionally NOT filled — they have no analog in a single-DSCB
+    //   model and downstream plots referencing them will show empty bins.
+    // -----------------------------------------------------------------------
+    void fillDSCB(int idx, TF1* fit) const {
+      sigmaDist  ->SetBinContent(idx+1, fit->GetParameter("Sigma"));
+      sigmaDist  ->SetBinError  (idx+1, fit->GetParError ("Sigma"));
+
+      coreAmpDist->SetBinContent(idx+1, fit->GetParameter("Norm"));
+      coreAmpDist->SetBinError  (idx+1, fit->GetParError ("Norm"));
+
+      alphaDist  ->SetBinContent(idx+1, fit->GetParameter("Alpha"));
+      alphaDist  ->SetBinError  (idx+1, fit->GetParError ("Alpha"));
+
+      nDist      ->SetBinContent(idx+1, fit->GetParameter("N"));
+      nDist      ->SetBinError  (idx+1, fit->GetParError ("N"));
+    }
+
+    // -----------------------------------------------------------------------
+    // fillGausDSCB
+    //   Two-component fit: the narrow Gaussian σ becomes "core σ" (sigmaDist)
+    //   and amplitude (coreAmpDist); the wider DSCB σ goes to bkgSigmaDist
+    //   and amplitude to backAmpDist.  α/n tail params populate alphaDist
+    //   and nDist as DSCB diagnostics.
+    // -----------------------------------------------------------------------
+    void fillGausDSCB(int idx, TF1* fit) const {
+      sigmaDist   ->SetBinContent(idx+1, fit->GetParameter("Sigma_g"));
+      sigmaDist   ->SetBinError  (idx+1, fit->GetParError ("Sigma_g"));
+
+      coreAmpDist ->SetBinContent(idx+1, fit->GetParameter("Norm_g"));
+      coreAmpDist ->SetBinError  (idx+1, fit->GetParError ("Norm_g"));
+
+      bkgSigmaDist->SetBinContent(idx+1, fit->GetParameter("Sigma_d"));
+      bkgSigmaDist->SetBinError  (idx+1, fit->GetParError ("Sigma_d"));
+
+      backAmpDist ->SetBinContent(idx+1, fit->GetParameter("Norm_d"));
+      backAmpDist ->SetBinError  (idx+1, fit->GetParError ("Norm_d"));
+
+      alphaDist   ->SetBinContent(idx+1, fit->GetParameter("Alpha"));
+      alphaDist   ->SetBinError  (idx+1, fit->GetParError ("Alpha"));
+
+      nDist       ->SetBinContent(idx+1, fit->GetParameter("N"));
+      nDist       ->SetBinError  (idx+1, fit->GetParError ("N"));
     }
 
     // -----------------------------------------------------------------------
