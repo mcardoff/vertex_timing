@@ -23,7 +23,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 # parser.add_argument('--extra_time', type=float, required=False)
 # args = parser.parse_args()
 
-event_num, file_num = 599, '000002'
+event_num, file_num = 2511, '000006'
 
 IDEALEFF = False
 # filename = f'./VDT_TALK_2/RPT/event_display_{file_num}_{event_num:04d}.pdf'
@@ -69,6 +69,7 @@ branch = tree.arrays([
     'TruthOOTPUJet_eta',
     'Track_nearestVtx_sig',
     'Track_nearestVtx_idx',
+    'Track_truthPart_idx',
 ])
 
 print('='*50)
@@ -123,34 +124,25 @@ print(f'Found {len(connected_tracks)} tracks')
 for idx_trk in connected_tracks:
     z0_trk = branch.Track_z0[event_num][idx_trk]
     var_z0_trk = branch.Track_var_z0[event_num][idx_trk]
-
-    closest_nsigma = np.inf
-    closest_reco_vtx = -1
-    for (idx_vtx, z_vtx) in enumerate(branch.RecoVtx_z[event_num]):
-        nsigma = np.abs(z_vtx - z0_trk)/np.sqrt(var_z0_trk)
-        if nsigma < closest_nsigma:
-            closest_nsigma = nsigma
-            closest_reco_vtx = idx_vtx
-            
-    if closest_reco_vtx >= 0:
-        trk_reco_vtx = branch.Track_recoVtx_idx[event_num][idx_trk]
-        trk_truth_vtx = branch.Track_truthVtx_idx[event_num][idx_trk]
-        ntuple_nearest_sig = branch.Track_nearestVtx_sig[event_num][idx_trk]
-        ntuple_nearest_vtx = int(branch.Track_nearestVtx_idx[event_num][idx_trk])
-
-        trk_nearest_z = branch.RecoVtx_z[event_num][closest_reco_vtx]
-        ntuple_nearest_z = branch.RecoVtx_z[event_num][ntuple_nearest_vtx]
-
-
-    eta_trk = branch.Track_eta[event_num][idx_trk]
     pt_trk = branch.Track_pt[event_num][idx_trk]
+    eta_trk = branch.Track_eta[event_num][idx_trk]
+    time_trk = branch.Track_time[event_num][idx_trk]
+
+    trk_reco_vtx = branch.Track_recoVtx_idx[event_num][idx_trk]
+    trk_truth_vtx = branch.Track_truthVtx_idx[event_num][idx_trk]
+    trk_truth_part = branch.Track_truthPart_idx[event_num][idx_trk]
         
     print(50*'=')
     print(f'Track {idx_trk}')
     print(f'pt: {pt_trk:.2f}, z0: {z0_trk:.2f}, eta: {eta_trk:.2f}')
+    print(f'time: {time_trk:.2f}')
+    print(f'dt(Reco Vtx, Reco Trk): {abs(reco_hs_t - time_trk):.2f}')
+    print(f'dt(Truth Vtx, Reco Trk): {abs(truth_hs_t - time_trk):.2f}')
     print(f'RecoVtx Association: {trk_reco_vtx}')
     print(f'TruthVtx Association: {trk_truth_vtx}')
-    print(f'Calculated Closest Vertex (nsigma = {closest_nsigma:.2f}): {closest_reco_vtx} vtx_z={trk_nearest_z:.2f}')
-    print(f'NTuple Closest Vertex (nsigma = {ntuple_nearest_sig:.2f}): {ntuple_nearest_vtx} vtx_z={ntuple_nearest_z:.2f}')
+    print(f'TruthPart Association: {trk_truth_part}')
+    print(f'IsFake?: {trk_truth_part < 0}')
+    # print(f'Calculated Closest Vertex (nsigma = {closest_nsigma:.2f}): {closest_reco_vtx} vtx_z={trk_nearest_z:.2f}')
+    # print(f'NTuple Closest Vertex (nsigma = {ntuple_nearest_sig:.2f}): {ntuple_nearest_vtx} vtx_z={ntuple_nearest_z:.2f}')
     print(50*'=')
     

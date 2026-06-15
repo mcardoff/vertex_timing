@@ -18,7 +18,7 @@ void runHGTD_Clustering(std::string number, Long64_t eventNum) {
   BranchPointerWrapper branch(reader);
 
   reader.SetEntry(eventNum);
-  
+
   std::vector<int> tracks = getAssociatedTracks(&branch, MIN_TRACK_PT, MAX_TRACK_PT, 3.0);
 
   bool useSmearTimes = false, useValidTimesOnly = true, useZ0 = false;
@@ -48,11 +48,13 @@ void runHGTD_Clustering(std::string number, Long64_t eventNum) {
 
   for (int j = 0; j < clusters.size(); j++) {
     auto cluster = clusters.at(j);
-    auto score = cluster.scores.at(Score::TRKPTZ.id);
+    auto score_waves = cluster.scores.at(Score::WAVES.id);
+    auto score_trkptz = cluster.scores.at(Score::TRKPTZ.id);
     std::cout << "---------\n";
     std::cout << "t: " << cluster.values.at(0) << "\n";
     if (cluster.values.size() > 1) std::cout << "z: " << cluster.values.at(1) << "\n";
-    std::cout << "score: " << score << "\n";
+    std::cout << "score_trkptz: " << score_trkptz << "\n";
+    std::cout << "score_waves: " << score_waves << "\n";
     for (int i=0; i < cluster.trackIndices.size(); i++) {
       std::cout << cluster.trackIndices[i] << "," << cluster.allTimes[i] << "\n";
       

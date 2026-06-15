@@ -7,6 +7,8 @@
 /figs/
 /build/
 /.cache/
+/util/scratch/
+/saved_model_dir/
 *.csv
 *.pdf
 *.png

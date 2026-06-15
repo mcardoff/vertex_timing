@@ -27,6 +27,8 @@ add_executable(hgtd_matching util/hgtd_matching.cxx)
 add_executable(extract_error_metrics util/extract_error_metrics.cxx)
 add_executable(test_ml_model util/test_ml_model.cxx)
 add_executable(generate_rpt util/generate_rpt.cxx)
+add_executable(rpt_v2 util/rpt_v2.cxx)
+add_executable(rpt_v3 util/rpt_v3.cxx)
 add_executable(timing_diag util/timing_diag.cxx)
 add_executable(test_vbf_selection test_vbf_selection.cxx)
 add_executable(evaluate_ml_lowtrack util/evaluate_ml_lowtrack.cxx)
@@ -68,6 +70,18 @@ target_include_directories(test_ml_model
 )
 
 target_include_directories(generate_rpt
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+	${ROOT_INCLUDE_DIRS}
+)
+
+target_include_directories(rpt_v2
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+	${ROOT_INCLUDE_DIRS}
+)
+
+target_include_directories(rpt_v3
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 	${ROOT_INCLUDE_DIRS}
@@ -198,6 +212,18 @@ target_link_libraries(generate_rpt
         Boost::filesystem
 )
 
+target_link_libraries(rpt_v2
+    PRIVATE
+        ${ROOT_LIBRARIES}
+        Boost::filesystem
+)
+
+target_link_libraries(rpt_v3
+    PRIVATE
+        ${ROOT_LIBRARIES}
+        Boost::filesystem
+)
+
 target_link_libraries(timing_diag
     PRIVATE
         ${ROOT_LIBRARIES}
@@ -281,6 +307,15 @@ target_link_libraries(failure_decomposition
         ${ROOT_LIBRARIES}
         Boost::filesystem
 )
+
 add_executable(vtx_diag util/vtx_diag.cxx)
 target_include_directories(vtx_diag PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${ROOT_INCLUDE_DIRS})
 target_link_libraries(vtx_diag PRIVATE ${ROOT_LIBRARIES} Boost::filesystem)
+
+add_executable(rpt_v4 util/rpt_v4.cxx)
+target_include_directories(rpt_v4 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${ROOT_INCLUDE_DIRS})
+target_link_libraries(rpt_v4 PRIVATE ${ROOT_LIBRARIES} Boost::filesystem)
+
+add_executable(rpt_v5 util/rpt_v5.cxx)
+target_include_directories(rpt_v5 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${ROOT_INCLUDE_DIRS})
+target_link_libraries(rpt_v5 PRIVATE ${ROOT_LIBRARIES} Boost::filesystem)

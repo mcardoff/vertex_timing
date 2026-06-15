@@ -7,6 +7,7 @@ MODIFIED FOR USE BY: mcardiff@brandeis.edu
 import argparse
 import random
 import subprocess
+import sys
 from itertools import chain
 
 import uproot
@@ -21,12 +22,26 @@ parser = argparse.ArgumentParser(description='Process event and vertex data.')
 parser.add_argument('--event_num', type=int, required=True)
 parser.add_argument('--file_num', type=str, required=True)
 parser.add_argument('--extra_time', type=float, required=False)
+parser.add_argument('--jet_idx', type=int, required=False, default=None,
+                    help='Index of jet to highlight (orange) in R-Z and eta-phi displays')
+parser.add_argument('--jet_label', type=str, required=False, default=None,
+                    help='Truth identity of the target jet: HS or PU')
+parser.add_argument('--rpt_hgtd', type=float, required=False, default=None,
+                    help='HGTD RpT value for the target jet')
+parser.add_argument('--rpt_mine', type=float, required=False, default=None,
+                    help='My algo RpT value for the target jet')
+parser.add_argument('--output_dir', type=str, required=False,
+                    default='event_displays',
+                    help='Directory to save the output PDF (created if absent)')
 args = parser.parse_args()
 
 event_num, file_num = args.event_num, args.file_num
 
+import os
+os.makedirs(args.output_dir, exist_ok=True)
+
 IDEALEFF = False
-filename = f'event_displays/event_display_{file_num}_{event_num:04d}.pdf'
+filename = f'{args.output_dir}/event_display_{file_num}_{event_num:04d}.pdf'
 # filename = f'event_displays/failing_5/event_display_{file_num}_{event_num:04d}.pdf'
 
 def generate_cluster_colors(n):
@@ -112,8 +127,7 @@ for idx in connected_tracks:
     track_info.append({'z0':track_z0, 'x':x, 'y':y, 'stat':status, 'idx':idx})
 
 jet_info = []
-for jet_pt in branch.AntiKt4EMTopoJets_pt[event_num]:
-    idx = branch.AntiKt4EMTopoJets_pt[event_num].tolist().index(jet_pt)
+for idx, jet_pt in enumerate(branch.AntiKt4EMTopoJets_pt[event_num]):
     if jet_pt < 30.0:
         continue
     jet_eta = branch.AntiKt4EMTopoJets_eta[event_num][idx]
@@ -126,7 +140,8 @@ for jet_pt in branch.AntiKt4EMTopoJets_pt[event_num]:
     theta = np.arctan(jet_pt / abs(pz))
     x_jet = (jet_pt / 40) * np.cos(theta) * signX
     y_jet = (jet_pt / 40) * np.sin(theta) * signY
-    jet_info.append({'pt':jet_pt, 'eta':jet_eta, 'phi':jet_phi, 'isHS':isHS, 'x':x_jet, 'y':y_jet})
+    jet_info.append({'pt':jet_pt, 'eta':jet_eta, 'phi':jet_phi, 'isHS':isHS,
+                     'x':x_jet, 'y':y_jet, 'idx':idx})
 
 
 # --- ROOT Macro Execution and Clustering ---
@@ -139,9 +154,12 @@ try:
     print(result.stdout)
     track_clusters = []
     cluster_times, cluster_zs = [], []
+    cluster_trkptz_scores, cluster_waves_scores = [], []
     track_times = []
     current_block_idx = []
     current_block_times = []
+    current_trkptz = None
+    current_waves  = None
 
     for line in result.stdout.splitlines():
         line = line.strip()
@@ -149,27 +167,38 @@ try:
             if current_block_idx:
                 track_clusters.append(current_block_idx)
                 track_times.append(current_block_times)
+                cluster_trkptz_scores.append(current_trkptz)
+                cluster_waves_scores.append(current_waves)
                 current_block_idx = []
                 current_block_times = []
+                current_trkptz = None
+                current_waves  = None
             continue
-        if "t:" in line:
+        if line.startswith("t:"):
             cl_time = float(line[2:])
-            if np.abs(cl_time-truth_hs_t) < 1000:
+            if np.abs(cl_time - truth_hs_t) < 1000:
                 cluster_times.append(cl_time)
             else:
                 continue
-        try:
-            tup = line.split(",")
-            trk_idx = int(tup[0])
-            trk_time = float(tup[1])
-            if np.abs(trk_time-truth_hs_t) < 1000:
-                current_block_idx.append(trk_idx)
-                current_block_times.append(trk_time)
-        except (ValueError, IndexError):
-            continue
+        elif line.startswith("score_trkptz:"):
+            current_trkptz = float(line.split(":", 1)[1])
+        elif line.startswith("score_waves:"):
+            current_waves = float(line.split(":", 1)[1])
+        else:
+            try:
+                tup = line.split(",")
+                trk_idx = int(tup[0])
+                trk_time = float(tup[1])
+                if np.abs(trk_time - truth_hs_t) < 1000:
+                    current_block_idx.append(trk_idx)
+                    current_block_times.append(trk_time)
+            except (ValueError, IndexError):
+                continue
     if current_block_idx:
         track_clusters.append(current_block_idx)
         track_times.append(current_block_times)
+        cluster_trkptz_scores.append(current_trkptz)
+        cluster_waves_scores.append(current_waves)
 except subprocess.CalledProcessError as e:
     print(f"Error executing root script: {e.stderr}")
     track_clusters = []
@@ -251,16 +280,19 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
                 linestyle='solid')
 
     for (jet_i, jet_tup) in enumerate(jet_info_list):
-        jet_color = 'green' if jet_tup['isHS'] >= 1 else 'grey'
+        highlighted = (args.jet_idx is not None and jet_tup.get('idx') == args.jet_idx)
+        jet_color = 'orange' if highlighted else ('green' if jet_tup['isHS'] >= 1 else 'grey')
         x_off1, y_off1 = jet_tup['x']-0.15*jet_tup['y'], jet_tup['y']+0.15*jet_tup['x']
         x_off2, y_off2 = jet_tup['x']+0.15*jet_tup['y'], jet_tup['y']-0.15*jet_tup['x']
         ax.fill([reco_hs_z, reco_hs_z + x_off1, reco_hs_z + x_off2], [0, y_off1, y_off2],
-                color=jet_color, alpha=0.5)
+                color=jet_color, alpha=0.7 if highlighted else 0.5)
 
-        txt_color = 'green' if jet_tup['isHS'] >= 1 else 'black'
+        txt_color = 'orange' if highlighted else ('green' if jet_tup['isHS'] >= 1 else 'black')
+        label = f"Jet {jet_i+1}: $p_T$={jet_tup['pt']:.0f} GeV, $\eta$={jet_tup['eta']:.1f}"
+        if highlighted:
+            label += "  ← target"
         ax.text(reco_hs_z - 6.8, 0.9 - (1.2 + jet_i*0.1),
-                f"Jet {jet_i+1}: $p_T$={jet_tup['pt']:.0f} GeV, $\eta$={jet_tup['eta'] :.1f}",
-                weight='bold', fontsize=12, color=txt_color)
+                label, weight='bold', fontsize=12, color=txt_color)
 
     draw_eta_reference_lines(ax, reco_hs_z, 2.4)
     ax.set_ylim(-1.0, 1.0)
@@ -285,6 +317,20 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
     ax.text(reco_hs_z + 2.0, 0.85, 'ATLAS Simulation Internal',
             fontsize=16, weight='bold', style='italic')
 
+    # Target jet annotation (bottom-left, only when --jet_idx is given)
+    if args.jet_idx is not None:
+        has_rpt = args.rpt_hgtd is not None and args.rpt_mine is not None
+        lines = [f'Target jet (idx={args.jet_idx})']
+        if args.jet_label is not None:
+            lines.append(f'  Truth identity: {args.jet_label}')
+        if has_rpt:
+            lines.append(f'  HGTD $R_{{pT}}$ = {args.rpt_hgtd:.3f}')
+            lines.append(f'  My algo $R_{{pT}}$ = {args.rpt_mine:.3f}')
+        for i, line in enumerate(lines):
+            ax.text(reco_hs_z + 2.0, 0.72 - i * 0.13, line,
+                    fontsize=11, color='orange',
+                    weight='bold' if i == 0 else 'normal')
+
     # Add RZ display labels and legend
     ax.text(reco_hs_z-6.8, 0.9,
             f"Reco HS (z,t) = ({reco_hs_z:.1f} mm, {reco_hs_t:.1f} ps)",
@@ -294,11 +340,17 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
             weight='bold', fontsize=12)
 
     # Jet and track legend
-    ax.legend([mlines.Line2D([], [], color='blue'),
-               mlines.Line2D([], [], color='red'),
-               mpatches.Rectangle((0, 0), 1, 1, color='green', alpha=0.5),
-               mpatches.Rectangle((0, 0), 1, 1, color='grey', alpha=0.5)],
-              ['Hard Scatter', 'Pile-Up', 'HS jet', 'PU jet'],
+    legend_handles = [
+        mlines.Line2D([], [], color='blue'),
+        mlines.Line2D([], [], color='red'),
+        mpatches.Rectangle((0, 0), 1, 1, color='green', alpha=0.5),
+        mpatches.Rectangle((0, 0), 1, 1, color='grey',  alpha=0.5),
+    ]
+    legend_labels = ['Hard Scatter', 'Pile-Up', 'HS jet', 'PU jet']
+    if args.jet_idx is not None:
+        legend_handles.append(mpatches.Rectangle((0, 0), 1, 1, color='orange', alpha=0.7))
+        legend_labels.append('Target jet')
+    ax.legend(legend_handles, legend_labels,
               loc='upper left', title='Track and Jet Types',
               bbox_to_anchor=(0.0, 0.9))
 
@@ -339,15 +391,16 @@ all_times = [reco_hs_t, truth_hs_t] + list(chain.from_iterable(hist_times))
 extended_min_time = min(all_times) - 0.05 * (max(all_times) - min(all_times))
 extended_max_time = max(all_times) + 0.05 * (max(all_times) - min(all_times))
 
-# Compute per-cluster scores and find the indices to show in the legend.
-# Score: sum(pt) * exp(-dz), same quantities already used for labels below.
-cluster_scores = [
-    sum(pt_wghts[i]) * np.exp(-1.5 * np.abs(reco_hs_z - cluster_zs[i]))
-    for i in range(len(pt_wghts))
-]
+# Rank clusters by TRKPTZ score (parsed from C++ output); fall back to
+# Python-recomputed sum(pT)*exp(-1.5|Δz|) if the parsed score is missing.
+def _trkptz_or_fallback(i):
+    s = cluster_trkptz_scores[i] if i < len(cluster_trkptz_scores) else None
+    if s is not None:
+        return s
+    return sum(pt_wghts[i]) * np.exp(-1.5 * np.abs(reco_hs_z - cluster_zs[i]))
 
-# Top 4 by score (descending)
-ranked_indices = sorted(range(len(cluster_scores)), key=lambda i: cluster_scores[i], reverse=True)
+# Top 4 by TRKPTZ score (descending)
+ranked_indices = sorted(range(len(pt_wghts)), key=_trkptz_or_fallback, reverse=True)
 legend_indices = ranked_indices[:4]
 
 # Always include the cluster whose time is closest to the truth HS vertex time
@@ -361,12 +414,17 @@ weight_legend_patches = []
 for i_cluster, weights in enumerate(pt_wghts):
     if i_cluster not in legend_index_set:
         continue
-    total_weight = sum(weights)
-    dz = np.abs(reco_hs_z - cluster_zs[i_cluster])
-    score = total_weight * np.exp(-1.5 * dz)
-    score_label = f'score = {score:.3f}'
-    t_label  = f't={cluster_times[i_cluster]:.2f}'
-    suffix   = ' [ΔT closest]' if i_cluster == truth_closest_idx and truth_closest_idx not in ranked_indices[:4] else ''
+    t_label = f't = {cluster_times[i_cluster]:.2f} ps'
+    suffix  = '  [ΔT closest]' if i_cluster == truth_closest_idx and truth_closest_idx not in ranked_indices[:4] else ''
+    trkptz_s = cluster_trkptz_scores[i_cluster] if i_cluster < len(cluster_trkptz_scores) else None
+    waves_s  = cluster_waves_scores[i_cluster]  if i_cluster < len(cluster_waves_scores)  else None
+    if trkptz_s is not None and waves_s is not None:
+        score_label = f'TRKPTZ = {trkptz_s:.3g}  |  WAVeS = {waves_s:.3g}'
+    elif trkptz_s is not None:
+        score_label = f'TRKPTZ = {trkptz_s:.3g}'
+    else:
+        dz = np.abs(reco_hs_z - cluster_zs[i_cluster])
+        score_label = f'score = {sum(weights) * np.exp(-1.5 * dz):.3f}'
     FULL_LABEL = f'{score_label}\n{t_label}{suffix}'
     patch = mpatches.Patch(facecolor=cluster_colors[i_cluster], label=FULL_LABEL)
     weight_legend_patches.append(patch)
@@ -510,20 +568,23 @@ with PdfPages(filename) as pdf:
     pdf.savefig(fig2)
     plt.close(fig2)
 
-    # --- Page 3: η-φ cluster view ---
+    # --- Page 3: η-φ cluster view (split: negative η left, positive η right) ---
     ETA_MIN, ETA_MAX = 2.38, 4.0
-    fig3, ax3 = plt.subplots(figsize=(12, 8))
-    fig3.subplots_adjust(bottom=0.22)   # room for legend below axes
+    fig3, (ax_neg, ax_pos) = plt.subplots(1, 2, figsize=(14, 8), sharey=True)
+    fig3.subplots_adjust(bottom=0.22, wspace=0.05)
 
-    # Per-cluster tracks in |η|-φ
+    def _eta_ax(eta):
+        return ax_neg if eta < 0 else ax_pos
+
+    # Per-cluster tracks in η-φ (signed eta, correct panel)
     for i_cl, cluster in enumerate(track_clusters):
         col = cluster_colors[i_cl]
         for idx in cluster:
-            eta = abs(float(branch.Track_eta[event_num][idx]))
+            eta = float(branch.Track_eta[event_num][idx])
             phi = float(branch.Track_phi[event_num][idx])
             pt  = float(branch.Track_pt[event_num][idx])
             is_hs = branch.Track_truthVtx_idx[event_num][idx] == 0
-            ax3.scatter(eta, phi,
+            _eta_ax(eta).scatter(eta, phi,
                         s=max(20, pt * 8),
                         color=col,
                         edgecolors='blue' if is_hs else 'none',
@@ -531,33 +592,53 @@ with PdfPages(filename) as pdf:
                         zorder=4 if is_hs else 3,
                         marker='o')
 
-    # Cluster centroids: naive mean |η| and circular mean φ
+    # Cluster centroids: signed mean η and circular mean φ
     for i_cl, cluster in enumerate(track_clusters):
         col  = cluster_colors[i_cl]
-        etas = np.array([abs(float(branch.Track_eta[event_num][idx])) for idx in cluster])
+        etas = np.array([float(branch.Track_eta[event_num][idx]) for idx in cluster])
         phis = np.array([float(branch.Track_phi[event_num][idx]) for idx in cluster])
         eta_c = np.mean(etas)
         phi_c = np.arctan2(np.mean(np.sin(phis)), np.mean(np.cos(phis)))
-        ax3.scatter(eta_c, phi_c,
+        _eta_ax(eta_c).scatter(eta_c, phi_c,
                     s=350, marker='*', color=col,
                     edgecolors='black', linewidths=0.7, zorder=6)
 
-    # Jets as ΔR = 0.4 circles (only those overlapping the HGTD |η| range)
+    # Jets as ΔR = 0.4 circles (placed in the correct signed-η panel)
     for jet in jet_info:
-        abs_eta = abs(jet['eta'])
-        if abs_eta + 0.4 < ETA_MIN or abs_eta - 0.4 > ETA_MAX:
+        jet_eta = jet['eta']
+        if abs(jet_eta) + 0.4 < ETA_MIN or abs(jet_eta) - 0.4 > ETA_MAX:
             continue
-        jet_color = 'green' if jet['isHS'] else 'grey'
-        circle = plt.Circle((abs_eta, jet['phi']), 0.4,
+        highlighted = (args.jet_idx is not None and jet.get('idx') == args.jet_idx)
+        jet_color = 'orange' if highlighted else ('green' if jet['isHS'] else 'grey')
+        lw = 3.0 if highlighted else 1.5
+        ax_j = _eta_ax(jet_eta)
+        circle = plt.Circle((jet_eta, jet['phi']), 0.4,
                              color=jet_color, fill=False,
-                             linewidth=1.5, linestyle='-',
-                             alpha=0.7, zorder=5)
-        ax3.add_patch(circle)
-        ax3.text(abs_eta + 0.02, jet['phi'],
-                 f" {jet['pt']:.0f} GeV",
-                 fontsize=8, color=jet_color, va='center', zorder=6)
+                             linewidth=lw, linestyle='-',
+                             alpha=0.9 if highlighted else 0.7, zorder=5)
+        ax_j.add_patch(circle)
+        label = f" {jet['pt']:.0f} GeV" + (" ← target" if highlighted else "")
+        ax_j.text(jet_eta + 0.02 * np.sign(jet_eta), jet['phi'],
+                  label, fontsize=8, color=jet_color, va='center', zorder=6)
 
-    # Legend below axes — only track type + jet type entries
+    # Axis limits and labels
+    ax_neg.set_xlim(-ETA_MAX, -ETA_MIN)
+    ax_pos.set_xlim(ETA_MIN, ETA_MAX)
+    for ax in (ax_neg, ax_pos):
+        ax.set_ylim(-np.pi, np.pi)
+        ax.set_yticks([-np.pi, -np.pi/2, 0, np.pi/2, np.pi])
+        ax.set_yticklabels(['-π', '-π/2', '0', 'π/2', 'π'])
+        ax.set_xlabel('η', fontsize=13)
+        ax.grid(True, alpha=0.3)
+    ax_neg.set_ylabel('φ  (rad)', fontsize=13)
+    ax_neg.set_title('Negative η  (backward)', fontsize=12)
+    ax_pos.set_title('Positive η  (forward)', fontsize=12)
+    fig3.suptitle(f'Event# {event_num}: η-φ Cluster View  (HGTD acceptance)', fontsize=13, y=1.01)
+    ax_neg.text(0.02, 0.98, 'ATLAS Simulation Internal',
+                transform=ax_neg.transAxes, fontsize=11,
+                weight='bold', style='italic', va='top')
+
+    # Legend below axes
     leg_handles = [
         mlines.Line2D([], [], marker='o', color='none',
                       markerfacecolor='grey', markeredgecolor='blue',
@@ -567,25 +648,16 @@ with PdfPages(filename) as pdf:
                       markersize=8, label='Pile-up track'),
         mlines.Line2D([], [], marker='*', color='none',
                       markerfacecolor='grey', markeredgecolor='black',
-                      markersize=12, label='Cluster centroid (mean |η|, φ)'),
-        mpatches.Patch(facecolor='green', alpha=0.6, label='HS jet (ΔR=0.4)'),
-        mpatches.Patch(facecolor='grey',  alpha=0.5, label='PU jet (ΔR=0.4)'),
+                      markersize=12, label='Cluster centroid (mean η, φ)'),
+        mpatches.Patch(facecolor='green',  alpha=0.6, label='HS jet (ΔR=0.4)'),
+        mpatches.Patch(facecolor='grey',   alpha=0.5, label='PU jet (ΔR=0.4)'),
     ]
-    ax3.legend(handles=leg_handles,
-               loc='upper center', bbox_to_anchor=(0.5, -0.14),
-               ncol=5, fontsize=9, framealpha=0.9)
+    if args.jet_idx is not None:
+        leg_handles.append(mpatches.Patch(facecolor='none', edgecolor='orange',
+                                          linewidth=2.5, label='Target jet (ΔR=0.4)'))
+    fig3.legend(handles=leg_handles,
+                loc='upper center', bbox_to_anchor=(0.5, -0.02),
+                ncol=5, fontsize=9, framealpha=0.9)
 
-    ax3.set_xlim(ETA_MIN, ETA_MAX)
-    ax3.set_ylim(-np.pi, np.pi)
-    ax3.set_xlabel('|η|', fontsize=13)
-    ax3.set_ylabel('φ  (rad)', fontsize=13)
-    ax3.set_title(f'Event# {event_num}: |η|-φ Cluster View  (HGTD acceptance)', fontsize=13)
-    ax3.set_yticks([-np.pi, -np.pi/2, 0, np.pi/2, np.pi])
-    ax3.set_yticklabels(['-π', '-π/2', '0', 'π/2', 'π'])
-    ax3.grid(True, alpha=0.3)
-    ax3.text(0.01, 0.98, 'ATLAS Simulation Internal',
-             transform=ax3.transAxes, fontsize=11,
-             weight='bold', style='italic', va='top')
-
-    pdf.savefig(fig3)
+    pdf.savefig(fig3, bbox_inches='tight')
     plt.close(fig3)

@@ -81,8 +81,8 @@ struct BinData {
 static const int NBINS = static_cast<int>(FOLD_HS_TRACK) + 1;
 
 // ---------------------------------------------------------------------------
-// chooseTRKPTZ — return pointer to the highest-TRKPTZ qualifying cluster,
-//                or nullptr if the collection is empty.
+// chooseTRKPTZ / chooseWAVeS — return pointer to the highest-score qualifying
+//                               cluster, or nullptr if the collection is empty.
 // ---------------------------------------------------------------------------
 static const Cluster* chooseTRKPTZ(const std::vector<Cluster>& qual) {
   if (qual.empty()) return nullptr;
@@ -90,6 +90,17 @@ static const Cluster* chooseTRKPTZ(const std::vector<Cluster>& qual) {
   double maxScore = best->scores.at(Score::TRKPTZ.id);
   for (const auto& c : qual) {
     double s = c.scores.at(Score::TRKPTZ.id);
+    if (s > maxScore) { maxScore = s; best = &c; }
+  }
+  return best;
+}
+
+static const Cluster* chooseWAVeS(const std::vector<Cluster>& qual) {
+  if (qual.empty()) return nullptr;
+  const Cluster* best = &qual[0];
+  double maxScore = best->scores.at(Score::WAVES.id);
+  for (const auto& c : qual) {
+    double s = c.scores.at(Score::WAVES.id);
     if (s > maxScore) { maxScore = s; best = &c; }
   }
   return best;
@@ -123,7 +134,7 @@ static BinData aggregate(const std::vector<BinData>& bins) {
 // ---------------------------------------------------------------------------
 // printSummary — full summary table for a BinData aggregate
 // ---------------------------------------------------------------------------
-static void printSummary(const BinData& g) {
+static void printSummary(const BinData& g, const char* label = "TRKPTZ") {
   const double nf = g.n_fail;
   const double nt = g.total;
   auto pf = [&](double n) { return nf > 0 ? 100.*n/nf : 0.; };  // % of fail
@@ -138,11 +149,11 @@ static void printSummary(const BinData& g) {
 
   std::cout << "\n";
   std::cout << "================================================================\n";
-  std::cout << "  TRKPTZ Failure Decomposition\n";
+  printf("  %s Failure Decomposition\n", label);
   std::cout << "================================================================\n";
   printf("  Total events (passing selection): %9.0f\n", g.total);
-  printf("  TRKPTZ pass:                      %9.0f  (%5.2f%%)\n", g.n_pass, pt(g.n_pass));
-  printf("  TRKPTZ fail:                      %9.0f  (%5.2f%%)\n", g.n_fail, pt(g.n_fail));
+  printf("  %s pass:                      %9.0f  (%5.2f%%)\n", label, g.n_pass, pt(g.n_pass));
+  printf("  %s fail:                      %9.0f  (%5.2f%%)\n", label, g.n_fail, pt(g.n_fail));
 
   std::cout << "\n  --- Among failing events (N = " << (int)g.n_fail << ") ---\n\n";
   printf("  %-45s %8s %9s %9s\n",
@@ -558,7 +569,8 @@ auto main() -> int {
   ROOT::EnableImplicitMT();
   gErrorIgnoreLevel = kFatal;
 
-  std::vector<BinData> bins(NBINS);
+  std::vector<BinData> bins(NBINS);    // TRKPTZ path
+  std::vector<BinData> bins_w(NBINS);  // WAVeS path (same oracle categories)
 
   // ── filterClusters: keep clusters with ≥ MIN_CLUSTER_TRACKS tracks ────────
   auto filterClusters = [](const std::vector<Cluster>& col) {
@@ -593,40 +605,45 @@ auto main() -> int {
     const int bin = folded(nHSTrack, static_cast<int>(FOLD_HS_TRACK));
 
     // ── D. HGTD clustering (real times, purity enabled) ───────────────────
+    // Use ITERATIVE (production method) so WAVeS scores are populated.
     auto hgtdRaw = clusterTracksInTime(
       tracks, &branch, DIST_CUT_CONE,
       /*useSmearedTimes=*/false, /*checkTimeValid=*/true, /*smearRes=*/-1.0,
-      ClusteringMethod::CONE, /*useZ0=*/false,
+      ClusteringMethod::ITERATIVE, /*useZ0=*/false,
       /*sortTracks=*/false, /*calcPurityFlag=*/true);
     const auto qualHGTD = filterClusters(hgtdRaw);
 
-    // ── E. HGTD per-event flags ────────────────────────────────────────────
-    // TRKPTZ selection and pass/fail status.
-    const Cluster* hgtdBest = chooseTRKPTZ(qualHGTD);
-    const bool hgtd_trkptz_pass = hgtdBest && hgtdBest->passEfficiency(&branch);
+    // ── E. Per-event pass/fail for TRKPTZ and WAVeS ───────────────────────
+    const Cluster* hgtdBest   = chooseTRKPTZ(qualHGTD);
+    const Cluster* hgtdBestW  = chooseWAVeS(qualHGTD);
+    const bool hgtd_trkptz_pass = hgtdBest  && hgtdBest->passEfficiency(&branch);
+    const bool hgtd_waves_pass  = hgtdBestW && hgtdBestW->passEfficiency(&branch);
 
     bins[bin].total++;
-    if (hgtd_trkptz_pass) { bins[bin].n_pass++; continue; }
-    bins[bin].n_fail++;
+    bins_w[bin].total++;
+    if (hgtd_trkptz_pass) bins[bin].n_pass++;   else bins[bin].n_fail++;
+    if (hgtd_waves_pass)  bins_w[bin].n_pass++;  else bins_w[bin].n_fail++;
 
-    // ── F. Category 1: selection failure ──────────────────────────────────
+    // Skip shared oracle work entirely if both passed
+    if (hgtd_trkptz_pass && hgtd_waves_pass) continue;
+
+    // ── F. Shared cluster-level properties ───────────────────────────────
     bool any_hgtd_pass = false;
     bool hgtd_hasPure  = false;
     for (const auto& c : qualHGTD) {
       if (c.passEfficiency(&branch)) any_hgtd_pass = true;
       if (c.purity > 0.75f)         hgtd_hasPure  = true;
     }
-    const bool cat_sel = any_hgtd_pass;   // TRKPTZ failed but another cluster passes
 
-    // ── F2. Category 3: misclustering ─────────────────────────────────────
-    // Fired if EITHER:
-    //   (a) no HGTD cluster has purity > 75%  (original purity-based definition)
-    //   (b) the REFINED 2σ timing refinement fixes it  (catches CONE over-merging
-    //       failures where PU tracks absorbed into the winner drag its centroid
-    //       outside the pass window, but the 2σ-filtered time lands inside it)
+    // Category 1 (selection failure): depends on which cluster was chosen.
+    // If the chosen cluster failed but another cluster in the collection passes,
+    // the algorithm made a wrong selection choice.
+    const bool cat_sel_T = !hgtd_trkptz_pass && any_hgtd_pass;
+    const bool cat_sel_W = !hgtd_waves_pass  && any_hgtd_pass;
+
+    // ── F2. Category 3: misclustering (score-independent) ─────────────────
     bool refined_fixes = false;
     {
-      const auto qualHGTD = filterClusters(hgtdRaw);
       if (!qualHGTD.empty()) {
         auto bestIt = std::max_element(qualHGTD.begin(), qualHGTD.end(),
             [](const Cluster& a, const Cluster& b) {
@@ -638,92 +655,97 @@ auto main() -> int {
     }
     const bool cat_miscl = !hgtd_hasPure || refined_fixes;
 
-    // ── G. Category 2: timing misassignment (Ideal Res. scenario) ─────────
+    // ── G. Category 2: timing misassignment (oracle — score-independent) ──
     auto idealRaw = clusterTracksInTime(
       tracks, &branch, DIST_CUT_CONE,
       /*useSmearedTimes=*/true, /*checkTimeValid=*/true, IDEAL_TRACK_RES,
-      ClusteringMethod::CONE, /*useZ0=*/false,
+      ClusteringMethod::ITERATIVE, /*useZ0=*/false,
       /*sortTracks=*/false, /*calcPurityFlag=*/false);
     const auto qualIdeal = filterClusters(idealRaw);
     const Cluster* idealBest = chooseTRKPTZ(qualIdeal);
     const bool ideal_pass = idealBest && idealBest->passEfficiency(&branch);
     const bool cat_timing = ideal_pass;
 
-    // ── H. Category 4: track efficiency loss ──────────────────────────────
-    // Only run Ideal+Eff. clustering when Ideal Res. alone didn't fix it,
-    // since cat_teff is defined as the exclusive contribution.
+    // ── H. Category 4: track efficiency loss (oracle — score-independent) ─
     bool cat_teff = false;
     if (!ideal_pass) {
       auto idealEffRaw = clusterTracksInTime(
         tracks, &branch, DIST_CUT_CONE,
         /*useSmearedTimes=*/true, /*checkTimeValid=*/false, IDEAL_TRACK_RES,
-        ClusteringMethod::CONE, /*useZ0=*/false,
+        ClusteringMethod::ITERATIVE, /*useZ0=*/false,
         /*sortTracks=*/false, /*calcPurityFlag=*/false);
       const auto qualIdealEff = filterClusters(idealEffRaw);
       const Cluster* idealEffBest = chooseTRKPTZ(qualIdealEff);
       cat_teff = idealEffBest && idealEffBest->passEfficiency(&branch);
     }
-    // By construction, cat_timing and cat_teff are mutually exclusive.
 
-    // ── I. "None" catch-all ────────────────────────────────────────────────
-    const bool cat_none = !cat_sel && !cat_timing && !cat_miscl && !cat_teff;
-
-    if (cat_none) {
-      static constexpr const char* EVTDISPLAY_FMT =
-        "python3 event_display.py --file_num %s --event_num %lld --extra_time %.2f";
-
-      std::string fname   = chain.GetCurrentFile()->GetName();
-      std::string fileNum = "?";
-      auto p1 = fname.rfind("._");
-      auto p2 = fname.rfind(".SuperNtuple");
-      if (p1 != std::string::npos && p2 != std::string::npos)
-        fileNum = fname.substr(p1 + 2, p2 - p1 - 2);
-      const Long64_t localEntry = chain.GetTree()->GetReadEntry();
-
-      std::cout << "\n===== cat_none event =====\n";
-      printf((std::string(EVTDISPLAY_FMT) + "\n").c_str(),
-             fileNum.c_str(), localEntry, 0.0);
-      for (const auto& c : hgtdRaw) {
-        std::cout << "---------\n";
-        std::cout << "t: " << c.values.at(0) << "\n";
-        if (c.values.size() > 1) std::cout << "z: " << c.values.at(1) << "\n";
-        std::cout << "score: " << c.scores.at(Score::TRKPTZ.id) << "\n";
-        std::cout << "purity: " << c.purity << " (" << c.nConstituents << " tracks)\n";
-        for (size_t i = 0; i < c.trackIndices.size(); ++i)
-          std::cout << c.trackIndices[i] << "," << c.allTimes[i] << "\n";
-        std::cout << "passes? " << c.passEfficiency(&branch) << "\n";
-        std::cout << "---------\n";
+    // ── I. Accumulate TRKPTZ path ─────────────────────────────────────────
+    if (!hgtd_trkptz_pass) {
+      const bool cat_none_T = !cat_sel_T && !cat_timing && !cat_miscl && !cat_teff;
+      if (cat_none_T) {
+        static constexpr const char* EVTDISPLAY_FMT =
+          "python3 event_display.py --file_num %s --event_num %lld --extra_time %.2f";
+        std::string fname   = chain.GetCurrentFile()->GetName();
+        std::string fileNum = "?";
+        auto p1 = fname.rfind("._");
+        auto p2 = fname.rfind(".SuperNtuple");
+        if (p1 != std::string::npos && p2 != std::string::npos)
+          fileNum = fname.substr(p1 + 2, p2 - p1 - 2);
+        const Long64_t localEntry = chain.GetTree()->GetReadEntry();
+        std::cout << "\n===== cat_none event (TRKPTZ) =====\n";
+        printf((std::string(EVTDISPLAY_FMT) + "\n").c_str(),
+               fileNum.c_str(), localEntry, 0.0);
+        for (const auto& c : hgtdRaw) {
+          std::cout << "---------\n";
+          std::cout << "t: " << c.values.at(0) << "\n";
+          std::cout << "score: " << c.scores.at(Score::TRKPTZ.id) << "\n";
+          std::cout << "purity: " << c.purity << " (" << c.nConstituents << " tracks)\n";
+          std::cout << "passes? " << c.passEfficiency(&branch) << "\n";
+          std::cout << "---------\n";
+        }
+        std::cout << "===== end cat_none event =====\n";
       }
-      std::cout << "===== end cat_none event =====\n";
+      auto& B = bins[bin];
+      if (cat_sel_T)  B.cat_sel++;
+      if (cat_timing) B.cat_timing++;
+      if (cat_miscl)  B.cat_miscl++;
+      if (cat_teff)   B.cat_teff++;
+      if (cat_none_T) B.cat_none++;
+      if (cat_sel_T  && cat_timing) B.ov_s_t++;
+      if (cat_sel_T  && cat_miscl)  B.ov_s_m++;
+      if (cat_sel_T  && cat_teff)   B.ov_s_e++;
+      if (cat_timing && cat_miscl)  B.ov_t_m++;
+      if (cat_miscl  && cat_teff)   B.ov_m_e++;
+      if (cat_sel_T && cat_timing && cat_miscl) B.ov_stm++;
+      if (cat_sel_T && cat_miscl  && cat_teff)  B.ov_sme++;
     }
 
-    // ── J. Accumulate ─────────────────────────────────────────────────────
-    auto& B = bins[bin];
-    if (cat_sel)    B.cat_sel++;
-    if (cat_timing) B.cat_timing++;
-    if (cat_miscl)  B.cat_miscl++;
-    if (cat_teff)   B.cat_teff++;
-    if (cat_none)   B.cat_none++;
-
-    // Pairwise overlaps
-    if (cat_sel   && cat_timing) B.ov_s_t++;
-    if (cat_sel   && cat_miscl)  B.ov_s_m++;
-    if (cat_sel   && cat_teff)   B.ov_s_e++;
-    if (cat_timing && cat_miscl) B.ov_t_m++;
-    // cat_timing && cat_teff is always 0 by construction
-    if (cat_miscl  && cat_teff)  B.ov_m_e++;
-
-    // Triple overlaps
-    if (cat_sel && cat_timing && cat_miscl) B.ov_stm++;
-    if (cat_sel && cat_miscl  && cat_teff)  B.ov_sme++;
-    // All triples/quads involving (cat_timing && cat_teff) are 0
+    // ── J. Accumulate WAVeS path ──────────────────────────────────────────
+    if (!hgtd_waves_pass) {
+      const bool cat_none_W = !cat_sel_W && !cat_timing && !cat_miscl && !cat_teff;
+      auto& W = bins_w[bin];
+      if (cat_sel_W)  W.cat_sel++;
+      if (cat_timing) W.cat_timing++;
+      if (cat_miscl)  W.cat_miscl++;
+      if (cat_teff)   W.cat_teff++;
+      if (cat_none_W) W.cat_none++;
+      if (cat_sel_W  && cat_timing) W.ov_s_t++;
+      if (cat_sel_W  && cat_miscl)  W.ov_s_m++;
+      if (cat_sel_W  && cat_teff)   W.ov_s_e++;
+      if (cat_timing && cat_miscl)  W.ov_t_m++;
+      if (cat_miscl  && cat_teff)   W.ov_m_e++;
+      if (cat_sel_W && cat_timing && cat_miscl) W.ov_stm++;
+      if (cat_sel_W && cat_miscl  && cat_teff)  W.ov_sme++;
+    }
   }
 
   std::cout << "\nFINISHED PROCESSING\n";
 
   // ── Print results ─────────────────────────────────────────────────────────
-  const BinData g = aggregate(bins);
-  printSummary(g);
+  const BinData g  = aggregate(bins);
+  const BinData gw = aggregate(bins_w);
+  printSummary(g,  "TRKPTZ");
+  printSummary(gw, "WAVeS");
   printPerBinTable(bins);
 
   // ── Generate plots ────────────────────────────────────────────────────────
