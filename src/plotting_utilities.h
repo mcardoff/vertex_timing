@@ -3,30 +3,30 @@
 
 // ---------------------------------------------------------------------------
 // plotting_utilities.h
-//   All histogram booking, filling, fitting, and plotting logic.  Three
-//   structs and three free functions are defined here, all inside MyUtl.
+//   All histogram booking, filling, fitting, and plotting logic.  All
+//   public types and free functions are defined here, inside MyUtl.
 //
-//   Global fit functions (module-level TF1 objects):
-//     tgausFitFunc — triple Gaussian (3 cores, shared mean)
-//     dgausFitFunc — double Gaussian (core + background, shared mean)
-//     sgausFitFunc — single Gaussian
+//   Pluggable fit framework:
+//     FitModel             — one fit recipe: makeFit closure + label/summary
+//                            formatters + ParamMap for FitParams extraction +
+//                            optional fallback model
+//     FitModel instances   — gaussian recipes: SNGGAUS, SNGGAUS_FULL, DBLGAUS,
+//                            TRPGAUS, plus PULLGAUS for pull distributions.
+//     ACTIVE_FIT_MODEL     — the one model used by plotPostProcessing and
+//                            inclusivePlot.  Re-point this single reference
+//                            to swap the global fit method.
 //
-//   Fit factory functions:
-//     createTrpFit  — configure and fit tgausFitFunc to a histogram
-//     createDblFit  — configure and fit dgausFitFunc to a histogram (legacy;
-//                     retained for backward compatibility, no longer used in
-//                     plotPostProcessing or inclusivePlot)
-//     createSngFit  — configure and fit sgausFitFunc to a histogram
-//     createDSCBFit — fit an asymmetric double-sided Crystal Ball; the active
-//                     model for per-bin slice fits and inclusivePlot
+//   Module-level TF1 objects (referenced by FitModel closures by formula name):
+//     tgausFitFunc, dgausFitFunc, sgausFitFunc
 //
 //   Structs:
-//     FitParams   — collection of per-bin resolution and amplitude histograms
-//                   extracted from double-Gaussian fits to timing residuals
+//     FitParams   — collection of per-bin resolution and amplitude histograms;
+//                   `fillFromModel` populates them from any FitModel's TF1
 //     PlotObj     — one (variable, score) analysis cell: owns the 2D timing
 //                   residual histogram, efficiency TH1Ds, purity 2D histogram,
-//                   per-bin slice histograms and their fits, and the
-//                   TEfficiency object; drives all per-cell plotting
+//                   per-bin slice histograms and their fits, the model used
+//                   for each slice, and the TEfficiency object; drives all
+//                   per-cell plotting
 //     AnalysisObj — collection of PlotObjs keyed by variable name, plus the
 //                   inclusive timing residual and purity histograms; top-level
 //                   container for one (scenario, score) combination
@@ -34,7 +34,7 @@
 //   Free plot functions:
 //     moneyPlot     — multi-algorithm comparison: core σ, background σ,
 //                     efficiency vs one kinematic variable
-//     inclusivePlot — inclusive timing residual plot with double-Gaussian fit
+//     inclusivePlot — inclusive timing residual plot fit with ACTIVE_FIT_MODEL
 //     purityPlot    — normalised cluster purity distributions
 // ---------------------------------------------------------------------------
 
@@ -45,10 +45,13 @@
 #include <TEfficiency.h>
 #include <TGraph.h>
 #include <TGraphErrors.h>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <memory>
 #include <sstream>
+#include <utility>
+#include <vector>
 
 namespace MyUtl {
 
@@ -70,237 +73,294 @@ namespace MyUtl {
   TF1* sgausFitFunc = new TF1("sgaus", "[1]*TMath::Exp(-0.5 * ((x - [0]) / [2])^2)");
 
   // ---------------------------------------------------------------------------
-  // createTrpFit
-  //   Configures tgausFitFunc with sensible starting parameters relative to
-  //   the histogram maximum, fixes the mean to 0 and the third width to
-  //   PILEUP_SMEAR, constrains all amplitudes and widths to be positive, then
-  //   fits the function to hist over its full range.  Returns the fitted TF1*.
-  //   The caller owns the returned pointer (it is managed by ROOT's memory).
-  // ---------------------------------------------------------------------------
-  auto createTrpFit(
-    TH1D* hist
-  ) -> TF1* {
-    tgausFitFunc->SetParNames("Mean", "Norm1", "Norm2", "Norm3", "Sigma1", "Sigma2", "Sigma3");
-    TF1* fit = new TF1("tgaus_fit", "tgaus", hist->GetXaxis()->GetXmin(), hist->GetXaxis()->GetXmax());
-    fit->SetParameters(0,
-		       0.80*hist->GetMaximum(),
-		       0.40*hist->GetMaximum(),
-		       0.01*hist->GetMaximum(),
-		       13.0, 26.0, 175.0);
-    fit->FixParameter(0, 0);
-    fit->FixParameter(6, PILEUP_SMEAR);
-    fit->SetParLimits(1, 0, 1.E6); // can only be positive
-    fit->SetParLimits(2, 0, 1.E6); // can only be positive
-    fit->SetParLimits(3, 0, 1.E6); // can only be positive
-    fit->SetParLimits(4, 0.1, PILEUP_SMEAR); // can only be positive
-    fit->SetParLimits(5, 0.1, PILEUP_SMEAR); // can only be positive
-    fit->SetLineColor(kRed);
-    fit->SetLineWidth(2);
-    fit->SetNpx(1000);
-    hist->Fit(fit,"RQ");
-    return fit;
-  }
-
-  // ---------------------------------------------------------------------------
-  // createDblFit
-  //   Configures dgausFitFunc for a double-Gaussian fit.  When fixbkg is true
-  //   the background width is fixed to PILEUP_SMEAR (models a flat pileup
-  //   component); when false it is free within [1, PILEUP_SMEAR].  Returns
-  //   the fitted TF1*.  This is the primary fit used in plotPostProcessing
-  //   for per-bin timing residual slices and in inclusivePlot.
-  // ---------------------------------------------------------------------------
-  auto createDblFit(
-    TH1D* hist, bool fixbkg, double fitRange = 200.0
-  ) -> TF1* {
-    dgausFitFunc->SetParNames("Mean", "Norm1", "Norm2", "Sigma1", "Sigma2");
-    TF1* fit = new TF1("dgaus_fit", "dgaus", hist->GetXaxis()->GetXmin(), hist->GetXaxis()->GetXmax());
-    fit->SetParameters(0, 0.8*hist->GetMaximum(), 1e-2*hist->GetMaximum(), 0.1*hist->GetStdDev(), hist->GetStdDev());
-    fit->FixParameter(0, 0);
-    fit->SetParLimits(1, 0, 1.E6); // can only be positive
-    fit->SetParLimits(2, 0, 1.E6); // can only be positive
-    fit->SetParLimits(3, 0.1, 1.E6); // can only be positive
-    if (fixbkg) { fit->FixParameter(4, PILEUP_SMEAR); }
-    else { fit->SetParLimits(4, 50.0, 3.0 * PILEUP_SMEAR); } // [50, 525] ps — physically motivated
-    fit->SetLineColor(kRed);
-    fit->SetLineWidth(2);
-    fit->SetNpx(1000);
-    hist->Fit(fit,"RQ");
-    return fit;
-  }
-
-  // ---------------------------------------------------------------------------
-  // createSngFit
-  //   Configures sgausFitFunc for a single-Gaussian fit with the mean fixed
-  //   to 0.  Used as a fallback when the double-Gaussian fit is poorly
-  //   constrained (e.g. very few entries in a slice).  Returns the fitted TF1*.
-  // ---------------------------------------------------------------------------
-  auto createSngFit(
-    TH1D* hist, double fitRange = DIFF_MAX
-  ) -> TF1* {
-    sgausFitFunc->SetParNames("Mean", "Norm1", "Sigma1");
-    // TF1* fit = new TF1("gaus_fit", "sgaus", -3*PASS_SIGMA, 3*PASS_SIGMA);
-    TF1* fit = new TF1("gaus_fit", "sgaus", -fitRange, fitRange);
-    fit->SetParameters(0, hist->GetMaximum(), 30);
-    fit->FixParameter(0, 0);
-    fit->SetParLimits(1, 0, 1.E6); // can only be positive
-    fit->SetParLimits(2, 0, 1.E6); // can only be positive
-    // fit->FixParameter(2, 175);
-    fit->SetLineColor(kBlue);
-    fit->SetLineWidth(2);
-    fit->SetNpx(1000);
-    hist->Fit(fit,"RQ");
-    return fit;
-  }
-
-  // ---------------------------------------------------------------------------
-  // dscbFunc
-  //   Symmetric double-sided Crystal Ball: Gaussian core with matched
-  //   power-law tails on both sides (αL = αR ≡ α, nL = nR ≡ n).  Five free
-  //   parameters; tails tied to reduce instability vs the fully asymmetric
-  //   form.  With t = (x - μ)/σ:
-  //     core (|t| ≤ α):  N · exp(-t²/2)
-  //     tail (|t| > α):  N · A · (B + |t|)^(-n)
-  //   where A = (n/α)^n · exp(-α²/2), B = n/α - α.  Requires n > 1, α > 0.
+  // FitModel
+  //   One pluggable fit recipe.  To add a new fit method:
+  //     1. Append a FitModel instance to the registry below.
+  //     2. (Optional) re-point ACTIVE_FIT_MODEL at it to make it the default.
+  //   Nothing else in this header — and no other file — needs to change.
   //
-  //   par[0]=N, par[1]=μ, par[2]=σ, par[3]=α, par[4]=n
+  //   Members:
+  //     name           — unique identifier (debug / log only)
+  //     makeFit        — creates, configures, and fits a TF1 to the histogram
+  //     sliceLabel     — legend entry text on per-bin slice pages
+  //     latexSummary   — inline-text σ summary (used in inclusive stack page
+  //                      and slice-fit overlay)
+  //     inclusiveLines — right-column parameter list on inclusive per-category
+  //                      pages.  Each entry is one TLatex line, top-to-bottom
+  //     params         — name-based mapping from fit parameters into the
+  //                      generic FitParams histograms (empty string ⇒ skip)
+  //     swapBySize     — if true, swap (core, bkg) so that the smaller σ
+  //                      always feeds sigmaDist (matches legacy dgaus behaviour)
+  //     fallback       — alternate FitModel to retry with when the primary
+  //                      fit's core σ is unphysically narrow (< 5 ps)
   // ---------------------------------------------------------------------------
-  inline double dscbFunc(double* x, double* par) {
-    double N      = par[0];
-    double mu     = par[1];
-    double sigma  = par[2];
-    double alpha  = par[3];
-    double n      = par[4];
-    double t      = (x[0] - mu) / sigma;
-    double absT   = std::abs(t);
-    if (absT <= alpha) {
-      return N * std::exp(-0.5 * t * t);
-    }
-    double A = std::pow(n/alpha, n) * std::exp(-0.5 * alpha * alpha);
-    double B = n/alpha - alpha;
-    return N * A * std::pow(B + absT, -n);
-  }
+  struct FitModel {
+    struct ParamMap {
+      const char* sigmaCore = "";
+      const char* sigmaBkg  = "";
+      const char* ampCore   = "";
+      const char* ampBkg    = "";
+    };
+
+    const char* name = "";
+    std::function<TF1*(TH1D*)> makeFit;
+    std::function<TString(TF1*)> sliceLabel;
+    std::function<std::vector<TString>(TF1*)> latexSummary;
+    std::function<std::vector<TString>(TF1*, TH1D*)> inclusiveLines;
+    ParamMap params{};
+    bool swapBySize = false;
+    const FitModel* fallback = nullptr;
+  };
 
   // ---------------------------------------------------------------------------
-  // gausDSCBFunc
-  //   Two-component model preserved for reference (not the active fit in this
-  //   build): a narrow Gaussian core stacked on a symmetric double-sided
-  //   Crystal Ball that absorbs the wider mixed/background population.  Both
-  //   components share a mean fixed to 0.  See createGausDSCBFit for limits;
-  //   reference inclusive PDFs from this model live in share/docs/
-  //   dscb_reference_plots/.
-  //
-  //   par[0] = N_g     (narrow Gaussian amplitude)
-  //   par[1] = sigma_g (narrow Gaussian width)
-  //   par[2] = N_d     (DSCB amplitude)
-  //   par[3] = sigma_d (DSCB width, > sigma_g)
-  //   par[4] = alpha   (DSCB cutoff)
-  //   par[5] = n       (DSCB tail power, > 1)
+  // FitModel registry
+  //   Each closure replaces a legacy createXfit free function: same TF1
+  //   formula, initial parameters, limits, and Fit() options.  Add new
+  //   recipes by appending a FitModel instance here.
   // ---------------------------------------------------------------------------
-  inline double gausDSCBFunc(double* x, double* par) {
-    double Ng = par[0];
-    double sg = par[1];
-    double Nd = par[2];
-    double sd = par[3];
-    double a  = par[4];
-    double n  = par[5];
-    double xv = x[0];
+  inline const FitModel FIT_SNGGAUS = {
+    "sngaus",
+    [](TH1D* hist) -> TF1* {
+      sgausFitFunc->SetParNames("Mean", "Norm1", "Sigma1");
+      TF1* fit = new TF1("gaus_fit", "sgaus", -PASS_SIGMA, PASS_SIGMA);
+      fit->SetParameters(0, hist->GetMaximum(), 30);
+      fit->FixParameter(0, 0);
+      fit->SetParLimits(1, 0, 1.E6);
+      fit->SetParLimits(2, 0, 1.E6);
+      fit->SetLineColor(kBlue);
+      fit->SetLineWidth(2);
+      fit->SetNpx(1000);
+      hist->Fit(fit, "RQ");
+      return fit;
+    },
+    [](TF1* f) { return TString::Format("Gaussian Fit: #chi^{2}/ndf=%.2f", f->GetChisquare()/f->GetNDF()); },
+    [](TF1* f) {
+      return std::vector<TString>{
+        TString::Format("#sigma_{1}^{gaus}=%.2f(%.2f%%)",
+                        f->GetParameter("Sigma1"),
+                        100*f->GetParError("Sigma1")/f->GetParameter("Sigma1")),
+      };
+    },
+    [](TF1* f, TH1D* h) {
+      std::vector<TString> v;
+      v.push_back(TString::Format("N = %.0f",                h->Integral()));
+      v.push_back(TString::Format("#sigma = %.2f ps",        f->GetParameter("Sigma1")));
+      v.push_back(TString::Format("A = %.1f",                f->GetParameter("Norm1")));
+      v.push_back(TString::Format("#chi^{2}/ndf = %.1f/%d",  f->GetChisquare(), f->GetNDF()));
+      return v;
+    },
+    /* params     */ { "Sigma1", "", "Norm1", "" },
+    /* swapBySize */ false,
+    /* fallback   */ nullptr
+  };
 
-    double tg    = xv / sg;
-    double gauss = Ng * std::exp(-0.5 * tg * tg);
+  // Single Gaussian over the full histogram range with a floating mean.
+  // Used for direct comparison against FIT_DBLGAUS (same range, same mean freedom).
+  inline const FitModel FIT_SNGGAUS_FULL = {
+    "sngaus_full",
+    [](TH1D* hist) -> TF1* {
+      sgausFitFunc->SetParNames("Mean", "Norm1", "Sigma1");
+      double xlo = hist->GetXaxis()->GetXmin(), xhi = hist->GetXaxis()->GetXmax();
+      TF1* fit = new TF1("gaus_full_fit", "sgaus", xlo, xhi);
+      fit->SetParameters(hist->GetMean(), hist->GetMaximum(), 13.0);
+      fit->SetParLimits(0, -50.0, 50.0);   // Mean: free within ±50 ps
+      fit->SetParLimits(1,   0.0, 1.E6);
+      fit->SetParLimits(2,   5.0, 1.E6);   // Sigma >= 5 ps
+      fit->SetLineColor(kBlue);
+      fit->SetLineWidth(2);
+      fit->SetNpx(1000);
+      hist->Fit(fit, "RQI");
+      return fit;
+    },
+    [](TF1* f) {
+      return TString::Format("Gaussian Fit: #chi^{2}/ndf=%.2f", f->GetChisquare()/f->GetNDF());
+    },
+    [](TF1* f) {
+      return std::vector<TString>{
+        TString::Format("#mu^{gaus}=%.2f ps",   f->GetParameter("Mean")),
+        TString::Format("#sigma^{gaus}=%.2f(%.2f%%)",
+                        f->GetParameter("Sigma1"),
+                        100*f->GetParError("Sigma1")/f->GetParameter("Sigma1")),
+      };
+    },
+    [](TF1* f, TH1D* h) {
+      std::vector<TString> v;
+      v.push_back(TString::Format("N = %.0f",               h->Integral()));
+      v.push_back(TString::Format("#mu = %.2f ps",          f->GetParameter("Mean")));
+      v.push_back(TString::Format("#sigma = %.2f ps",       f->GetParameter("Sigma1")));
+      v.push_back(TString::Format("A = %.1f",               f->GetParameter("Norm1")));
+      v.push_back(TString::Format("#chi^{2}/ndf = %.1f/%d", f->GetChisquare(), f->GetNDF()));
+      return v;
+    },
+    /* params     */ { "Sigma1", "", "Norm1", "" },
+    /* swapBySize */ false,
+    /* fallback   */ nullptr
+  };
 
-    double td    = xv / sd;
-    double absTd = std::abs(td);
-    double dscb;
-    if (absTd <= a) {
-      dscb = Nd * std::exp(-0.5 * td * td);
-    } else {
-      double A = std::pow(n/a, n) * std::exp(-0.5 * a * a);
-      double B = n/a - a;
-      dscb = Nd * A * std::pow(B + absTd, -n);
-    }
-    return gauss + dscb;
-  }
+  inline const FitModel FIT_DBLGAUS = {
+    "dgaus",
+    [](TH1D* hist) -> TF1* {
+      dgausFitFunc->SetParNames("Mean", "Norm1", "Norm2", "Sigma1", "Sigma2");
+      double xlo = hist->GetXaxis()->GetXmin(), xhi = hist->GetXaxis()->GetXmax();
+      TF1* fit = new TF1("dgaus_fit", "dgaus", xlo, xhi);
+      fit->SetParameters(hist->GetMean(),             // Mean: seed at histogram mean (bias free)
+                         0.8 *hist->GetMaximum(),   // Norm1
+                         1e-2*hist->GetMaximum(),   // Norm2
+                         13.0,                      // Sigma1: seed at known HGTD core width
+                         hist->GetStdDev());        // Sigma2: adapt to histogram spread
+      fit->SetParLimits(0, -50.0, 50.0);            // Mean: constrained ±50 ps — no fix
+      fit->SetParLimits(1, 0, 1.E6);
+      fit->SetParLimits(2, 0, 1.E6);
+      fit->SetParLimits(3, 5.0, 1.E6);  // Sigma1 >= 5 ps — prevents unphysical spike
+      fit->SetParLimits(4, 5.0, 1.E6);  // Sigma2 >= 5 ps — must be positive
+      fit->SetNpx(1000);
+      fit->SetLineColor(kRed);
+      fit->SetLineWidth(2);
+      hist->Fit(fit, "RQI");
+      return fit;
+    },
+    [](TF1* f) {
+      return TString::Format("Double Gaussian Fit: #chi^{2}/ndf=%.2f",
+                             f->GetChisquare() / f->GetNDF());
+    },
+    [](TF1* f) {
+      return std::vector<TString>{
+        TString::Format("#mu^{dgaus}=%.2f ps",
+                        f->GetParameter("Mean")),
+        TString::Format("#sigma_{1}^{dgaus}=%.2f(%.2f%%)",
+                        f->GetParameter("Sigma1"),
+                        100*f->GetParError("Sigma1")/f->GetParameter("Sigma1")),
+        TString::Format("#sigma_{2}^{dgaus}=%.2f(%.2f%%)",
+                        f->GetParameter("Sigma2"),
+                        100*f->GetParError("Sigma2")/f->GetParameter("Sigma2")),
+      };
+    },
+    [](TF1* f, TH1D* h) {
+      std::vector<TString> v;
+      v.push_back(TString::Format("N = %.0f",                h->Integral()));
+      v.push_back(TString::Format("#mu = %.2f ps",           f->GetParameter("Mean")));
+      v.push_back(TString::Format("#sigma_{1} = %.2f ps",    f->GetParameter("Sigma1")));
+      v.push_back(TString::Format("#sigma_{2} = %.2f ps",    f->GetParameter("Sigma2")));
+      v.push_back(TString::Format("A_{1} = %.1f",            f->GetParameter("Norm1")));
+      v.push_back(TString::Format("A_{2} = %.1f",            f->GetParameter("Norm2")));
+      v.push_back(TString::Format("#chi^{2}/ndf = %.1f/%d",  f->GetChisquare(), f->GetNDF()));
+      return v;
+    },
+    /* params     */ { "Sigma1", "Sigma2", "Norm1", "Norm2" },
+    /* swapBySize */ true,
+    /* fallback   */ nullptr
+  };
 
-  // ---------------------------------------------------------------------------
-  // createGausDSCBFit
-  //   Reference factory — not the active fit in this build.  Free Gaussian
-  //   narrow core + symmetric DSCB wider component.  Used during the
-  //   exploration that produced the inclusive plots in share/docs/
-  //   dscb_reference_plots/.  Sigma_g constrained narrower than Sigma_d so
-  //   the two components don't swap roles.  The `n` parameter often rails
-  //   at its lower bound on noisy categories — a known limitation reflecting
-  //   that the data's deep tail is flatter than any finite-n DSCB allows.
-  // ---------------------------------------------------------------------------
-  inline TF1* createGausDSCBFit(TH1D* hist, double fitRange = 1000.0) {
-    TString fname = TString::Format("gausdscb_fit_%s", hist->GetName());
-    TF1* fit = new TF1(fname, gausDSCBFunc, -fitRange, fitRange, 6);
-    fit->SetParName(0, "Norm_g");
-    fit->SetParName(1, "Sigma_g");
-    fit->SetParName(2, "Norm_d");
-    fit->SetParName(3, "Sigma_d");
-    fit->SetParName(4, "Alpha");
-    fit->SetParName(5, "N");
+  inline const FitModel FIT_TRPGAUS = {
+    "tgaus",
+    [](TH1D* hist) -> TF1* {
+      tgausFitFunc->SetParNames("Mean", "Norm1", "Norm2", "Norm3", "Sigma1", "Sigma2", "Sigma3");
+      TF1* fit = new TF1("tgaus_fit", "tgaus",
+                          hist->GetXaxis()->GetXmin(), hist->GetXaxis()->GetXmax());
+      fit->SetParameters(0,
+                         0.80*hist->GetMaximum(),
+                         0.40*hist->GetMaximum(),
+                         0.01*hist->GetMaximum(),
+                         13.0, 26.0, 175.0);
+      fit->FixParameter(0, 0);
+      fit->SetParLimits(1, 0, 1.E6);
+      fit->SetParLimits(2, 0, 1.E6);
+      fit->SetParLimits(3, 0, 1.E6);
+      fit->SetParLimits(4, 0.1, PILEUP_SMEAR);
+      fit->SetParLimits(5, 0.1, PILEUP_SMEAR);
+      fit->SetParLimits(6, PILEUP_SMEAR, 1.E6);
+      fit->SetLineColor(kRed);
+      fit->SetLineWidth(2);
+      fit->SetNpx(1000);
+      hist->Fit(fit, "RQ");
+      return fit;
+    },
+    [](TF1* f) { return TString::Format("Triple Gaussian Fit: #chi^{2}/ndf=%.2f", f->GetChisquare()/f->GetNDF()); },
+    [](TF1* f) {
+      return std::vector<TString>{
+        TString::Format("#sigma_{1}=%.1f(%.2f%%)",
+                        f->GetParameter("Sigma1"), 100*f->GetParError("Sigma1")/f->GetParameter("Sigma1")),
+        TString::Format("#sigma_{2}=%.1f(%.2f%%)",
+                        f->GetParameter("Sigma2"), 100*f->GetParError("Sigma2")/f->GetParameter("Sigma2")),
+        TString::Format("#sigma_{3}=%.1f(%.2f%%)",
+                        f->GetParameter("Sigma3"), 100*f->GetParError("Sigma3")/f->GetParameter("Sigma3")),
+      };
+    },
+    [](TF1* f, TH1D* h) {
+      std::vector<TString> v;
+      v.push_back(TString::Format("N = %.0f",                h->Integral()));
+      v.push_back(TString::Format("#sigma_{1} = %.2f ps",    f->GetParameter("Sigma1")));
+      v.push_back(TString::Format("#sigma_{2} = %.2f ps",    f->GetParameter("Sigma2")));
+      v.push_back(TString::Format("#sigma_{3} = %.2f ps",    f->GetParameter("Sigma3")));
+      v.push_back(TString::Format("#chi^{2}/ndf = %.1f/%d",  f->GetChisquare(), f->GetNDF()));
+      return v;
+    },
+    /* params     */ { "Sigma1", "Sigma2", "Norm1", "Norm2" },
+    /* swapBySize */ true,
+    /* fallback   */ &FIT_DBLGAUS
+  };
 
-    fit->SetParameters(
-      0.7  * hist->GetMaximum(),  // Norm_g
-      12.0,                        // Sigma_g (narrow core)
-      0.10 * hist->GetMaximum(),   // Norm_d
-      40.0,                        // Sigma_d (wider shoulder)
-      1.5,                         // Alpha
-      3.0                          // N
-    );
-    fit->SetParLimits(0, 0.0,  1.E7);
-    fit->SetParLimits(1, 1.0,  30.0);    // narrow component (~core)
-    fit->SetParLimits(2, 0.0,  1.E7);
-    fit->SetParLimits(3, 10.0, 500.0);   // wider component
-    fit->SetParLimits(4, 0.1,  10.0);
-    fit->SetParLimits(5, 1.01, 100.0);
-    fit->SetLineColor(kRed);
-    fit->SetLineWidth(2);
-    fit->SetNpx(1000);
-    // "I" → integrate fit function over each bin rather than evaluating at the
-    //       bin centre.  Important because σ_g ~ 10 ps ≲ bin width 10 ps,
-    //       so the narrow core varies sharply within a single bin.
-    hist->Fit(fit, "RQI");
-    return fit;
-  }
+  // FIT_PULLGAUS — triple Gaussian for pull distributions (Δt / σ_cluster).
+  //   Common mean free (seeded at 0); unitless sigma limits [0.01, 20].
+  //   Used only by inclusivePlot pull calls.
+  inline const FitModel FIT_PULLGAUS = {
+    /* name */ "pullgaus",
+    [](TH1D* hist) -> TF1* {
+      tgausFitFunc->SetParNames("Mean", "Norm1", "Norm2", "Norm3", "Sigma1", "Sigma2", "Sigma3");
+      tgausFitFunc->SetParLimits(1, 0, 1e6);
+      tgausFitFunc->SetParLimits(2, 0, 1e6);
+      tgausFitFunc->SetParLimits(3, 0, 1e6);
+      tgausFitFunc->SetParLimits(4, 0.01, 20.0);
+      tgausFitFunc->SetParLimits(5, 0.01, 20.0);
+      tgausFitFunc->SetParLimits(6, 0.01, 20.0);
+      TF1* fit = new TF1(TString::Format("pullgaus_fit_%s", hist->GetName()),
+                         tgausFitFunc->GetExpFormula(),
+                         hist->GetXaxis()->GetXmin(), hist->GetXaxis()->GetXmax());
+      double sd = std::max(hist->GetStdDev(), 0.1);
+      fit->SetParameters(0.0,
+                         0.70 * hist->GetMaximum(),
+                         0.20 * hist->GetMaximum(),
+                         0.10 * hist->GetMaximum(),
+                         0.3 * sd, 0.8 * sd, 2.0 * sd);
+      fit->SetNpx(1000);
+      hist->Fit(fit, "RQ");
+      return fit;
+    },
+    [](TF1* f) {
+      return TString::Format("Triple Gaussian Pull: #chi^{2}/ndf=%.2f",
+                             f->GetChisquare() / f->GetNDF());
+    },
+    [](TF1* f) -> std::vector<TString> {
+      double s1 = f->GetParameter("Sigma1"), se1 = f->GetParError("Sigma1");
+      double s2 = f->GetParameter("Sigma2"), se2 = f->GetParError("Sigma2");
+      double s3 = f->GetParameter("Sigma3"), se3 = f->GetParError("Sigma3");
+      return {
+        TString::Format("#mu=%.3f",                          f->GetParameter("Mean")),
+        TString::Format("#sigma_{1}^{pull}=%.3f (%.2f%%)",   s1, 100*se1/s1),
+        TString::Format("#sigma_{2}^{pull}=%.3f (%.2f%%)",   s2, 100*se2/s2),
+        TString::Format("#sigma_{3}^{pull}=%.3f (%.2f%%)",   s3, 100*se3/s3),
+      };
+    },
+    [](TF1* f, TH1D* h) -> std::vector<TString> {
+      double s1 = f->GetParameter("Sigma1"), se1 = f->GetParError("Sigma1");
+      double s2 = f->GetParameter("Sigma2"), se2 = f->GetParError("Sigma2");
+      double s3 = f->GetParameter("Sigma3"), se3 = f->GetParError("Sigma3");
+      return {
+        TString::Format("N = %.0f",                          h->Integral()),
+        TString::Format("#mu = %.3f",                        f->GetParameter("Mean")),
+        TString::Format("#sigma_{1}^{pull} = %.3f (%.2f%%)", s1, 100*se1/s1),
+        TString::Format("#sigma_{2}^{pull} = %.3f (%.2f%%)", s2, 100*se2/s2),
+        TString::Format("#sigma_{3}^{pull} = %.3f (%.2f%%)", s3, 100*se3/s3),
+        TString::Format("#chi^{2}/ndf = %.1f/%d",            f->GetChisquare(), f->GetNDF()),
+      };
+    },
+    /* params     */ { "Sigma1", "Sigma2", "Norm1", "Norm2" },
+    /* swapBySize */ true,
+    /* fallback   */ nullptr
+  };
 
-  // ---------------------------------------------------------------------------
-  // createDSCBFit
-  //   Build and fit a symmetric double-sided Crystal Ball to hist.  The mean
-  //   is fixed to 0 (matching createDblFit's convention).  Returns the fitted
-  //   TF1*.  fitRange controls the half-width of the fit window — use a
-  //   smaller value (e.g. 100 ps) to focus on the core and ignore the
-  //   far-tail combinatorial background.
-  // ---------------------------------------------------------------------------
-  inline TF1* createDSCBFit(TH1D* hist, double fitRange = 1000.0) {
-    TString fname = TString::Format("dscb_fit_%s", hist->GetName());
-    TF1* fit = new TF1(fname, dscbFunc, -fitRange, fitRange, 5);
-    fit->SetParName(0, "Norm");
-    fit->SetParName(1, "Mu");
-    fit->SetParName(2, "Sigma");
-    fit->SetParName(3, "Alpha");
-    fit->SetParName(4, "N");
-
-    double sigmaSeed = std::max(20.0, 0.5 * hist->GetStdDev());
-    fit->SetParameters(
-      hist->GetMaximum(),  // Norm
-      0.0,                 // Mu (fixed below)
-      sigmaSeed,           // Sigma
-      1.5,                 // Alpha
-      3.0                  // N
-    );
-    fit->FixParameter(1, 0.0);             // Mu = 0
-    fit->SetParLimits(0, 0.0,  1.E7);      // Norm >= 0
-    fit->SetParLimits(2, 1.0,  500.0);     // Sigma in [1, 500] ps
-    fit->SetParLimits(3, 0.1,  10.0);      // Alpha > 0
-    fit->SetParLimits(4, 1.01, 100.0);     // N > 1 (formula divergence at N<=1)
-    fit->SetLineColor(kRed);
-    fit->SetLineWidth(2);
-    fit->SetNpx(1000);
-    hist->Fit(fit, "RQ");
-    return fit;
-  }
+  // *** THE ONLY LINE TO TOUCH TO SWAP THE GLOBAL FIT METHOD ***
+  inline const FitModel& ACTIVE_FIT_MODEL = FIT_SNGGAUS_FULL;
 
   // ---------------------------------------------------------------------------
   // FitParams
@@ -328,10 +388,6 @@ namespace MyUtl {
     TH1D* coreAmpDist;
     TH1D* backAmpDist;
     TH1D* ampRatioDist;
-    // Symmetric DSCB tail-parameter diagnostic histograms (filled by fillDSCB).
-    // Not iterated in the FitParamFields enum — these are kept for debugging.
-    TH1D* alphaDist = nullptr;
-    TH1D* nDist     = nullptr;
 
     FitParams(
       const char* title,
@@ -373,132 +429,65 @@ namespace MyUtl {
 			       TString::Format(fullTitle, "Core Amp/Bkg Amp", "Core/Background"),
 			       nbins, xMin, foldMax);
 
-      alphaDist     = new TH1D(TString::Format("alpha_dist_%s", name),
-			       TString::Format(fullTitle, "DSCB #alpha", "#alpha"),
-			       nbins, xMin, foldMax);
-
-      nDist         = new TH1D(TString::Format("n_dist_%s", name),
-			       TString::Format(fullTitle, "DSCB n", "n"),
-			       nbins, xMin, foldMax);
-
-      for (const auto& hist: {meanDist, bkgSigmaDist, sigmaDist, coreAmpDist, backAmpDist, ampRatioDist, rmsDist,
-                              alphaDist, nDist}) {
+      for (const auto& hist: {meanDist, bkgSigmaDist, sigmaDist, coreAmpDist, backAmpDist, ampRatioDist, rmsDist}) {
 	hist->SetLineWidth(2);
 	hist->SetLineColor(color);
       }
     }
 
     // -----------------------------------------------------------------------
-    // fillEach
-    //   Fills the core σ, background σ, core amplitude, background
-    //   amplitude, and amplitude-ratio histograms for bin idx from a
-    //   double-Gaussian (5-parameter) fit.  The smaller of Sigma1/Sigma2
-    //   is treated as the core and the larger as the background.
+    // fillFromModel
+    //   Generic extractor: reads the fitted TF1 parameters named in
+    //   `m.params`, and writes each one into the matching diagnostic
+    //   histogram.  Empty parameter names are skipped (so a model that
+    //   has no background-σ leaves bkgSigmaDist untouched).
+    //
+    //   When `m.swapBySize` is true and both σ-names are present, the
+    //   smaller σ is treated as the core (and the corresponding amplitudes
+    //   are swapped to match) — preserves the legacy double-Gaussian
+    //   behaviour.
+    //
+    //   The amplitude ratio is filled only when both amp parameters are
+    //   present.
     // -----------------------------------------------------------------------
-    void fillEach(int idx, TF1* fit) const {
-      double sigma1 = fit->GetParameter("Sigma1");
-      double sigma2 = fit->GetParameter("Sigma2");
+    void fillFromModel(int idx, TF1* fit, const FitModel& m) const {
+      auto setBin = [&](TH1D* h, const char* pname) {
+        if (!pname || !*pname || !h) return;
+        if (fit->GetParNumber(pname) < 0) return;  // parameter absent in this TF1 variant
+        h->SetBinContent(idx+1, fit->GetParameter(pname));
+        h->SetBinError  (idx+1, fit->GetParError (pname));
+      };
 
-      if (sigma1 > sigma2) {
-	sigmaDist->SetBinContent(idx+1,sigma2);
-	sigmaDist->SetBinError(idx+1,fit->GetParError("Sigma2"));
-	
-	bkgSigmaDist->SetBinContent(idx+1,sigma1);
-	bkgSigmaDist->SetBinError(idx+1,fit->GetParError("Sigma1"));
-      } else {
-	sigmaDist->SetBinContent(idx+1,sigma1);
-	sigmaDist->SetBinError(idx+1,fit->GetParError("Sigma1"));
-	
-	bkgSigmaDist->SetBinContent(idx+1,sigma2);
-	bkgSigmaDist->SetBinError(idx+1,fit->GetParError("Sigma2"));
+      const char* sCoreN = m.params.sigmaCore;
+      const char* sBkgN  = m.params.sigmaBkg;
+      const char* aCoreN = m.params.ampCore;
+      const char* aBkgN  = m.params.ampBkg;
+
+      const bool bothSigma = sCoreN && *sCoreN && sBkgN && *sBkgN;
+      if (m.swapBySize && bothSigma &&
+          fit->GetParameter(sCoreN) > fit->GetParameter(sBkgN)) {
+        std::swap(sCoreN, sBkgN);
+        std::swap(aCoreN, aBkgN);
       }
-      
-    
-      double amp1     = fit->GetParameter("Norm1");
-      double amp2     = fit->GetParameter("Norm2");
-      double amp1Err  = fit->GetParError ("Norm1");
-      double amp2Err  = fit->GetParError ("Norm2");
-      double ampRatio = amp1/amp2;
-      double ampRatioErr = std::sqrt(pow((1.0/amp2)*amp1Err,2)+pow(-amp2Err*ampRatio/amp2,2));
 
-      coreAmpDist->SetBinContent(idx+1,amp1);   
-      coreAmpDist->SetBinError(idx+1,amp1Err); 
-    
-      backAmpDist->SetBinContent(idx+1,amp2);   
-      backAmpDist->SetBinError(idx+1,amp2Err); 
+      setBin(sigmaDist,    sCoreN);
+      setBin(bkgSigmaDist, sBkgN);
+      setBin(coreAmpDist,  aCoreN);
+      setBin(backAmpDist,  aBkgN);
 
-      ampRatioDist->SetBinContent(idx+1,ampRatio);
-      ampRatioDist->SetBinError(idx+1,ampRatioErr); 
-    }
-
-    // -----------------------------------------------------------------------
-    // fillGaus
-    //   Fallback for single-Gaussian fits: given a core distribution fit and
-    //   a background distribution fit, fill the corresponding entries in the
-    //   distribution
-    // -----------------------------------------------------------------------
-    void fillGaus(int idx, TF1* coreFit, TF1* bkgFit) const {
-      double sigma1 = coreFit->GetParameter("Sigma1");
-
-      sigmaDist->SetBinContent(idx+1,sigma1);
-      sigmaDist->SetBinError(idx+1,coreFit->GetParError("Sigma1"));
-
-      double amp1    = coreFit->GetParameter("Norm1");
-      double amp1Err = coreFit->GetParError ("Norm1");
-    
-      coreAmpDist->SetBinContent(idx+1,amp1);   
-      coreAmpDist->SetBinError(idx+1,amp1Err);
-
-      double sigma2 = bkgFit->GetParameter("Sigma1");
-
-      bkgSigmaDist->SetBinContent(idx+1,sigma2);
-      bkgSigmaDist->SetBinError(idx+1,bkgFit->GetParError("Sigma1"));
-
-      double amp2    = coreFit->GetParameter("Norm1");
-      double amp2Err = coreFit->GetParError ("Norm1");
-    
-      backAmpDist->SetBinContent(idx+1,amp2);   
-      backAmpDist->SetBinError(idx+1,amp2Err); 
-    }
-
-    // -----------------------------------------------------------------------
-    // fillCoreGaus
-    //   Fallback for single-Gaussian fits: fills only the core sigma and
-    //   core-amplitude histograms (the bkg σ and amplitude are not
-    //   meaningful for a single Gaussian).
-    // -----------------------------------------------------------------------
-    void fillCoreGaus(int idx, TF1* coreFit) const {
-      double sigma1 = coreFit->GetParameter("Sigma1");
-
-      sigmaDist->SetBinContent(idx+1,sigma1);
-      sigmaDist->SetBinError(idx+1,coreFit->GetParError("Sigma1"));
-
-      double amp1    = coreFit->GetParameter("Norm1");
-      double amp1Err = coreFit->GetParError ("Norm1");
-    
-      coreAmpDist->SetBinContent(idx+1,amp1);   
-      coreAmpDist->SetBinError(idx+1,amp1Err);
-    }
-
-    // -----------------------------------------------------------------------
-    // fillBkgGaus
-    //   Fallback for single-Gaussian fits: fills only the bkg sigma and
-    //   core-amplitude histograms (the core σ and amplitude are not
-    //   meaningful for a single Gaussian).
-    // -----------------------------------------------------------------------
-    void fillBkgGaus(int idx, TF1* bkgFit) const {
-      // std::cout << bkgFit->GetNpar() << '\n';
-      const char* paramNum = bkgFit->GetNpar() == 5 ? "2" : "1";
-      double sigma1 = bkgFit->GetParameter(TString::Format("Sigma%s", paramNum));
-
-      bkgSigmaDist->SetBinContent(idx+1,sigma1);
-      bkgSigmaDist->SetBinError(idx+1,bkgFit->GetParError(TString::Format("Sigma%s", paramNum)));
-
-      double amp1    = bkgFit->GetParameter(TString::Format("Norm%s", paramNum));
-      double amp1Err = bkgFit->GetParError (TString::Format("Norm%s", paramNum));
-    
-      backAmpDist->SetBinContent(idx+1,amp1);   
-      backAmpDist->SetBinError(idx+1,amp1Err);
+      if (aCoreN && *aCoreN && aBkgN && *aBkgN) {
+        double amp1    = fit->GetParameter(aCoreN);
+        double amp2    = fit->GetParameter(aBkgN);
+        double amp1Err = fit->GetParError (aCoreN);
+        double amp2Err = fit->GetParError (aBkgN);
+        if (amp2 != 0.0) {
+          double ampRatio    = amp1/amp2;
+          double ampRatioErr = std::sqrt(std::pow((1.0/amp2)*amp1Err, 2)
+                                       + std::pow(-amp2Err*ampRatio/amp2, 2));
+          ampRatioDist->SetBinContent(idx+1, ampRatio);
+          ampRatioDist->SetBinError  (idx+1, ampRatioErr);
+        }
+      }
     }
 
     // -----------------------------------------------------------------------
@@ -510,56 +499,6 @@ namespace MyUtl {
       double rmsError = slice->GetRMSError();
       rmsDist->SetBinContent(idx+1,rms);
       rmsDist->SetBinError(idx+1,rmsError);
-    }
-
-    // -----------------------------------------------------------------------
-    // fillDSCB
-    //   Extracts σ + amplitude + asymmetric tail parameters from a 7-parameter
-    //   double-sided Crystal Ball fit and fills the corresponding bin idx of
-    //   the diagnostic histograms.  The single DSCB σ is treated as the
-    //   "core σ" (sigmaDist).  bkgSigmaDist / backAmpDist / ampRatioDist
-    //   are intentionally NOT filled — they have no analog in a single-DSCB
-    //   model and downstream plots referencing them will show empty bins.
-    // -----------------------------------------------------------------------
-    void fillDSCB(int idx, TF1* fit) const {
-      sigmaDist  ->SetBinContent(idx+1, fit->GetParameter("Sigma"));
-      sigmaDist  ->SetBinError  (idx+1, fit->GetParError ("Sigma"));
-
-      coreAmpDist->SetBinContent(idx+1, fit->GetParameter("Norm"));
-      coreAmpDist->SetBinError  (idx+1, fit->GetParError ("Norm"));
-
-      alphaDist  ->SetBinContent(idx+1, fit->GetParameter("Alpha"));
-      alphaDist  ->SetBinError  (idx+1, fit->GetParError ("Alpha"));
-
-      nDist      ->SetBinContent(idx+1, fit->GetParameter("N"));
-      nDist      ->SetBinError  (idx+1, fit->GetParError ("N"));
-    }
-
-    // -----------------------------------------------------------------------
-    // fillGausDSCB
-    //   Two-component fit: the narrow Gaussian σ becomes "core σ" (sigmaDist)
-    //   and amplitude (coreAmpDist); the wider DSCB σ goes to bkgSigmaDist
-    //   and amplitude to backAmpDist.  α/n tail params populate alphaDist
-    //   and nDist as DSCB diagnostics.
-    // -----------------------------------------------------------------------
-    void fillGausDSCB(int idx, TF1* fit) const {
-      sigmaDist   ->SetBinContent(idx+1, fit->GetParameter("Sigma_g"));
-      sigmaDist   ->SetBinError  (idx+1, fit->GetParError ("Sigma_g"));
-
-      coreAmpDist ->SetBinContent(idx+1, fit->GetParameter("Norm_g"));
-      coreAmpDist ->SetBinError  (idx+1, fit->GetParError ("Norm_g"));
-
-      bkgSigmaDist->SetBinContent(idx+1, fit->GetParameter("Sigma_d"));
-      bkgSigmaDist->SetBinError  (idx+1, fit->GetParError ("Sigma_d"));
-
-      backAmpDist ->SetBinContent(idx+1, fit->GetParameter("Norm_d"));
-      backAmpDist ->SetBinError  (idx+1, fit->GetParError ("Norm_d"));
-
-      alphaDist   ->SetBinContent(idx+1, fit->GetParameter("Alpha"));
-      alphaDist   ->SetBinError  (idx+1, fit->GetParError ("Alpha"));
-
-      nDist       ->SetBinContent(idx+1, fit->GetParameter("N"));
-      nDist       ->SetBinError  (idx+1, fit->GetParError ("N"));
     }
 
     // -----------------------------------------------------------------------
@@ -627,6 +566,7 @@ namespace MyUtl {
     std::unique_ptr<TH2D> purity;
     std::vector<std::unique_ptr<TH1D>> slicesHists;
     std::vector<std::unique_ptr<TF1>>  slicesFits;
+    std::vector<const FitModel*>       slicesModels;   // which FitModel produced each slice fit
     std::unique_ptr<TH1D>              effEstimate;  // fraction of residuals within ±3*PASS_SIGMA per bin
 
   PlotObj(const char* title, const char* times,
@@ -643,6 +583,7 @@ namespace MyUtl {
     {
       TString name(title);
       name.ReplaceAll(" ", "_");
+      name.ReplaceAll("/", "_");
       name.ReplaceAll("{", "");
       name.ReplaceAll("}", "");
       int xbins = (int)((xMax - xMin) / xWid);
@@ -710,8 +651,10 @@ namespace MyUtl {
     // plotPostProcessing
     //   Post-event-loop processing: projects the 2D residual histogram into
     //   per-bin slices (collapsing bins beyond foldValue), fits each slice
-    //   with createDblFit, stores the results in FitParams, and constructs
-    //   the TEfficiency object.  Must be called before plotLogic.
+    //   with ACTIVE_FIT_MODEL (falling back to the model's fallback when
+    //   the core σ is unphysically narrow), stores the results in
+    //   FitParams, and constructs the TEfficiency object.
+    //   Must be called before plotLogic.
     // -----------------------------------------------------------------------
     inline void plotPostProcessing() {
       for(int j = 0; j < hist->GetNbinsX(); ++j) {
@@ -724,7 +667,7 @@ namespace MyUtl {
 
 	std::unique_ptr<TH1D> hSlice = std::unique_ptr<TH1D>((TH1D*)hist->ProjectionY(name, j+1, right)->Clone());
 
-	if (hSlice->Integral() == 0 || hSlice->GetEntries() < 50) {
+	if (hSlice->Integral() == 0 || hSlice->GetEntries() < 10) {
 	  continue;
 	}
 
@@ -743,16 +686,33 @@ namespace MyUtl {
 			      hist->GetTitle(),
 			      (int)leftEdge,(int)rightEdge,
 			      this->ytitle));
-	
-	std::unique_ptr<TF1> dgausFit = std::unique_ptr<TF1>(createDblFit(hSlice.get(),true));
 
-	double percErrCore = dgausFit->GetParError("Sigma1")/dgausFit->GetParameter("Sigma1");
-	double sigma1      = dgausFit->GetParameter("Sigma1");
+	const FitModel* model = &ACTIVE_FIT_MODEL;
+	std::unique_ptr<TF1> fit(model->makeFit(hSlice.get()));
 
-	// If the double-Gaussian core is unphysically narrow (< 5 ps), the fit
-	// has converged on noise rather than a real core.  Fall back to a single
-	// Gaussian over ±PASS_SIGMA and use fillCoreGaus instead.
-	bool useSingleGaus = (sigma1 < 5.0);
+	// Returns true if any shape parameter in `m` has relative error > maxRelErr.
+	// Only the σ parameters are checked — amplitudes are excluded because
+	// they are typically much noisier and not meaningful fallback indicators.
+	auto shapesPoorlyConstrained = [](const TF1* f, const FitModel& m, double maxRelErr) {
+	  auto bad = [&](const char* p) {
+	    if (!p || !*p) return false;
+	    double v = std::abs(f->GetParameter(p));
+	    return v > 0.0 && f->GetParError(p) / v > maxRelErr;
+	  };
+	  return bad(m.params.sigmaCore) || bad(m.params.sigmaBkg);
+	};
+
+	// Walk the fallback chain until the fit is acceptable or no fallback remains.
+	// Triggers: core σ < 5 ps (converged on noise), or any shape parameter's
+	// relative error exceeds 10% (poorly constrained).
+	while (model->fallback) {
+	  auto cName = model->params.sigmaCore;
+	  bool narrowCore = cName && *cName && fit->GetParameter(cName) < 5.0;
+	  if (!narrowCore && !shapesPoorlyConstrained(fit.get(), *model, 0.10)) break;
+	  model = model->fallback;
+	  fit.reset(model->makeFit(hSlice.get()));
+	}
+	auto coreSigmaName = model->params.sigmaCore;
 
 	params->fillRMS(j, hSlice.get());
 
@@ -769,22 +729,20 @@ namespace MyUtl {
 	  }
 	}
 
-	if (useSingleGaus) {
-	  std::unique_ptr<TF1> sgFit(createSngFit(hSlice.get(), PASS_SIGMA));
-	  double sgPercErr = sgFit->GetParError("Sigma1") / sgFit->GetParameter("Sigma1");
-	  if (sgPercErr < 0.5) {
-	    params->fillCoreGaus(j, sgFit.get());
-	  }
-	  slicesHists.push_back(std::move(hSlice));
-	  slicesFits.push_back(std::move(sgFit));
-	} else {
-	  // Only store the double-Gaussian result when the core-σ is well-constrained.
-	  if (percErrCore < 0.5) {
-	    params->fillEach(j, dgausFit.get());
-	  }
-	  slicesHists.push_back(std::move(hSlice));
-	  slicesFits.push_back(std::move(dgausFit));
+	// Quality gate: relative uncertainty on core σ must be < 50%.
+	bool keep = true;
+	if (coreSigmaName && *coreSigmaName) {
+	  double v = fit->GetParameter(coreSigmaName);
+	  double e = fit->GetParError (coreSigmaName);
+	  keep = (v > 0.0) && (e/v < 0.5);
 	}
+	if (keep) {
+	  params->fillFromModel(j, fit.get(), *model);
+	}
+
+	slicesHists.push_back(std::move(hSlice));
+	slicesFits .push_back(std::move(fit));
+	slicesModels.push_back(model);
 
 	if (right == hist->GetNbinsX()+1)
 	  break;
@@ -886,44 +844,39 @@ namespace MyUtl {
       // draw slices o7
       TLatex latex;
       latex.SetTextSize(0.04);
-      latex.SetTextAlign(13); 
-      for (int iSlice=0; iSlice < slicesHists.size(); ++iSlice) {
+      latex.SetTextAlign(13);
+      for (int iSlice=0; iSlice < (int)slicesHists.size(); ++iSlice) {
 	const auto& hSlice = slicesHists[iSlice];
-	const auto& fit = slicesFits[iSlice];
+	const auto& fit    = slicesFits  [iSlice];
+	const auto* model  = slicesModels[iSlice];
 	TLegend* thislegend = new TLegend(0.65, 0.75, 0.9, 0.9);
 	StyleLegend(thislegend);
-	TString restext;
-	if (fit->GetNpar() == 5) { // Double Gaussian
-	  restext = TString::Format("#sigma_{1}^{dgaus}=%.2f(%.2f%%), #sigma_{2}^{dgaus}=%.2f(%.2f%%)",
-			 fit->GetParameter("Sigma1"),100*fit->GetParError("Sigma1")/fit->GetParameter("Sigma1"),
-			 fit->GetParameter("Sigma2"),100*fit->GetParError("Sigma2")/fit->GetParameter("Sigma2"));
-	  thislegend->AddEntry(fit.get(),"Double Gaussian Fit", "l");
-	} else {
-	  restext = TString::Format("#sigma_{1}^{gaus}=%.2f(%.2f%%)",
-			 fit->GetParameter(2),100*fit->GetParError(2)/fit->GetParameter(2));
-	  thislegend->AddEntry(fit.get(),"Gaussian Fit", "l");
-	}
-
+	thislegend->AddEntry(fit.get(), model->sliceLabel(fit.get()), "l");
 	thislegend->AddEntry(hSlice.get(),"Histogram", "l");
 
-	auto chi2text = TString::Format("#chi^{2}=%.2f",fit->GetChisquare()/fit->GetNDF());
-	  
+	auto annotLines = model->inclusiveLines(fit.get(), hSlice.get());
+	auto drawAnnotations = [&]() {
+	  double y = 0.90;
+	  for (const auto& line : annotLines) {
+	    latex.DrawLatexNDC(0.18, y, line);
+	    y -= 0.05;
+	  }
+	};
+
 	hSlice->GetYaxis()->SetTitleOffset(1.4);
 	hSlice->Draw("HIST");
 	fit->Draw("SAME");
 	hSlice->GetXaxis()->SetRangeUser(-100, 100);
-	latex.DrawLatexNDC(0.18, 0.90, restext);
-	latex.DrawLatexNDC(0.18, 0.85, chi2text);
+	drawAnnotations();
 	thislegend->Draw("SAME");
 	canvas->Print(fname); // slices
-	
+
 	// with log scale
 	canvas->SetLogy(true);
 	hSlice->Draw("HIST");
 	fit->Draw("SAME");
 	hSlice->GetXaxis()->SetRangeUser(-400, 400);
-	latex.DrawLatexNDC(0.18, 0.90, restext);
-	latex.DrawLatexNDC(0.18, 0.85, chi2text);
+	drawAnnotations();
 	thislegend->Draw("SAME");
 	canvas->Print(fname); // slices
 	canvas->SetLogy(false);
@@ -1092,6 +1045,52 @@ namespace MyUtl {
     std::unique_ptr<TH1D> inclusiveResoLowTrackSig;  // nHSTrack <= 5, purity > 0.75
     std::unique_ptr<TH1D> inclusiveResoLowTrackMix;  // nHSTrack <= 5, 0.50-0.75
     std::unique_ptr<TH1D> inclusiveResoLowTrackBkg;  // nHSTrack <= 5, purity < 0.50
+    // Inclusive resolution split by avg nHGTD hits per cluster track
+    std::unique_ptr<TH1D> inclusiveResoNhit1Sig;   // avg < 1.5
+    std::unique_ptr<TH1D> inclusiveResoNhit1Mix;
+    std::unique_ptr<TH1D> inclusiveResoNhit1Bkg;
+    std::unique_ptr<TH1D> inclusiveResoNhit2Sig;   // 1.5 <= avg < 2.5
+    std::unique_ptr<TH1D> inclusiveResoNhit2Mix;
+    std::unique_ptr<TH1D> inclusiveResoNhit2Bkg;
+    std::unique_ptr<TH1D> inclusiveResoNhit3pSig;  // avg >= 2.5
+    std::unique_ptr<TH1D> inclusiveResoNhit3pMix;
+    std::unique_ptr<TH1D> inclusiveResoNhit3pBkg;
+    // Inclusive resolution split by combined cluster quality score (two tiers)
+    std::unique_ptr<TH1D> inclusiveResoClusQHighSig;  // quality >= CLUS_QUALITY_SPLIT
+    std::unique_ptr<TH1D> inclusiveResoClusQHighMix;
+    std::unique_ptr<TH1D> inclusiveResoClusQHighBkg;
+    std::unique_ptr<TH1D> inclusiveResoClusQLowSig;   // quality < CLUS_QUALITY_SPLIT
+    std::unique_ptr<TH1D> inclusiveResoClusQLowMix;
+    std::unique_ptr<TH1D> inclusiveResoClusQLowBkg;
+    // Pull distribution Δt/σ_t split by the same two quality tiers
+    std::unique_ptr<TH1D> inclusivePullClusQHighSig;
+    std::unique_ptr<TH1D> inclusivePullClusQHighMix;
+    std::unique_ptr<TH1D> inclusivePullClusQHighBkg;
+    std::unique_ptr<TH1D> inclusivePullClusQLowSig;
+    std::unique_ptr<TH1D> inclusivePullClusQLowMix;
+    std::unique_ptr<TH1D> inclusivePullClusQLowBkg;
+
+    // 2D mean |Δt| heatmap: cluster PU fraction (x) × avg nHGTD hits/track (y)
+    std::unique_ptr<TProfile2D> prof2dPuFracVsNhit;
+    // 2D σ(Δt) heatmap: same axes, "S" option stores std-dev in the error slot
+    std::unique_ptr<TProfile2D> prof2dPuFracVsNhitSigma;
+
+    // In-time pile-up diagnostic — for each cluster with at least one PU track,
+    // identifies the dominant PU truth vertex (mode of trackToTruthvtx among PU tracks)
+    // and plots Δt(cluster − HS truth) vs Δz(dominant PU vertex − HS vertex).
+    // The inclusive version + per-quality-tier versions show how PU contamination
+    // structure differs between HIGH and LOW quality regions.
+    std::unique_ptr<TH2D> dtClusterVsDzPU;       // all clusters
+    std::unique_ptr<TH2D> dtClusterVsDzPUHigh;   // Q ≥ CLUS_QUALITY_SPLIT
+    std::unique_ptr<TH2D> dtClusterVsDzPULow;    // Q <  CLUS_QUALITY_SPLIT
+
+    // Pull distribution: Δt / σ_cluster — parallel to reso histograms
+    std::unique_ptr<TH1D> inclusivePullSig;          // purity > 0.75
+    std::unique_ptr<TH1D> inclusivePullMix;          // 0.50 <= purity <= 0.75
+    std::unique_ptr<TH1D> inclusivePullBkg;          // purity < 0.50
+    std::unique_ptr<TH1D> inclusivePullLowTrackSig;  // nHSTrack <= 5, purity > 0.75
+    std::unique_ptr<TH1D> inclusivePullLowTrackMix;  // nHSTrack <= 5, 0.50-0.75
+    std::unique_ptr<TH1D> inclusivePullLowTrackBkg;  // nHSTrack <= 5, purity < 0.50
     std::unique_ptr<TH1D> inclusivePurity;
 
     // Cached raw pointers for the six standard fill keys.
@@ -1103,6 +1102,10 @@ namespace MyUtl {
     PlotObj* ptrPuFrac  = nullptr;
     PlotObj* ptrHSTrack = nullptr;
     PlotObj* ptrPUTrack = nullptr;
+    PlotObj* ptrNhit        = nullptr;  // avg nHGTD hits per track in selected cluster
+    PlotObj* ptrClusPuFrac  = nullptr;  // cluster PU fraction by track count
+    PlotObj* ptrClusSigmaT  = nullptr;  // cluster timing uncertainty σ_t (sigmas[0])
+    PlotObj* ptrClusQuality = nullptr;  // combined quality: (1-puFrac)*clamp(nhit/2,0,1)
 
     Score score;
     std::string timetypeIDer;
@@ -1196,13 +1199,49 @@ namespace MyUtl {
 	FOLD_HS_TRACK, FOLD_HS_TRACK+HS_TRACK_WIDTH/2.0);
   
       dataObjects["pu_track"] = std::make_unique<PlotObj>(
-        "n Forward PU Tracks", timetypeIDer, 
+        "n Forward PU Tracks", timetypeIDer,
 	TString::Format("../figs/fullplots/%s_nputrack.pdf",filenameIDer.Data()),
 	score,
 	PU_TRACK_MIN, PU_TRACK_MAX, PU_TRACK_WIDTH ,
 	DIFF_MIN    , DIFF_MAX    , DIFF_WIDTH     ,
 	PURITY_MIN  , PURITY_MAX  , PURITY_WIDTH   ,
 	FOLD_PU_TRACK, FOLD_PU_TRACK+PU_TRACK_WIDTH/2.0);
+
+      dataObjects["nhit"] = std::make_unique<PlotObj>(
+        "Avg. nHGTD Hits / Track", timetypeIDer,
+        TString::Format("../figs/fullplots/%s_nhit.pdf", filenameIDer.Data()),
+        score,
+        NHIT_MIN, NHIT_MAX, NHIT_WIDTH,
+        DIFF_MIN, DIFF_MAX, DIFF_WIDTH,
+        PURITY_MIN, PURITY_MAX, PURITY_WIDTH,
+        FOLD_NHIT, NHIT_MAX);
+
+      dataObjects["clus_pu_frac"] = std::make_unique<PlotObj>(
+        "Cluster PU Fraction", timetypeIDer,
+        TString::Format("../figs/fullplots/%s_cluspufrac.pdf", filenameIDer.Data()),
+        score,
+        CLUS_PU_FRAC_MIN, CLUS_PU_FRAC_MAX, CLUS_PU_FRAC_WIDTH,
+        DIFF_MIN,          DIFF_MAX,          DIFF_WIDTH,
+        PURITY_MIN,        PURITY_MAX,        PURITY_WIDTH,
+        FOLD_CLUS_PU_FRAC, CLUS_PU_FRAC_MAX);
+
+      dataObjects["clus_sigma_t"] = std::make_unique<PlotObj>(
+        "Cluster #sigma_{t} [ps]", timetypeIDer,
+        TString::Format("../figs/fullplots/%s_clussigmat.pdf", filenameIDer.Data()),
+        score,
+        CLUS_SIGMA_T_MIN, CLUS_SIGMA_T_MAX, CLUS_SIGMA_T_WIDTH,
+        DIFF_MIN,          DIFF_MAX,          DIFF_WIDTH,
+        PURITY_MIN,        PURITY_MAX,        PURITY_WIDTH,
+        FOLD_CLUS_SIGMA_T, CLUS_SIGMA_T_MAX);
+
+      dataObjects["clus_quality"] = std::make_unique<PlotObj>(
+        "Cluster Quality", timetypeIDer,
+        TString::Format("../figs/fullplots/%s_clusquality.pdf", filenameIDer.Data()),
+        score,
+        CLUS_QUALITY_MIN, CLUS_QUALITY_MAX, CLUS_QUALITY_WIDTH,
+        DIFF_MIN,          DIFF_MAX,          DIFF_WIDTH,
+        PURITY_MIN,        PURITY_MAX,        PURITY_WIDTH,
+        FOLD_CLUS_QUALITY, CLUS_QUALITY_MAX);
 
       // Helper to construct one inclusive-reso histogram
       auto makeResoHist = [&](const char* prefix, const char* catLabel) {
@@ -1226,6 +1265,107 @@ namespace MyUtl {
       inclusiveResoLowTrackMix->SetFillColorAlpha(C03, 0.6); inclusiveResoLowTrackMix->SetLineColor(C03);
       inclusiveResoLowTrackBkg->SetFillColorAlpha(C02, 0.6); inclusiveResoLowTrackBkg->SetLineColor(C02);
 
+      inclusiveResoNhit1Sig  = makeResoHist("reso_nhit1_sig",  "Signal(1hit)");
+      inclusiveResoNhit1Mix  = makeResoHist("reso_nhit1_mix",  "Mixed(1hit)");
+      inclusiveResoNhit1Bkg  = makeResoHist("reso_nhit1_bkg",  "Bkg(1hit)");
+      inclusiveResoNhit2Sig  = makeResoHist("reso_nhit2_sig",  "Signal(2hit)");
+      inclusiveResoNhit2Mix  = makeResoHist("reso_nhit2_mix",  "Mixed(2hit)");
+      inclusiveResoNhit2Bkg  = makeResoHist("reso_nhit2_bkg",  "Bkg(2hit)");
+      inclusiveResoNhit3pSig = makeResoHist("reso_nhit3p_sig", "Signal(3+hit)");
+      inclusiveResoNhit3pMix = makeResoHist("reso_nhit3p_mix", "Mixed(3+hit)");
+      inclusiveResoNhit3pBkg = makeResoHist("reso_nhit3p_bkg", "Bkg(3+hit)");
+      for (auto* h : {inclusiveResoNhit1Sig.get(), inclusiveResoNhit2Sig.get(), inclusiveResoNhit3pSig.get()})
+        { h->SetFillColorAlpha(C01, 0.6); h->SetLineColor(C01); }
+      for (auto* h : {inclusiveResoNhit1Mix.get(), inclusiveResoNhit2Mix.get(), inclusiveResoNhit3pMix.get()})
+        { h->SetFillColorAlpha(C03, 0.6); h->SetLineColor(C03); }
+      for (auto* h : {inclusiveResoNhit1Bkg.get(), inclusiveResoNhit2Bkg.get(), inclusiveResoNhit3pBkg.get()})
+        { h->SetFillColorAlpha(C02, 0.6); h->SetLineColor(C02); }
+
+      // Cluster quality-binned inclusive resolution histograms (two tiers)
+      inclusiveResoClusQHighSig = makeResoHist("reso_cqhigh_sig", "Signal(Q#geq0.5)");
+      inclusiveResoClusQHighMix = makeResoHist("reso_cqhigh_mix", "Mixed(Q#geq0.5)");
+      inclusiveResoClusQHighBkg = makeResoHist("reso_cqhigh_bkg", "Bkg(Q#geq0.5)");
+      inclusiveResoClusQLowSig  = makeResoHist("reso_cqlow_sig",  "Signal(Q<0.5)");
+      inclusiveResoClusQLowMix  = makeResoHist("reso_cqlow_mix",  "Mixed(Q<0.5)");
+      inclusiveResoClusQLowBkg  = makeResoHist("reso_cqlow_bkg",  "Bkg(Q<0.5)");
+      for (auto* h : {inclusiveResoClusQHighSig.get(), inclusiveResoClusQLowSig.get()})
+        { h->SetFillColorAlpha(C01, 0.6); h->SetLineColor(C01); }
+      for (auto* h : {inclusiveResoClusQHighMix.get(), inclusiveResoClusQLowMix.get()})
+        { h->SetFillColorAlpha(C03, 0.6); h->SetLineColor(C03); }
+      for (auto* h : {inclusiveResoClusQHighBkg.get(), inclusiveResoClusQLowBkg.get()})
+        { h->SetFillColorAlpha(C02, 0.6); h->SetLineColor(C02); }
+
+      // 2D profiles: mean |Δt| and σ(Δt) in (clusPuFrac, avgNHGTD) cells
+      {
+        int nBinsX = static_cast<int>(std::round((CLUS_PU_FRAC_MAX - CLUS_PU_FRAC_MIN) / CLUS_PU_FRAC_WIDTH));
+        int nBinsY = static_cast<int>(std::round((NHIT_MAX          - NHIT_MIN         ) / NHIT_WIDTH         ));
+        prof2dPuFracVsNhit = std::make_unique<TProfile2D>(
+          TString::Format("prof2d_pufrac_nhit_%s", filenameIDer.Data()),
+          TString::Format("%s Mean |#Delta t| vs Cluster PU Frac. #times Avg. nHGTD Hits;"
+                          "Cluster PU Fraction;Avg. nHGTD Hits / Track;Mean |#Delta t| [ps]",
+                          score.toString()),
+          nBinsX, CLUS_PU_FRAC_MIN, CLUS_PU_FRAC_MAX,
+          nBinsY, NHIT_MIN,         NHIT_MAX);
+        // "S" option: GetBinError returns the std-dev of filled values (not std-dev-of-mean)
+        prof2dPuFracVsNhitSigma = std::make_unique<TProfile2D>(
+          TString::Format("prof2d_pufrac_nhit_sigma_%s", filenameIDer.Data()),
+          TString::Format("%s #sigma(#Delta t) vs Cluster PU Frac. #times Avg. nHGTD Hits;"
+                          "Cluster PU Fraction;Avg. nHGTD Hits / Track;#sigma(#Delta t) [ps]",
+                          score.toString()),
+          nBinsX, CLUS_PU_FRAC_MIN, CLUS_PU_FRAC_MAX,
+          nBinsY, NHIT_MIN,         NHIT_MAX, "S");
+      }
+
+      // In-time PU diagnostic: Δt(cluster − HS truth) vs Δz(dominant PU vertex − HS vertex)
+      // x range ±60 mm covers the beam spot envelope (σ_z ≈ 50 mm); y range ±300 ps covers
+      // the full beam-spot time spread (σ_t ≈ 175 ps).
+      auto makeDtDzHist = [&](const char* suffix, const char* qualLabel) {
+        return std::make_unique<TH2D>(
+          TString::Format("dt_vs_dz_pu%s_%s", suffix, filenameIDer.Data()),
+          TString::Format("%s%s #Delta t(cluster − HS truth) vs #Delta z(PU vtx − HS vtx);"
+                          "#Delta z_{PU − HS} [mm];#Delta t_{cluster − HS} [ps];Entries",
+                          score.toString(), qualLabel),
+          120, -60.0, 60.0,
+          150, -300.0, 300.0);
+      };
+      dtClusterVsDzPU     = makeDtDzHist("",      "");
+      dtClusterVsDzPUHigh = makeDtDzHist("_high", " (Q#geq0.5)");
+      dtClusterVsDzPULow  = makeDtDzHist("_low",  " (Q<0.5)");
+
+      // Pull histograms: Δt / σ_cluster, same purity stratification as reso
+      auto makePullHist = [&](const char* prefix, const char* catLabel) {
+        return std::make_unique<TH1D>(
+          TString::Format("%s_%s", prefix, filenameIDer.Data()),
+          TString::Format("%s %s pull (%s);(t_{0}-t_{truth})/#sigma_{t};Entries",
+                          catLabel, score.toString(), timetypeIDer),
+          (int)((PULL_MAX-PULL_MIN)/PULL_WIDTH), PULL_MIN, PULL_MAX);
+      };
+      inclusivePullSig         = makePullHist("pull_sig",    "Signal");
+      inclusivePullMix         = makePullHist("pull_mix",    "Mixed");
+      inclusivePullBkg         = makePullHist("pull_bkg",    "Bkg");
+      inclusivePullLowTrackSig = makePullHist("pull_lt_sig", "Signal(#leq5tk)");
+      inclusivePullLowTrackMix = makePullHist("pull_lt_mix", "Mixed(#leq5tk)");
+      inclusivePullLowTrackBkg = makePullHist("pull_lt_bkg", "Bkg(#leq5tk)");
+      // Per-quality-tier pull histograms — two tiers matching the reso split
+      inclusivePullClusQHighSig = makePullHist("pull_cqhigh_sig", "Signal(Q#geq0.5)");
+      inclusivePullClusQHighMix = makePullHist("pull_cqhigh_mix", "Mixed(Q#geq0.5)");
+      inclusivePullClusQHighBkg = makePullHist("pull_cqhigh_bkg", "Bkg(Q#geq0.5)");
+      inclusivePullClusQLowSig  = makePullHist("pull_cqlow_sig",  "Signal(Q<0.5)");
+      inclusivePullClusQLowMix  = makePullHist("pull_cqlow_mix",  "Mixed(Q<0.5)");
+      inclusivePullClusQLowBkg  = makePullHist("pull_cqlow_bkg",  "Bkg(Q<0.5)");
+      inclusivePullSig->SetFillColorAlpha(C01, 0.6); inclusivePullSig->SetLineColor(C01);
+      inclusivePullMix->SetFillColorAlpha(C03, 0.6); inclusivePullMix->SetLineColor(C03);
+      inclusivePullBkg->SetFillColorAlpha(C02, 0.6); inclusivePullBkg->SetLineColor(C02);
+      for (auto* h : {inclusivePullClusQHighSig.get(), inclusivePullClusQLowSig.get()})
+        { h->SetFillColorAlpha(C01, 0.6); h->SetLineColor(C01); }
+      for (auto* h : {inclusivePullClusQHighMix.get(), inclusivePullClusQLowMix.get()})
+        { h->SetFillColorAlpha(C03, 0.6); h->SetLineColor(C03); }
+      for (auto* h : {inclusivePullClusQHighBkg.get(), inclusivePullClusQLowBkg.get()})
+        { h->SetFillColorAlpha(C02, 0.6); h->SetLineColor(C02); }
+      inclusivePullLowTrackSig->SetFillColorAlpha(C01, 0.6); inclusivePullLowTrackSig->SetLineColor(C01);
+      inclusivePullLowTrackMix->SetFillColorAlpha(C03, 0.6); inclusivePullLowTrackMix->SetLineColor(C03);
+      inclusivePullLowTrackBkg->SetFillColorAlpha(C02, 0.6); inclusivePullLowTrackBkg->SetLineColor(C02);
+
       inclusivePurity = std::make_unique<TH1D>(
 					       TString::Format("purity_%s", filenameIDer.Data()),
 					       TString::Format("%s Purity (%s);Purity;Entries", score.toString(), timetypeIDer),
@@ -1238,6 +1378,10 @@ namespace MyUtl {
       ptrPUTrack  = dataObjects["pu_track"].get();
       ptrPuFrac   = dataObjects["pu_frac" ].get();
       ptrVtxDz    = dataObjects["vtx_dz"  ].get();
+      ptrNhit        = dataObjects["nhit"        ].get();
+      ptrClusPuFrac  = dataObjects["clus_pu_frac"].get();
+      ptrClusSigmaT  = dataObjects["clus_sigma_t"].get();
+      ptrClusQuality = dataObjects["clus_quality"].get();
     }
 
     // -----------------------------------------------------------------------
@@ -1334,7 +1478,8 @@ namespace MyUtl {
     const char* fname,
     const std::string& key,
     TCanvas* canvas,
-    const std::vector<AnalysisObj*>& plts
+    const std::vector<AnalysisObj*>& plts,
+    const std::vector<Color_t>& colorOverride = {}
   ) {
     // std::cout << fname << "\n";
     if (plts.empty()) return;
@@ -1359,6 +1504,10 @@ namespace MyUtl {
 	const auto& plt = ana->get(key);
 	auto obj = getter(plt);
 	auto colorIdx = counter++;
+	// Positional palette by default; per-call override when provided
+	Color_t plotCol = colorOverride.empty()
+	  ? COLORS[colorIdx % COLORS.size()]
+	  : colorOverride[colorIdx % colorOverride.size()];
 
 	if constexpr (std::is_same_v<std::decay_t<decltype(obj)>, TEfficiency*>) {
 	  // Convert TEfficiency → TGraphAsymmErrors with x-errors explicitly
@@ -1376,8 +1525,8 @@ namespace MyUtl {
 	      obj->GetEfficiencyErrorLow(b), obj->GetEfficiencyErrorUp(b));
 	    ++pt;
 	  }
-	  gr->SetLineColor(COLORS[colorIdx % COLORS.size()]);
-	  gr->SetMarkerColor(COLORS[colorIdx % COLORS.size()]);
+	  gr->SetLineColor(plotCol);
+	  gr->SetMarkerColor(plotCol);
 	  gr->SetMarkerStyle(obj->GetMarkerStyle());
 	  gr->SetMarkerSize(obj->GetMarkerSize());
 	  gr->SetLineWidth(obj->GetLineWidth());
@@ -1396,8 +1545,8 @@ namespace MyUtl {
 	    gr->Draw("P SAME");
 	  }
 	} else {
-	  obj->SetLineColor(COLORS[colorIdx % COLORS.size()]);
-	  obj->SetMarkerColor(COLORS[colorIdx % COLORS.size()]);
+	  obj->SetLineColor(plotCol);
+	  obj->SetMarkerColor(plotCol);
 	  // legend->AddEntry(obj, TString::Format("%s (%s)", plt->scoreToUse.toString(), plt->times), "lep");
 	  legend->AddEntry(obj, TString::Format("%s", plt->scoreToUse.toString()), "lep");
 	  if (first) {
@@ -1525,14 +1674,37 @@ namespace MyUtl {
         [](AnalysisObj* a) -> ResoTriple {
           return { a->inclusiveResoSig.get(),
                    a->inclusiveResoMix.get(),
-                   a->inclusiveResoBkg.get() }; }
+                   a->inclusiveResoBkg.get() }; },
+    const FitModel* fitModelOverride = nullptr,
+    const char* xAxisLabel = "#Delta t [ps]",
+    bool stackByPurity = true,
+    double yMaxOverride = 0.0,   // > 0: fixed y-axis ceiling (for cross-plot comparability)
+    double yMinOverride = 0.0    // > 0: fixed y-axis floor (typically 0.7 for log)
   ) {
+    const FitModel& activeModel = fitModelOverride ? *fitModelOverride : ACTIVE_FIT_MODEL;
     TLatex latex;
     latex.SetTextSize(0.04);
     latex.SetTextAlign(13);
+
+    // Inclusive core fraction (percent) for a score: integrate the money-plot
+    // TEfficiency, i.e. total passed / total events across all bins of the
+    // primary (n Forward HS Tracks) efficiency.  This reports the exact number
+    // behind the money plot rather than re-deriving it from the Δt histogram.
+    auto coreFraction = [](AnalysisObj* a) -> double {
+      PlotObj* p = a->ptrHSTrack;
+      if (!p || !p->effTotal || !p->effPass) return 0.0;
+      int n = p->effTotal->GetNbinsX();
+      double total = p->effTotal->Integral(0, n + 1);
+      if (total <= 0.0) return 0.0;
+      return 100.0 * p->effPass->Integral(0, n + 1) / total;
+    };
+
     canvas->Print(TString::Format("%s[", fname));
     canvas->SetLogy(logScale);
+    int colorCounter = 0;
     for (const auto& plt : plts) {
+      auto plotColor = COLORS[colorCounter++ % COLORS.size()];
+
       auto [hSig, hMix, hBkg] = tripleGetter(plt);
 
       // Clone so originals are not modified
@@ -1551,82 +1723,105 @@ namespace MyUtl {
         continue;
       }
 
-      TF1* fit1 = createDblFit(cTotal, true);
+      TF1* fit1 = activeModel.makeFit(cTotal);
 
-      // Stack: bkg at bottom, mix in middle, sig on top
-      THStack* stack = new THStack(TString::Format("stk_%p", (void*)plt), "");
-      stack->Add(cBkg);
-      stack->Add(cMix);
-      stack->Add(cSig);
+      if (stackByPurity) {
+        // --- Stacked view: bkg at bottom, mix in middle, sig on top ---
+        THStack* stack = new THStack(TString::Format("stk_%p", (void*)plt), "");
+        stack->Add(cBkg);
+        stack->Add(cMix);
+        stack->Add(cSig);
 
-      TLegend* leg = new TLegend(0.63, 0.68, 0.88, 0.90);
-      StyleLegend(leg);
-      leg->AddEntry(cSig, "Signal (>75%)",  "f");
-      leg->AddEntry(cMix, "Mixed (50#minus75%)", "f");
-      leg->AddEntry(cBkg, "Background (<50%)"  , "f");
-      leg->AddEntry(fit1, "Double Gaussian Fit", "l");
+        TLegend* leg = new TLegend(0.63, 0.68, 0.88, 0.90);
+        StyleLegend(leg);
+        leg->AddEntry(cSig, "Signal (>75%)",       "f");
+        leg->AddEntry(cMix, "Mixed (50#minus75%)", "f");
+        leg->AddEntry(cBkg, "Background (<50%)",   "f");
+        leg->AddEntry(fit1, activeModel.sliceLabel(fit1), "l");
 
-      stack->Draw("HIST");
-      stack->SetMaximum(stack->GetMaximum() * (logScale ? 8.0 : 1.4));
-      stack->GetXaxis()->SetRangeUser(xMin, xMax);
-      stack->GetXaxis()->SetTitle("#Delta t [ps]");
-      stack->GetYaxis()->SetTitle("Entries");
-      fit1->Draw("SAME");
-      leg->Draw("SAME");
+        stack->Draw("HIST");
+        if (yMaxOverride > 0.0) stack->SetMaximum(yMaxOverride);
+        else                    stack->SetMaximum(stack->GetMaximum() * (logScale ? 8.0 : 1.4));
+        if (yMinOverride > 0.0) stack->SetMinimum(yMinOverride);
+        stack->GetXaxis()->SetRangeUser(xMin, xMax);
+        stack->GetXaxis()->SetTitle(xAxisLabel);
+        stack->GetYaxis()->SetTitle("Entries");
+        fit1->Draw("SAME");
+        leg->Draw("SAME");
 
-      double dgSigma1 = fit1->GetParameter("Sigma1");
-      double dgSigma2 = fit1->GetParameter("Sigma2");
-      double sigMixInt = cSig->Integral() + cMix->Integral();
-      double bkgInt    = cBkg->Integral();
-      double sigBkgRatio = 100* sigMixInt / (bkgInt+sigMixInt);
-      ATLASLabel(0.18, 0.88, "Simulation Internal");
-      ATLASEnergyLabel(0.18, 0.82);
-      latex.DrawLatexNDC(0.20, 0.76, plt->score.toStringShort());
-      latex.DrawLatexNDC(0.20, 0.70, TString::Format("#sigma_{1}^{dgaus}=%.2f", dgSigma1));
-      latex.DrawLatexNDC(0.20, 0.64, TString::Format("#sigma_{2}^{dgaus}=%.2f", dgSigma2));
-      latex.DrawLatexNDC(0.20, 0.58, TString::Format("(S+M)/B=%.2f", sigBkgRatio));
-      canvas->Print(fname);
-
-      // Individual pages: signal, mixed, background
-      auto drawSingle = [&](TH1D* h, const char* label) {
-        if (h->GetEntries() == 0) return;
-        canvas->Clear();
-        canvas->SetLogy(logScale);
-        TH1D* c = (TH1D*)h->Clone();
-        TF1* fit = createDblFit(c, true);
-        c->Draw("HIST");
-        c->GetXaxis()->SetRangeUser(xMin, xMax);
-        c->GetXaxis()->SetTitle("#Delta t [ps]");
-        c->GetYaxis()->SetTitle("Entries");
-        c->SetMaximum(c->GetMaximum() * (logScale ? 8.0 : 1.4));
-        fit->Draw("SAME");
-        double s1   = fit->GetParameter("Sigma1");
-        double s2   = fit->GetParameter("Sigma2");
-        double amp1 = fit->GetParameter("Norm1");
-        double amp2 = fit->GetParameter("Norm2");
-        double chi2 = fit->GetChisquare();
-        int    ndf  = fit->GetNDF();
+        double sigMixInt   = cSig->Integral() + cMix->Integral();
+        double bkgInt      = cBkg->Integral();
+        double sigBkgRatio = 100 * sigMixInt / (bkgInt + sigMixInt);
         ATLASLabel(0.18, 0.88, "Simulation Internal");
         ATLASEnergyLabel(0.18, 0.82);
         latex.DrawLatexNDC(0.20, 0.76, plt->score.toStringShort());
-        latex.DrawLatexNDC(0.20, 0.70, label);
-        TLatex latexR;
-        latexR.SetTextSize(0.04);
-        latexR.SetTextAlign(33);
-        double ry = 0.88;
-        const double dy = 0.06;
-        latexR.DrawLatexNDC(0.88, ry, TString::Format("N = %.0f",              c->Integral())); ry -= dy;
-        latexR.DrawLatexNDC(0.88, ry, TString::Format("#sigma_{1} = %.2f ps",  s1));            ry -= dy;
-        latexR.DrawLatexNDC(0.88, ry, TString::Format("#sigma_{2} = %.2f ps",  s2));            ry -= dy;
-        latexR.DrawLatexNDC(0.88, ry, TString::Format("A_{1} = %.1f",          amp1));          ry -= dy;
-        latexR.DrawLatexNDC(0.88, ry, TString::Format("A_{2} = %.1f",          amp2));          ry -= dy;
-        latexR.DrawLatexNDC(0.88, ry, TString::Format("#chi^{2}/ndf = %.1f/%d", chi2, ndf));
+        latex.DrawLatexNDC(0.20, 0.70,
+          TString::Format("Core frac. = %.1f%%", coreFraction(plt)));
+        latex.DrawLatexNDC(0.20, 0.64, TString::Format("(S+M)/B=%.2f", sigBkgRatio));
         canvas->Print(fname);
-        delete c; delete fit;
-      };
-      drawSingle(cSig, "Signal (>75%)");
-      drawSingle(cMix, "Mixed (50#minus75%)");
-      drawSingle(cBkg, "Background (<50%)");
+
+        // Individual pages: signal, mixed, background
+        auto drawSingle = [&](TH1D* h, const char* label) {
+          if (h->GetEntries() == 0) return;
+          canvas->Clear();
+          canvas->SetLogy(logScale);
+          TH1D* c = (TH1D*)h->Clone();
+          TF1* fit = activeModel.makeFit(c);
+          c->Draw("HIST");
+          c->GetXaxis()->SetRangeUser(xMin, xMax);
+          c->GetXaxis()->SetTitle(xAxisLabel);
+          c->GetYaxis()->SetTitle("Entries");
+          if (yMaxOverride > 0.0) c->SetMaximum(yMaxOverride);
+          else                    c->SetMaximum(c->GetMaximum() * (logScale ? 8.0 : 1.4));
+          if (yMinOverride > 0.0) c->SetMinimum(yMinOverride);
+          fit->Draw("SAME");
+          ATLASLabel(0.18, 0.88, "Simulation Internal");
+          ATLASEnergyLabel(0.18, 0.82);
+          latex.DrawLatexNDC(0.20, 0.76, plt->score.toStringShort());
+          latex.DrawLatexNDC(0.20, 0.70, label);
+          TLatex latexR;
+          latexR.SetTextSize(0.04);
+          latexR.SetTextAlign(33);
+          latexR.DrawLatexNDC(0.88, 0.88,
+            TString::Format("Core frac. = %.1f%%", coreFraction(plt)));
+          canvas->Print(fname);
+          delete c; delete fit;
+        };
+        drawSingle(cSig, "Signal (>75%)");
+        drawSingle(cMix, "Mixed (50#minus75%)");
+        drawSingle(cBkg, "Background (<50%)");
+
+      } else {
+        // --- Inclusive view: single total histogram, no purity decomposition ---
+        cTotal->SetLineColor(plotColor);
+        cTotal->SetFillColorAlpha(plotColor, 0.6);
+        cTotal->SetLineWidth(2);
+        fit1->SetLineColor(plotColor);
+
+        TLegend* leg = new TLegend(0.63, 0.73, 0.88, 0.90);
+        StyleLegend(leg);
+        leg->AddEntry(cTotal, "Inclusive", "l");
+        leg->AddEntry(fit1,   activeModel.sliceLabel(fit1), "l");
+
+        cTotal->Draw("HIST");
+        if (yMaxOverride > 0.0) cTotal->SetMaximum(yMaxOverride);
+        else                    cTotal->SetMaximum(cTotal->GetMaximum() * (logScale ? 8.0 : 1.4));
+        if (yMinOverride > 0.0) cTotal->SetMinimum(yMinOverride);
+        cTotal->GetXaxis()->SetRangeUser(xMin, xMax);
+        cTotal->GetXaxis()->SetTitle(xAxisLabel);
+        cTotal->GetYaxis()->SetTitle("Entries");
+        fit1->Draw("SAME");
+        leg->Draw("SAME");
+
+        ATLASLabel(0.18, 0.88, "Simulation Internal");
+        ATLASEnergyLabel(0.18, 0.82);
+        latex.DrawLatexNDC(0.20, 0.76, plt->score.toStringShort());
+        latex.DrawLatexNDC(0.20, 0.70,
+          TString::Format("Core frac. = %.1f%%", coreFraction(plt)));
+        canvas->Print(fname);
+      }
+
+      delete cSig; delete cMix; delete cBkg; delete cTotal;
     }
     canvas->Print(TString::Format("%s]", fname));
   }
@@ -1669,6 +1864,141 @@ namespace MyUtl {
     legend->Draw("SAME");
     canvas->Print(TString::Format("%s",fname));
     canvas->Print(TString::Format("%s]",fname));
+  }
+
+  // ---------------------------------------------------------------------------
+  // shapeComparisonPlot / shapeComparisonPlotPair
+  //   Overlays normalized (unit-area) total resolution histograms for each
+  //   AnalysisObj on a single canvas page.  Each curve is the inclusive total
+  //   (sig+mix+bkg) — no purity decomposition.  A dashed double-Gaussian fit
+  //   is drawn per curve.
+  //   shapeComparisonPlot  — single-page PDF (one scale).
+  //   shapeComparisonPlotPair — two-page PDF (linear then log).
+  // ---------------------------------------------------------------------------
+  struct ShapeDrawEntry { TH1D* h; TF1* fit; const AnalysisObj* plt; };
+
+  std::vector<ShapeDrawEntry> buildShapeEntries(
+    const std::vector<AnalysisObj*>& plts,
+    const std::function<ResoTriple(AnalysisObj*)>& tripleGetter,
+    const FitModel& activeModel,
+    double& globalMaxOut
+  ) {
+    std::vector<ShapeDrawEntry> entries;
+    globalMaxOut = 0.0;
+    int colorCounter = 0;
+    for (const auto& plt : plts) {
+      auto [hSig, hMix, hBkg] = tripleGetter(plt);
+      TH1D* cTotal = (TH1D*)hBkg->Clone(TString::Format("_shape_total_%p", (void*)plt));
+      cTotal->Add(hMix);
+      cTotal->Add(hSig);
+      if (cTotal->GetEntries() == 0 || cTotal->Integral() == 0) { delete cTotal; ++colorCounter; continue; }
+      cTotal->Scale(1.0 / cTotal->Integral());
+      globalMaxOut = std::max(globalMaxOut, cTotal->GetMaximum());
+      // Score-specific colors matching the money-plot convention:
+      //   TRKPTZ=red, TEST_MISAS=orange, TEST_MISCL=violet; fallback to COLORS cycle.
+      Color_t col;
+      switch (plt->score.id) {
+        case 2:  col = C02; break;  // TRKPTZ     → red
+        case 13: col = C04; break;  // TEST_MISAS → violet
+        case 12: col = C03; break;  // TEST_MISCL → yellow
+        default: col = COLORS[colorCounter % COLORS.size()]; break;
+      }
+      ++colorCounter;
+      cTotal->SetLineColor(col);
+      cTotal->SetLineWidth(2);
+      cTotal->SetFillStyle(0);
+      TF1* fit = activeModel.makeFit(cTotal);
+      fit->SetLineColor(col);
+      fit->SetLineStyle(2);
+      entries.push_back({cTotal, fit, plt});
+    }
+    return entries;
+  }
+
+  void drawShapePage(
+    const char* fname,
+    bool logScale,
+    double xMin, double xMax,
+    TCanvas* canvas,
+    const std::vector<ShapeDrawEntry>& entries,
+    double globalMax,
+    const char* xAxisLabel
+  ) {
+    canvas->Clear();
+    canvas->SetLogy(logScale);
+
+    TLegend* leg = new TLegend(0.55, 0.68, 0.88, 0.90);
+    StyleLegend(leg);
+
+    bool first = true;
+    for (const auto& e : entries) {
+      if (first) {
+        e.h->Draw("HIST");
+        e.h->SetMaximum(globalMax * (logScale ? 8.0 : 1.4));
+        if (logScale) e.h->SetMinimum(1e-5);
+        e.h->GetXaxis()->SetRangeUser(xMin, xMax);
+        e.h->GetXaxis()->SetTitle(xAxisLabel);
+        e.h->GetYaxis()->SetTitle("Normalized Entries");
+        first = false;
+      } else {
+        e.h->Draw("HIST SAME");
+      }
+      leg->AddEntry(e.h, e.plt->score.toStringShort(), "l");
+    }
+    for (const auto& e : entries) e.fit->Draw("SAME");
+    leg->Draw("SAME");
+
+    ATLASLabel(0.18, 0.88, "Simulation Internal");
+    ATLASEnergyLabel(0.18, 0.82);
+    canvas->Print(fname);
+  }
+
+  void shapeComparisonPlot(
+    const char* fname,
+    bool logScale,
+    double xMin, double xMax,
+    TCanvas* canvas,
+    const std::vector<AnalysisObj*>& plts,
+    std::function<ResoTriple(AnalysisObj*)> tripleGetter =
+        [](AnalysisObj* a) -> ResoTriple {
+          return { a->inclusiveResoSig.get(),
+                   a->inclusiveResoMix.get(),
+                   a->inclusiveResoBkg.get() }; },
+    const FitModel* fitModelOverride = nullptr,
+    const char* xAxisLabel = "#Delta t [ps]"
+  ) {
+    const FitModel& activeModel = fitModelOverride ? *fitModelOverride : ACTIVE_FIT_MODEL;
+    double globalMax = 0.0;
+    auto entries = buildShapeEntries(plts, tripleGetter, activeModel, globalMax);
+    canvas->Print(TString::Format("%s[", fname));
+    drawShapePage(fname, logScale, xMin, xMax, canvas, entries, globalMax, xAxisLabel);
+    canvas->Print(TString::Format("%s]", fname));
+    for (auto& e : entries) { delete e.h; delete e.fit; }
+  }
+
+  // Two-page PDF: linear scale (page 1) then log scale (page 2).
+  void shapeComparisonPlotPair(
+    const char* fname,
+    double xMinLin, double xMaxLin,
+    double xMinLog, double xMaxLog,
+    TCanvas* canvas,
+    const std::vector<AnalysisObj*>& plts,
+    std::function<ResoTriple(AnalysisObj*)> tripleGetter =
+        [](AnalysisObj* a) -> ResoTriple {
+          return { a->inclusiveResoSig.get(),
+                   a->inclusiveResoMix.get(),
+                   a->inclusiveResoBkg.get() }; },
+    const FitModel* fitModelOverride = nullptr,
+    const char* xAxisLabel = "#Delta t [ps]"
+  ) {
+    const FitModel& activeModel = fitModelOverride ? *fitModelOverride : ACTIVE_FIT_MODEL;
+    double globalMax = 0.0;
+    auto entries = buildShapeEntries(plts, tripleGetter, activeModel, globalMax);
+    canvas->Print(TString::Format("%s[", fname));
+    drawShapePage(fname, false, xMinLin, xMaxLin, canvas, entries, globalMax, xAxisLabel);
+    drawShapePage(fname, true,  xMinLog, xMaxLog, canvas, entries, globalMax, xAxisLabel);
+    canvas->Print(TString::Format("%s]", fname));
+    for (auto& e : entries) { delete e.h; delete e.fit; }
   }
 }
 #endif // PLOTTING_UTILITIES_H

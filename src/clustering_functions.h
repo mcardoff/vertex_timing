@@ -12,6 +12,7 @@
 //     5. doSimultaneousClustering — agglomerative (minimum-distance) merge
 //     6. doConeClustering         — seed-and-cone merge
 //     6.5. doIterativeClustering  — nearest-neighbour iterative merge (anti-KT style)
+//     6.6. doIterativeSplit       — post-process: split high-pull RMS clusters
 //     7. clusterTracksInTime      — top-level clustering entry point
 //     8. chooseHGTDCluster        — select cluster closest to reco vertex time
 //     9. chooseHGTDSortCluster    — select highest-BDT cluster (HGTD_SORT score)
@@ -78,6 +79,7 @@ namespace MyUtl {
     for (size_t i = 0; i < N; ++i) {
       double diff  = a.values[i] - b.values[i];
       double denom = std::sqrt(a.sigmas[i]*a.sigmas[i] + b.sigmas[i]*b.sigmas[i]);
+      if (denom <= 0.0) continue;
       double d = diff / denom;
       dsqr += d * d;
     }
@@ -388,6 +390,71 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
+  // 6.55. doIterativeSplit
+  //   Post-processing pass on top of doIterativeClustering.  For each cluster
+  //   with ≥2 tracks, compute the pT-weighted RMS of (t_i − cluster_t)/σ_{t,i}
+  //   (the "t-pull RMS").  A well-formed HS-only cluster looks like a χ² fit
+  //   with mean ≈ 1; impure clusters (PU mixed in) systematically show
+  //   t-pull RMS > 1.  If the RMS exceeds `pullThreshold`, the cluster is
+  //   re-clustered from scratch at the tighter `tightCut` and the resulting
+  //   sub-clusters replace the original.
+  //
+  //   Only the real-time path is supported; smeared-time scenarios fall
+  //   through unchanged because per-track resolutions are needed to compute
+  //   the pull and the smeared σ's aren't preserved in the Cluster struct.
+  // ---------------------------------------------------------------------------
+  void doIterativeSplit(
+    std::vector<Cluster>* collection,
+    BranchPointerWrapper* branch,
+    double pullThreshold,
+    double tightCut
+  ) {
+    std::vector<Cluster> result;
+    result.reserve(collection->size());
+
+    for (auto& c : *collection) {
+      if (c.trackIndices.size() < 2) {
+        result.push_back(std::move(c));
+        continue;
+      }
+      const double ct = c.values.at(0);
+      double sumW = 0.0, sumWX = 0.0;
+      for (size_t i = 0; i < c.trackIndices.size(); ++i) {
+        int idx     = c.trackIndices[i];
+        double pt   = branch->trackPt[idx];
+        double sigT = branch->trackTimeRes[idx];
+        if (sigT <= 0.0) continue;
+        double pull = (c.allTimes[i] - ct) / sigT;
+        sumW  += pt;
+        sumWX += pt * pull * pull;
+      }
+      const double pullRMS = sumW > 0.0 ? std::sqrt(sumWX / sumW) : 0.0;
+
+      if (pullRMS <= pullThreshold) {
+        result.push_back(std::move(c));   // internally consistent — keep
+        continue;
+      }
+
+      // Rebuild singleton clusters from constituent tracks and re-cluster
+      // at the tighter cut.  Mirrors makeSimpleClusters' inline initialiser.
+      std::vector<Cluster> singletons;
+      singletons.reserve(c.trackIndices.size());
+      for (int idx : c.trackIndices) {
+        double trkTime = branch->trackTime[idx];
+        double trkRes  = branch->trackTimeRes[idx];
+        double trkPt   = branch->trackPt[idx];
+        singletons.push_back(Cluster{
+          {trkTime}, {trkRes}, {trkTime}, {idx},
+          {{Score::HGTD.id, 0.0}, {Score::TRKPT.id, trkPt}}
+        });
+      }
+      doIterativeClustering(&singletons, tightCut);
+      for (auto& sub : singletons) result.push_back(std::move(sub));
+    }
+    *collection = std::move(result);
+  }
+
+  // ---------------------------------------------------------------------------
   // 7. clusterTracksInTime
   //   Top-level clustering entry point called from event_processing.h.
   //   Orchestrates the full pipeline:
@@ -454,6 +521,14 @@ namespace MyUtl {
         doConeClustering        (&collection, distanceCut); break;
       case ClusteringMethod::ITERATIVE:
         doIterativeClustering   (&collection, distanceCut); break;
+      case ClusteringMethod::ITERATIVE_SPLIT:
+        // Run standard iterative clustering, then split any cluster whose
+        // internal t-pull RMS exceeds T_PULL_SPLIT_THRESHOLD by re-clustering
+        // its constituents at the tighter DIST_CUT_SPLIT.
+        doIterativeClustering   (&collection, distanceCut);
+        doIterativeSplit        (&collection, branch,
+                                 T_PULL_SPLIT_THRESHOLD, DIST_CUT_SPLIT);
+        break;
     }
 
     // Load ML model only once using static initialization (lazy evaluation)
@@ -533,8 +608,6 @@ namespace MyUtl {
     for (Score score: SCORE_REGISTRY) {
       if (DEBUG)
         std::cout << "SCORE: " << score.toString() << '\n';
-      if (score.usesOwnCollection)
-	continue;
 
       // Scores with usesOwnCollection=true have a dedicated cluster collection
       // (built in the auxCollections table or directly in selectClusters) and

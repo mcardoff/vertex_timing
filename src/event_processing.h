@@ -80,7 +80,7 @@ namespace MyUtl {
       vxZ      = branch->recoVtxZ[vertexIdx],
       vxZVar  = 0.0;
 
-    double nsigmaPrim = std::abs(trkZ0 - vxZ) / std::sqrt(trkZVar + vxZVar);
+    double nsigmaPrim = std::abs(trkZ0 - vxZ) / std::sqrt(Z0_VAR_INFLATION * trkZVar + vxZVar);
     return nsigmaPrim < significanceCut;
   }
 
@@ -112,16 +112,21 @@ namespace MyUtl {
     // ZT_REFINED uses its own re-clustered collection (z₀-filtered tracks re-clustered
     // at DIST_CUT_T_REFINED); values[0] is already set correctly — fall through.
 
-    // JET_REFINED: precision-weighted mean using only constituent tracks that fall
-    // within dR < 0.4 of at least one truth-HS-matched reco jet.
-    // Selection is the same as TRKPTZ; only the time computation changes.
-    if (score == Score::JET_REFINED) {
-      // Collect (eta, phi) of truth-HS-matched reco jets
+    // WAVES: precision-weighted mean using only constituent tracks that fall within
+    // dR < 0.4 of at least one forward reco jet (pT > MIN_JET_PT, |η| in HGTD range).
+    // The cluster is still selected by the WAVeS score; this in-jet timing refinement
+    // purifies the time by dropping absorbed PU tracks, worth ~+1% efficiency.
+    // WAVES_MISCL / WAVES_MISAS share this path so the oracle rows report the same
+    // time as the WAVES row they gate.
+    if (score == Score::WAVES || score == Score::WAVES_MISCL || score == Score::WAVES_MISAS) {
+      // Collect (eta, phi) of qualifying forward reco jets — no truth matching
       std::vector<std::pair<double,double>> hsJets;
-      const int nJets = (int)branch->topoJetTruthHSIdx.GetSize();
+      const int nJets = (int)branch->topoJetPt.GetSize();
       for (int j = 0; j < nJets; ++j) {
-        if (!branch->topoJetTruthHSIdx[j].empty())
-          hsJets.push_back({branch->topoJetEta[j], branch->topoJetPhi[j]});
+        double jEta = branch->topoJetEta[j];
+        if (branch->topoJetPt[j] < MIN_JET_PT) continue;
+        if (std::abs(jEta) < MIN_ABS_ETA_JET || std::abs(jEta) > MAX_ABS_ETA_JET) continue;
+        hsJets.push_back({jEta, branch->topoJetPhi[j]});
       }
       double sumW = 0.0, sumWT = 0.0;
       for (size_t i = 0; i < trackIndices.size(); ++i) {
@@ -152,22 +157,24 @@ namespace MyUtl {
   // ---------------------------------------------------------------------------
   // 3c. Cluster::calculatePurity — out-of-line implementation
   //   For most scores: returns the pre-computed this->purity (HS ΣpT fraction
-  //   of the full cluster).  For JET_REFINED: re-evaluates purity using only
-  //   the constituent tracks that pass dR < 0.4 to a truth-HS-matched jet,
-  //   so the reported purity matches the tracks actually used for timing.
+  //   of the full cluster).  For WAVES: re-evaluates purity using only the
+  //   constituent tracks within dR < 0.4 of a forward reco jet, so the reported
+  //   purity matches the tracks actually used for the in-jet timing.
+  //   WAVES_MISCL / WAVES_MISAS intentionally use the default full-cluster purity
+  //   so their purity gates stay directly comparable to TEST_MISCL / TEST_MISAS.
   // ---------------------------------------------------------------------------
   inline double Cluster::calculatePurity(Score score, BranchPointerWrapper* branch) const {
-    if (score != Score::JET_REFINED)
+    if (score != Score::WAVES)
       return this->purity;
 
-    // Collect (eta, phi) of truth-HS-matched reco jets.
-    // Use topoJetTruthHSIdx.GetSize() as the loop bound — it may differ from
-    // topoJetPt.GetSize() in events where the truth-matching array is shorter.
+    // Collect (eta, phi) of qualifying forward reco jets — no truth matching.
     std::vector<std::pair<double,double>> hsJets;
-    const int nJets = (int)branch->topoJetTruthHSIdx.GetSize();
+    const int nJets = (int)branch->topoJetPt.GetSize();
     for (int j = 0; j < nJets; ++j) {
-      if (!branch->topoJetTruthHSIdx[j].empty())
-        hsJets.push_back({branch->topoJetEta[j], branch->topoJetPhi[j]});
+      double jEta = branch->topoJetEta[j];
+      if (branch->topoJetPt[j] < MIN_JET_PT) continue;
+      if (std::abs(jEta) < MIN_ABS_ETA_JET || std::abs(jEta) > MAX_ABS_ETA_JET) continue;
+      hsJets.push_back({jEta, branch->topoJetPhi[j]});
     }
 
     double sumPt = 0.0, hsPt = 0.0;
@@ -272,7 +279,8 @@ namespace MyUtl {
   //   with the truth vertex (|pull| < HS_TIMING_QUALITY_CUT).
   //   Used as an event-level gate for Score::TEST_MISAS: only events where
   //   >= 75% of HS pT has a good timing measurement enter its denominator.
-  //   Returns 1.0 (vacuously clean) when no HS tracks with valid HGTD time exist.
+  //   Returns 0.0 when no HS tracks with valid HGTD time exist, so such events
+  //   are excluded from the TEST_MISAS denominator rather than counted as clean.
   //
   //   Truth time resolution:
   //     Primary tracks   (trackToParticle != -1): use particleT (most precise).
@@ -428,15 +436,18 @@ namespace MyUtl {
   //   misasPass      — true if event was in TEST_MISAS denominator AND passed
   // ---------------------------------------------------------------------------
   struct EventResult {
-    int    code         = -1;
-    double time         = -1.0;
-    int    nFwdHS       =  0;
-    bool   trkptzPass   = false;
-    bool   tRefinedPass = false;
-    bool   misclInDenom = false;
-    bool   misasInDenom = false;
-    bool   misclPass    = false;
-    bool   misasPass    = false;
+    int    code          = -1;
+    double time          = -1.0;
+    int    nFwdHS        =  0;
+    bool   trkptzPass    = false;
+    bool   tRefinedPass  = false;
+    bool   misclInDenom  = false;
+    bool   misasInDenom  = false;
+    bool   misclPass     = false;
+    bool   misasPass     = false;
+    // Combined cluster quality for the TRKPTZ-selected cluster:
+    // (1 - clusPuFrac)² * clamp(avgNHGTD/2, 0, 1) * sigmaTFactor
+    double clusQuality   =  0.0;
   };
 
   EventResult processEventData(
@@ -473,7 +484,8 @@ namespace MyUtl {
     // ── D. Main iterative clustering ─────────────────────────────────────────
     // Purity is only computed when TEST_MISCL is active (it is expensive).
 
-    const bool NEEDS_PURITY = analyses.count(Score::TEST_MISCL) > 0;
+    const bool NEEDS_PURITY = analyses.count(Score::TEST_MISCL) > 0 ||
+                              analyses.count(Score::WAVES_MISCL) > 0;
     auto clusters = clusterTracksInTime(tracks, branch, DIST_CUT_CONE,
                                         useSmearedTimes, checkValidTimes, IDEAL_TRACK_RES,
                                         ClusteringMethod::ITERATIVE, /*useZ0=*/false,
@@ -520,12 +532,13 @@ namespace MyUtl {
 
     // ── G½. HS timing purity for TEST_MISAS gate ────────────────────────────
     float hsTimingPurity = 1.0f;
-    if (analyses.count(Score::TEST_MISAS))
+    if (analyses.count(Score::TEST_MISAS) || analyses.count(Score::WAVES_MISAS))
       hsTimingPurity = calcHSTimingPurity(tracks, branch);
 
     // ── H. Per-score histogram filling ──────────────────────────────────────
     int    returnCode = 0;
     double returnVal  = -1.;
+    double trkptzClusQuality = 0.0;  // quality of TRKPTZ-selected cluster; exported in EventResult
     bool passesMine = false, passesTRefined = false;
     bool passesMiscl = false, passesMisas = false;
     bool misclInDenominator = false, misasInDenominator = false;
@@ -537,7 +550,7 @@ namespace MyUtl {
       // Skip scores with invalid or missing cluster data
       if (branch->recoVtxValid[0] == 0 && score == Score::HGTD)   continue;
       if (clusters.empty() && !score.usesOwnCollection)           continue;
-      if (!chosen.count(score.id) && score != Score::HGTD)         continue;
+      if (!chosen.count(score.id))                                continue;
 
       Cluster& scored    = chosen.at(score.id);
       double iResH       = useSmearedTimes ? IDEAL_TRACK_RES : -1.0;
@@ -545,6 +558,50 @@ namespace MyUtl {
       scored.values[0]   = t;   // keep passEfficiency consistent with diff
       double purity      = clusters.empty() ? 0.0 : scored.calculatePurity(score, branch);
       double diff        = t - branch->truthVtxTime[0];
+
+      // Avg nHGTD hits per track in the selected cluster (computed once, used in
+      // multiple fill sites below: inclusive histograms, PlotObj total/pass/diff/purity)
+      double avgNHGTD = 0.0;
+      if (!scored.trackIndices.empty()) {
+        for (int trk : scored.trackIndices)
+          avgNHGTD += branch->trackHgtdHits[trk];
+        avgNHGTD /= static_cast<double>(scored.trackIndices.size());
+      }
+
+      // Cluster-level PU fraction by track count (consistent with event-level puRatio).
+      double clusPuFrac = 0.0;
+      if (!scored.trackIndices.empty()) {
+        int nPU = 0;
+        for (int trk : scored.trackIndices)
+          if (branch->trackToTruthvtx[trk] != 0) nPU++;
+        clusPuFrac = static_cast<double>(nPU) / static_cast<double>(scored.trackIndices.size());
+      }
+
+      // Cluster timing uncertainty — hoisted so all fill sites (total/pass/diff/purity)
+      // can reach it without re-accessing the sigmas vector, and so it can feed clusQuality
+      double clusSigmaT = scored.sigmas.at(0);
+
+      // σ_t factor: linear roll-off between FLOOR and CEIL.
+      // Well-determined clusters (σ_t ≤ floor) get factor 1; poorly-determined ones
+      // (σ_t ≥ ceil) get 0. This pushes high-Q outliers — clusters that look clean
+      // by composition but report large self-uncertainty — toward LOW quality.
+      //
+      // Note: nConstituents was tested as a separate fourth factor; it produced identical
+      // results because σ_t already encodes √N (averaging power) plus per-track resolution
+      // variance and track-time disagreement. nConstituents is fully subsumed by σ_t.
+      double sigmaTFactor = std::clamp(
+        (CLUS_SIGMA_T_FACTOR_CEIL - clusSigmaT) /
+          (CLUS_SIGMA_T_FACTOR_CEIL - CLUS_SIGMA_T_FACTOR_FLOOR),
+        0.0, 1.0);
+
+      // Combined cluster quality: (1 - PU frac)² × clamp(avgNHGTD/2, 0, 1) × σ_t factor
+      // Ranges 0→1; captures PU contamination, nhit, and timing certainty in one scalar.
+      // Quadratic puFrac because the linear form let high-puFrac clusters (~0.7-0.8) survive
+      // into the MID tier — these are the ~30 ps "middle background" clusters. σ_t doesn't
+      // catch them either because PU tracks at the same z have correlated (wrong) times.
+      double puFracFactor = (1.0 - clusPuFrac) * (1.0 - clusPuFrac);
+      double clusQuality = puFracFactor * std::min(avgNHGTD / 2.0, 1.0) * sigmaTFactor;
+      if (score == Score::TRKPTZ) trkptzClusQuality = clusQuality;
 
       // Expose time for the caller's event-display collection
       if (score == Score::TRKPTZ || score.requiresPurity) returnVal = t;
@@ -569,7 +626,7 @@ namespace MyUtl {
       bool inDenominator = !score.requiresPurity;
       if (score.requiresPurity) {
         bool passesGate;
-        if (score == Score::TEST_MISAS) {
+        if (score == Score::TEST_MISAS || score == Score::WAVES_MISAS) {
           // Gate on event-level HS timing purity: 100% of HS pT must have |pull|<3σ
           passesGate = (hsTimingPurity >= 0.95f);
         } else if (score == Score::PERF_EVT) {
@@ -600,10 +657,71 @@ namespace MyUtl {
           fillResoStack(analysis.inclusiveResoLowTrackSig.get(),
                         analysis.inclusiveResoLowTrackMix.get(),
                         analysis.inclusiveResoLowTrackBkg.get());
+
+        // PlotObj denominators for cluster-level variables (filled here rather than at
+        // the pre-loop fillTotals call since these values require the selected cluster)
+        analysis.ptrNhit->fillTotal(avgNHGTD);
+        analysis.ptrClusPuFrac->fillTotal(clusPuFrac);
+        analysis.ptrClusQuality->fillTotal(clusQuality);
+        if (clusSigmaT > 0.0) analysis.ptrClusSigmaT->fillTotal(clusSigmaT);
+        if (avgNHGTD < 1.5)
+          fillResoStack(analysis.inclusiveResoNhit1Sig.get(),
+                        analysis.inclusiveResoNhit1Mix.get(),
+                        analysis.inclusiveResoNhit1Bkg.get());
+        else if (avgNHGTD < 2.5)
+          fillResoStack(analysis.inclusiveResoNhit2Sig.get(),
+                        analysis.inclusiveResoNhit2Mix.get(),
+                        analysis.inclusiveResoNhit2Bkg.get());
+        else
+          fillResoStack(analysis.inclusiveResoNhit3pSig.get(),
+                        analysis.inclusiveResoNhit3pMix.get(),
+                        analysis.inclusiveResoNhit3pBkg.get());
+
+        // Cluster quality-binned inclusive reso (two tiers: HIGH Q≥0.5, LOW Q<0.5)
+        if (clusQuality >= CLUS_QUALITY_SPLIT) {
+          fillResoStack(analysis.inclusiveResoClusQHighSig.get(),
+                        analysis.inclusiveResoClusQHighMix.get(),
+                        analysis.inclusiveResoClusQHighBkg.get());
+        } else {
+          fillResoStack(analysis.inclusiveResoClusQLowSig.get(),
+                        analysis.inclusiveResoClusQLowMix.get(),
+                        analysis.inclusiveResoClusQLowBkg.get());
+        }
+
+        // Pull distribution: Δt / σ_cluster — skipped when σ is unphysical (≤ 0)
+        if (clusSigmaT > 0.0) {
+          double sigmaT = clusSigmaT;
+          double pull = diff / sigmaT;
+          auto fillPullStack = [&](TH1D* sig, TH1D* mix, TH1D* bkg) {
+            if      (purity > 0.75)  sig->Fill(pull);
+            else if (purity >= 0.50) mix->Fill(pull);
+            else                     bkg->Fill(pull);
+          };
+          fillPullStack(analysis.inclusivePullSig.get(),
+                        analysis.inclusivePullMix.get(),
+                        analysis.inclusivePullBkg.get());
+          // Per-quality-tier pull — two tiers matching the reso split
+          if (clusQuality >= CLUS_QUALITY_SPLIT)
+            fillPullStack(analysis.inclusivePullClusQHighSig.get(),
+                          analysis.inclusivePullClusQHighMix.get(),
+                          analysis.inclusivePullClusQHighBkg.get());
+          else
+            fillPullStack(analysis.inclusivePullClusQLowSig.get(),
+                          analysis.inclusivePullClusQLowMix.get(),
+                          analysis.inclusivePullClusQLowBkg.get());
+          if (ev.nForwardTrackHS <= 5)
+            fillPullStack(analysis.inclusivePullLowTrackSig.get(),
+                          analysis.inclusivePullLowTrackMix.get(),
+                          analysis.inclusivePullLowTrackBkg.get());
+        }
       }
 
       if (passes) {
         analysis.fillPasses(ev);
+        analysis.ptrNhit->fillPass(avgNHGTD);
+        analysis.ptrClusPuFrac->fillPass(clusPuFrac);
+        analysis.ptrClusQuality->fillPass(clusQuality);
+        if (clusSigmaT > 0.0) analysis.ptrClusSigmaT->fillPass(clusSigmaT);
         if (score == Score::TRKPTZ)     passesMine    = true;
         if (score == Score::T_REFINED)  passesTRefined = true;
         if (score == Score::TEST_MISCL) passesMiscl   = true;
@@ -611,13 +729,50 @@ namespace MyUtl {
       }
 
       // 2D timing residual and purity distributions
-      // (requiresPurity scores: only fill events that entered the denominator)
-      if (!score.requiresPurity ||
-          (score == Score::TEST_MISCL && misclInDenominator) ||
-          (score == Score::TEST_MISAS && misasInDenominator) ||
-          (score == Score::PERF_EVT  && perfEvtInDenominator)) {
+      // (requiresPurity scores: only fill events that entered the denominator;
+      //  inDenominator is always true for non-gated scores)
+      if (inDenominator) {
         analysis.fillDiffs   (ev, diff);
         analysis.fillPurities(ev, purity);
+        analysis.ptrNhit->fillDiff       (avgNHGTD,   diff);
+        analysis.ptrNhit->fillPurity     (avgNHGTD,   purity);
+        analysis.ptrClusPuFrac->fillDiff  (clusPuFrac, diff);
+        analysis.ptrClusPuFrac->fillPurity(clusPuFrac, purity);
+        analysis.ptrClusQuality->fillDiff  (clusQuality, diff);
+        analysis.ptrClusQuality->fillPurity(clusQuality, purity);
+        if (clusSigmaT > 0.0) {
+          analysis.ptrClusSigmaT->fillDiff  (clusSigmaT, diff);
+          analysis.ptrClusSigmaT->fillPurity(clusSigmaT, purity);
+        }
+        // 2D heatmaps: mean |Δt| and σ(Δt) as a function of (clusPuFrac, avgNHGTD)
+        analysis.prof2dPuFracVsNhit     ->Fill(clusPuFrac, avgNHGTD, std::abs(diff));
+        analysis.prof2dPuFracVsNhitSigma->Fill(clusPuFrac, avgNHGTD, diff);
+
+        // In-time PU diagnostic: find the dominant PU truth vertex contributing tracks
+        // to this cluster (mode of trackToTruthvtx among PU tracks), then fill
+        // Δt(cluster − HS truth) vs Δz(dominant PU vtx − HS vtx).
+        // The expected slope σ_t / σ_z ≈ 3.5 ps/mm confirms in-time PU origin.
+        if (clusPuFrac > 0.0) {
+          std::unordered_map<int, int> puVtxCount;
+          for (int trk : scored.trackIndices) {
+            int vtx = branch->trackToTruthvtx[trk];
+            if (vtx > 0) puVtxCount[vtx]++;   // only PU vertices (HS is index 0)
+          }
+          if (!puVtxCount.empty()) {
+            int dominantPUVtx = -1, maxCount = 0;
+            for (const auto& [vtx, n] : puVtxCount) {
+              if (n > maxCount) { maxCount = n; dominantPUVtx = vtx; }
+            }
+            if (dominantPUVtx > 0) {
+              double dzPU = branch->truthVtxZ[dominantPUVtx] - branch->truthVtxZ[0];
+              analysis.dtClusterVsDzPU->Fill(dzPU, diff);
+              if (clusQuality >= CLUS_QUALITY_SPLIT)
+                analysis.dtClusterVsDzPUHigh->Fill(dzPU, diff);
+              else
+                analysis.dtClusterVsDzPULow->Fill(dzPU, diff);
+            }
+          }
+        }
       }
     }
 
@@ -633,7 +788,8 @@ namespace MyUtl {
     return {returnCode, returnVal, ev.nForwardTrackHS,
             passesMine, passesTRefined,
             misclInDenominator, misasInDenominator,
-            passesMiscl, passesMisas};
+            passesMiscl, passesMisas,
+            trkptzClusQuality};
   }
 }
 #endif // EVENT_PROCESSING_H

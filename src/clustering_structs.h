@@ -58,6 +58,7 @@ namespace MyUtl {
     TTreeReaderArray<float> trackVarD0;
     TTreeReaderArray<float> trackVarQp;
     TTreeReaderArray<float> trackVarTheta;
+    TTreeReaderArray<float> trackVarPhi;
     TTreeReaderArray<float> trackTime;
     TTreeReaderArray<float> trackTimeRes;
     TTreeReaderArray<int>   trackTimeValid;
@@ -82,8 +83,18 @@ namespace MyUtl {
 
     TTreeReaderArray<float> truthHSJetPt;
     TTreeReaderArray<float> truthHSJetEta;
+    TTreeReaderArray<float> truthHSJetPhi;
+
+    TTreeReaderArray<float> truthITPUJetPt;
+    TTreeReaderArray<float> truthITPUJetEta;
+    TTreeReaderArray<float> truthITPUJetPhi;
+
+    TTreeReaderArray<float> truthOOTPUJetPt;
+    TTreeReaderArray<float> truthOOTPUJetEta;
+    TTreeReaderArray<float> truthOOTPUJetPhi;
 
     TTreeReaderArray<std::vector<int>> topoJetTruthHSIdx;
+    TTreeReaderArray<std::vector<int>> topoJetGhostTrackIdx;
 
     TTreeReaderArray<float> particleT;
 
@@ -95,6 +106,7 @@ namespace MyUtl {
       trackTheta (r, "Track_theta"), trackPhi (r, "Track_phi"),
       trackVarD0 (r, "Track_var_d0"), trackVarZ0 (r, "Track_var_z0"),
       trackVarQp (r, "Track_var_qOverP"), trackVarTheta (r, "Track_var_theta"),
+      trackVarPhi (r, "Track_var_phi0"),
       trackTime (r, "Track_time"), trackTimeRes (r, "Track_timeRes"),
       trackTimeValid (r, "Track_hasValidTime"), trackQuality (r, "Track_quality"),
       trackToTruthvtx (r, "Track_truthVtx_idx"),
@@ -109,7 +121,13 @@ namespace MyUtl {
       topoJetEta (r, "AntiKt4EMTopoJets_eta"),
       topoJetPhi (r, "AntiKt4EMTopoJets_phi"),
       truthHSJetPt (r, "TruthHSJet_pt"), truthHSJetEta (r, "TruthHSJet_eta"),
+      truthHSJetPhi (r, "TruthHSJet_phi"),
+      truthITPUJetPt (r, "TruthITPUJet_pt"), truthITPUJetEta (r, "TruthITPUJet_eta"),
+      truthITPUJetPhi (r, "TruthITPUJet_phi"),
+      truthOOTPUJetPt (r, "TruthOOTPUJet_pt"), truthOOTPUJetEta (r, "TruthOOTPUJet_eta"),
+      truthOOTPUJetPhi (r, "TruthOOTPUJet_phi"),
       topoJetTruthHSIdx (r, "AntiKt4EMTopoJets_truthHSJet_idx"),
+      topoJetGhostTrackIdx (r, "AntiKt4EMTopoJets_ghostTrack_idx"),
       particleT (r, "TruthPart_prodVtx_time")
     {}
 
@@ -734,8 +752,8 @@ namespace MyUtl {
       if (this->values.size() > 1) {
         // Clustering was done with z₀ as a second dimension: use that value.
         double dz = std::abs(this->values.at(1) - branch->recoVtxZ[0]);
-        double oldscore = Score::TRKPT.id;
-        this->scores[Score::TRKPTZ.id] = oldscore * std::exp(-1.5 * dz);
+        this->scores[Score::TRKPTZ.id] =
+          this->scores.at(Score::TRKPT.id) * std::exp(-1.5 * dz);
       } else {
         // Common case (usez0=false): reuse deltaZ already computed by calcFeatures.
         this->scores[Score::TRKPTZ.id] =
@@ -746,9 +764,51 @@ namespace MyUtl {
       float mlScore = mlModel->predict(features);
       this->scores[Score::TEST_ML.id] = mlScore;
 
-      // JET_REFINED: same selection as TRKPTZ; calculateTime() re-filters
-      // constituent tracks to those within dR < 0.4 of a truth-HS-matched jet.
-      this->scores[Score::JET_REFINED.id] = this->scores.at(Score::TRKPTZ.id);
+      // WAVES: WAVeS-style score — Σ_i pT_i × pT_jet(i) / max(ΔR_i, DR_FLOOR)
+      // multiplied by exp(−1.5|Δz_cluster|), where Δz is the pT-weighted cluster z centroid
+      // minus the reco vertex z.  The cluster-level z-term is more effective than per-track
+      // z-pull weighting because it averages over track-by-track z noise.
+      // Linear pT (not squared) so a couple of high-pT time-misassigned tracks can't
+      // outvote a larger time-coherent cluster.
+      // Falls back to TRKPTZ if no qualifying forward jets exist.
+      {
+        double wavesSum = 0.0;
+        for (int idx : this->trackIndices) {
+          double trkEta  = branch->trackEta[idx];
+          double trkPhi  = branch->trackPhi[idx];
+          double trkPt   = branch->trackPt[idx];
+
+          double minDR     = 1e6;
+          double nearJetPt = 0.0;
+          for (int j = 0; j < (int)branch->topoJetEta.GetSize(); ++j) {
+            double jEta = branch->topoJetEta[j];
+            double jPt  = branch->topoJetPt[j];
+            if (jPt < MIN_JET_PT) continue;
+            if (std::abs(jEta) < MIN_ABS_ETA_JET || std::abs(jEta) > MAX_ABS_ETA_JET) continue;
+            double deta = jEta - trkEta;
+            double dphi = TVector2::Phi_mpi_pi(branch->topoJetPhi[j] - trkPhi);
+            double dr   = std::hypot(deta, dphi);
+            if (dr < minDR) { minDR = dr; nearJetPt = jPt; }
+          }
+          if (nearJetPt <= 0.0) continue;
+          wavesSum += trkPt * nearJetPt
+                      / std::max(minDR, WAVES_DR_FLOOR);
+        }
+        if (wavesSum > 0.0)
+          this->scores[Score::WAVES.id] =
+              wavesSum * std::exp(-1.5 * std::abs(rawDeltaZ));
+        else
+          this->scores[Score::WAVES.id] = this->scores.at(Score::TRKPTZ.id);
+      }
+
+      // JET_T_REFINED: dedicated collection (jet-filtered tracks at 2σ iterative);
+      // cluster selected by TRKPTZ via the aux-collection path in selectClusters().
+      this->scores[Score::JET_T_REFINED.id] = this->scores.at(Score::TRKPTZ.id);
+
+      // WAVeS oracle variants: selected by the WAVeS score; denominator gates
+      // (cluster purity / HS timing purity) applied at fill time in event_processing.h.
+      this->scores[Score::WAVES_MISCL.id] = this->scores.at(Score::WAVES.id);
+      this->scores[Score::WAVES_MISAS.id] = this->scores.at(Score::WAVES.id);
 
       // TEST_MISCL uses TRKPTZ as its selection score; the purity gate is applied
       // at efficiency-check time in event_processing.h (both pass and total fills).
@@ -839,7 +899,7 @@ namespace MyUtl {
     // calculatePurity
     //   Returns the purity to use for resolution and efficiency plots for the
     //   given score.  For most scores this is the pre-computed this->purity
-    //   (fraction of cluster ΣpT from HS tracks).  For JET_REFINED, purity
+    //   (fraction of cluster ΣpT from HS tracks).  For WAVES, purity
     //   is re-evaluated using only the constituent tracks that survive the
     //   dR < 0.4 HS-jet filter, mirroring the time computation in calculateTime.
     //   Implemented out-of-line in event_processing.h alongside calculateTime.

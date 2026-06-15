@@ -37,6 +37,7 @@
 #include <TLegend.h>
 #include <TLine.h>
 #include <TProfile.h>
+#include <TProfile2D.h>
 #include <TMath.h>
 // TMVA headers intentionally excluded: HGTD_SORT/CONE_BDT are disabled.
 // Re-enable when those scores are re-activated (and restore in CMakeLists.txt).

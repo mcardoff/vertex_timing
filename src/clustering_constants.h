@@ -54,7 +54,7 @@ namespace MyUtl {
   const int    MIN_JETS           = 2;     // min n jets
   const int    MIN_PASSPT_JETS    = 2;     // min n jets >30 GeV
   const int    MIN_PASSETA_JETS   = 1;     // min n forward jets >30GeV
-  const int    MIN_CLUSTER_TRACKS = 3;     // min tracks required to select a cluster
+  const int    MIN_CLUSTER_TRACKS = 0;     // min tracks required to select a cluster
   const int    MIN_NHS_TRACK      = 2;     // testing only
   const int    MAX_NHS_TRACK      = 6;     // testing only
   const double VBS_JET_D_ETA      = 3.0;   // min eta separation for VBS Jets
@@ -79,9 +79,18 @@ namespace MyUtl {
   const double DIST_CUT_ITER      = 3.0;   // Distance cut for iterative clustering
   const double DIST_CUT_REFINE    = 2.0;   // Timing distance cut used by ZT_REFINED (legacy)
   const double DIST_CUT_T_REFINED = 2.0;   // Re-clustering distance cut for T_REFINED and ZT_REFINED
+  const double WAVES_DR_FLOOR    = 0.05;  // Minimum ΔR for WAVeS 1/ΔR weight (prevents divergence)
   const double TVA_CUT_Z_REFINED  = 2.0;   // z₀ TVA significance cut for Z_REFINED and ZT_REFINED
   const int    CONE_ITER_K        = 3;     // Top cone clusters to refine (REFINED score)
   const double TRUTH_PULL_CUT     = 3.0;   // |pull| < cut keeps track as truth-matched
+  // z₀ pull-width inflation factor (measured from z0_pull_diag: σ ≈ 1.15 across all
+  // η bins, indicating the covariance matrix underestimates the true z₀ resolution by
+  // ~15%).  Inflating var_z0 by this factor before taking the square root matches the
+  // observed spread, analogous to the 1.5² = 2.25 inflation used for the timing gate.
+  const double Z0_VAR_INFLATION   = 1.15 * 1.15;  // = 1.3225
+  // ITERATIVE_SPLIT tunables (inline so diagnostics can sweep them).
+  inline double T_PULL_SPLIT_THRESHOLD = 1.5;  // split clusters whose t-pull RMS exceeds this
+  inline double DIST_CUT_SPLIT         = 2.0;  // tighter cut used when re-clustering after split
   // Per-track timing resolution used for Ideal Resolution/Efficiency scenarios.
   // Flat per-track value (independent of hit count), representing a hypothetically
   // better detector.  Contrast with real HGTD: ~30 ps/hit → 30/√nHits ≈ 15–21 ps/track.
@@ -90,15 +99,17 @@ namespace MyUtl {
   // ---------------------------------------------------------------------------
   // 3b. Clustering method selector
   //   Passed as a single parameter to clusterTracksInTime, replacing the old
-  //   bool useCone flag.  Three modes are supported:
-  //     SIMULTANEOUS — globally-closest-pair agglomerative merge
-  //     CONE         — seed-and-cone, absorbs all in-cone candidates at once
-  //     ITERATIVE    — nearest-neighbour iterative, centroid updated per step
+  //   bool useCone flag.  Four modes are supported:
+  //     SIMULTANEOUS    — globally-closest-pair agglomerative merge
+  //     CONE            — seed-and-cone, absorbs all in-cone candidates at once
+  //     ITERATIVE       — nearest-neighbour iterative, centroid updated per step
+  //     ITERATIVE_SPLIT — ITERATIVE then split clusters with high t-pull RMS
   // ---------------------------------------------------------------------------
   enum class ClusteringMethod {
     SIMULTANEOUS, // doSimultaneousClustering — agglomerative minimum-distance
     CONE,         // doConeClustering — seed-and-cone simultaneous absorption
     ITERATIVE,    // doIterativeClustering — nearest-neighbour, centroid-updating
+    ITERATIVE_SPLIT, // ITERATIVE + post-process: split clusters with high t-pull RMS
   };
 
   // ---------------------------------------------------------------------------
@@ -120,7 +131,10 @@ namespace MyUtl {
   //   sparse high-multiplicity tails don't dominate the plots.
   // ---------------------------------------------------------------------------
   const double DIFF_MIN = -1000.0, DIFF_MAX = 1000.0;
-  const double DIFF_WIDTH = 4.0;
+  const double DIFF_WIDTH = 5.0;
+
+  const double PULL_MIN = -50.0, PULL_MAX = 50.0;
+  const double PULL_WIDTH = 0.25;   // 400 bins booked; display range clipped to ±10 at plot time
 
   const double PURITY_MIN = 0, PURITY_MAX = 1;
   const double PURITY_WIDTH = 0.05;
@@ -131,17 +145,49 @@ namespace MyUtl {
   const double VTX_DZ_MIN = 0, VTX_DZ_MAX = 5.0, FOLD_VTX_DZ = 2.0;
   const double VTX_DZ_WIDTH = 0.1;
 
-  const double TRACK_MIN = 2.5, TRACK_MAX = 100.5, FOLD_TRACK = 20;
-  const double TRACK_WIDTH = 1.0;
+  const double TRACK_MIN = 2.5, TRACK_MAX = 100.5, FOLD_TRACK = 50;
+  const double TRACK_WIDTH = 2.0;
 
-  const double PU_TRACK_MIN = TRACK_MIN, PU_TRACK_MAX = TRACK_MAX, FOLD_HS_TRACK = FOLD_TRACK;  
-  const double PU_TRACK_WIDTH = TRACK_WIDTH;
+  const double PU_TRACK_MIN = 2.5, PU_TRACK_MAX = 100.5, FOLD_HS_TRACK = 20;  
+  const double PU_TRACK_WIDTH = 1.0;
 
-  const double HS_TRACK_MIN = TRACK_MIN, HS_TRACK_MAX = TRACK_MAX, FOLD_PU_TRACK = FOLD_TRACK;
-  const double HS_TRACK_WIDTH = TRACK_WIDTH;
+  const double HS_TRACK_MIN = 2.5, HS_TRACK_MAX = 100.5, FOLD_PU_TRACK = 20;
+  const double HS_TRACK_WIDTH = 1.0;
 
   const double PU_FRAC_WIDTH = 0.1;
   const double PU_FRAC_MIN = 0, PU_FRAC_MAX = 1.0 + PU_FRAC_WIDTH, FOLD_PU_FRAC = 1.0;
+
+  // Avg nHGTD hits per track in the selected cluster (range 1–4; no folding needed)
+  const double NHIT_MIN = 0.75, NHIT_MAX = 4.25, FOLD_NHIT = 4.25;
+  const double NHIT_WIDTH = 0.5;
+
+  // Cluster-level PU fraction by track count; mirrors event PU_FRAC_* for direct comparison
+  const double CLUS_PU_FRAC_WIDTH = 0.1;
+
+  // Cluster timing uncertainty σ_t (scored.sigmas[0]); max = 30 ps (HGTD res/hit), no folding
+  const double CLUS_SIGMA_T_MIN = 0.0, CLUS_SIGMA_T_MAX = 20.0, FOLD_CLUS_SIGMA_T = 20.0;
+  const double CLUS_SIGMA_T_WIDTH = 1.0;
+
+  // σ_t factor used as the third multiplicative term in cluster quality.
+  // Linear roll-off: factor=1 below FLOOR, factor=0 above CEIL, linear between.
+  // Floor=5 ps represents a well-determined multi-track multi-hit cluster;
+  // Ceil=20 ps marks the boundary where the cluster's own time estimate is unreliable.
+  const double CLUS_SIGMA_T_FACTOR_FLOOR = 5.0;
+  const double CLUS_SIGMA_T_FACTOR_CEIL  = 20.0;
+  const double CLUS_PU_FRAC_MIN = 0.0, CLUS_PU_FRAC_MAX = 1.0 + CLUS_PU_FRAC_WIDTH, FOLD_CLUS_PU_FRAC = 1.0;
+
+  // Combined cluster quality score: (1 - clusPuFrac)² * clamp(avgNHGTD/2, 0, 1) * σ_t factor
+  // Range [0, 1]: 0 = total failure, 1 = pure-HS multi-hit well-determined cluster.
+  // Histogram range shifted by half a bin so bin centers fall on 0.0, 0.1, ..., 1.0
+  // (more natural for axis reading than 0.05, 0.15, ..., 1.05).
+  const double CLUS_QUALITY_WIDTH = 0.1;
+  const double CLUS_QUALITY_MIN = -0.5 * CLUS_QUALITY_WIDTH;          // = -0.05
+  const double CLUS_QUALITY_MAX = 1.0 + 0.5 * CLUS_QUALITY_WIDTH;     // =  1.05
+  const double FOLD_CLUS_QUALITY = 1.0;
+  // Quality tier thresholds: two regions
+  //   LOW  : Q < CLUS_QUALITY_SPLIT  — PU-dominated smear, σ_tail ~ 200+ ps
+  //   HIGH : Q ≥ CLUS_QUALITY_SPLIT  — signal + mild contamination, σ_core ~ 7-12 ps
+  const double CLUS_QUALITY_SPLIT = 0.15;
 
   const double Z_MIN = -200, Z_MAX = 200, FOLD_Z = 100;
   const double Z_WIDTH = 10.0;
@@ -227,7 +273,10 @@ namespace MyUtl {
     static const Score TEST_HS;
     static const Score ZT_ITER;
     static const Score PERF_EVT;
-    static const Score JET_REFINED;
+    static const Score WAVES;
+    static const Score JET_T_REFINED;
+    static const Score WAVES_MISCL;
+    static const Score WAVES_MISAS;
   };
 
   inline const std::string STR_TRKPTZ = "#Sigma p_{T}e^{-|#Delta z|}";
@@ -270,10 +319,19 @@ namespace MyUtl {
 
   inline const Score Score::TEST_MISCL = { 12, STR_TRKPTZ + " [Events with Pure Clusters]"   , "TRKPTZ Pure Clust.",    false, true, -1.f };
   inline const Score Score::TEST_MISAS = { 13, STR_TRKPTZ + " [Events with Perfect Timing]"  , "TRKPTZ Perf. Time",    false, true, -1.f };
-  inline const Score Score::PERF_EVT   = { 17, STR_TRKPTZ + " [Pure Clusters + Perf. Timing]", "TRKPTZ Pure Clust./Perf. Time", false, true, -1.f };
-  // JET_REFINED: same cluster as TRKPTZ, but calculateTime() re-weights using
-  // only constituent tracks within dR < 0.4 of a truth-HS-matched reco jet.
-  inline const Score Score::JET_REFINED = { 18, "TRKPTZ (In-Jet Tracks)", "JET_REFINED", false, false, -1.f };
+  inline const Score Score::PERF_EVT   = { 17, STR_TRKPTZ + " [Pure Clusters + Perf. Timing]", "TRKPTZ Pure Clust. Perf. Time", false, true, -1.f };
+  // WAVES: WAVeS-style selection score — Σ pT·pT_jet/max(ΔR,floor) × exp(−1.5|Δz|).
+  // Pure selection: picks the highest-scoring main-collection cluster and reports its
+  // standard weighted-mean time and full-cluster purity (no in-jet-only recomputation).
+  inline const Score Score::WAVES  = { 18, "WAVeS Score",                      "WAVES",        false, false, -1.f };
+  // JET_T_REFINED: clusters only jet-proximate tracks at DIST_CUT_T_REFINED (2σ iterative)
+  inline const Score Score::JET_T_REFINED = { 19, "WAVeS 2#sigma t Re-clustering",  "WAVES_RECLUST", true,  false, -1.f,
+                                              DIST_CUT_T_REFINED, ClusteringMethod::ITERATIVE,
+                                              false, TrackFilterType::JET };
+  // WAVeS oracle variants: selection by the WAVeS score, denominator gates applied
+  // at fill time exactly like TEST_MISCL (cluster purity) / TEST_MISAS (HS timing purity)
+  inline const Score Score::WAVES_MISCL  = { 20, "WAVeS [Events with Pure Clusters]" , "WAVES Pure Clust.", false, true, -1.f };
+  inline const Score Score::WAVES_MISAS  = { 21, "WAVeS [Events with Perfect Timing]", "WAVES Perf. Time" , false, true, -1.f };
 
   // Scores with a dedicated collection (distCut ≥ 0 → buildsCollection() = true)
   inline const Score Score::CONE       = {  7, "Cone"                       , "CONE",     true , false, -1.f, DIST_CUT_CONE,      ClusteringMethod::CONE      };
@@ -291,7 +349,10 @@ namespace MyUtl {
     Score::TEST_MISAS, Score::TEST_HS,
     Score::ZT_ITER,
     Score::PERF_EVT,
-    Score::JET_REFINED,
+    Score::WAVES,
+    Score::JET_T_REFINED,
+    Score::WAVES_MISCL,
+    Score::WAVES_MISAS,
   };
 
   // ---------------------------------------------------------------------------
