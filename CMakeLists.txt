@@ -23,299 +23,33 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Add your executables, specifying the path to the source files
 add_executable(clustering_dt src/clustering_dt.cxx)
-add_executable(hgtd_matching util/hgtd_matching.cxx)
-add_executable(extract_error_metrics util/extract_error_metrics.cxx)
-add_executable(test_ml_model util/test_ml_model.cxx)
 add_executable(generate_rpt util/generate_rpt.cxx)
 add_executable(rpt_v2 util/rpt_v2.cxx)
 add_executable(rpt_v3 util/rpt_v3.cxx)
-add_executable(timing_diag util/timing_diag.cxx)
-add_executable(test_vbf_selection test_vbf_selection.cxx)
-add_executable(evaluate_ml_lowtrack util/evaluate_ml_lowtrack.cxx)
+add_executable(rpt_v4 util/rpt_v4.cxx)
+add_executable(rpt_v5 util/rpt_v5.cxx)
 add_executable(export_training_data util/export_training_data.cxx)
-add_executable(distcut_sweep util/distcut_sweep.cxx)
-add_executable(maxtrackpt_sweep util/maxtrackpt_sweep.cxx)
-add_executable(mintrackpt_sweep util/mintrackpt_sweep.cxx)
-add_executable(cone_iter_k_sweep util/cone_iter_k_sweep.cxx)
-add_executable(dist_refine_sweep util/dist_refine_sweep.cxx)
-add_executable(nsigma_sweep util/nsigma_sweep.cxx)
-add_executable(trkptz_alpha_sweep util/trkptz_alpha_sweep.cxx)
-add_executable(trkptz_resunits_sweep util/trkptz_resunits_sweep.cxx)
-add_executable(rate_diagnostics util/rate_diagnostics.cxx)
 add_executable(failure_decomposition util/failure_decomposition.cxx)
 
 # Specify the include directories for your header files
-target_include_directories(clustering_dt
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-	${ROOT_INCLUDE_DIRS}
+foreach(_tgt
+    clustering_dt
+    generate_rpt
+    rpt_v2
+    rpt_v3
+    rpt_v4
+    rpt_v5
+    export_training_data
+    failure_decomposition
 )
-
-target_include_directories(hgtd_matching
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-	${ROOT_INCLUDE_DIRS}
-)
-
-target_include_directories(extract_error_metrics
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-	${ROOT_INCLUDE_DIRS}
-)
-
-target_include_directories(test_ml_model
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-	${ROOT_INCLUDE_DIRS}
-)
-
-target_include_directories(generate_rpt
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-	${ROOT_INCLUDE_DIRS}
-)
-
-target_include_directories(rpt_v2
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-	${ROOT_INCLUDE_DIRS}
-)
-
-target_include_directories(rpt_v3
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-	${ROOT_INCLUDE_DIRS}
-)
-
-target_include_directories(timing_diag
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-	${ROOT_INCLUDE_DIRS}
-)
-
-target_include_directories(test_vbf_selection
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-	${ROOT_INCLUDE_DIRS}
-)
-
-target_include_directories(evaluate_ml_lowtrack
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-	${ROOT_INCLUDE_DIRS}
-)
-
-target_include_directories(export_training_data
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${ROOT_INCLUDE_DIRS}
-)
-
-target_include_directories(distcut_sweep
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/util
-        ${ROOT_INCLUDE_DIRS}
-)
-
-target_include_directories(maxtrackpt_sweep
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/util
-        ${ROOT_INCLUDE_DIRS}
-)
-
-target_include_directories(mintrackpt_sweep
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/util
-        ${ROOT_INCLUDE_DIRS}
-)
-
-target_include_directories(cone_iter_k_sweep
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/util
-        ${ROOT_INCLUDE_DIRS}
-)
-
-target_include_directories(nsigma_sweep
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/util
-        ${ROOT_INCLUDE_DIRS}
-)
-
-target_include_directories(trkptz_alpha_sweep
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/util
-        ${ROOT_INCLUDE_DIRS}
-)
-
-target_include_directories(trkptz_resunits_sweep
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/util
-        ${ROOT_INCLUDE_DIRS}
-)
-
-target_include_directories(dist_refine_sweep
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/util
-        ${ROOT_INCLUDE_DIRS}
-)
-
-target_include_directories(rate_diagnostics
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${ROOT_INCLUDE_DIRS}
-)
-
-target_include_directories(failure_decomposition
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${ROOT_INCLUDE_DIRS}
-)
-
-# Link the executables with the required libraries
-# ROOT libraries are linked using the ${ROOT_LIBRARIES} variable
-# Boost libraries are linked using Boost::filesystem
-target_link_libraries(clustering_dt
-    PRIVATE
-        ${ROOT_LIBRARIES}
-        Boost::filesystem
-)
-
-target_link_libraries(hgtd_matching
-    PRIVATE
-        ${ROOT_LIBRARIES}
-        Boost::filesystem
-)
-
-target_link_libraries(extract_error_metrics
-    PRIVATE
-        ${ROOT_LIBRARIES}
-        Boost::filesystem
-)
-
-target_link_libraries(test_ml_model
-    PRIVATE
-        ${ROOT_LIBRARIES}
-        Boost::filesystem
-)
-
-target_link_libraries(generate_rpt
-    PRIVATE
-        ${ROOT_LIBRARIES}
-        Boost::filesystem
-)
-
-target_link_libraries(rpt_v2
-    PRIVATE
-        ${ROOT_LIBRARIES}
-        Boost::filesystem
-)
-
-target_link_libraries(rpt_v3
-    PRIVATE
-        ${ROOT_LIBRARIES}
-        Boost::filesystem
-)
-
-target_link_libraries(timing_diag
-    PRIVATE
-        ${ROOT_LIBRARIES}
-        Boost::filesystem
-)
-
-target_link_libraries(test_vbf_selection
-    PRIVATE
-        ${ROOT_LIBRARIES}
-        Boost::filesystem
-)
-
-target_link_libraries(evaluate_ml_lowtrack
-    PRIVATE
-        ${ROOT_LIBRARIES}
-        Boost::filesystem
-)
-
-target_link_libraries(export_training_data
-    PRIVATE
-        ${ROOT_LIBRARIES}
-        Boost::filesystem
-)
-
-target_link_libraries(distcut_sweep
-    PRIVATE
-        ${ROOT_LIBRARIES}
-        Boost::filesystem
-)
-
-target_link_libraries(maxtrackpt_sweep
-    PRIVATE
-        ${ROOT_LIBRARIES}
-        Boost::filesystem
-)
-
-target_link_libraries(mintrackpt_sweep
-    PRIVATE
-        ${ROOT_LIBRARIES}
-        Boost::filesystem
-)
-
-target_link_libraries(cone_iter_k_sweep
-    PRIVATE
-        ${ROOT_LIBRARIES}
-        Boost::filesystem
-)
-
-target_link_libraries(dist_refine_sweep
-    PRIVATE
-        ${ROOT_LIBRARIES}
-        Boost::filesystem
-)
-
-target_link_libraries(nsigma_sweep
-    PRIVATE
-        ${ROOT_LIBRARIES}
-        Boost::filesystem
-)
-
-target_link_libraries(trkptz_alpha_sweep
-    PRIVATE
-        ${ROOT_LIBRARIES}
-        Boost::filesystem
-)
-
-target_link_libraries(trkptz_resunits_sweep
-    PRIVATE
-        ${ROOT_LIBRARIES}
-        Boost::filesystem
-)
-
-target_link_libraries(rate_diagnostics
-    PRIVATE
-        ${ROOT_LIBRARIES}
-        Boost::filesystem
-)
-
-target_link_libraries(failure_decomposition
-    PRIVATE
-        ${ROOT_LIBRARIES}
-        Boost::filesystem
-)
-
-add_executable(vtx_diag util/vtx_diag.cxx)
-target_include_directories(vtx_diag PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${ROOT_INCLUDE_DIRS})
-target_link_libraries(vtx_diag PRIVATE ${ROOT_LIBRARIES} Boost::filesystem)
-
-add_executable(rpt_v4 util/rpt_v4.cxx)
-target_include_directories(rpt_v4 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${ROOT_INCLUDE_DIRS})
-target_link_libraries(rpt_v4 PRIVATE ${ROOT_LIBRARIES} Boost::filesystem)
-
-add_executable(rpt_v5 util/rpt_v5.cxx)
-target_include_directories(rpt_v5 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${ROOT_INCLUDE_DIRS})
-target_link_libraries(rpt_v5 PRIVATE ${ROOT_LIBRARIES} Boost::filesystem)
+    target_include_directories(${_tgt}
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+            ${ROOT_INCLUDE_DIRS}
+    )
+    target_link_libraries(${_tgt}
+        PRIVATE
+            ${ROOT_LIBRARIES}
+            Boost::filesystem
+    )
+endforeach()
