@@ -778,9 +778,14 @@ namespace MyUtl {
           this->scores.at(Score::TRKPT.id) * std::exp(-1.5 * std::abs(rawDeltaZ));
       }
 
-      // ML score for TEST_ML
-      float mlScore = mlModel->predict(features);
-      this->scores[Score::TEST_ML.id] = mlScore;
+      // ML score for TEST_ML — DISABLED: the model is not loaded (no weights
+      // file read at all).  TEST_ML is pinned to 0 so the score map stays
+      // populated.  To re-enable, restore the predict() call below and the
+      // static MLModel loader in clustering_functions.h.
+      (void)mlModel;
+      // float mlScore = mlModel->predict(features);
+      // this->scores[Score::TEST_ML.id] = mlScore;
+      this->scores[Score::TEST_ML.id] = 0.0f;
 
       // WAVES: WAVeS-style score — Σ_i pT_i × pT_jet(i) / max(ΔR_i, DR_FLOOR)
       // multiplied by exp(−1.5|Δz_cluster|), where Δz is the pT-weighted cluster z centroid

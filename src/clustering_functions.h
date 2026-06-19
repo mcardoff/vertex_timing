@@ -531,18 +531,20 @@ namespace MyUtl {
         break;
     }
 
-    // Load ML model only once using static initialization (lazy evaluation)
-    static MLModel mlModel = []() {
-        MLModel m;
-        m.load_weights("/Users/mcard/project/vertex_timing/share/models/model_weights.json");
-        std::cout << "✓ ML model loaded (one-time initialization)" << std::endl;
-        return m;
-    }();
+    // ML model loading DISABLED — the weights file is never read (TEST_ML is
+    // pinned to 0 in updateScores).  Re-enable by restoring this static loader
+    // and passing &mlModel to updateScores below.
+    // static MLModel mlModel = []() {
+    //     MLModel m;
+    //     m.load_weights("/Users/mcard/project/vertex_timing/share/models/model_weights.json");
+    //     std::cout << "✓ ML model loaded (one-time initialization)" << std::endl;
+    //     return m;
+    // }();
 
     for (Cluster& cluster: collection) {
       if (calcPurityFlag)
         cluster.calcPurity(branch);  // only needed when TEST_MISCL is active
-      cluster.updateScores(branch, &mlModel);
+      cluster.updateScores(branch, nullptr);
     }
     
     if (DEBUG) std::cout << "Finished Clustering\n";
