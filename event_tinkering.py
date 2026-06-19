@@ -23,7 +23,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 # parser.add_argument('--extra_time', type=float, required=False)
 # args = parser.parse_args()
 
-event_num, file_num = 2511, '000006'
+event_num, file_num = 788, '000010'
 
 IDEALEFF = False
 # filename = f'./VDT_TALK_2/RPT/event_display_{file_num}_{event_num:04d}.pdf'

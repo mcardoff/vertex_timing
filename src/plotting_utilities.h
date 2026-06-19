@@ -1097,6 +1097,7 @@ namespace MyUtl {
     // Populated at the end of the constructor so that fill helpers can avoid
     // std::map string lookups (O(log N) string comparison) on every event.
     PlotObj* ptrFjet    = nullptr;
+    PlotObj* ptrTruthJets = nullptr;  // n truth HS jets in the whole event
     PlotObj* ptrVtxDz   = nullptr;
     PlotObj* ptrFtrack  = nullptr;
     PlotObj* ptrPuFrac  = nullptr;
@@ -1156,6 +1157,15 @@ namespace MyUtl {
       dataObjects["fjet"] = std::make_unique<PlotObj>(
         "n Forward Jets", timetypeIDer,
 	TString::Format("../figs/fullplots/%s_nfjet.pdf",filenameIDer.Data()),
+	score,
+	FJET_MIN  , FJET_MAX  , FJET_WIDTH  ,
+	DIFF_MIN  , DIFF_MAX  , DIFF_WIDTH  ,
+	PURITY_MIN, PURITY_MAX, PURITY_WIDTH,
+	FOLD_FJET, FOLD_FJET+FJET_WIDTH/2.0 );
+
+      dataObjects["truthjets"] = std::make_unique<PlotObj>(
+        "n Truth HS Jets", timetypeIDer,
+	TString::Format("../figs/fullplots/%s_ntruthjet.pdf",filenameIDer.Data()),
 	score,
 	FJET_MIN  , FJET_MAX  , FJET_WIDTH  ,
 	DIFF_MIN  , DIFF_MAX  , DIFF_WIDTH  ,
@@ -1373,6 +1383,7 @@ namespace MyUtl {
 
       // Cache raw PlotObj* pointers for fast per-event fill access (no map lookup)
       ptrFjet     = dataObjects["fjet"    ].get();
+      ptrTruthJets = dataObjects["truthjets"].get();
       ptrFtrack   = dataObjects["ftrack"  ].get();
       ptrHSTrack  = dataObjects["hs_track"].get();
       ptrPUTrack  = dataObjects["pu_track"].get();
@@ -1429,6 +1440,7 @@ namespace MyUtl {
     // -----------------------------------------------------------------------
     void fillTotals(const EventCounts& ev) {
       ptrFjet->    fillTotal(ev.effFillValFjet   );
+      ptrTruthJets->fillTotal(ev.effFillValHSJet );
       ptrVtxDz->   fillTotal(ev.effFillValVtxDz  );
       ptrFtrack->  fillTotal(ev.effFillValTrack  );
       ptrPuFrac->  fillTotal(ev.effFillValPURatio);
@@ -1438,6 +1450,7 @@ namespace MyUtl {
 
     void fillPasses(const EventCounts& ev) {
       ptrFjet->    fillPass(ev.effFillValFjet   );
+      ptrTruthJets->fillPass(ev.effFillValHSJet );
       ptrVtxDz->   fillPass(ev.effFillValVtxDz  );
       ptrFtrack->  fillPass(ev.effFillValTrack  );
       ptrPuFrac->  fillPass(ev.effFillValPURatio);
@@ -1447,6 +1460,7 @@ namespace MyUtl {
 
     void fillDiffs(const EventCounts& ev, double diff) {
       ptrFjet->    fillDiff(ev.effFillValFjet,    diff);
+      ptrTruthJets->fillDiff(ev.effFillValHSJet,  diff);
       ptrVtxDz->   fillDiff(ev.effFillValVtxDz,  diff);
       ptrFtrack->  fillDiff(ev.effFillValTrack,   diff);
       ptrPuFrac->  fillDiff(ev.effFillValPURatio, diff);
@@ -1456,6 +1470,7 @@ namespace MyUtl {
 
     void fillPurities(const EventCounts& ev, double purity) {
       ptrFjet->    fillPurity(ev.nForwardJet,     purity);
+      ptrTruthJets->fillPurity(ev.nTruthHSJet,    purity);
       ptrVtxDz->   fillPurity(ev.effFillValVtxDz, purity);
       ptrFtrack->  fillPurity(ev.nForwardTrack,   purity);
       ptrPuFrac->  fillPurity(ev.puRatio,         purity);

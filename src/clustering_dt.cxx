@@ -140,17 +140,27 @@ void makeComparisonPlots(
 	    });
 
   // WAVeS oracle comparison: selection by WAVeS score, gated like the TRKPTZ oracles.
-  // Color override: WAVES cyan, perfect timing violet, pure clusters yellow.
+  // Focus on the timing-misassignment oracle: HGTD, TRKPTZ, WAVeS, and WAVeS
+  // with ideal timing (WAVES_MISAS).  Misclustering case removed.
+  // Color override: WAVES yellow, ideal timing violet.
   moneyPlot(TString::Format("%s/waves_oracle_%s.pdf",compSubdir.c_str(), key), key, canvas,
 	    {
 	      &mapHGTD.at(Score::HGTD),
 	      &mapHGTD.at(Score::TRKPTZ),
 	      &mapHGTD.at(Score::WAVES),
 	      &mapHGTD.at(Score::WAVES_MISAS),
-	      &mapHGTD.at(Score::WAVES_MISCL),
 	    },
-	    {C01, C02, C05, C04, C03});
-  
+	    {C01, C02, C03, C04});
+
+  // Simple three-way comparison: HGTD vs TRKPTZ vs WAVeS (no oracles).
+  moneyPlot(TString::Format("%s/hgtd_trkptz_waves_%s.pdf",compSubdir.c_str(), key), key, canvas,
+	    {
+	      &mapHGTD.at(Score::HGTD),
+	      &mapHGTD.at(Score::TRKPTZ),
+	      &mapHGTD.at(Score::WAVES),
+	    },
+	    {C01, C02, C03});
+
   moneyPlot(TString::Format("%s/perfect_timing_%s.pdf", compSubdir.c_str(), key), key, canvas,
             {
                 &mapHGTD.at(Score::HGTD),
@@ -181,178 +191,9 @@ void makeComparisonPlots(
   moneyPlot(TString::Format("%s/2d_clust_%s.pdf", compSubdir.c_str(), key), key, canvas,
             {
                 &mapHGTD.at(Score::HGTD),
-                &mapHGTD.at(Score::TRKPTZ),
+                &mapHGTD.at(Score::WAVES),
 		&mapHGTD.at(Score::ZT_ITER),
 	    });
-
-  // WAVeS: HGTD | TRKPTZ | WAVES (WAVeS score) | JET_T_REFINED (jet-filtered 2σ clustering)
-  moneyPlot(TString::Format("%s/jet_refined_%s.pdf", compSubdir.c_str(), key), key, canvas,
-            {
-                &mapHGTD.at(Score::HGTD),
-                &mapHGTD.at(Score::TRKPTZ),
-                &mapHGTD.at(Score::WAVES),
-                &mapHGTD.at(Score::JET_T_REFINED),
-	    });
-
-  // moneyPlot(TString::Format("%s/z_refined_ideal_%s.pdf", compSubdir.c_str(), key), key, canvas,
-  //           {
-  //               // &mapHGTD.at(Score::HGTD),
-  //               &mapIdealRes.at(Score::TRKPTZ),
-  //               // &mapHGTD.at(Score::T_REFINED),
-  //               // &mapHGTD.at(Score::Z_REFINED),
-  //               // &mapHGTD.at(Score::ZT_REFINED),
-  //               &mapIdealRes.at(Score::T_REFINED),
-  //               &mapIdealRes.at(Score::Z_REFINED)
-  //           });
-
-  // // HGTD algo vs TRKPTZ vs HGTD_SORT (pT-sorted simultaneous + BDT)
-  // moneyPlot(TString::Format("%s/hgtd_sort_%s.pdf", compSubdir.c_str(), key), key, canvas,
-  //           {
-  //               &mapHGTD.at(Score::HGTD),
-  //               &mapHGTD.at(Score::TRKPTZ),
-  //               &mapHGTD.at(Score::HGTD_SORT)
-  // 	    });
-
-  // HGTD algo vs TRKPTZ vs HGTD_SORT (pT-sorted simultaneous + BDT)
-  // moneyPlot(TString::Format("%s/iter_v_sort_%s.pdf", compSubdir.c_str(), key), key, canvas,
-  //           {
-  //               &mapHGTD.at(Score::HGTD),
-  //               &mapHGTD.at(Score::TRKPTZ),
-  //               &mapHGTD.at(Score::HGTD_SORT),
-  // 		&mapHGTD.at(Score::CONE)
-  // 	    });
-
-  // HGTD base times: TRKPTZ vs DNN
-  moneyPlot(TString::Format("%s/trkptz_dnn_hgtd_%s.pdf", compSubdir.c_str(), key), key, canvas,
-            {
-                &mapHGTD.at(Score::HGTD),
-                &mapHGTD.at(Score::TRKPTZ),
-                &mapHGTD.at(Score::TEST_ML)
-	    });
-
-  // // TRKPTZ full sample vs TRKPTZ restricted to highly pure clusters
-  // moneyPlot(TString::Format("%s/pure_clusters_%s.pdf", compSubdir.c_str(), key), key, canvas,
-  //           {
-  //               &mapHGTD.at(Score::HGTD),
-  //               &mapHGTD.at(Score::TRKPTZ),
-  //               &mapHGTD.at(Score::TEST_MISCL)
-  // 	    });
-
-  // // Misassignment effect: HGTD vs TRKPTZ vs TEST_MISAS (misassigned tracks removed)
-  // moneyPlot(TString::Format("%s/test_misas_%s.pdf", compSubdir.c_str(), key), key, canvas,
-  //           {
-  //               &mapHGTD.at(Score::HGTD),
-  //               &mapHGTD.at(Score::TRKPTZ),
-  //               &mapHGTD.at(Score::TEST_MISAS)
-  // 	    });
-
-  // // PU-contamination effect: HGTD vs TRKPTZ vs TEST_HS (HS-origin tracks only)
-  // moneyPlot(TString::Format("%s/test_hs_%s.pdf", compSubdir.c_str(), key), key, canvas,
-  //           {
-  //               &mapHGTD.at(Score::HGTD),
-  //               &mapHGTD.at(Score::TRKPTZ),
-  //               &mapHGTD.at(Score::TEST_HS)
-  // 	    });
-
-  // // Full error decomposition: misclustering vs misassignment vs PU-contamination
-  // moneyPlot(TString::Format("%s/error_decomp_%s.pdf", compSubdir.c_str(), key), key, canvas,
-  //           {
-  //               &mapHGTD.at(Score::TRKPTZ),
-  //               &mapHGTD.at(Score::TEST_MISCL),
-  // 		&mapIdealRes.at(Score::TRKPTZ),
-  // 		&mapIdealRes.at(Score::PASS),
-  // 		&mapIdealEff.at(Score::PASS)
-  // 	    });
-
-  // moneyPlot(TString::Format("%s/idealres_error_decomp_%s.pdf", compSubdir.c_str(), key), key, canvas,
-  //           {
-  //               &mapHGTD.at(Score::HGTD),
-  //               &mapIdealRes.at(Score::TRKPTZ),
-  //               &mapIdealRes.at(Score::TEST_MISCL),
-  //               &mapIdealRes.at(Score::TEST_MISAS)
-  // 	    });
-
-  // Check iterative clustering score
-  // moneyPlot(TString::Format("%s/iterative_clust_%s.pdf", compSubdir.c_str(), key), key, canvas,
-  //           {
-  //               &mapHGTD.at(Score::HGTD),
-  //               &mapHGTD.at(Score::TRKPTZ),
-  //               &mapHGTD.at(Score::CONE)
-  // 	    });
-
-  // HGTD BDT on cone clusters vs HGTD_SORT (BDT on pT-sorted simultaneous) vs TRKPTZ
-  // moneyPlot(TString::Format("%s/cone_bdt_%s.pdf", compSubdir.c_str(), key), key, canvas,
-  //           {
-  //               &mapHGTD.at(Score::HGTD),
-  //               &mapHGTD.at(Score::TRKPTZ),
-  //               &mapHGTD.at(Score::CONE_BDT)
-  // 	    });
-
-  // pure clusters with ideal resolution
-  // moneyPlot(TString::Format("%s/pure_clusters_ires_%s.pdf", compSubdir.c_str(), key), key, canvas,
-  //           {
-  //               &mapHGTD.at(Score::HGTD),
-  //               &mapIdealRes.at(Score::TRKPTZ),
-  //               &mapIdealRes.at(Score::TEST_MISCL)
-  // 	    });
-
-  // moneyPlot(TString::Format("%s/pure_clusters_ieff_%s.pdf", compSubdir.c_str(), key), key, canvas,
-  //           {
-  //               &mapHGTD.at(Score::HGTD),
-  //               &mapIdealEff.at(Score::TRKPTZ),
-  //               &mapIdealEff.at(Score::TEST_MISCL)
-  // 	    });
-
-  // // Ideal-resolution times: TRKPTZ vs DNN
-  // moneyPlot(TString::Format("%s/trkptz_dnn_ires_%s.pdf", compSubdir.c_str(), key), key, canvas,
-  //           {
-  //               &mapHGTD.at(Score::HGTD),
-  //               &mapIdealRes.at(Score::TRKPTZ),
-  //               &mapIdealRes.at(Score::TEST_ML)
-  // 	    });
-
-  // // Ideal-efficiency times: TRKPTZ vs DNN
-  // moneyPlot(TString::Format("%s/trkptz_dnn_ieff_%s.pdf", compSubdir.c_str(), key), key, canvas,
-  //           {
-  //               &mapHGTD.at(Score::HGTD),
-  //               &mapIdealEff.at(Score::TRKPTZ),
-  //               &mapIdealEff.at(Score::TEST_ML)
-  // 	    });
-
-  // // Full ideal comparison: HGTD → TRKPTZ → IdealRes → IdealEff
-  // moneyPlot(TString::Format("%s/ideal_comp_%s.pdf", compSubdir.c_str(), key), key, canvas,
-  //           {
-  //               &mapHGTD.at(Score::HGTD),
-  //               &mapHGTD.at(Score::TRKPTZ),
-  //               &mapIdealRes.at(Score::TRKPTZ),
-  //               &mapIdealEff.at(Score::TRKPTZ)
-  // 	    });
-
-  // Effect of fixing HGTD matching alone
-  // moneyPlot(TString::Format("%s/fixed_assoc_%s.pdf", compSubdir.c_str(), key), key, canvas,
-  //           {
-  //               &mapHGTD.at(HGTD),
-  //               &mapHGTD.at(TRKPTZ),
-  //               &mapIdealRes.at(TRKPTZ),
-  //               &mapIdealEff.at(TRKPTZ)
-  // 	    });
-
-  // Effect of fixing cluster selection alone
-  // moneyPlot(TString::Format("%s/fixed_selection_%s.pdf", compSubdir.c_str(), key), key, canvas,
-  //           {
-  //               &mapHGTD.at(HGTD),
-  //               &mapHGTD.at(TRKPTZ),
-  //               &mapHGTD.at(PASS)
-  // 	    });
-
-  // Effect of fixing everything
-  // moneyPlot(TString::Format("%s/fixed_all_%s.pdf", compSubdir.c_str(), key), key, canvas,
-  //           {
-  //               &mapHGTD.at(HGTD),
-  //               &mapHGTD.at(TRKPTZ),
-  //               &mapIdealEff.at(PASS)
-  // 	    });
-
 }
 
 // ---------------------------------------------------------------------------
@@ -364,7 +205,7 @@ auto main() -> int {
 
   // --- Data source ---
   TChain chain("ntuple");
-  setupChain(chain, "../../ntuple-hgtd/");
+  setupChain(chain, "../../highstats-ntuple/");
   TTreeReader reader(&chain);
   BranchPointerWrapper branch(reader);
   ROOT::EnableImplicitMT(); // use all CPU cores
@@ -476,7 +317,7 @@ auto main() -> int {
 
   std::cout << "\nFINISHED PROCESSING\n";
 
-  const auto KEYS = {"pu_frac", "fjet", "ftrack", "hs_track", "nhit", "clus_pu_frac", "clus_sigma_t", "clus_quality"};
+  const auto KEYS = {"pu_frac", "fjet", "ftrack", "hs_track", "truthjets"};
 
   // --- Comparison plots (per variable KEY) ---
   for (const auto* key : KEYS)
@@ -484,8 +325,8 @@ auto main() -> int {
 
   // --- Inclusive resolution plots ---
   const std::initializer_list<AnalysisObj*> RESO_SET = {
-    &mapHGTD.at(Score::HGTD), &mapHGTD.at(Score::TRKPTZ), &mapHGTD.at(Score::TEST_MISCL),
-    &mapHGTD.at(Score::TEST_MISAS), &mapHGTD.at(Score::TEST_ML),
+    &mapHGTD.at(Score::HGTD), &mapHGTD.at(Score::TRKPTZ), &mapHGTD.at(Score::WAVES),
+    &mapHGTD.at(Score::WAVES_MISAS), &mapHGTD.at(Score::TEST_ML),
   };
   const char* diffLabel = "#Delta t [ps]";
   auto resoGetter = [](AnalysisObj* a) -> ResoTriple {
@@ -526,72 +367,12 @@ auto main() -> int {
   const double INCL_PULL_YMAX_LIN = 1.1 * globalPullMax;
   const double INCL_YMIN_LOG      = 0.5;
 
-  // inclusivePlot(TString::Format("%s/inclusive/inclusivereso_logscale.pdf", SAVE_DIR),
-		// true,  false, -400, 400, canvas, RESO_SET);
-  // inclusivePlot(TString::Format("%s/inclusive/inclusivereso_linscale.pdf", SAVE_DIR),
-		// false, false, -200, 200, canvas, RESO_SET);
   inclusivePlot(TString::Format("%s/inclusive/inclusivereso_logscale.pdf", SAVE_DIR),
-		true,  false, -400, 400, canvas, RESO_SET, resoGetter, nullptr, diffLabel, false, INCL_RESO_YMAX_LOG, INCL_YMIN_LOG);
+		true,  false, -400, 400, canvas, RESO_SET, resoGetter, &FIT_TRPGAUS, diffLabel, false, INCL_RESO_YMAX_LOG, INCL_YMIN_LOG);
   inclusivePlot(TString::Format("%s/inclusive/inclusivereso_linscale.pdf", SAVE_DIR),
-		false, false, -200, 200, canvas, RESO_SET, resoGetter, nullptr, diffLabel, false, INCL_RESO_YMAX_LIN, 0.0);
+		false, false, -200, 200, canvas, RESO_SET, resoGetter, &FIT_TRPGAUS, diffLabel, false, INCL_RESO_YMAX_LIN, 0.0);
 
-  // nHGTD hits-binned inclusive resolution
-  auto nhit1Getter = [](AnalysisObj* a) -> ResoTriple {
-    return { a->inclusiveResoNhit1Sig.get(),
-             a->inclusiveResoNhit1Mix.get(),
-             a->inclusiveResoNhit1Bkg.get() }; };
-  auto nhit2Getter = [](AnalysisObj* a) -> ResoTriple {
-    return { a->inclusiveResoNhit2Sig.get(),
-             a->inclusiveResoNhit2Mix.get(),
-             a->inclusiveResoNhit2Bkg.get() }; };
-  auto nhit3pGetter = [](AnalysisObj* a) -> ResoTriple {
-    return { a->inclusiveResoNhit3pSig.get(),
-             a->inclusiveResoNhit3pMix.get(),
-             a->inclusiveResoNhit3pBkg.get() }; };
-  inclusivePlot(TString::Format("%s/inclusive/inclusivereso_nhit1_logscale.pdf", SAVE_DIR),
-      true, false, -400, 400, canvas, RESO_SET, nhit1Getter, nullptr, diffLabel, false, INCL_RESO_YMAX_LOG, INCL_YMIN_LOG);
-  inclusivePlot(TString::Format("%s/inclusive/inclusivereso_nhit1_linscale.pdf", SAVE_DIR),
-      false, false, -200, 200, canvas, RESO_SET, nhit1Getter, nullptr, diffLabel, false, INCL_RESO_YMAX_LIN, 0.0);
-  inclusivePlot(TString::Format("%s/inclusive/inclusivereso_nhit2_logscale.pdf", SAVE_DIR),
-      true, false, -400, 400, canvas, RESO_SET, nhit2Getter, nullptr, diffLabel, false, INCL_RESO_YMAX_LOG, INCL_YMIN_LOG);
-  inclusivePlot(TString::Format("%s/inclusive/inclusivereso_nhit2_linscale.pdf", SAVE_DIR),
-      false, false, -200, 200, canvas, RESO_SET, nhit2Getter, nullptr, diffLabel, false, INCL_RESO_YMAX_LIN, 0.0);
-  inclusivePlot(TString::Format("%s/inclusive/inclusivereso_nhit3p_logscale.pdf", SAVE_DIR),
-      true, false, -400, 400, canvas, RESO_SET, nhit3pGetter, nullptr, diffLabel, false, INCL_RESO_YMAX_LOG, INCL_YMIN_LOG);
-  inclusivePlot(TString::Format("%s/inclusive/inclusivereso_nhit3p_linscale.pdf", SAVE_DIR),
-      false, false, -200, 200, canvas, RESO_SET, nhit3pGetter, nullptr, diffLabel, false, INCL_RESO_YMAX_LIN, 0.0);
 
-  // Cluster quality-binned inclusive resolution (two tiers: Q≥0.5 high, Q<0.5 low)
-  auto cqHighGetter = [](AnalysisObj* a) -> ResoTriple {
-    return { a->inclusiveResoClusQHighSig.get(),
-             a->inclusiveResoClusQHighMix.get(),
-             a->inclusiveResoClusQHighBkg.get() }; };
-  auto cqLowGetter  = [](AnalysisObj* a) -> ResoTriple {
-    return { a->inclusiveResoClusQLowSig.get(),
-             a->inclusiveResoClusQLowMix.get(),
-             a->inclusiveResoClusQLowBkg.get() }; };
-  inclusivePlot(TString::Format("%s/inclusive/inclusivereso_cqhigh_logscale.pdf", SAVE_DIR),
-      true, false, -400, 400, canvas, RESO_SET, cqHighGetter, nullptr, diffLabel, false, INCL_RESO_YMAX_LOG, INCL_YMIN_LOG);
-  inclusivePlot(TString::Format("%s/inclusive/inclusivereso_cqhigh_linscale.pdf", SAVE_DIR),
-      false, false, -200, 200, canvas, RESO_SET, cqHighGetter, nullptr, diffLabel, false, INCL_RESO_YMAX_LIN, 0.0);
-  inclusivePlot(TString::Format("%s/inclusive/inclusivereso_cqlow_logscale.pdf", SAVE_DIR),
-      true, false, -400, 400, canvas, RESO_SET, cqLowGetter,  nullptr, diffLabel, false, INCL_RESO_YMAX_LOG, INCL_YMIN_LOG);
-  inclusivePlot(TString::Format("%s/inclusive/inclusivereso_cqlow_linscale.pdf", SAVE_DIR),
-      false, false, -200, 200, canvas, RESO_SET, cqLowGetter,  nullptr, diffLabel, false, INCL_RESO_YMAX_LIN, 0.0);
-
-  // Low-track (nHSTrack <= 5) inclusive plots
-  // auto lowTrackGetter = [](AnalysisObj* a) -> ResoTriple {
-  //   return { a->inclusiveResoLowTrackSig.get(),
-  //            a->inclusiveResoLowTrackMix.get(),
-  //            a->inclusiveResoLowTrackBkg.get() }; };
-  // inclusivePlot(TString::Format("%s/inclusive/inclusivereso_lowtrack_logscale.pdf", SAVE_DIR),
-  // 		true,  false, -400, 400, canvas, RESO_SET, lowTrackGetter);
-  // inclusivePlot(TString::Format("%s/inclusive/inclusivereso_lowtrack_linscale.pdf", SAVE_DIR),
-  // 		false, false, -200, 200, canvas, RESO_SET, lowTrackGetter);
-
-  // --- Inclusive pull plots: Δt / σ_cluster ---
-  // σ_pull ≈ 1 confirms the cluster timing uncertainty is correctly calibrated;
-  // σ_pull > 1 means the uncertainty is underestimated.
   auto pullGetter = [](AnalysisObj* a) -> ResoTriple {
     return { a->inclusivePullSig.get(),
              a->inclusivePullMix.get(),
@@ -608,251 +389,26 @@ auto main() -> int {
 		false, false, -10, 10, canvas, RESO_SET,
 		pullGetter, &FIT_PULLGAUS, pullLabel, false, INCL_PULL_YMAX_LIN, 0.0);
 
-  // --- Per-quality-tier pull plots (two tiers) ---
-  auto pullCqHighGetter = [](AnalysisObj* a) -> ResoTriple {
-    return { a->inclusivePullClusQHighSig.get(),
-             a->inclusivePullClusQHighMix.get(),
-             a->inclusivePullClusQHighBkg.get() }; };
-  auto pullCqLowGetter  = [](AnalysisObj* a) -> ResoTriple {
-    return { a->inclusivePullClusQLowSig.get(),
-             a->inclusivePullClusQLowMix.get(),
-             a->inclusivePullClusQLowBkg.get() }; };
-  inclusivePlot(TString::Format("%s/inclusive/inclusivepull_cqhigh_logscale.pdf", SAVE_DIR),
-		true,  false, -10, 10, canvas, RESO_SET, pullCqHighGetter, &FIT_PULLGAUS, pullLabel, false, INCL_PULL_YMAX_LOG, INCL_YMIN_LOG);
-  inclusivePlot(TString::Format("%s/inclusive/inclusivepull_cqhigh_linscale.pdf", SAVE_DIR),
-		false, false, -10, 10, canvas, RESO_SET, pullCqHighGetter, &FIT_PULLGAUS, pullLabel, false, INCL_PULL_YMAX_LIN, 0.0);
-  inclusivePlot(TString::Format("%s/inclusive/inclusivepull_cqlow_logscale.pdf", SAVE_DIR),
-		true,  false, -10, 10, canvas, RESO_SET, pullCqLowGetter,  &FIT_PULLGAUS, pullLabel, false, INCL_PULL_YMAX_LOG, INCL_YMIN_LOG);
-  inclusivePlot(TString::Format("%s/inclusive/inclusivepull_cqlow_linscale.pdf", SAVE_DIR),
-		false, false, -10, 10, canvas, RESO_SET, pullCqLowGetter,  &FIT_PULLGAUS, pullLabel, false, INCL_PULL_YMAX_LIN, 0.0);
-  // inclusivePlot(TString::Format("%s/inclusive/inclusivepull_lowtrack_logscale.pdf", SAVE_DIR),
-		// true,  false, -10, 10, canvas, RESO_SET,
-		// pullLowTrackGetter, &FIT_PULLGAUS, pullLabel);
-  // inclusivePlot(TString::Format("%s/inclusive/inclusivepull_lowtrack_linscale.pdf", SAVE_DIR),
-		// false, false, -10, 10, canvas, RESO_SET,
-		// pullLowTrackGetter, &FIT_PULLGAUS, pullLabel);
-
   // --- Normalized shape comparison: TRKPTZ vs oracle scores ---
   const std::vector<AnalysisObj*> SHAPE_SET = {
     &mapHGTD.at(Score::TRKPTZ),
-    &mapHGTD.at(Score::TEST_MISCL),
-    &mapHGTD.at(Score::TEST_MISAS)
+    &mapHGTD.at(Score::WAVES),
+    &mapHGTD.at(Score::WAVES_MISAS)
   };
   shapeComparisonPlot(
-    TString::Format("%s/inclusive/shape_comparison_linscale.pdf", SAVE_DIR),
+    TString::Format("%s/diagnostics/shape_comparison_linscale.pdf", SAVE_DIR),
     false, -200, 200, canvas, SHAPE_SET, resoGetter, nullptr, diffLabel);
   shapeComparisonPlot(
-    TString::Format("%s/inclusive/shape_comparison_logscale.pdf", SAVE_DIR),
+    TString::Format("%s/diagnostics/shape_comparison_logscale.pdf", SAVE_DIR),
     true, -400, 400, canvas, SHAPE_SET, resoGetter, nullptr, diffLabel);
   shapeComparisonPlotPair(
-    TString::Format("%s/inclusive/shape_comparison.pdf", SAVE_DIR),
+    TString::Format("%s/diagnostics/shape_comparison.pdf", SAVE_DIR),
     -200, 200, -400, 400, canvas, SHAPE_SET, resoGetter, nullptr, diffLabel);
-
-
-  // --- 2D heatmap: mean |Δt| as a function of cluster PU fraction × avg nHGTD hits ---
-  // One page per score in RESO_SET.  Uses a dedicated canvas with extra right margin for
-  // the colour-bar palette.  kBird palette: blue (low |Δt|) → yellow/red (high |Δt|).
-  {
-    TString fname2d = TString::Format("%s/inclusive/cluspufrac_vs_nhit_meandt.pdf", SAVE_DIR);
-    TCanvas c2d("c2d_pufrac_nhit", "", 800, 650);
-    gStyle->SetPalette(kBird);
-
-    c2d.Print(fname2d + "[");
-    for (auto* aObj : RESO_SET) {
-      c2d.Clear();
-      c2d.SetRightMargin(0.17);
-      c2d.SetLeftMargin(0.15);
-      c2d.SetBottomMargin(0.15);
-      c2d.SetTopMargin(0.08);
-      TProfile2D* h2 = aObj->prof2dPuFracVsNhit.get();
-      h2->SetMinimum(0);
-      h2->SetContour(50);
-      h2->GetXaxis()->SetTitleOffset(1.2);
-      h2->GetYaxis()->SetTitleOffset(1.4);
-      h2->Draw("COLZ");
-      TLatex lat;
-      lat.SetNDC();
-      lat.SetTextSize(0.032);
-      lat.DrawLatex(0.13, 0.93, TString::Format("%s  [%s]",
-                    aObj->score.toString(), aObj->timetypeIDer.c_str()));
-      c2d.Print(fname2d);
-    }
-    c2d.Print(fname2d + "]");
-  }
-
-  // --- 2D heatmap: σ(Δt) as a function of cluster PU fraction × avg nHGTD hits ---
-  // TProfile2D "S" option stores per-bin std-dev in the error slot; we transfer it
-  // to a plain TH2D for COLZ rendering (profile Draw("COLZ") shows the mean, not σ).
-  {
-    TString fnameSigma = TString::Format("%s/inclusive/cluspufrac_vs_nhit_sigmadt.pdf", SAVE_DIR);
-    TCanvas c2ds("c2ds_pufrac_nhit", "", 800, 650);
-    gStyle->SetPalette(kBird);
-
-    c2ds.Print(fnameSigma + "[");
-    for (auto* aObj : RESO_SET) {
-      c2ds.Clear();
-      c2ds.SetRightMargin(0.17);
-      c2ds.SetLeftMargin(0.15);
-      c2ds.SetBottomMargin(0.15);
-      c2ds.SetTopMargin(0.08);
-
-      TProfile2D* prof = aObj->prof2dPuFracVsNhitSigma.get();
-      // Build a TH2D whose bin contents are the per-bin σ(Δt) from the profile
-      TH2D hSigma("hSigma_tmp",
-                  TString::Format("%s;Cluster PU Fraction;Avg. nHGTD Hits / Track;#sigma(#Delta t) [ps]",
-                                  prof->GetTitle()),
-                  prof->GetNbinsX(), prof->GetXaxis()->GetXmin(), prof->GetXaxis()->GetXmax(),
-                  prof->GetNbinsY(), prof->GetYaxis()->GetXmin(), prof->GetYaxis()->GetXmax());
-      for (int iX = 1; iX <= prof->GetNbinsX(); ++iX)
-        for (int iY = 1; iY <= prof->GetNbinsY(); ++iY) {
-          double n = prof->GetBinEntries(prof->GetBin(iX, iY));
-          if (n > 1)
-            hSigma.SetBinContent(iX, iY, prof->GetBinError(iX, iY));
-        }
-      hSigma.SetMinimum(0);
-      hSigma.SetContour(50);
-      hSigma.GetXaxis()->SetTitleOffset(1.2);
-      hSigma.GetYaxis()->SetTitleOffset(1.4);
-      hSigma.Draw("COLZ");
-      TLatex lat;
-      lat.SetNDC();
-      lat.SetTextSize(0.032);
-      lat.DrawLatex(0.13, 0.93, TString::Format("%s  [%s]",
-                    aObj->score.toString(), aObj->timetypeIDer.c_str()));
-      c2ds.Print(fnameSigma);
-    }
-    c2ds.Print(fnameSigma + "]");
-    gStyle->SetPalette(kBird);
-  }
-
-  // --- In-time PU diagnostic: Δt(cluster − HS truth) vs Δz(dominant PU vtx − HS vtx) ---
-  // Three versions: inclusive, HIGH-quality (Q≥0.5), LOW-quality (Q<0.5).
-  // Tests whether the 30 ps middle background is in-time pile-up. The "cross" shape
-  // (vertical spoke at Δz=0, horizontal spoke at Δt=0) is the signature of in-time PU.
-  // We overlay a reference slope line σ_t/σ_z ≈ 3.5 ps/mm (visible mostly as a sanity check).
-  auto plotDtDz = [&](const TString& fname, auto getter) {
-    TCanvas c2dz("c2dz_dt_dz_pu", "", 800, 650);
-    gStyle->SetPalette(kBird);
-    c2dz.Print(fname + "[");
-    for (auto* aObj : RESO_SET) {
-      c2dz.Clear();
-      c2dz.SetRightMargin(0.17);
-      c2dz.SetLeftMargin(0.15);
-      c2dz.SetBottomMargin(0.15);
-      c2dz.SetTopMargin(0.08);
-      c2dz.SetLogz();
-
-      TH2D* h2 = getter(aObj);
-      h2->SetMinimum(1);
-      h2->SetContour(50);
-      h2->GetXaxis()->SetTitleOffset(1.2);
-      h2->GetYaxis()->SetTitleOffset(1.4);
-      h2->Draw("COLZ");
-
-      const double slope = PILEUP_SMEAR / 50.0;
-      TF1 fLine("fSlope", "[0]*x", -60.0, 60.0);
-      fLine.SetParameter(0, slope);
-      fLine.SetLineColor(kRed);
-      fLine.SetLineWidth(2);
-      fLine.SetLineStyle(2);
-      fLine.DrawCopy("SAME");
-
-      TLatex lat;
-      lat.SetNDC();
-      lat.SetTextSize(0.032);
-      lat.DrawLatex(0.13, 0.93, TString::Format("%s  [%s]",
-                    aObj->score.toString(), aObj->timetypeIDer.c_str()));
-      lat.SetTextColor(kRed);
-      lat.DrawLatex(0.55, 0.18, TString::Format("Expected slope = %.2f ps/mm", slope));
-      c2dz.Print(fname);
-    }
-    c2dz.Print(fname + "]");
-    c2dz.SetLogz(false);
-  };
-
-  plotDtDz(TString::Format("%s/inclusive/dt_vs_dz_pu.pdf",      SAVE_DIR),
-           [](AnalysisObj* a) { return a->dtClusterVsDzPU.get();     });
-  plotDtDz(TString::Format("%s/inclusive/dt_vs_dz_pu_high.pdf", SAVE_DIR),
-           [](AnalysisObj* a) { return a->dtClusterVsDzPUHigh.get(); });
-  plotDtDz(TString::Format("%s/inclusive/dt_vs_dz_pu_low.pdf",  SAVE_DIR),
-           [](AnalysisObj* a) { return a->dtClusterVsDzPULow.get();  });
-
-
-  // --- nHSTrack CDF / survival diagnostic ---
-  // Shows what fraction of events fall below (CDF) or above (survival) each
-  // nHSTrack threshold.  Answers: "is the nHSTrack < N region worth optimising?"
-  {
-    gSystem->mkdir(TString::Format("%s/diagnostics", SAVE_DIR), true);
-    TH1D* hRaw = mapHGTD.at(Score::TRKPTZ).ptrHSTrack->effTotal.get();
-    auto* hCDF = static_cast<TH1D*>(hRaw->GetCumulative());
-    double total = hCDF->GetBinContent(hCDF->GetNbinsX());
-
-    // Build CDF and survival TGraphs
-    std::vector<double> xs, yCDF, ySurv;
-    if (total > 0) {
-      for (int b = 1; b <= hCDF->GetNbinsX(); ++b) {
-        double cdf = hCDF->GetBinContent(b) / total;
-        xs   .push_back(hCDF->GetBinCenter(b));
-        yCDF .push_back(cdf);
-        ySurv.push_back(1.0 - cdf);
-      }
-    }
-    delete hCDF;
-
-    int n = (int)xs.size();
-    TGraph grCDF (n, xs.data(), yCDF .data());
-    TGraph grSurv(n, xs.data(), ySurv.data());
-
-    grCDF .SetLineColor(kBlue+1); grCDF .SetLineWidth(2);
-    grSurv.SetLineColor(kRed+1);  grSurv.SetLineWidth(2);
-    grCDF .SetMarkerColor(kBlue+1); grCDF .SetMarkerStyle(20); grCDF .SetMarkerSize(0.6);
-    grSurv.SetMarkerColor(kRed+1);  grSurv.SetMarkerStyle(20); grSurv.SetMarkerSize(0.6);
-
-    canvas->cd();
-    grCDF.SetTitle(";N_{HS tracks} (forward);Fraction of events");
-    grCDF.GetXaxis()->SetRangeUser(0, 20);
-    grCDF.GetYaxis()->SetRangeUser(0, 1.2);
-    grCDF.Draw("APL");
-    grSurv.Draw("PL SAME");
-
-    // Reference lines and labels at N=5 and N=10
-    auto drawRef = [&](int N, double yC, double yS) {
-      TLine* vl = new TLine(N, 0, N, yC);
-      vl->SetLineStyle(2); vl->SetLineColor(kGray+1); vl->Draw();
-      TLatex lat;
-      lat.SetTextSize(0.028); lat.SetTextColor(kBlue+1);
-      lat.DrawLatex(N + 0.2, yC + 0.01, TString::Format("%.1f%%", yC * 100));
-      lat.SetTextColor(kRed+1);
-      lat.DrawLatex(N + 0.2, yS - 0.03, TString::Format("%.1f%%", yS * 100));
-    };
-    // find CDF values at N=5 and N=10
-    auto cdfAt = [&](int N) -> double {
-      for (int i = 0; i < n; ++i)
-        if ((int)std::round(xs[i]) == N) return yCDF[i];
-      return -1;
-    };
-    for (int refN : {5, 10}) {
-      double c = cdfAt(refN);
-      if (c >= 0) drawRef(refN, c, 1.0 - c);
-    }
-
-    TLegend leg(0.60, 0.82, 0.80, 0.92);
-    leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.032);
-    leg.AddEntry(&grCDF,  "CDF: frac. with #leq N", "lp");
-    leg.AddEntry(&grSurv, "Survival: frac. with > N", "lp");
-    leg.Draw();
-
-    ATLASLabel(0.18, 0.88, "Simulation Internal");
-    canvas->SaveAs(TString::Format("%s/diagnostics/hs_track_cdf.pdf", SAVE_DIR));
-    canvas->Clear();
-  }
 
   std::cout << "FINISHED PLOT PRINTING\n";
 
   // --- Print event display commands (toggle PRINT_EVENT_DISPLAYS above) ---
   printEventDisplays("HGTD times: TRKPTZ passes, TEST_MISAS fails (misassignment)", evtDisplayHGTD    );
-  // printEventDisplays("Ideal Res.: TRKPTZ passes, TEST_MISAS fails (misassignment)", evtDisplayIdealRes);
-  // printEventDisplays("Ideal Eff.: TRKPTZ passes, TEST_MISAS fails (misassignment)", evtDisplayIdealEff);
 
   // Shared helpers for all random-subsample blocks below.
   // Each block is guarded by PRINT_EVENT_DISPLAYS and can be independently
@@ -919,16 +475,6 @@ auto main() -> int {
     subsampleN(misasFailEvents, N_MISAS_PASS);
     printGroup("TEST_MISAS: EXCLUDED from filter (hsTimingPurity < 95%)",
                misasFailEvents);
-  }
-
-  // --- Cluster quality tiers — browse events at two levels of cluster quality ---
-  if (PRINT_EVENT_DISPLAYS) {
-    subsampleN(cqHighEvents, N_LOW_MULT_DISPLAY);
-    subsampleN(cqLowEvents,  N_LOW_MULT_DISPLAY);
-    printGroup(TString::Format("Cluster quality HIGH (Q>=%.1f) — expected core σ~10 ps",
-                               CLUS_QUALITY_SPLIT).Data(), cqHighEvents);
-    printGroup(TString::Format("Cluster quality LOW  (Q<%.1f) — expected background σ~175 ps",
-                               CLUS_QUALITY_SPLIT).Data(), cqLowEvents);
   }
 
   return 0;

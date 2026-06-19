@@ -58,7 +58,7 @@ def generate_cluster_colors(n):
         hue = (hue + golden_ratio) % 1.0
     return colors
 
-ANA_FILE = f'../ntuple-hgtd/user.mcardiff.45809429.Output._{file_num}.SuperNtuple.root'
+ANA_FILE = f'../highstats-ntuple/user.mcardiff.51010390.Output._{file_num}.SuperNtuple.root'
 tree = uproot.open(ANA_FILE)["ntuple"]
 
 branch = tree.arrays([
@@ -273,11 +273,19 @@ def draw_eta_reference_lines(ax, z_pos=reco_hs_z, eta_ref=2.4, line_length=50):
 
 def plot_rz_display(ax, track_info_list, jet_info_list):
     """Plot Event Display in R-Z Plane"""
+    # Map each track index to the color of the cluster it belongs to (the same
+    # clusters shown in the lower Z-T panel).  Tracks not assigned to any cluster
+    # fall back to light grey.  HS tracks are solid, PU tracks dashed.
+    trk_color = {}
+    for i_cl, cluster in enumerate(track_clusters):
+        for idx in cluster:
+            trk_color[idx] = cluster_colors[i_cl]
+
     # Plot event display (z vs R)
     for track in track_info_list:
         ax.plot([track['z0'], track['z0'] + track['x']],[0, track['y']],
-                color='blue' if track['stat'] == 1 else 'red',
-                linestyle='solid')
+                color=trk_color.get(track['idx'], 'lightgrey'),
+                linestyle='solid' if track['stat'] == 1 else 'dashed')
 
     for (jet_i, jet_tup) in enumerate(jet_info_list):
         highlighted = (args.jet_idx is not None and jet_tup.get('idx') == args.jet_idx)
@@ -339,19 +347,22 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
             f"Truth HS (z,t) = ({truth_hs_z:.1f} mm, {truth_hs_t:.1f} ps)",
             weight='bold', fontsize=12)
 
-    # Jet and track legend
+    # Jet and track legend.  Track colour now encodes the cluster (see lower
+    # panel); line style encodes truth origin — solid HS, dashed PU.
     legend_handles = [
-        mlines.Line2D([], [], color='blue'),
-        mlines.Line2D([], [], color='red'),
+        mlines.Line2D([], [], color='black', linestyle='solid'),
+        mlines.Line2D([], [], color='black', linestyle='dashed'),
+        mlines.Line2D([], [], color='lightgrey', linestyle='solid'),
         mpatches.Rectangle((0, 0), 1, 1, color='green', alpha=0.5),
         mpatches.Rectangle((0, 0), 1, 1, color='grey',  alpha=0.5),
     ]
-    legend_labels = ['Hard Scatter', 'Pile-Up', 'HS jet', 'PU jet']
+    legend_labels = ['Hard Scatter track (solid)', 'Pile-Up track (dashed)',
+                     'Unclustered track', 'HS jet', 'PU jet']
     if args.jet_idx is not None:
         legend_handles.append(mpatches.Rectangle((0, 0), 1, 1, color='orange', alpha=0.7))
         legend_labels.append('Target jet')
     ax.legend(legend_handles, legend_labels,
-              loc='upper left', title='Track and Jet Types',
+              loc='upper left', title='Tracks (colour = cluster) and Jets',
               bbox_to_anchor=(0.0, 0.9))
 
 def add_annotation(ax, truth_text_y, reco_text_y):

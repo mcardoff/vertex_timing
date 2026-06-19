@@ -57,7 +57,7 @@ namespace MyUtl {
   void setupChain(
     TChain &chain, const std::string& number
   ) {
-    chain.Add(TString::Format("../ntuple-hgtd/user.mcardiff.45809429.Output._%s.SuperNtuple.root", number.c_str()));
+    chain.Add(TString::Format("../highstats-ntuple/user.mcardiff.51010390.Output._%s.SuperNtuple.root", number.c_str()));
   }
 
   // ---------------------------------------------------------------------------
@@ -117,8 +117,10 @@ namespace MyUtl {
     // The cluster is still selected by the WAVeS score; this in-jet timing refinement
     // purifies the time by dropping absorbed PU tracks, worth ~+1% efficiency.
     // WAVES_MISCL / WAVES_MISAS share this path so the oracle rows report the same
-    // time as the WAVES row they gate.
-    if (score == Score::WAVES || score == Score::WAVES_MISCL || score == Score::WAVES_MISAS) {
+    // time as the WAVES row they gate.  ZT_ITER also shares it (selected by the
+    // WAVeS score, with the same in-jet timing refinement).
+    if (score == Score::WAVES || score == Score::WAVES_MISCL || score == Score::WAVES_MISAS ||
+        score == Score::ZT_ITER) {
       // Collect (eta, phi) of qualifying forward reco jets — no truth matching
       std::vector<std::pair<double,double>> hsJets;
       const int nJets = (int)branch->topoJetPt.GetSize();
@@ -159,12 +161,13 @@ namespace MyUtl {
   //   For most scores: returns the pre-computed this->purity (HS ΣpT fraction
   //   of the full cluster).  For WAVES: re-evaluates purity using only the
   //   constituent tracks within dR < 0.4 of a forward reco jet, so the reported
-  //   purity matches the tracks actually used for the in-jet timing.
+  //   purity matches the tracks actually used for the in-jet timing.  ZT_ITER
+  //   shares this in-jet purity path too.
   //   WAVES_MISCL / WAVES_MISAS intentionally use the default full-cluster purity
   //   so their purity gates stay directly comparable to TEST_MISCL / TEST_MISAS.
   // ---------------------------------------------------------------------------
   inline double Cluster::calculatePurity(Score score, BranchPointerWrapper* branch) const {
-    if (score != Score::WAVES)
+    if (score != Score::WAVES && score != Score::ZT_ITER)
       return this->purity;
 
     // Collect (eta, phi) of qualifying forward reco jets — no truth matching.
@@ -369,11 +372,13 @@ namespace MyUtl {
     if (!qualMain.empty())
       chosen = chooseCluster(qualMain, branch);
 
-    // Dedicated collections: each selected by TRKPTZ
+    // Dedicated collections: selected by TRKPTZ, except ZT_ITER which is
+    // selected by the WAVeS score.
     for (const auto& [id, col] : auxCollections) {
       auto qual = filterClusters(col);
-      if (!qual.empty())
-        chosen[id] = chooseCluster(qual, Score::TRKPTZ);
+      if (qual.empty()) continue;
+      const Score& sel = (id == Score::ZT_ITER.id) ? Score::WAVES : Score::TRKPTZ;
+      chosen[id] = chooseCluster(qual, sel);
     }
 
     // CONE_BDT: main clusters, TMVA BDT selector (aliases HGTD_SORT score)

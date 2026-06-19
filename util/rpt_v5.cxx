@@ -26,7 +26,6 @@
 #include <TChain.h>
 #include <TFile.h>
 #include <TGraph.h>
-#include <TGraphErrors.h>
 #include <TH1.h>
 #include <TLatex.h>
 #include <TLegend.h>
@@ -67,33 +66,29 @@ static constexpr double JET_ETA_MAX = 3.8;
 // oracle.
 static constexpr float MISAS_PURITY_CUT = 0.75f;
 
+// Per-track time-gate half-width in σ.  A 2σ cut over-trims genuine HS tracks
+// when the vertex time is slightly mis-estimated, dragging the high-efficiency
+// end of the ROC below ITk-only (worst in the >40 GeV slice).  Loosening it
+// recovers that region at a small low-efficiency cost.
+static constexpr double GATE_SIGMA = 2.5;
+
 // -----------------------------------------------------------------------------
-// ROC: HS efficiency vs PU rejection (1 / mistag), with binomial errors so the
-// statistical reach of each point is visible.  For a cumulative fraction
-// p = k/N the error is the binomial σ_p = sqrt(p(1-p)/N); the rejection
-// y = 1/p_PU then carries σ_y = σ_p / p² (error propagation of 1/p), and the
-// efficiency x = p_HS carries σ_x = σ_p directly.  (Successive points share
-// entries so they are correlated, but the per-point bar still shows whether a
-// given threshold has enough surviving PU events to trust the number.)
+// ROC: HS efficiency vs PU rejection (1 / mistag).
 // -----------------------------------------------------------------------------
-TGraphErrors* generate_roc(TH1D* PU_hist, TH1D* HS_hist) {
+TGraph* generate_roc(TH1D* PU_hist, TH1D* HS_hist) {
   int bin = PU_hist->GetNbinsX();
   double HS_tot = HS_hist->Integral();
   double PU_tot = PU_hist->Integral();
-  std::vector<double> vx, vy, vex, vey;
+  std::vector<double> vx, vy;
   for (int i = 1; i <= bin; ++i) {
     double HS_eff    = HS_hist->Integral(i, bin + 1) / HS_tot;
     double PU_mistag = PU_hist->Integral(i, bin + 1) / PU_tot;
     if (std::abs(PU_mistag) > 1e-6 && HS_eff < 0.99) {
       vx.push_back(HS_eff);
       vy.push_back(1.0 / PU_mistag);
-      double eff_err = std::sqrt(std::max(0.0, HS_eff    * (1.0 - HS_eff)    / HS_tot));
-      double mis_err = std::sqrt(std::max(0.0, PU_mistag * (1.0 - PU_mistag) / PU_tot));
-      vex.push_back(eff_err);
-      vey.push_back(mis_err / (PU_mistag * PU_mistag));  // σ on 1/mistag
     }
   }
-  return new TGraphErrors((int)vx.size(), vx.data(), vy.data(), vex.data(), vey.data());
+  return new TGraph((int)vx.size(), vx.data(), vy.data());
 }
 
 // -----------------------------------------------------------------------------
@@ -130,7 +125,7 @@ int main() {
   gStyle->SetOptStat(0);
 
   TChain chain("ntuple");
-  setupChain(chain, "../../ntuple-hgtd/");
+  setupChain(chain, "../../highstats-ntuple/");
   if (chain.GetEntries() == 0) {
     std::cerr << "No ROOT files found.  Aborting.\n";
     return 1;
@@ -179,7 +174,7 @@ int main() {
     std::vector<Scenario> s = {
       {"zonly",       "ITk-only",                    C05, nullptr, nullptr},
       {"hgtd",        "HGTD t_{0}",                  C01, nullptr, nullptr},
-      {"waves",       "WAVeS t_{0}",                 C02, nullptr, nullptr},
+      {"waves",       "WAVeS t_{0}",                 C03, nullptr, nullptr},
       {"waves_misas", "WAVeS t_{0} + clean timing",  C04, nullptr, nullptr},
       {"truth",       "Truth t_{0}",                 C06, nullptr, nullptr},
     };
@@ -201,7 +196,8 @@ int main() {
   // z-selected track pT in each jet, how much is carried by tracks with NO valid
   // HGTD time?  Those tracks pass every timing gate unconditionally, so they set
   // the irreducible RpT floor that no timing method (even Truth) can remove.
-  double pu_tot_pt = 0, pu_floor_pt = 0, hs_tot_pt = 0, hs_floor_pt = 0;
+  double pu_tot_pt = 0, pu_floor_pt = 0, hs_tot_pt = 0, hs_floor_pt = 0;        // >40
+  double pu_tot_lo = 0, pu_floor_lo = 0, hs_tot_lo = 0, hs_floor_lo = 0;        // 30-40
 
   while (reader.Next()) {
     ++n_total;
@@ -265,13 +261,13 @@ int main() {
       return out;
     };
 
-    std::vector<int> trk_hgtd  = applyTimeGate(trk_all, t_hgtd,  var_hgtd,  hgtd_vtx_valid);
-    std::vector<int> trk_waves = applyTimeGate(trk_all, t_waves, var_waves, waves_ok);
+    std::vector<int> trk_hgtd  = applyTimeGate(trk_all, t_hgtd,  var_hgtd,  hgtd_vtx_valid, GATE_SIGMA);
+    std::vector<int> trk_waves = applyTimeGate(trk_all, t_waves, var_waves, waves_ok,       GATE_SIGMA);
 
     // ── Truth-vertex-t₀: gate the reco track times against the perfect HS
     //    vertex time (var_vtx = 0). ──────────────────────────────────────────
     double t_truth = branch.truthVtxTime[0];
-    std::vector<int> trk_truth = applyTimeGate(trk_all, t_truth, 0.0, true);
+    std::vector<int> trk_truth = applyTimeGate(trk_all, t_truth, 0.0, true, GATE_SIGMA);
 
     // ── "Clean timing" event filter: only fill the waves_misas scenario in
     //    events whose HS timing purity clears MISAS_PURITY_CUT.  Same WAVeS time
@@ -308,14 +304,17 @@ int main() {
         fill(sv[3], set_waves, gate_misas);         // WAVeS t0 + clean timing (event filter)
         fill(sv[4], set_truth);                     // Truth t0
 
-        // Untimed floor accounting (>40 GeV slice only).
-        if (pt_lo >= 40.0) {
-          for (int idx : ghost) {
-            if (!set_all.count(idx)) continue;
-            double pt = branch.trackPt[idx];
-            bool untimed = (branch.trackTimeValid[idx] != 1);
+        // Untimed floor accounting, per slice.
+        for (int idx : ghost) {
+          if (!set_all.count(idx)) continue;
+          double pt = branch.trackPt[idx];
+          bool untimed = (branch.trackTimeValid[idx] != 1);
+          if (pt_lo >= 40.0) {
             if (isHS) { hs_tot_pt += pt; if (untimed) hs_floor_pt += pt; }
             else      { pu_tot_pt += pt; if (untimed) pu_floor_pt += pt; }
+          } else {
+            if (isHS) { hs_tot_lo += pt; if (untimed) hs_floor_lo += pt; }
+            else      { pu_tot_lo += pt; if (untimed) pu_floor_lo += pt; }
           }
         }
       }
@@ -561,19 +560,24 @@ int main() {
     }
     return 0.0;
   };
-  std::cout << "\n=== PU REJECTION (1/mistag) AT FIXED HS EFF (>40 GeV) ===\n";
-  std::cout << "  scenario       eff=0.85  0.90  0.93  0.95  0.97\n";
-  for (auto& s : scen_hi) {
-    std::printf("  %-12s   %7.1f %6.1f %6.1f %6.1f %6.1f\n", s.name.c_str(),
-                rejAtEff(s.h_pu, s.h_hs, 0.85), rejAtEff(s.h_pu, s.h_hs, 0.90),
-                rejAtEff(s.h_pu, s.h_hs, 0.93), rejAtEff(s.h_pu, s.h_hs, 0.95),
-                rejAtEff(s.h_pu, s.h_hs, 0.97));
-  }
+  auto printRejTable = [&](const char* hdr, std::vector<Scenario>& sv) {
+    std::cout << "\n=== PU REJECTION (1/mistag) AT FIXED HS EFF " << hdr << " ===\n";
+    std::cout << "  scenario       eff=0.85  0.90  0.93  0.95  0.97\n";
+    for (auto& s : sv)
+      std::printf("  %-12s   %7.1f %6.1f %6.1f %6.1f %6.1f\n", s.name.c_str(),
+                  rejAtEff(s.h_pu, s.h_hs, 0.85), rejAtEff(s.h_pu, s.h_hs, 0.90),
+                  rejAtEff(s.h_pu, s.h_hs, 0.93), rejAtEff(s.h_pu, s.h_hs, 0.95),
+                  rejAtEff(s.h_pu, s.h_hs, 0.97));
+  };
+  printRejTable("(30-40 GeV)", scen_lo);
+  printRejTable("(>40 GeV)",   scen_hi);
 
-  std::cout << "\n=== UNTIMED-TRACK FLOOR (>40 GeV, ghost & z-selected) ===\n";
-  std::printf("  PU: %.1f%% of ghost track pT is UNTIMED (irreducible floor)\n",
-              pu_tot_pt > 0 ? 100.0 * pu_floor_pt / pu_tot_pt : 0.0);
-  std::printf("  HS: %.1f%% of ghost track pT is UNTIMED (always kept, good)\n",
+  std::cout << "\n=== UNTIMED-TRACK FLOOR (ghost & z-selected) ===\n";
+  std::printf("  30-40 GeV  PU untimed: %.1f%%   HS untimed: %.1f%%\n",
+              pu_tot_lo > 0 ? 100.0 * pu_floor_lo / pu_tot_lo : 0.0,
+              hs_tot_lo > 0 ? 100.0 * hs_floor_lo / hs_tot_lo : 0.0);
+  std::printf("  >40 GeV    PU untimed: %.1f%%   HS untimed: %.1f%%\n",
+              pu_tot_pt > 0 ? 100.0 * pu_floor_pt / pu_tot_pt : 0.0,
               hs_tot_pt > 0 ? 100.0 * hs_floor_pt / hs_tot_pt : 0.0);
 
   std::cout << "\nWrote " << out_pdf << "\n";

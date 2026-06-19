@@ -215,7 +215,21 @@ namespace MyUtl {
 	nForwardJet++;
     }
   }
-    
+
+    // -----------------------------------------------------------------------
+    // countTruthHSJets
+    //   Counts truth hard-scatter jets in the WHOLE event (no η restriction)
+    //   above MIN_JET_PT.  Used as the binning x-axis variable in place of the
+    //   forward reco-jet count.
+    // -----------------------------------------------------------------------
+    void countTruthHSJets(int& nTruthHSJet) {
+    nTruthHSJet = 0;
+    for (int jetIdx = 0; jetIdx < (int)this->truthHSJetPt.GetSize(); ++jetIdx) {
+      if (this->truthHSJetPt[jetIdx] > MIN_JET_PT)
+	nTruthHSJet++;
+    }
+  }
+
     // -----------------------------------------------------------------------
     // countForwardTracks
     //   Splits a pre-selected track list into forward HS and PU components.
@@ -631,12 +645,14 @@ namespace MyUtl {
   struct EventCounts {
     // Raw forward track/jet counts
     int nForwardJet      = 0;
+    int nTruthHSJet      = 0;   // truth HS jets in the whole event (> MIN_JET_PT)
     int nForwardTrack    = 0;
     int nForwardTrackHS  = 0;
     int nForwardTrackPU  = 0;
     double puRatio       = 0.0;
     // Pre-folded x-values for efficiency / purity histograms
     int    effFillValFjet;
+    int    effFillValHSJet;
     int    effFillValTrack;
     int    effFillValHSTrack;
     int    effFillValPUTrack;
@@ -647,10 +663,12 @@ namespace MyUtl {
                 const std::vector<int>& tracks,
                 bool checkValidTimes) {
       branch->countForwardJets(nForwardJet);
+      branch->countTruthHSJets(nTruthHSJet);
       branch->countForwardTracks(nForwardTrack, nForwardTrackHS, nForwardTrackPU,
                                  tracks, checkValidTimes);
       puRatio          = (double)nForwardTrackPU / (double)nForwardTrack;
       effFillValFjet    = folded(nForwardJet,     (int)FOLD_FJET);
+      effFillValHSJet   = folded(nTruthHSJet,     (int)FOLD_FJET);
       effFillValTrack   = folded(nForwardTrack,   (int)FOLD_TRACK);
       effFillValHSTrack = folded(nForwardTrackHS, (int)FOLD_HS_TRACK);
       effFillValPUTrack = folded(nForwardTrackPU, (int)FOLD_PU_TRACK);
