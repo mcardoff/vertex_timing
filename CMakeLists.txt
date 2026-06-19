@@ -9,6 +9,25 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# --- LCG / cvmfs dependency discovery (e.g. UChicago AF under `lsetup root`) ---
+# `lsetup` puts each LCG package's lib dir on LD_LIBRARY_PATH but does NOT set
+# CMAKE_PREFIX_PATH, so find_package can't locate ROOT's transitive deps (Vdt)
+# or the matching Boost library.  Derive each package prefix from the cvmfs lib
+# dirs on LD_LIBRARY_PATH and prepend them.  No-op on non-cvmfs machines (e.g.
+# the macOS dev box, where LD_LIBRARY_PATH has no /cvmfs/.../lib entries).
+if(DEFINED ENV{LD_LIBRARY_PATH})
+  string(REPLACE ":" ";" _ld_dirs "$ENV{LD_LIBRARY_PATH}")
+  foreach(_d ${_ld_dirs})
+    if(_d MATCHES "^/cvmfs/.*/lib$")
+      get_filename_component(_prefix "${_d}" DIRECTORY)
+      list(APPEND CMAKE_PREFIX_PATH "${_prefix}")
+    endif()
+  endforeach()
+  if(CMAKE_PREFIX_PATH)
+    list(REMOVE_DUPLICATES CMAKE_PREFIX_PATH)
+  endif()
+endif()
+
 # Find the ROOT and Boost libraries
 # Assumes ROOT and Boost are installed and discoverable by find_package
 find_package(ROOT REQUIRED COMPONENTS RIO Core Gpad Graf Hist Tree)
