@@ -1,0 +1,44 @@
+# ---------------------------------------------------------------------------
+# rpt_v5.sub — condor submit template: one job per sample.
+#
+# Setup (once):
+#   cd build && cmake .. && make rpt_v5             # build BEFORE submitting
+#   chmod +x condor/run_analysis.sh
+#
+# Submit (from inside condor/, so relative paths below resolve correctly):
+#   cd condor && condor_submit rpt_v5.sub
+#
+# Separate .sub file from clustering_dt.sub on purpose: each condor_submit
+# call gets its own ClusterId, so this runs as an independent job cluster
+# and won't interfere with already-running clustering_dt jobs.
+#
+# Same shared-filesystem caveat as clustering_dt.sub: execute hosts don't
+# share a filesystem with the submit host, so the built executable is
+# staged in via transfer_input_files and results staged back via
+# transfer_output_files. The ntuple inputs are read from /data/mcardiff/...
+# (an absolute path baked into --sample=vbf|zjets|dijet), not transferred.
+# ---------------------------------------------------------------------------
+universe                 = vanilla
+executable               = run_analysis.sh
+arguments                = rpt_v5 $(sample)
+
+should_transfer_files    = YES
+when_to_transfer_output  = ON_EXIT
+transfer_input_files     = ../build/rpt_v5
+transfer_output_files    = $(sample)
+
+getenv                   = True
+
+# CERN-style job-length hint; harmless no-op on pools that don't read it,
+# remove if your condor pool doesn't recognize +JobFlavour.
++JobFlavour              = "nextweek"
+
+request_cpus             = 1
+request_memory           = 4GB
+request_disk             = 4GB
+
+output                   = logs/rpt_v5_$(sample).$(ClusterId).$(ProcId).out
+error                    = logs/rpt_v5_$(sample).$(ClusterId).$(ProcId).err
+log                      = logs/rpt_v5_$(sample).$(ClusterId).$(ProcId).log
+
+queue sample in (vbf, zjets, dijet)
