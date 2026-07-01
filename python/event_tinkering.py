@@ -29,7 +29,7 @@ IDEALEFF = False
 # filename = f'./VDT_TALK_2/RPT/event_display_{file_num}_{event_num:04d}.pdf'
 # colors = ["#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#a65628", "#f781bf", "#999999"]
 
-ANA_FILE = f'../ntuple-hgtd/user.mcardiff.45809429.Output._{file_num}.SuperNtuple.root'
+ANA_FILE = f'../../ntuple-hgtd/user.mcardiff.45809429.Output._{file_num}.SuperNtuple.root'
 tree = uproot.open(ANA_FILE)["ntuple"]
 
 branch = tree.arrays([

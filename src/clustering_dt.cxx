@@ -19,7 +19,7 @@ static const std::string& SAVE_DIR = MyUtl::OUTPUT_DIR;
 
 // Event display command template (filled with file number, event number, extra time)
 static constexpr const char* EVTDISPLAY_FMT =
-  "python3 event_display.py --file_num %s --event_num %lld --extra_time %.2f";
+  "cd python && python3 event_display.py --file_num %s --event_num %lld --extra_time %.2f";
 
 // Set to true to print event display commands to stdout after the event loop.
 static constexpr bool PRINT_EVENT_DISPLAYS = false;

@@ -58,7 +58,7 @@ def generate_cluster_colors(n):
         hue = (hue + golden_ratio) % 1.0
     return colors
 
-ANA_FILE = f'../highstats-ntuple/user.mcardiff.51010390.Output._{file_num}.SuperNtuple.root'
+ANA_FILE = f'../../highstats-ntuple/user.mcardiff.51010390.Output._{file_num}.SuperNtuple.root'
 tree = uproot.open(ANA_FILE)["ntuple"]
 
 branch = tree.arrays([

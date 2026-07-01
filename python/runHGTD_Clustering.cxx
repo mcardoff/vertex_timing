@@ -1,10 +1,10 @@
-#include "src/clustering_constants.h"
+#include "../src/clustering_constants.h"
 R__ADD_INCLUDE_PATH(/opt/homebrew/opt/boost/include)
 R__ADD_LIBRARY_PATH(/opt/homebrew/opt/boost/lib)
 R__LOAD_LIBRARY(libboost_filesystem)
 
-#include "src/clustering_functions.h"
-#include "src/event_processing.h"
+#include "../src/clustering_functions.h"
+#include "../src/event_processing.h"
 #include <TRandom.h>
 
 using namespace MyUtl;

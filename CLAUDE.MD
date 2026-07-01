@@ -47,8 +47,11 @@ vertex_timing/
 │   ├── trkptz_resunits_sweep.cxx # Sweep: α in resolution-normalised Σpₜ·exp(−α|Δz/σ_z|)
 │   ├── timing_diag.cxx           # Diagnostic: trackTimeRes distribution + |dt| HS vs PU
 │   └── vtx_diag.cxx              # Diagnostic: vertex-level diagnostics
-├── event_display.py              # Event visualisation — calls runHGTD_Clustering.cxx, produces 2-page PDF
-├── runHGTD_Clustering.cxx        # Interactive per-event clustering (root dir)
+├── python/                        # Interactive/visualisation scripts (run from within this dir)
+│   ├── event_display.py          # Event visualisation — calls runHGTD_Clustering.cxx, produces 2-page PDF
+│   ├── runHGTD_Clustering.cxx    # Interactive per-event clustering
+│   ├── clustering_animation.py   # Animates the iterative clustering algorithm for one event
+│   └── event_tinkering.py        # Quick event inspection and jet printing via uproot
 ├── vertex_time.cxx               # Vertex timing distribution analysis with jet selection
 ├── check_jet_sorting.cxx         # Utility: verify jets are pT-sorted in ntuples
 ├── test_vbf_integration.cxx      # Tests VBF cut integration
@@ -99,7 +102,7 @@ All sweep executables live in `util/` and share helpers from `util/sweep_utiliti
 - **export_training_data.cxx**: Exports 8-feature CSV rows + labels for DNN retraining.
 
 ### Utilities
-- **runHGTD_Clustering.cxx** (root dir): Interactive per-event clustering. Uses `ClusteringMethod::ITERATIVE` at `DIST_CUT_CONE = 3.0 σ` by default. The T_REFINED stage block is present but commented out. Output is parsed by `event_display.py` (project root) to produce a 2-page PDF.
+- **runHGTD_Clustering.cxx** (`python/`): Interactive per-event clustering. Uses `ClusteringMethod::ITERATIVE` at `DIST_CUT_CONE = 3.0 σ` by default. The T_REFINED stage block is present but commented out. Output is parsed by `event_display.py` (`python/`) to produce a 2-page PDF.
 - **generate_rpt.cxx**: Report generation with timing distributions.
 - **check_jet_sorting.cxx**: Verifies jet pT ordering in ntuples.
 
@@ -143,7 +146,7 @@ Categories 2 and 4 are mutually exclusive by construction.
 
 **cat_none debug output**: When `cat_none` fires, a ready-to-run event display command is printed:
 ```
-python3 event_display.py --file_num <NUM> --event_num <ENTRY> --extra_time 0.00
+cd python && python3 event_display.py --file_num <NUM> --event_num <ENTRY> --extra_time 0.00
 ```
 followed by the full cluster dump (time, score, purity, tracks, passes?).
 
@@ -193,10 +196,10 @@ ROOT ntuples with the following key branches:
 ## Event Display
 
 ```bash
-python event_display.py --file_num <NUM> --event_num <ENTRY> --extra_time <dt>
+cd python && python event_display.py --file_num <NUM> --event_num <ENTRY> --extra_time <dt>
 ```
 
-Internally calls `runHGTD_Clustering.cxx` and parses its stdout to produce a 2-page PDF (R-Z geometry view + time histogram). Script lives at the **project root** (not `share/scripts/`).
+Internally calls `runHGTD_Clustering.cxx` and parses its stdout to produce a 2-page PDF (R-Z geometry view + time histogram). Script lives in **`python/`** (not `share/scripts/`).
 
 ## Machine Learning Model
 
@@ -249,7 +252,7 @@ cd build && ./clustering_dt
 cd build && ./failure_decomposition
 
 # Event display for a specific event
-python event_display.py --file_num 000009 --event_num 1856 --extra_time 0.0
+cd python && python event_display.py --file_num 000009 --event_num 1856 --extra_time 0.0
 
 # Parameter sweep
 cd build && ./dist_refine_sweep

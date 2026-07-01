@@ -60,11 +60,12 @@ namespace MyUtl {
   // 2. setupChain  [single-file overload]
   //   Adds a single SuperNtuple file to chain, selected by its numeric run
   //   identifier.  Convenience wrapper for quick single-file checks.
+  //   Only used by python/runHGTD_Clustering.cxx, run with CWD=python/.
   // ---------------------------------------------------------------------------
   void setupChain(
     TChain &chain, const std::string& number
   ) {
-    chain.Add(TString::Format("../highstats-ntuple/user.mcardiff.51010390.Output._%s.SuperNtuple.root", number.c_str()));
+    chain.Add(TString::Format("../../highstats-ntuple/user.mcardiff.51010390.Output._%s.SuperNtuple.root", number.c_str()));
   }
 
   // ---------------------------------------------------------------------------

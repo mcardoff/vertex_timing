@@ -12,8 +12,8 @@ Phases shown:
   6. End — all final centroids labelled
 
 Usage:
-    python clustering_animation.py [--file_num 000001] [--event_num 2808]
-                                   [--output figs/clustering_animation.mp4]
+    cd python && python clustering_animation.py [--file_num 000001] [--event_num 2808]
+                                   [--output ../figs/clustering_animation.mp4]
 
 Dependencies: uproot, numpy, matplotlib (with ffmpeg for MP4 output)
 """
@@ -68,17 +68,17 @@ parser.add_argument('--file_num',  default='000001',
 parser.add_argument('--event_num', type=int, default=2808,
                     help='Event entry number within the file (default: 2808)')
 parser.add_argument('--output',    default=None,
-                    help='Output path (.gif or .mp4); default: figs/clustering_animation_<file>_<event>.gif')
+                    help='Output path (.gif or .mp4); default: ../figs/clustering_animation_<file>_<event>.gif')
 args   = parser.parse_args()
 F_NUM  = args.file_num
 EVT    = args.event_num
 OUT    = Path(args.output) if args.output else \
-         Path(f'figs/clustering_animation_{F_NUM}_{EVT}.gif')
+         Path(f'../figs/clustering_animation_{F_NUM}_{EVT}.gif')
 OUT.parent.mkdir(parents=True, exist_ok=True)
 
 
 # ── Load event data ───────────────────────────────────────────────────────────
-ntuple = f'../ntuple-hgtd/user.mcardiff.45809429.Output._{F_NUM}.SuperNtuple.root'
+ntuple = f'../../ntuple-hgtd/user.mcardiff.45809429.Output._{F_NUM}.SuperNtuple.root'
 print(f'Loading {ntuple}  event {EVT}')
 
 tree = uproot.open(ntuple)['ntuple']

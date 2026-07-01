@@ -693,7 +693,7 @@ int main() {
 
     int n_print = std::min(max_print, (int)events.size());
     for (int i = 0; i < n_print; i++) {
-      printf("python3 event_display.py --file_num %s --event_num %lld --extra_time %.2f\n", 
+      printf("cd python && python3 event_display.py --file_num %s --event_num %lld --extra_time %.2f\n",
 	     events[i].file_num.Data(), events[i].event_num, events[i].extra_time);
     }
     std::cout << std::endl;

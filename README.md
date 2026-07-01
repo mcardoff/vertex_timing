@@ -40,12 +40,14 @@ vertex_timing/
 │   ├── scripts/                        # Legacy/utility scripts (see share/scripts below)
 │   └── docs/                           # Reference documentation (ML integration, VBF, etc.)
 ├── vertex_time.cxx               # Standalone ROOT script: vertex timing distributions
-├── runHGTD_Clustering.cxx        # Single-event clustering wrapper / debug tool
 ├── check_jet_sorting.cxx         # Diagnostic: verifies jets are pT-sorted in ntuples
 ├── test_vbf_selection.cxx        # Validates VBF cut sequence and prints pass rates
 ├── test_vbf_integration.cxx      # Integration test for VBF cuts in event processing
-├── event_display.py              # Interactive event visualization (vertices, tracks, jets)
-├── event_tinkering.py            # Quick event inspection and jet printing via uproot
+├── python/                       # Interactive/visualisation scripts (run from within this dir)
+│   ├── runHGTD_Clustering.cxx    # Single-event clustering wrapper / debug tool
+│   ├── event_display.py          # Interactive event visualization (vertices, tracks, jets)
+│   ├── event_tinkering.py        # Quick event inspection and jet printing via uproot
+│   └── clustering_animation.py   # Animates the iterative clustering algorithm for one event
 ├── analyze_pileup_removal.py     # Python analysis of pileup removal cut effects
 ├── CMakeLists.txt                # Build configuration
 ├── build/                        # CMake build output directory
@@ -87,17 +89,23 @@ The following targets are defined in `CMakeLists.txt` and built in the `build/` 
 | File | Description |
 |---|---|
 | `vertex_time.cxx` | Vertex timing distribution analysis. Selects forward jets and the hard-scatter vertex, fits timing residuals with single- and double-Gaussian models, and produces resolution vs. forward jet multiplicity plots. |
-| `runHGTD_Clustering.cxx` | Single-event clustering wrapper for interactive debugging. Loads one event, runs iterative-time clustering, and prints cluster details (time, z, score, track list, pass/fail). Output is consumed by `event_display.py`. |
 | `check_jet_sorting.cxx` | Diagnostic tool. Checks whether jets in input ROOT files are stored in descending-pT order and prints a per-event summary plus aggregate pass rate. |
 | `test_vbf_selection.cxx` | Validates the VBF selection cut chain against the ntuple data and reports per-cut pass rates. (Also a CMake build target — see above.) |
 | `test_vbf_integration.cxx` | Integration test checking that `processEventData()` correctly rejects non-VBF events, with printed pass-rate statistics. |
 
-### Python Scripts
+### `python/` Scripts (run from within `python/`)
 
 | File | Description |
 |---|---|
+| `runHGTD_Clustering.cxx` | Single-event clustering wrapper for interactive debugging. Loads one event, runs iterative-time clustering, and prints cluster details (time, z, score, track list, pass/fail). Output is consumed by `event_display.py`. |
 | `event_display.py` | Generates event display plots showing reconstructed and truth vertices, tracks, timing information, cluster assignments, and jets. Accepts `--file_num`, `--event_num`, and `--extra_time` arguments. |
 | `event_tinkering.py` | Quick inspection tool that loads ROOT ntuples via uproot and prints jet information (truth HS jets, in-time/out-of-time pileup jets, reconstructed topo jets) for a given event. |
+| `clustering_animation.py` | Animates the iterative HGTD clustering algorithm step-by-step for one event. |
+
+### Python Scripts (project root)
+
+| File | Description |
+|---|---|
 | `analyze_pileup_removal.py` | Analyzes the effect of the 3σ pileup removal cut on track composition, measuring how many hard-scatter and pileup tracks are removed at each stage. |
 
 ---
@@ -164,8 +172,8 @@ make
 ./hgtd_matching
 ./extract_error_metrics   # prints quantitative breakdown
 
-# Visualize an event (script lives at project root)
-python event_display.py --file_num 000009 --event_num 1856 --extra_time 0.0
+# Visualize an event (script lives in python/)
+cd python && python event_display.py --file_num 000009 --event_num 1856 --extra_time 0.0
 ```
 
 ## Scoring Algorithms

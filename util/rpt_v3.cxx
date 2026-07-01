@@ -704,7 +704,7 @@ int main() {
   for (auto& h : hurt_events) {
     std::printf("  jet pT=%.1f  eta=%.2f  phi=%.2f  RpT: %.3f→%.3f  tracks_lost=%d\n",
                 h.j_pt, h.j_eta, h.j_phi, h.rpt_z, h.rpt_mine, h.n_lost);
-    std::printf("  python event_display.py --file_num %s --event_num %ld --extra_time 0.00\n\n",
+    std::printf("  cd python && python event_display.py --file_num %s --event_num %ld --extra_time 0.00\n\n",
                 h.file_num.c_str(), h.entry);
   }
   if (hurt_events.empty())
@@ -719,7 +719,7 @@ int main() {
       std::printf("  jet pT=%.1f GeV  eta=%.2f  %s  RpT: mine=%.3f  hgtd=%.3f  Δ=%.3f\n",
                   c.j_pt, c.j_eta, c.isHS ? "HS" : "PU",
                   c.rpt_mine, c.rpt_hgtd, c.delta);
-      std::printf("  python3 event_display.py --file_num %s --event_num %ld"
+      std::printf("  cd python && python3 event_display.py --file_num %s --event_num %ld"
                   " --extra_time %.2f --jet_idx %d"
                   " --jet_label %s --rpt_hgtd %.3f --rpt_mine %.3f\n\n",
                   c.file_num.c_str(), c.entry, c.t_trkptz, c.jet_idx,
