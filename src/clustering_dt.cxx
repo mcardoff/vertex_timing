@@ -116,9 +116,7 @@ void printEventDisplays(
 void makeComparisonPlots(
   const char* key,
   TCanvas* canvas,
-  std::map<Score, AnalysisObj>& mapHGTD,
-  std::map<Score, AnalysisObj>& mapIdealRes,
-  std::map<Score, AnalysisObj>& mapIdealEff
+  std::map<Score, AnalysisObj>& mapHGTD
 ) {
   const std::string compSubdir = SAVE_DIR + "/comparisons";
 
@@ -180,14 +178,14 @@ auto main(int argc, char** argv) -> int {
   TCanvas* canvas = new TCanvas("canvas", "Histograms", 800, 600);
 
   // --- Analysis maps (one per timing scenario) ---
-  auto mapHGTD     = buildAnalysisMap(Scenario::HGTD      );
-  auto mapIdealRes = buildAnalysisMap(Scenario::IDEAL_RES );
-  auto mapIdealEff = buildAnalysisMap(Scenario::IDEAL_EFF );
+  // Only the HGTD scenario is currently active; Scenario::IDEAL_RES/IDEAL_EFF
+  // and buildAnalysisMap's branching for them remain available for future use.
+  auto mapHGTD = buildAnalysisMap(Scenario::HGTD);
 
-  auto allMaps = { &mapHGTD}; //, &mapIdealRes, &mapIdealEff };
+  auto allMaps = { &mapHGTD };
 
   // --- Event display candidate lists ---
-  std::vector<TString> evtDisplayHGTD, evtDisplayIdealRes, evtDisplayIdealEff;
+  std::vector<TString> evtDisplayHGTD;
   // Low-multiplicity (nFwdHS == LOW_MULT_NHS) pass and fail, HGTD scenario
   std::vector<TString> lowMultPass, lowMultFail;
   std::vector<TString> misasPassEvents;    // in TEST_MISAS denominator and PASSES
@@ -206,19 +204,15 @@ auto main(int argc, char** argv) -> int {
     if (READ_NUM % 100 == 0)
       std::cout << "Progress: " << READ_NUM << "/" << N_EVENT << "\r" << std::flush;
 
-    // Run the three timing scenarios
-    auto resHGTD     = processEventData(&branch, false, true,  mapHGTD    );
-    // auto resIdealRes = processEventData(&branch, true,  true,  mapIdealRes);
-    // auto resIdealEff = processEventData(&branch, true,  false, mapIdealEff);
+    // HGTD timing scenario (the only scenario currently active)
+    auto resHGTD = processEventData(&branch, false, true, mapHGTD);
 
     // Extract file identifier from the full path (characters 49–54)
     TString fileName = branch.reader.GetTree()->GetCurrentFile()->GetName();
     TString fileNum  = fileName(49, 6);
 
     // Collect events where TRKPTZ passes but TEST_MISAS does not (misassignment effect)
-    collectEventDisplay(evtDisplayHGTD,      3, resHGTD,     fileNum, EVENT_NUM);
-    // collectEventDisplay(evtDisplayIdealRes,  3, resIdealRes, fileNum, EVENT_NUM);
-    // collectEventDisplay(evtDisplayIdealEff,  3, resIdealEff, fileNum, EVENT_NUM);
+    collectEventDisplay(evtDisplayHGTD, 3, resHGTD, fileNum, EVENT_NUM);
 
     // Low-multiplicity event display collection (HGTD scenario, n=LOW_MULT_NHS HS tracks)
     if (resHGTD.code >= 0 && resHGTD.nFwdHS == LOW_MULT_NHS) {
@@ -259,7 +253,7 @@ auto main(int argc, char** argv) -> int {
 
   // --- Comparison plots (per variable KEY) ---
   for (const auto* key : KEYS)
-    makeComparisonPlots(key, canvas, mapHGTD, mapIdealRes, mapIdealEff);
+    makeComparisonPlots(key, canvas, mapHGTD);
 
   // --- Inclusive resolution plots ---
   const std::initializer_list<AnalysisObj*> RESO_SET = {

@@ -17,138 +17,132 @@ The project performs timing-based vertex reconstruction using:
 ```
 vertex_timing/
 ├── src/                           # Core library headers + main analysis executable
-│   ├── clustering_constants.h    # Analysis constants, Score enum, ClusteringMethod enum
-│   ├── clustering_functions.h    # Clustering algorithms; ML model loaded here (line 294)
+│   ├── clustering_constants.h    # Analysis constants, Score struct + SCORE_REGISTRY, ClusteringMethod enum
+│   ├── clustering_functions.h    # Clustering algorithms (clusterTracksInTime, chooseCluster, ...)
 │   ├── clustering_includes.h     # Common ROOT/C++ includes
-│   ├── clustering_structs.h      # Data structures; ML feature extraction (line 328)
-│   ├── event_processing.h        # Event loop: setupChain, getAssociatedTracks, processEvent
-│   ├── plotting_utilities.h      # Visualization tools (overlay histogram, money plots)
-│   ├── ml_model.h                # Standalone C++ neural network
+│   ├── clustering_structs.h      # BranchPointerWrapper, Cluster (incl. updateScores/calcFeatures), EventCounts
+│   ├── sample_config.h           # --sample=vbf|zjets|dijet resolution (default: local ../../ntuple-hgtd/)
+│   ├── event_processing.h        # setupChain, getAssociatedTracks, selectClusters, processEventData
+│   ├── plotting_utilities.h      # PlotObj / AnalysisObj + all plotting helpers (moneyPlot, inclusivePlot, ...)
 │   ├── AtlasLabels.h / AtlasStyle.h  # ATLAS plot style utilities
-│   ├── json.hpp                  # JSON parser for model weights
-│   └── clustering_dt.cxx         # Main analysis (3 timing scenarios × multiple scores)
-├── util/                          # Diagnostic, sweep, and ML utility executables
-│   ├── sweep_utilities.h         # Shared helpers for 1-D parameter sweep executables
-│   ├── failure_decomposition.cxx # Failure mode categorisation + pie chart
-│   ├── rate_diagnostics.cxx      # Selection-agnostic misclustering/misassignment rates
-│   ├── hgtd_matching.cxx         # Low-level track/cluster matching diagnostics
-│   ├── extract_error_metrics.cxx # Extracts metrics from hgtd_matching output
-│   ├── generate_rpt.cxx          # Timing distribution report
-│   ├── test_ml_model.cxx         # ML model validation
-│   ├── evaluate_ml_lowtrack.cxx  # NN score analysis for low-track-count events
-│   ├── export_training_data.cxx  # Exports CSV rows for DNN retraining (8 features)
-│   ├── distcut_sweep.cxx         # Sweep: cone distance cut
-│   ├── mintrackpt_sweep.cxx      # Sweep: minimum track pT
-│   ├── maxtrackpt_sweep.cxx      # Sweep: maximum track pT
-│   ├── cone_iter_k_sweep.cxx     # Sweep: CONE_ITER_K (REFINED top-K parameter)
-│   ├── dist_refine_sweep.cxx     # Sweep: DIST_CUT_T_REFINED (REFINED iterative distance)
-│   ├── nsigma_sweep.cxx          # Sweep: distance cut expressed in σ units
-│   ├── trkptz_alpha_sweep.cxx    # Sweep: α in Σpₜ·exp(−α|Δz|); production uses α=1.5
-│   ├── trkptz_resunits_sweep.cxx # Sweep: α in resolution-normalised Σpₜ·exp(−α|Δz/σ_z|)
-│   ├── timing_diag.cxx           # Diagnostic: trackTimeRes distribution + |dt| HS vs PU
-│   └── vtx_diag.cxx              # Diagnostic: vertex-level diagnostics
+│   └── clustering_dt.cxx         # Main analysis executable (HGTD scenario only; see Main Executables)
+├── util/                          # Diagnostic / report / ML-data-export executables
+│   ├── failure_decomposition.cxx # Per-event principal-cause failure classification (see section below)
+│   ├── export_training_data.cxx  # Exports per-cluster CSV rows (8 features + purity/labels) for future DNN retraining
+│   ├── generate_rpt.cxx          # RpT-style timing/discrimination report (older version)
+│   ├── rpt_v2.cxx .. rpt_v5.cxx  # RpT discrimination study iterations; rpt_v5 uses the WAVeS score
+│   ├── maxpt_jet_test.cxx        # A/B/C test of the MAX_TRACK_PT cap vs per-event leading-jet pT
+│   ├── track_dt.cxx              # Inclusive per-track HGTD-time-vs-truth-particle-time residual
+│   └── sweep_utilities.h         # Shared helpers for parameter-sweep executables (no sweep .cxx files currently present)
 ├── python/                        # Interactive/visualisation scripts (run from within this dir)
 │   ├── event_display.py          # Event visualisation — calls runHGTD_Clustering.cxx, produces 2-page PDF
 │   ├── runHGTD_Clustering.cxx    # Interactive per-event clustering
 │   ├── clustering_animation.py   # Animates the iterative clustering algorithm for one event
 │   └── event_tinkering.py        # Quick event inspection and jet printing via uproot
-├── vertex_time.cxx               # Vertex timing distribution analysis with jet selection
-├── check_jet_sorting.cxx         # Utility: verify jets are pT-sorted in ntuples
-├── test_vbf_integration.cxx      # Tests VBF cut integration
-├── test_vbf_selection.cxx        # VBF signal region selection demo
 ├── share/
-│   ├── models/                   # ML model files (model.onnx, model_weights.json,
-│   │                             #   normalization_params.json)
-│   ├── scripts/                  # Python utilities
-│   │   ├── inspect_onnx_model.py
-│   │   ├── export_onnx_model.py
-│   │   └── model_evaluation_helper.py
-│   └── docs/                     # Design docs and ML integration guides
+│   ├── models/                   # ML artifacts from a prior (currently inactive) DNN/BDT effort — see
+│   │                             #   Machine Learning section below
+│   ├── scripts/                  # ONNX export/inspection Python utilities (historical; no active consumer in src/)
+│   └── docs/                     # Design docs, incl. older ML integration guides
+├── condor/                       # Condor submit templates + run_analysis.sh wrapper
 ├── CMakeLists.txt
-├── build/                        # Build output
-├── figs/                         # Output plots (PDF)
-├── old/                          # Legacy implementations
-└── DBSCAN.ipynb
+└── build/                        # Build output (created by `cmake ..`)
 ```
+
+Note: several directories/files described in earlier versions of this doc
+(`vertex_time.cxx`, `check_jet_sorting.cxx`, `test_vbf_*.cxx`, `DBSCAN.ipynb`,
+`figs/`, `old/`, `src/ml_model.h`, and most of the `util/` diagnostics and
+parameter-sweep executables) do not exist in the current tree — this section
+reflects what's actually present.
 
 ## Main Executables
 
 ### Primary Analysis
-- **clustering_dt.cxx** (`src/`): Main clustering analysis comparing HGTD times, ideal resolution, and efficiency scenarios. Active scores: `TRKPTZ`, `TEST_ML`, `TEST_MISCL`, `Z_REFINED`, `ZT_REFINED`, `T_REFINED`, `ZT_ITER`, `TEST_MISAS`, `PERF_EVT` (plus `HGTD` in the HGTD scenario). Iterative clustering is the default for all TRKPTZ-based scores. Generates six groups of comparison PDFs (see Score Registry section). At end of run prints up to 20 random pass/fail event display commands for `nFwdHS == 2` events (non-deterministic seed).
-
-- **vertex_time.cxx**: Vertex timing distribution analysis with forward jet selection.
+- **clustering_dt.cxx** (`src/`): Main clustering analysis. Only the HGTD
+  timing scenario is currently built/processed (`Scenario::IDEAL_RES`/
+  `IDEAL_EFF` and `buildAnalysisMap`'s branching for them still exist for
+  future reuse, but `main()` no longer instantiates or iterates those maps).
+  Active scores: `TRKPTZ`, `WAVES`, `JET_T_REFINED`, `TEST_MISAS`,
+  `WAVES_MISCL`, `WAVES_MISAS`, plus `HGTD`. Iterative clustering
+  (`ClusteringMethod::ITERATIVE`, `DIST_CUT_CONE = 3.0σ`) is the default main
+  collection. Produces the `theplot_*`, `waves_oracle_*`, and
+  `hgtd_trkptz_waves_*` comparison PDF groups (see Score Registry section),
+  plus inclusive resolution/pull plots and shape-comparison plots.
 
 ### Diagnostics & Failure Analysis
-- **failure_decomposition.cxx** (`util/`): Classifies every TRKPTZ failure into four non-exclusive categories (see section below). Primary diagnostic tool.
-- **rate_diagnostics.cxx** (`util/`): Selection-agnostic rates — misclustering (purity > 75%?) and timing misassignment (HGTD vs Ideal Res. PASS oracle). Binned tables matching clustering_dt style.
-- **hgtd_matching.cxx** (`util/`): Low-level track/cluster matching diagnostics. Quantifies wrong HGTD matching, wrong cluster selection, and insufficient track count failure modes.
-- **extract_error_metrics.cxx** (`util/`): Extracts quantitative metrics from hgtd_matching output.
-- **timing_diag.cxx** (`util/`): Prints `trackTimeRes` distribution and |dt| for HS vs PU tracks; used to cross-check Ideal t₀ ROC against ATL-HGTD-PUB-2022-001.
-- **vtx_diag.cxx** (`util/`): Vertex-level diagnostic utility.
+- **failure_decomposition.cxx** (`util/`): Assigns every TRKPTZ-failing event
+  to a single principal cause via a fixed precedence ladder (see Failure
+  Decomposition section below).
 
-### Parameter Sweeps
-All sweep executables live in `util/` and share helpers from `util/sweep_utilities.h`.
-- **distcut_sweep.cxx**: Sweeps `DIST_CUT_CONE` (0.5 σ – 5 σ).
-- **mintrackpt_sweep.cxx** / **maxtrackpt_sweep.cxx**: pT threshold sweeps.
-- **cone_iter_k_sweep.cxx**: Sweeps `CONE_ITER_K` (top-K clusters for T_REFINED pooling).
-- **dist_refine_sweep.cxx**: Sweeps `DIST_CUT_T_REFINED` (iterative distance cut in T_REFINED stage).
-- **nsigma_sweep.cxx**: Sweeps the distance cut expressed in σ units.
-- **trkptz_alpha_sweep.cxx**: Sweeps α in `Σpₜ·exp(−α|Δz|)`; production uses α=1.5, explores range 1–5.
-- **trkptz_resunits_sweep.cxx**: Sweeps α in the resolution-normalized form `Σpₜ·exp(−α|Δz/σ_z|)`.
+### RpT / Report Studies
+- **generate_rpt.cxx**, **rpt_v2.cxx**..**rpt_v5.cxx** (`util/`): Successive
+  iterations of an RpT (jet-level pileup-discrimination) study comparing
+  z-only, real-HGTD, and algorithm-selected (TRKPTZ or, as of `rpt_v5`,
+  WAVeS) timing gates. `rpt_v5` is the most current version.
 
-### ML Tools
-- **test_ml_model.cxx**: Validates the loaded neural network model.
-- **evaluate_ml_lowtrack.cxx**: Evaluates NN scores specifically on ≤4 HS-track events.
-- **export_training_data.cxx**: Exports 8-feature CSV rows + labels for DNN retraining.
+### ML Data Export
+- **export_training_data.cxx** (`util/`): Exports one CSV row per
+  cluster/passing event (8 features + purity/labels) mirroring
+  `clustering_dt`'s event/track selection exactly. Produces training data for
+  a possible future DNN, but no model currently consumes it in `src/` — see
+  Machine Learning Model section.
 
 ### Utilities
-- **runHGTD_Clustering.cxx** (`python/`): Interactive per-event clustering. Uses `ClusteringMethod::ITERATIVE` at `DIST_CUT_CONE = 3.0 σ` by default. The T_REFINED stage block is present but commented out. Output is parsed by `event_display.py` (`python/`) to produce a 2-page PDF.
-- **generate_rpt.cxx**: Report generation with timing distributions.
-- **check_jet_sorting.cxx**: Verifies jet pT ordering in ntuples.
+- **maxpt_jet_test.cxx** (`util/`): Diagnostic comparing WAVeS/TRKPTZ pass
+  rates under different `maxTrkPt` caps (current `MAX_TRACK_PT`, leading-jet
+  pT, subleading-jet pT). Pure diagnostic, changes nothing.
+- **track_dt.cxx** (`util/`): Inclusive per-track HGTD-time-vs-truth-particle
+  residual, no event selection.
+- **runHGTD_Clustering.cxx** (`python/`): Interactive per-event clustering.
+  Output is parsed by `event_display.py` to produce a 2-page PDF.
 
-## T_REFINED Clustering Algorithm
+## WAVeS Clustering / Scoring
 
-`Score::T_REFINED` is a two-stage approach implemented in `src/event_processing.h` and mirrored in `runHGTD_Clustering.cxx`:
+`Score::WAVES` (jet-proximity weighted score) is the current alternative to
+the baseline `Score::TRKPTZ`, implemented in `Cluster::updateScores`
+(`src/clustering_structs.h`) and `Cluster::calculateTime`/`calculatePurity`
+(`src/event_processing.h`):
 
-1. **Stage 1 (Iterative)**: Iterative nearest-neighbour clustering at `DIST_CUT_CONE = 3.0 σ` on all forward tracks. This is now also the default for all TRKPTZ-based scores.
-2. **Stage 2 (Timing refinement)**: Filter clusters to those with `≥ MIN_CLUSTER_TRACKS` tracks, sort by TRKPTZ score descending, pool the track indices of the top `CONE_ITER_K = 3` clusters, then re-cluster the pooled tracks using `ClusteringMethod::ITERATIVE` at the tighter `DIST_CUT_T_REFINED = 2.0 σ`. The ITERATIVE method updates the centroid after each merge, preventing PU track absorption.
+- **Score**: `Σ_i pT_i · pT_jet(i) / max(ΔR_i, WAVES_DR_FLOOR)`, summed over
+  the cluster's constituent tracks (nearest qualifying forward jet per
+  track), then multiplied by `exp(−1.5·|Δz_cluster|)`. Falls back to the
+  TRKPTZ score if no qualifying forward jets exist in the event.
+- **Time/purity**: for the `WAVES` row specifically (not its oracle
+  variants), both the reported time and purity are recomputed using only the
+  subset of the selected cluster's tracks that fall within `ΔR < 0.4` of a
+  qualifying forward jet — this purifies the time by dropping absorbed PU
+  tracks that the jet-agnostic clustering step picked up.
+- **`Score::JET_T_REFINED`** (short name `WAVES_RECLUST`, id 19): a
+  *dedicated* collection — tracks are first filtered to those within
+  `ΔR < 0.4` of a forward jet (`TrackFilterType::JET`), then re-clustered
+  with `ClusteringMethod::ITERATIVE` at the tighter `DIST_CUT_T_REFINED =
+  2.0σ`. The best cluster in that collection is selected by the TRKPTZ score
+  (via the aux-collection path in `selectClusters`).
+- **`Score::WAVES_MISCL`** / **`Score::WAVES_MISAS`**: oracle variants that
+  reuse the WAVeS selection and time, gated at fill time on cluster purity
+  (`> 0.75`) / event-level HS timing purity (`≥ 0.95`) respectively — see
+  `requiresPurity` in the Score Registry section. Unlike the `WAVES` row,
+  these use the default full-cluster purity (not the in-jet-only
+  recomputation), so their purity gate stays comparable to `TEST_MISAS`.
 
-`Score::CONE` uses legacy cone clustering (`ClusteringMethod::CONE`) at `DIST_CUT_CONE = 3.0 σ` and is preserved as a comparison baseline.
-
-Relevant constants in `src/clustering_constants.h`:
-```cpp
-DIST_CUT_CONE      = 3.0   // Main iterative distance (also used for CONE comparison)
-DIST_CUT_T_REFINED = 2.0   // T_REFINED / ZT_REFINED stage 2 iterative distance
-CONE_ITER_K        = 3     // Top-K clusters to pool for T_REFINED
-MIN_CLUSTER_TRACKS = 0     // Minimum tracks to qualify a cluster
-```
-
-Score enum: `Score::T_REFINED` (id=4) — selected by TRKPTZ among the refined sub-clusters.
+`Score::CONE` (legacy cone clustering, `ClusteringMethod::CONE` at
+`DIST_CUT_CONE = 3.0σ`) still exists in the registry as a historical
+baseline but is not currently emplaced in `buildAnalysisMap`.
 
 ## Failure Decomposition
 
-`src/failure_decomposition.cxx` classifies every TRKPTZ-failing event into four non-exclusive categories (an event can satisfy multiple):
+`util/failure_decomposition.cxx` assigns every event where the selection
+score fails the efficiency window to a **single principal cause**, via a
+fixed precedence ladder (first match wins) — this superseded an earlier
+non-exclusive four-category scheme:
 
-| # | Name | Condition |
+| Precedence | Name | Condition |
 |---|------|-----------|
-| 1 | Selection failure | Another qualifying HGTD cluster passes the efficiency window |
-| 2 | Timing misassignment | Re-running with ideal timing resolution fixes it |
-| 3 | Misclustering | No HGTD cluster has purity > 75% **OR** the T_REFINED algorithm fixes it |
-| 4 | Track efficiency loss | Ideal resolution + ideal efficiency fixes it (but ideal resolution alone does not) |
-
-Categories 2 and 4 are mutually exclusive by construction.
-`cat_none` catches events satisfying none of the four — true fundamental failures.
-
-**Output per run:**
-- Console: summary table with per-category counts/fractions, per-bin breakdown vs n Forward HS Tracks, and a sanity check that `|A∪B∪C∪D| + |None| = n_fail`.
-- PDF page 1: TEfficiency curves per category, normalised to **failing events** in each bin (`h_fail` denominator). The overall failure rate (`n_fail / n_total`) is overlaid as a grey dashed reference.
-- PDF page 2: Pie chart of exclusive Venn decomposition (12 slices summing to `n_fail`); a `printf` sanity check verifies the sum before drawing.
-
-**cat_none debug output**: When `cat_none` fires, a ready-to-run event display command is printed:
-```
-cd python && python3 event_display.py --file_num <NUM> --event_num <ENTRY> --extra_time 0.00
-```
-followed by the full cluster dump (time, score, purity, tracks, passes?).
+| 1 | Timing misassignment | Ideal Resolution scenario passes, **or** a majority of HS pT is mis-timed vs. truth (`|pull| ≥ 3σ`) — the latter isn't fixed by ideal resolution since the times are offset, not just smeared |
+| 2 | Selection failure | Another qualifying cluster in the same real-time collection passes `passEfficiency()` — the right answer existed but wasn't chosen |
+| 3 | Misclustering | Grouping *all* truth-HS tracks into one cluster (real times, no PU contamination) passes the window, but the algorithm's chosen cluster does not |
+| 4 | Track efficiency loss | Ideal Res. + Ideal Eff. passes but Ideal Res. alone does not — giving currently time-less HS tracks an ideal time is what recovers the event |
+| 5 | Irreducible | None of the above — not an algorithm failure |
 
 ## Key Analysis Parameters
 
@@ -157,12 +151,16 @@ From `src/clustering_constants.h`:
 MIN_TRACK_PT          = 1.0   // GeV — track selection floor
 MAX_TRACK_PT          = 30.0  // GeV — track selection ceiling
 DIST_CUT_CONE         = 3.0   // σ — main iterative clustering distance (also CONE baseline)
-DIST_CUT_T_REFINED    = 2.0   // σ — T_REFINED / ZT_REFINED stage 2 iterative distance
-CONE_ITER_K           = 3     // top-K clusters for T_REFINED pooling
+DIST_CUT_T_REFINED    = 2.0   // σ — JET_T_REFINED (WAVES_RECLUST) stage-2 iterative distance
+MIN_CLUSTER_TRACKS    = 0     // minimum tracks required to select a cluster
 IDEAL_TRACK_RES       = 1.0   // ps — flat per-track resolution for ideal scenarios
 PASS_SIGMA            = 60.0  // ps — ±window for "Core Fraction" efficiency oracle
 TRUTH_PULL_CUT        = 3.0   // σ — |pull| threshold for oracle timing purity gates
+WAVES_DR_FLOOR        = 0.05  // minimum ΔR for the WAVeS 1/ΔR weight (prevents divergence)
 ```
+`CONE_ITER_K` also still exists as a constant but its only historical
+consumer (a `cone_iter_k_sweep.cxx` sweep executable) is not present in this
+tree, so it's currently unused.
 
 ## Build System
 
@@ -172,6 +170,11 @@ TRUTH_PULL_CUT        = 3.0   // σ — |pull| threshold for oracle timing purit
 - ROOT (RIO, Core, Gpad, Graf, Hist, Tree)
 - Boost (filesystem)
 
+TMVA is intentionally excluded (see `CMakeLists.txt:34`) — `HGTD_SORT`/
+`CONE_BDT` are registered `Score`s but their selector
+(`chooseHGTDSortCluster`) is currently a stub returning an empty `Cluster`,
+and neither is emplaced in `buildAnalysisMap`.
+
 ### Build Commands
 ```bash
 cd build
@@ -180,18 +183,21 @@ make [<target>]   # e.g. make failure_decomposition
 ```
 
 ### Compiler Flags
-`-O3 -march=native -DNDEBUG` plus thin LTO.
+`-O3 -march=native -g` (no `-DNDEBUG`, no LTO — `CMakeLists.txt:37`).
 
 ## Data Format
 
-ROOT ntuples with the following key branches:
+ROOT ntuples (tree name `"ntuple"`) with the branches bound in
+`BranchPointerWrapper` (`src/clustering_structs.h`):
 
 | Group | Branches |
 |-------|----------|
-| Jets | `AntiKt4EMTopoJets_pt`, `_eta`, `_track_idx` |
-| Vertices | `TruthVtx_z/time`, `RecoVtx_z/time/timeRes/hasValidTime` |
-| Tracks | `Track_z0/pt/eta/time/timeRes/hasValidTime/var_z0/truthVtx_idx/truthPart_idx` |
-| Particles | `TruthPart_prodVtx_z` |
+| Tracks | `Track_z0/d0/pt/eta/phi/theta/qOverP`, `Track_var_z0/d0/qOverP/theta/phi0`, `Track_time/timeRes/hasValidTime`, `Track_quality`, `Track_truthVtx_idx/truthPart_idx`, `Track_nHGTDHits/nHGTDPrimaryHits` |
+| Vertices | `TruthVtx_z/time/isHS`, `RecoVtx_z/time/timeRes/hasValidTime` |
+| Reco jets | `AntiKt4EMTopoJets_pt/eta/phi`, `AntiKt4EMTopoJets_truthHSJet_idx`, `AntiKt4EMTopoJets_ghostTrack_idx` |
+| Truth jets | `TruthHSJet_pt/eta/phi`, `TruthITPUJet_pt/eta/phi`, `TruthOOTPUJet_pt/eta/phi` |
+| Particles | `TruthPart_prodVtx_time` (bound as `particleT`) |
+| Event | `weight` |
 
 ## Event Display
 
@@ -203,44 +209,26 @@ Internally calls `runHGTD_Clustering.cxx` and parses its stdout to produce a 2-p
 
 ## Machine Learning Model
 
-- **Architecture**: 8 → 128 → 64 → 32 → 1 (ReLU hidden, Sigmoid output; 11 521 parameters)
-- **Features**: delta_z, delta_z_resunits, cluster_z_sigma, cluster_d0, cluster_d0_sigma, cluster_qOverP, cluster_qOverP_sigma, cluster_sumpt
-- **Loading**: Lazy static init in `src/clustering_functions.h:294` — once per run, ~0.01 ms per inference
-- **Score**: `Score::TEST_ML`
-- **Files**: `share/models/model_weights.json`, `model.onnx`, `normalization_params.json`
-
-### Retraining Workflow
-
-Training happens in `~/project/clusterclassification/neural-net.ipynb` (CERN SWAN or local Jupyter).
-The notebook saves a TF SavedModel to `~/project/clusterclassification/saved_model_dir/` and writes
-`normalization_params.json` alongside it.  Then run the conversion script from `vertex_timing`:
-
-```bash
-# 1. Activate a venv that has tensorflow, tf2onnx, onnx (see Dependencies above)
-#    The venv used during initial setup lives at:
-#    ~/project/temp-conversion-dir/venv_conv/
-
-# 2. Run the all-in-one pipeline (from vertex_timing root):
-python share/scripts/export_onnx_model.py
-#    --saved-model-dir  ~/project/clusterclassification/saved_model_dir  (default)
-#    --dest-dir         ~/project/vertex_timing/share/models              (default)
-
-# 3. Rebuild
-cd build && make
-```
-
-The script performs four steps automatically:
-1. **SavedModel → ONNX** via `python -m tf2onnx.convert --saved-model ... --opset 13`
-2. **ONNX → model_weights.json** with stable `w1/b1/w2/b2/…` keys (layer order inferred
-   from tensor shapes; values row-major to match `ml_model.h`)
-3. **normalization_params.json** → updates `MEANS[N]` / `STDS[N]` arrays in
-   `src/clustering_structs.h` in-place, then copies the JSON to `share/models/`
-4. **Installs** `model_weights.json` → `share/models/`
-
-If the feature set changes (different number of inputs), also update:
-- `src/ml_model.h` — `N_INPUT` constant and network layer sizes
-- `src/clustering_structs.h` — `getFeatures()` extraction order
-- `util/export_training_data.cxx` — CSV column list
+**Currently inactive.** There is no `src/ml_model.h`, no ONNX runtime
+integration, and no `Score::TEST_ML` in the current `Score` registry — the
+WAVeS jet-proximity score (see section above) is the current alternative to
+the TRKPTZ baseline. What remains from the prior ML effort:
+- `share/models/` still holds artifacts (`model.onnx`, `model_weights.json`,
+  `normalization_params.json`, a TMVA `.weights.xml`) from that earlier
+  work, but nothing in `src/` currently loads or runs inference against
+  them.
+- `share/scripts/export_onnx_model.py` (SavedModel → ONNX → JSON weights
+  pipeline) and `share/docs/ML_MODEL_INTEGRATION.md` /
+  `ONNX_INTEGRATION_GUIDE.md` document that pipeline for reference, but it
+  has no active consumer.
+- `util/export_training_data.cxx` still exports per-cluster training CSVs
+  (8 features, purity/labels) mirroring the current `clustering_dt`
+  selection, in case retraining is picked back up later.
+- `src/clustering_structs.h`'s `Cluster::calcFeatures()` still computes and
+  normalises the same 8-feature vector (used historically as DNN input); its
+  `rawDeltaZ`/`rawDeltaZResunits` outputs are reused by `updateScores` for
+  TRKPTZ, but the normalised `features` vector itself is otherwise unused
+  today.
 
 ## Common Workflows
 
@@ -254,8 +242,8 @@ cd build && ./failure_decomposition
 # Event display for a specific event
 cd python && python event_display.py --file_num 000009 --event_num 1856 --extra_time 0.0
 
-# Parameter sweep
-cd build && ./dist_refine_sweep
+# RpT study (WAVeS-based)
+cd build && ./rpt_v5
 
 # Rebuild after header change
 cd build && make
@@ -263,67 +251,76 @@ cd build && make
 
 ## Score Registry
 
-All scores are defined as `static const Score` members of the `Score` struct in `src/clustering_constants.h` and listed in `SCORE_REGISTRY`. Each carries its own collection spec: `distCut`, `method` (`CONE`/`ITERATIVE`), `useZ0`, `filter` (`TrackFilterType`: `ALL`, `JET`, `Z0_TVA`, `HS_ONLY`), plus `buildsCollection()` to indicate it manages its own cluster collection.
+All scores are defined as `static const Score` members of the `Score` struct in `src/clustering_constants.h` and listed in `SCORE_REGISTRY`. Each carries its own collection spec: `distCut`, `method` (`CONE`/`ITERATIVE`/`SIMULTANEOUS`/`ITERATIVE_SPLIT`), `useZ0`, `filter` (`TrackFilterType`: `ALL`, `JET`, `HS_ONLY`), plus `buildsCollection()` to indicate it manages its own cluster collection (only true when `usesOwnCollection && distCut >= 0`).
 
 | id | Short | Long name | Notes |
 |----|-------|-----------|-------|
-| 0  | HGTD  | HGTD Algorithm | Own collection; HGTD-seeded |
+| 0  | HGTD  | HGTD Algorithm | Own collection; selected by proximity to `RecoVtx_time` |
 | 1  | TRKPT | Σ pT | Plain pT sum |
-| 2  | TRKPTZ | Σ pTe^{−\|Δz\|} | Primary score |
-| 3  | PASS  | Pass Cluster | First cluster passing quality cuts |
-| 4  | T_REFINED | 2σ t Reclustering | Two-stage; ITERATIVE at DIST_CUT_T_REFINED |
-| 5  | Z_REFINED | 2σ z Refinement | z-based refinement |
-| 6  | ZT_REFINED | 2σ z+t Reclustering | Two-stage with Z0_TVA filter |
-| 7  | CONE  | Cone | Legacy cone baseline |
-| 8  | CONE_BDT | Cone (BDT) | Cone + BDT threshold 0.3 |
-| 9  | FILTJET | Filter Tracks in Jets | JET filter; tracks within ΔR < 0.4 of jet |
-| 10 | HGTD_SORT | HGTD BDT (pT-sorted) | pT-sorted + BDT threshold |
-| 11 | TEST_ML | DNN Selection | Neural net score threshold 0.3 |
-| 12 | MISCL | TRKPTZ (pure clust) | Oracle: cluster purity > 75% |
-| 13 | MISAS | TRKPTZ (no t misassign.) | Oracle: event-level HS timing purity = 100% |
-| 14 | TEST_HS | TRKPTZ (HS only) | HS_ONLY filter; truth-matched tracks only |
-| 16 | ZT_ITER | 2D (z₀,t) Iterative | `useZ0=true`; 2D Mahalanobis distance √((Δt/σt)²+(Δz₀/σz₀)²) |
-| 17 | PERF_EVT | TRKPTZ (Pure Clust+Evt Times) | Combined oracle: MISCL ∧ MISAS |
+| 2  | TRKPTZ | Σ pTe^{−1.5\|Δz\|} | Primary/baseline score |
+| 3  | PASS  | Pass Cluster | First cluster passing quality cuts (not currently emplaced in `buildAnalysisMap`) |
+| 7  | CONE  | Cone | Legacy cone baseline; own collection at `DIST_CUT_CONE`, `ClusteringMethod::CONE` (not currently emplaced) |
+| 8  | CONE_BDT | Cone (BDT) | Threshold 0.3; selector is a stub (TMVA excluded) — currently non-functional |
+| 9  | FILTJET | Filter Tracks in Jets | JET filter; own collection at `DIST_CUT_CONE`, `ClusteringMethod::CONE` (not currently emplaced) |
+| 10 | HGTD_SORT | HGTD BDT (pT-sorted) | Threshold 0.3; selector is a stub (TMVA excluded) — currently non-functional |
+| 13 | TEST_MISAS | ΣpTe^{−1.5\|Δz\|} [Events with Perfect Timing] | Oracle: `requiresPurity`, gated on event-level HS timing purity ≥ 0.95 |
+| 14 | TEST_HS | ΣpTe^{−1.5\|Δz\|} (HS only) | Own collection; `HS_ONLY` filter, `ClusteringMethod::CONE` at `DIST_CUT_CONE` (not currently emplaced) |
+| 18 | WAVES | WAVeS Score | Jet-proximity weighted score; main collection (see WAVeS section above) |
+| 19 | JET_T_REFINED | WAVeS 2σ t Re-clustering | Own collection (`WAVES_RECLUST` short name); `JET` filter, `ClusteringMethod::ITERATIVE` at `DIST_CUT_T_REFINED`; selected by TRKPTZ |
+| 20 | WAVES_MISCL | WAVeS [Events with Pure Clusters] | Oracle: `requiresPurity`, gated on cluster purity > 0.75 |
+| 21 | WAVES_MISAS | WAVeS [Events with Perfect Timing] | Oracle: `requiresPurity`, gated on event-level HS timing purity ≥ 0.95 |
 
-Oracle scores (`requiresPurity=true`) gate their denominator: events outside the gate are not counted. **Important:** `calcHSTimingPurity` (event-level, used by MISAS) returns `0.0f` — not `1.0f` — when no qualifying HS tracks exist, ensuring that events with zero forward HS tracks are excluded from oracle denominators.
+Oracle scores (`requiresPurity=true`) gate their denominator: events outside the gate are not counted. **Important:** `calcHSTimingPurity` (event-level, used by `TEST_MISAS`/`WAVES_MISAS`) returns `0.0f` — not `1.0f` — when no qualifying HS tracks exist, ensuring that events with zero forward HS tracks are excluded from oracle denominators.
 
-Money plot groups produced by `clustering_dt`:
-- `theplot_*.pdf` — main score comparison
-- `timing_oracle_*.pdf` — MISAS oracle comparison
-- `perfect_timing_oracle_*.pdf` — PERF_EVT oracle comparison
-- `hgtd_trkptz_*.pdf` — HGTD vs TRKPTZ
-- `z_refined_*.pdf` — z/zt refinement variants
-- `2d_clust_*.pdf` — ZT_ITER comparison
+`clustering_dt`'s currently active scores (built by `buildAnalysisMap`) are `TRKPTZ`, `WAVES`, `JET_T_REFINED`, `TEST_MISAS`, `WAVES_MISCL`, `WAVES_MISAS`, plus `HGTD`.
+
+Comparison PDF groups produced by `clustering_dt` (`makeComparisonPlots`, one set per `KEYS = {pu_frac, fjet, ftrack, hs_track, truthjets}`):
+- `theplot_*.pdf` — HGTD vs TRKPTZ vs TEST_MISAS
+- `waves_oracle_*.pdf` — HGTD vs TRKPTZ vs WAVES vs WAVES_MISAS
+- `hgtd_trkptz_waves_*.pdf` — HGTD vs TRKPTZ vs WAVES (no oracles)
+
+Plus inclusive resolution/pull plots (`inclusive/inclusivereso_*`,
+`inclusive/inclusivepull_*`, log/lin) and shape-comparison plots
+(`inclusive/shape_comparison*`) over `{HGTD, TRKPTZ, WAVES, WAVES_MISAS}`
+(resolution set) / `{TRKPTZ, WAVES, WAVES_MISAS}` (shape set).
 
 ## event_processing.h Internals
 
-Key structures and refactored entry points:
+Key structures and entry points:
 
-- **`EventResult`** (replaces `std::pair<int,double>`):
+- **`EventResult`**:
   ```cpp
-  struct EventResult { int code; double time; int nFwdHS; bool trkptzPass; };
+  struct EventResult {
+    int    code          = -1;   // -1: rejected by selection; 0: normal; 3: MISAS fail
+    double time          = -1.0; // TRKPTZ-selected cluster time
+    int    nFwdHS        =  0;   // n forward HS tracks (3σ counting step)
+    bool   trkptzPass    = false;
+    bool   misasInDenom  = false; // event entered the TEST_MISAS denominator
+    bool   misasPass     = false; // in denominator AND passed
+    double clusQuality   =  0.0;  // combined quality of the TRKPTZ-selected cluster
+  };
   ```
   `processEventData` returns `EventResult`; early-exit returns `{}` (code=-1).
 
-- **Section E** (auxiliary collections): an `applyFilter` lambda dispatches on `TrackFilterType`, then a `SCORE_REGISTRY` loop calls `clusterTracksInTime` for every score where `s.buildsCollection()` is true, populating `unordered_map<int, vector<Cluster>> auxCollections`. No more named per-score collection variables.
+- **Section E** (auxiliary collections): an `applyFilter` lambda dispatches on `TrackFilterType`, then a `SCORE_REGISTRY` loop calls `clusterTracksInTime` for every score where `s.buildsCollection()` is true, populating `unordered_map<int, vector<Cluster>> auxCollections`. No named per-score collection variables.
 
-- **`selectClusters`** signature: takes `const unordered_map<int,vector<Cluster>>& auxCollections` (previously 10 named collection parameters).
+- **`selectClusters`**: takes the main clusters, tracks, branch, the active `analyses` map, and `auxCollections`; returns `unordered_map<int,Cluster>` keyed on `Score::id`. Handles the main-collection scores via the all-scores `chooseCluster` overload, aux-collection scores via TRKPTZ selection, and `HGTD`/`HGTD_SORT`/`CONE_BDT` via their own dedicated logic.
 
 ## plotting_utilities.h Notes
 
 - **`moneyPlot` / `plotWithLegend`**: the `plotWithLegend` lambda accepts optional legend coordinates `(legX1, legY1, legX2, legY2)` so each call can position the legend independently (bottom-right for efficiency plots, top-right for resolution plots).
 - **TEfficiency rendering**: `TEfficiency` objects are converted to `TGraphAsymmErrors` with x-errors explicitly set to 0 at construction — this avoids ROOT's repaint-time x-error restoration in `PaintGraph`. All efficiency plots are drawn this way.
-- **Fit quality guard**: `plotPostProcessing` skips slices with `< 50` entries (was 6) and only calls `fillEach` when `percErrCore < 0.5` (relative uncertainty on the core σ). Bins failing these guards are left empty rather than showing garbage fit results.
+- **Fit quality guard**: `plotPostProcessing` skips slices with too few entries and only calls `fillEach` when the relative uncertainty on the core σ is `< 50%`. Bins failing these guards are left empty rather than showing garbage fit results.
 - **y-axis labels**: efficiency-style plots use **"Core Fraction"**; the pass window is `PASS_SIGMA = 60 ps`.
 - **`AtlasStyle.h`**: calls `atlasStyle->SetErrorX(0)` globally (effective for TH1/TGraphErrors; TEfficiency uses the conversion approach above).
-- **`inclusivePlot` page structure**: produces **4 pages per score** — (1) THStack (signal+mixed+background stacked), (2) signal only >75%, (3) mixed only 50–75%, (4) background only <50%. Each individual-category page has its own double-Gaussian fit. Pages for a category with zero entries are skipped. Applies to all four call sites in `clustering_dt.cxx` (log/lin × standard/low-track).
+- **Histogram directory registration**: `PlotObj`/`AnalysisObj` construction does not currently call `TH1::AddDirectory(kFALSE)` or otherwise manage `gDirectory` — fine for the current single-threaded event loop, but anything that constructs multiple `AnalysisObj` instances concurrently (e.g. per-thread duplication) must set `TH1::AddDirectory(kFALSE)` first to avoid racing on ROOT's global directory registry.
 
 ## Development Notes
 
 - **Namespace**: all utilities live in `namespace MyUtl`
-- **Debug mode**: `#define debug true` at top of executable for verbose logging
-- **Multicore**: `ROOT::EnableImplicitMT()` parallelises histogram filling; `TTreeReader::Next()` loop remains sequential
+- **Debug mode**: `MyUtl::DEBUG` (`src/clustering_constants.h`) for verbose per-event logging
+- **Multicore**: `ROOT::EnableImplicitMT()` is called in `main()` but only parallelises ROOT-internal operations — the `TTreeReader::Next()` event loop itself remains sequential. See `util/ttreemt_prototype.cxx` for an exploratory (not production-wired) `TTreeProcessorMT` prototype that parallelises the per-event loop itself.
 - **Constants**: modify analysis cuts in `src/clustering_constants.h`; always rebuild after header changes
 - **Plot styling**: ROOT `TColor`/`TCanvas`; ATLAS style via `AtlasStyle.h`/`AtlasLabels.h`
 - **Event loop**: `TTreeReader` + `BranchPointerWrapper` for branch access
-- **File identification**: within a TChain loop, `chain.GetCurrentFile()->GetName()` gives the file path and `chain.GetTree()->GetReadEntry()` gives the local (0-indexed) entry number — both needed to reconstruct an event display command
+- **File identification**: within the sequential event loop, `branch.reader.GetTree()->GetCurrentFile()->GetName()` gives the current file path, and `chain.GetReadEntry() - chain.GetChainOffset()` gives the local (0-indexed) entry number within that file — both needed to reconstruct an event display command
