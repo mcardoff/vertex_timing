@@ -14,24 +14,12 @@ vertex_timing/
 │   ├── clustering_structs.h      # BranchPointerWrapper and Cluster data structures
 │   ├── event_processing.h        # High-level event loop orchestration
 │   ├── plotting_utilities.h      # Gaussian fitting and plot generation utilities
-│   ├── ml_model.h                # Standalone C++ neural network (8→128→64→32→1)
-│   ├── AtlasLabels.h / AtlasStyle.h  # ATLAS plot style utilities
-│   └── json.hpp                  # Header-only JSON parser for model weight loading
-├── util/                         # Diagnostic, sweep, and ML utility executables
+│   └── AtlasLabels.h / AtlasStyle.h  # ATLAS plot style utilities
+├── util/                         # Diagnostic and utility executables
 │   ├── sweep_utilities.h         # Shared helpers for 1-D parameter sweep executables
-│   ├── hgtd_matching.cxx         # Error analysis: quantifies failure modes
-│   ├── extract_error_metrics.cxx # Post-processor: generates failure mode summary table
-│   ├── test_ml_model.cxx         # ML model smoke test
 │   ├── generate_rpt.cxx          # ROC curve / timing distribution report generator
-│   ├── evaluate_ml_lowtrack.cxx  # ML performance in low-track-count events
 │   ├── export_training_data.cxx  # Exports cluster features to CSV for DNN retraining
-│   ├── failure_decomposition.cxx # Failure mode categorisation + pie chart
-│   ├── rate_diagnostics.cxx      # Selection-agnostic misclustering/misassignment rates
-│   ├── distcut_sweep.cxx         # Sweep: cone distance cut
-│   ├── mintrackpt_sweep.cxx      # Sweep: minimum track pT
-│   ├── maxtrackpt_sweep.cxx      # Sweep: maximum track pT
-│   ├── cone_iter_k_sweep.cxx     # Sweep: CONE_ITER_K
-│   └── dist_refine_sweep.cxx     # Sweep: DIST_CUT_REFINE
+│   └── failure_decomposition.cxx # Failure mode categorisation + pie chart
 ├── share/
 │   ├── models/
 │   │   ├── model.onnx                  # Original ONNX model (8 input features)
@@ -39,16 +27,11 @@ vertex_timing/
 │   │   └── normalization_params.json   # Feature mean/scale for input normalization
 │   ├── scripts/                        # Legacy/utility scripts (see share/scripts below)
 │   └── docs/                           # Reference documentation (ML integration, VBF, etc.)
-├── vertex_time.cxx               # Standalone ROOT script: vertex timing distributions
-├── check_jet_sorting.cxx         # Diagnostic: verifies jets are pT-sorted in ntuples
-├── test_vbf_selection.cxx        # Validates VBF cut sequence and prints pass rates
-├── test_vbf_integration.cxx      # Integration test for VBF cuts in event processing
 ├── python/                       # Interactive/visualisation scripts (run from within this dir)
 │   ├── runHGTD_Clustering.cxx    # Single-event clustering wrapper / debug tool
 │   ├── event_display.py          # Interactive event visualization (vertices, tracks, jets)
 │   ├── event_tinkering.py        # Quick event inspection and jet printing via uproot
 │   └── clustering_animation.py   # Animates the iterative clustering algorithm for one event
-├── analyze_pileup_removal.py     # Python analysis of pileup removal cut effects
 ├── CMakeLists.txt                # Build configuration
 ├── build/                        # CMake build output directory
 ├── figs/                         # Output plots (PDF)
@@ -63,35 +46,20 @@ The following targets are defined in `CMakeLists.txt` and built in the `build/` 
 
 | Executable | Source | Description |
 |---|---|---|
-| `clustering_dt` | `src/clustering_dt.cxx` | Main analysis. Runs timing-based vertex reconstruction across three scenarios (real HGTD, ideal resolution, ideal efficiency) and ten+ scoring algorithms. Generates six groups of comparison PDFs in `figs/`. |
+| `clustering_dt` | `src/clustering_dt.cxx` | Main analysis. Runs timing-based vertex reconstruction across three scenarios (real HGTD, ideal resolution, ideal efficiency) and several scoring algorithms. Supports `--sample=vbf\|zjets\|dijet` to switch input ntuple, energy-label annotation, and output directory. Generates comparison PDFs in `figs/` (or `vbf/`, `zjets/`, `dijet/`). |
 | `failure_decomposition` | `util/failure_decomposition.cxx` | Classifies every TRKPTZ-failing event into four failure categories (selection, timing misassignment, misclustering, track efficiency). Produces efficiency curves + pie chart. |
-| `rate_diagnostics` | `util/rate_diagnostics.cxx` | Selection-agnostic misclustering and timing-misassignment rates binned by n forward HS tracks. |
-| `hgtd_matching` | `util/hgtd_matching.cxx` | Error analysis tool. Quantifies three failure modes: wrong HGTD track-time matching, wrong hard-scatter cluster selection, and insufficient forward tracks. |
-| `extract_error_metrics` | `util/extract_error_metrics.cxx` | Reads histograms from `hgtd_matching_analysis.root` and prints a quantitative breakdown of each failure mode's contribution to overall inefficiency. |
-| `test_ml_model` | `util/test_ml_model.cxx` | Loads the neural network from `share/models/model_weights.json` and runs inference on dummy inputs to verify the C++ ML implementation is functioning correctly. |
-| `generate_rpt` | `util/generate_rpt.cxx` | Generates timing distribution plots and two-sample ROC curves comparing pT-weighted and pT+time-weighted track timing for hard-scatter vs. pileup separation. |
-| `evaluate_ml_lowtrack` | `util/evaluate_ml_lowtrack.cxx` | Evaluates ML model performance specifically on low-track-multiplicity events (N_HS ≤ 4). |
+| `generate_rpt` | `util/generate_rpt.cxx` | Generates timing distribution plots and ROC curves comparing pT-weighted and pT+time-weighted track timing for hard-scatter vs. pileup separation. |
+| `rpt_v2` | `util/rpt_v2.cxx` | RpT discrimination study using the main-analysis event selection (z-only / HGTD / TRKPTZ scenarios, with purity and HS-timing oracle gates). |
+| `rpt_v3` | `util/rpt_v3.cxx` | Jet-level RpT analysis with no event selection, matching the paper's approach. |
+| `rpt_v4` | `util/rpt_v4.cxx` | Jet-level RpT analysis with a 30–40 GeV / >40 GeV jet-pT split. |
+| `rpt_v5` | `util/rpt_v5.cxx` | Jet-level RpT analysis using the WAVeS-selected cluster time; supports `--sample=vbf\|zjets\|dijet`. |
 | `export_training_data` | `util/export_training_data.cxx` | Exports per-cluster feature vectors to CSV for DNN retraining. |
-| `distcut_sweep` | `util/distcut_sweep.cxx` | Sweeps `DIST_CUT_CONE` (0.5–5 σ). |
-| `mintrackpt_sweep` | `util/mintrackpt_sweep.cxx` | Sweeps minimum track pT threshold. |
-| `maxtrackpt_sweep` | `util/maxtrackpt_sweep.cxx` | Sweeps maximum track pT threshold. |
-| `cone_iter_k_sweep` | `util/cone_iter_k_sweep.cxx` | Sweeps `CONE_ITER_K` (top-K clusters for T_REFINED pooling, 1–6). |
-| `dist_refine_sweep` | `util/dist_refine_sweep.cxx` | Sweeps `DIST_CUT_T_REFINED` (0.5–3.0 σ). |
-| `nsigma_sweep` | `util/nsigma_sweep.cxx` | Sweeps the distance cut in σ units. |
-| `test_vbf_selection` | `test_vbf_selection.cxx` | Applies the full VBF signal region cut sequence and reports per-step pass rates. |
+| `maxpt_jet_test` | `util/maxpt_jet_test.cxx` | Compares WAVeS/TRKPTZ efficiency under different track pT upper-cut choices. |
+| `track_dt` | `util/track_dt.cxx` | Inclusive per-track timing residual (HGTD track time − truth particle production-vertex time), no event/track selection. |
 
 ---
 
 ## Root-Level Scripts
-
-### C++ Scripts (run with ROOT or compile separately)
-
-| File | Description |
-|---|---|
-| `vertex_time.cxx` | Vertex timing distribution analysis. Selects forward jets and the hard-scatter vertex, fits timing residuals with single- and double-Gaussian models, and produces resolution vs. forward jet multiplicity plots. |
-| `check_jet_sorting.cxx` | Diagnostic tool. Checks whether jets in input ROOT files are stored in descending-pT order and prints a per-event summary plus aggregate pass rate. |
-| `test_vbf_selection.cxx` | Validates the VBF selection cut chain against the ntuple data and reports per-cut pass rates. (Also a CMake build target — see above.) |
-| `test_vbf_integration.cxx` | Integration test checking that `processEventData()` correctly rejects non-VBF events, with printed pass-rate statistics. |
 
 ### `python/` Scripts (run from within `python/`)
 
@@ -102,58 +70,24 @@ The following targets are defined in `CMakeLists.txt` and built in the `build/` 
 | `event_tinkering.py` | Quick inspection tool that loads ROOT ntuples via uproot and prints jet information (truth HS jets, in-time/out-of-time pileup jets, reconstructed topo jets) for a given event. |
 | `clustering_animation.py` | Animates the iterative HGTD clustering algorithm step-by-step for one event. |
 
-### Python Scripts (project root)
-
-| File | Description |
-|---|---|
-| `analyze_pileup_removal.py` | Analyzes the effect of the 3σ pileup removal cut on track composition, measuring how many hard-scatter and pileup tracks are removed at each stage. |
-
 ---
 
 ## `share/scripts/` Contents
 
-These are legacy or utility scripts not built by CMake:
+These are legacy or utility scripts not built by CMake. The ONNX/DNN tooling
+below is orphaned — the `TEST_ML` score and its C++ inference engine
+(`src/ml_model.h`) have been removed from the active codebase, so these
+scripts no longer feed into anything `clustering_dt` reads:
 
 | File | Description |
 |---|---|
 | `generate_timeplot.cxx` | ROOT macro for generating timing resolution plots from pre-processed histogram files. |
 | `generate_onefile_timeplot.cxx` | Variant of `generate_timeplot.cxx` operating on a single input ROOT file. |
 | `testing_separation.cxx` | Tests vertex separation algorithms using common clustering utilities. |
-| `test_onnx_model.C` | ROOT macro that verifies ONNX model loading via ROOT's TMVA SOFIE interface. |
-| `inspect_onnx_model.py` | Inspects the ONNX model graph, prints layer shapes, and can export weights to `model_weights.json`. |
-| `export_onnx_model.py` | All-in-one pipeline: converts a TF SavedModel → ONNX → `model_weights.json`, updates `clustering_structs.h` normalization arrays, and installs artifacts to `share/models/`. |
-| `inspect_onnx_model.py` | Inspects the ONNX model graph, prints layer shapes, and can export weights to `model_weights.json`. |
-| `model_evaluation_helper.py` | Guide and reference code for evaluating the ML model in Python and comparing against C++ inference. |
-
----
-
-## ML Model Retraining Workflow
-
-The `TEST_ML` score uses a neural network (`8 → 128 → 64 → 32 → 1`, ReLU/Sigmoid).
-Training happens in `~/project/clusterclassification/neural-net.ipynb`.
-
-After training and saving a new model:
-
-```bash
-# Activate a Python environment with tensorflow, tf2onnx, onnx
-# (the venv used during initial setup: ~/project/temp-conversion-dir/venv_conv/)
-
-# Run from the vertex_timing root directory:
-python share/scripts/export_onnx_model.py
-#   --saved-model-dir  ~/project/clusterclassification/saved_model_dir  (default)
-#   --dest-dir         ~/project/vertex_timing/share/models              (default)
-
-# Rebuild
-cd build && make
-```
-
-The script does four things automatically:
-1. Converts `saved_model_dir/` → `model.onnx` via `tf2onnx` (opset 13)
-2. Exports weights to `model_weights.json` with stable `w1/b1/w2/b2/…` keys
-3. Updates `MEANS[N]` / `STDS[N]` in `src/clustering_structs.h` from `normalization_params.json`
-4. Installs `model_weights.json` and `normalization_params.json` to `share/models/`
-
-If the number of input features changes, also update `src/ml_model.h` (`N_INPUT`) and the feature extraction in `src/clustering_structs.h` (`getFeatures()`).
+| `test_onnx_model.C` | ROOT macro that verifies ONNX model loading via ROOT's TMVA SOFIE interface. (Orphaned — see note above.) |
+| `inspect_onnx_model.py` | Inspects the ONNX model graph, prints layer shapes, and can export weights to `model_weights.json`. (Orphaned — see note above.) |
+| `export_onnx_model.py` | All-in-one pipeline: converts a TF SavedModel → ONNX → `model_weights.json`. (Orphaned — see note above.) |
+| `model_evaluation_helper.py` | Guide and reference code for evaluating the ML model in Python and comparing against C++ inference. (Orphaned — see note above.) |
 
 ---
 
@@ -165,12 +99,11 @@ cd build
 cmake ..
 make
 
-# Run main analysis (outputs to figs/)
+# Run main analysis (outputs to figs/, or vbf|zjets|dijet with --sample)
 ./clustering_dt
 
-# Run error analysis
-./hgtd_matching
-./extract_error_metrics   # prints quantitative breakdown
+# Run failure decomposition
+./failure_decomposition
 
 # Visualize an event (script lives in python/)
 cd python && python event_display.py --file_num 000009 --event_num 1856 --extra_time 0.0
@@ -185,17 +118,17 @@ Each run of `clustering_dt` evaluates several scoring algorithms simultaneously.
 | `HGTD` | HGTD Algorithm | Selects the cluster chosen by the HGTD detector's own timing algorithm. Own collection; only active in the real-HGTD scenario. |
 | `TRKPT` | ΣpT | Scalar sum of track pT. |
 | `TRKPTZ` | ΣpTe^{−\|Δz\|} | Primary score. Weights pT by exp(−\|Δz\|/σ_z); tracks closer in z contribute more. |
-| `T_REFINED` | 2σ t Reclustering | Two-stage: iterative at 3σ then re-cluster top-3 cone clusters at `DIST_CUT_T_REFINED = 2σ`. |
-| `Z_REFINED` | 2σ z Refinement | z-based refinement variant. |
-| `ZT_REFINED` | 2σ z+t Reclustering | Two-stage with Z0_TVA track filter. |
-| `ZT_ITER` | 2D (z₀,t) Iterative | Iterative clustering with 2D Mahalanobis distance √((Δt/σt)²+(Δz₀/σz₀)²). |
+| `PASS` | Pass Cluster | First cluster passing quality cuts. |
+| `CONE` | Cone | Legacy cone-clustering baseline. |
+| `CONE_BDT` | Cone (BDT) | Cone clustering with a TMVA BDT selector (currently disabled — stub only). |
+| `HGTD_SORT` | HGTD BDT (pT-sorted) | pT-sorted simultaneous clustering with a TMVA BDT selector (currently disabled — stub only). |
 | `FILTJET` | Filter Tracks in Jets | Re-clusters using only tracks within ΔR < 0.4 of a jet, then TRKPTZ. |
-| `TEST_ML` | DNN Selection | Neural network (8→128→64→32→1, ReLU/sigmoid) with threshold 0.3. |
-| `MISCL` | TRKPTZ (pure clust) | **Oracle**: fills only for events where cluster purity **> 75%**. |
-| `MISAS` | TRKPTZ (no t misassign.) | **Oracle**: fills only when 100% of all fwd HS tracks have \|pull\| < 3σ (no timing misassignment). |
-| `CTIME` | TRKPTZ (clust t pure) | **Oracle**: fills only when 100% of the selected cluster's HS tracks have \|pull\| < 3σ. |
-| `PERF_EVT` | TRKPTZ (Pure Clust+Evt Times) | **Combined oracle**: MISCL ∧ MISAS — near-perfect event-level ceiling. |
-| `PERF_CLT` | TRKPTZ (Pure Clust+Clust. Times) | **Combined oracle**: MISCL ∧ CTIME — near-perfect cluster-level ceiling (~3× more statistics than PERF_EVT). |
+| `TEST_HS` | TRKPTZ (HS only) | Cone clustering restricted to truth-HS-linked tracks only. |
+| `WAVES` | WAVeS Score | Σ pT·pT_jet/max(ΔR,floor) weighted by exp(−1.5\|Δz\|); in-jet timing refinement drops absorbed PU tracks. |
+| `JET_T_REFINED` | WAVeS 2σ t Re-clustering | Own collection: clusters only jet-proximate tracks at the tighter 2σ iterative distance, selected by TRKPTZ. |
+| `TEST_MISAS` (MISAS) | TRKPTZ (no t misassign.) | **Oracle**: fills only when 100% of all fwd HS tracks have \|pull\| < 3σ (no timing misassignment). |
+| `WAVES_MISCL` | WAVeS (pure clust) | **Oracle**: WAVeS-selected cluster, gated on cluster purity. |
+| `WAVES_MISAS` | WAVeS (no t misassign.) | **Oracle**: WAVeS-selected cluster, gated on event-level HS timing purity. |
 
 Scores with `requiresPurity = true` (oracle scores) gate their denominator — events outside the gate are excluded entirely. All oracle functions return `0.0f` when no qualifying HS tracks exist, so zero-HS-track events are excluded from all oracle denominators.
 
@@ -203,23 +136,21 @@ Scores with `requiresPurity = true` (oracle scores) gate their denominator — e
 
 ## Removed Scoring Algorithms
 
-The following experimental scores were removed from the codebase. They were all based on using an independent calorimeter-derived timing estimate to gate or replace the HGTD track timing. The calorimeter time was computed as a Gaussian-weighted average of track times within a fixed cone around the calorimeter cluster centroid. In practice the estimator proved unreliable and all three approaches degraded efficiency without a compensating improvement in purity or resolution.
+Several scores have been removed from the codebase over time as they were superseded or found unreliable:
 
-| Short name | How it worked |
-|---|---|
-| `CALO60` / `CALO90` | Applied the standard `TRKPTZ` score, but vetoed cluster selection if the cluster's time differed from the calorimeter time estimate by more than 60 ps / 90 ps. The cluster collection and z reconstruction were unchanged; only the selection decision was affected by the calorimeter gate. |
-| `JUST60` / `JUST90` | Constructed a synthetic cluster whose assigned time came entirely from the calorimeter estimate. Only tracks whose times fell within 60 ps / 90 ps of the calorimeter time were included in the synthetic cluster. Unlike the FILT variants, the underlying cone-clustering and z reconstruction used the full track set; only the reported cluster time was replaced. |
-| `FILT60` / `FILT90` | Called `filterCaloTracks` before cone clustering to remove any track whose time lay more than 60 ps / 90 ps from the calorimeter estimate. Because the filtering happened before clustering, both the z position and the track composition of the resulting clusters were affected, not just the timing. |
-
-The supporting infrastructure (`filterCaloTracks`, the calorimeter time variables in `chooseCluster`, and the JUST synthetic-cluster branches) has been deleted along with the score definitions.
+- **`T_REFINED`, `Z_REFINED`, `ZT_REFINED`, `ZT_ITER`** — earlier two-stage re-clustering/refinement variants, superseded by the WAVeS-based scores (`WAVES`, `JET_T_REFINED`) above.
+- **`TEST_MISCL`, `PERF_EVT`** — TRKPTZ purity/combined oracles, superseded by the `WAVES_MISCL`/`WAVES_MISAS` oracle pair.
+- **`TEST_ML`** — a DNN selection score (8→128→64→32→1 neural network). The C++ inference engine (`src/ml_model.h`) and its JSON weight loader (`src/json.hpp`) have been deleted along with the score.
+- **`CALO60` / `CALO90`, `JUST60` / `JUST90`, `FILT60` / `FILT90`** — experimental scores based on an independent calorimeter-derived timing estimate to gate, replace, or pre-filter the HGTD track timing. The calorimeter time was a Gaussian-weighted average of track times within a fixed cone around the calorimeter cluster centroid; in practice the estimator proved unreliable and all three approaches degraded efficiency without a compensating improvement in purity or resolution. The supporting infrastructure (`filterCaloTracks`, the calorimeter time variables in `chooseCluster`, and the JUST synthetic-cluster branches) has been deleted along with the score definitions.
 
 ---
 
-## Disabled Event Selection Cuts
+## Event Selection
 
-The following cuts are commented out in `src/event_processing.h` and can be re-enabled for specific studies:
+Every event must pass `branch->passBasicCuts()` (minimum jet count, reco/truth HS vertex within `MAX_VTX_DZ`) and `branch->passJetPtCut()` (both in `src/clustering_structs.h`), the latter requiring:
+- At least `MIN_PASSPT_JETS` reco jets above `MIN_JET_PT`, at least `MIN_PASSETA_JETS` of which are in the forward HGTD acceptance — no truth-HS jet matching required.
+- The VBS candidate pair — the opposite-hemisphere, pT-passing jet pair with the largest invariant mass `m_jj` (`calcBestVbsDeltaEta()`) — must have an η separation ≥ `VBS_JET_D_ETA`.
 
-- **VBF signal region** (`branch->passVBFSignalRegion()`): Applies VBF H→invisible selection cuts. Disabled to run over the full inclusive sample; re-enable for VBF-specific efficiency studies.
-- **Forward HS track requirement** (`branch->pass_forward_hs_tracks(nForwardTrack_HS)`): Requires a minimum number of hard-scatter tracks in the forward region. Useful for studies of track multiplicity dependence; disabled by default to retain low-track events in the denominator.
+`branch->passForwardHsTracks(nForwardHSTrack)` (`src/clustering_structs.h`) is an available but currently-unused testing-only helper that gates on a minimum forward hard-scatter track count; not applied in the primary analysis.
 
 ---
