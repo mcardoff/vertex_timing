@@ -8,31 +8,28 @@
 #     <sample>      vbf | zjets | dijet | default   ("default" = no --sample flag,
 #                    i.e. the local ../../ntuple-hgtd/ + ../figs/ behavior)
 #
-# Assumes a shared filesystem between the condor submit and execute hosts
-# (true on the UChicago AF pool) — PROJECT_DIR must already contain a build/
-# directory built with `cd build && cmake .. && make` *before* submitting.
-# This script does not rebuild, so concurrently-queued jobs don't race on
-# the same build/ directory.
+# No shared filesystem between submit and execute hosts: <executable>
+# arrives in this job's scratch directory via transfer_input_files. It's
+# moved into a build/ subdir so the program's own "../<sample>" output path
+# convention (mirroring `cd build && ./clustering_dt`) lands at the scratch
+# root, where transfer_output_files can stage it back.
 # ---------------------------------------------------------------------------
 set -euo pipefail
-
-# EDIT ME: absolute path to the vertex_timing checkout on the shared filesystem.
-PROJECT_DIR=/home/mcardiff/project/vertex_timing
 
 EXECUTABLE=$1
 SAMPLE=$2
 
-# ATLAS/LCG environment (provides ROOT + Boost via cvmfs, matching the
-# `lsetup root` assumption baked into CMakeLists.txt's cvmfs discovery).
-# atlasLocalSetup.sh/lsetup reference unset variables internally (e.g.
-# ALRB_frontlineSite) and aren't `set -e`/`set -u` safe, so relax those
-# flags around them and restore afterward.
+# ATLAS/LCG environment (provides ROOT + Boost via cvmfs). atlasLocalSetup.sh
+# / lsetup reference unset variables internally (e.g. ALRB_frontlineSite) and
+# aren't `set -e`/`set -u` safe, so relax those flags around them.
 set +eu
 source "${ATLAS_LOCAL_ROOT_BASE}/user/atlasLocalSetup.sh"
-lsetup "root 6.38.04-x86_64-el9-gcc15-opt"
+lsetup "root 6.38.04-x86_64-el9-gcc15-opt"   # match the version used to build
 set -euo pipefail
 
-cd "${PROJECT_DIR}/build"
+mkdir -p build
+mv "${EXECUTABLE}" build/
+cd build
 
 if [ "${SAMPLE}" = "default" ]; then
   ./"${EXECUTABLE}"

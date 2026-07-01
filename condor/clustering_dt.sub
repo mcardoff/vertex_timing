@@ -8,28 +8,37 @@
 # Submit (from inside condor/, so relative paths below resolve correctly):
 #   cd condor && condor_submit clustering_dt.sub
 #
-# This queues 3 jobs, one per --sample value. Edit PROJECT_DIR in
-# run_analysis.sh first. To run rpt_v5 instead, copy this file and change
-# the `arguments` line below (rpt_v5 also supports --sample).
+# Execute hosts don't share a filesystem with the submit host (confirmed via
+# a FileSystemDomain match failure), so the built executable is staged in via
+# transfer_input_files and results are staged back via transfer_output_files.
+# The ntuple inputs themselves are read from /data/mcardiff/... (an absolute
+# path baked into --sample=vbf|zjets|dijet), not transferred.
+#
+# This queues 3 jobs, one per --sample value. To run rpt_v5 instead, copy
+# this file and change `arguments` and `transfer_input_files` below (rpt_v5
+# also supports --sample).
 # ---------------------------------------------------------------------------
-universe                = vanilla
-executable              = run_analysis.sh
-arguments               = clustering_dt $(sample)
+universe                 = vanilla
+executable               = run_analysis.sh
+arguments                = clustering_dt $(sample)
 
-getenv                  = True
-# Shared filesystem between submit/execute hosts, no need to transfer files.
-should_transfer_files   = NO
+should_transfer_files    = YES
+when_to_transfer_output  = ON_EXIT
+transfer_input_files     = ../build/clustering_dt
+transfer_output_files    = $(sample)
+
+getenv                   = True
 
 # CERN-style job-length hint; harmless no-op on pools that don't read it,
 # remove if your condor pool doesn't recognize +JobFlavour.
-+JobFlavour             = "nextweek"
++JobFlavour              = "nextweek"
 
-request_cpus            = 1
-request_memory          = 4GB
-request_disk            = 4GB
+request_cpus             = 1
+request_memory           = 4GB
+request_disk             = 4GB
 
-output                  = logs/$(sample).$(ClusterId).$(ProcId).out
-error                   = logs/$(sample).$(ClusterId).$(ProcId).err
-log                     = logs/$(sample).$(ClusterId).$(ProcId).log
+output                   = logs/$(sample).$(ClusterId).$(ProcId).out
+error                    = logs/$(sample).$(ClusterId).$(ProcId).err
+log                      = logs/$(sample).$(ClusterId).$(ProcId).log
 
 queue sample in (vbf, zjets, dijet)
