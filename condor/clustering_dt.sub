@@ -17,7 +17,8 @@ executable              = run_analysis.sh
 arguments               = clustering_dt $(sample)
 
 getenv                  = True
-should_transfer_files   = NO   # shared filesystem between submit/execute hosts
+# Shared filesystem between submit/execute hosts, no need to transfer files.
+should_transfer_files   = NO
 
 # CERN-style job-length hint; harmless no-op on pools that don't read it,
 # remove if your condor pool doesn't recognize +JobFlavour.
