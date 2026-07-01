@@ -24,8 +24,13 @@ SAMPLE=$2
 
 # ATLAS/LCG environment (provides ROOT + Boost via cvmfs, matching the
 # `lsetup root` assumption baked into CMakeLists.txt's cvmfs discovery).
+# atlasLocalSetup.sh/lsetup reference unset variables internally (e.g.
+# ALRB_frontlineSite) and aren't `set -e`/`set -u` safe, so relax those
+# flags around them and restore afterward.
+set +eu
 source "${ATLAS_LOCAL_ROOT_BASE}/user/atlasLocalSetup.sh"
 lsetup "root 6.38.04-x86_64-el9-gcc15-opt"
+set -euo pipefail
 
 cd "${PROJECT_DIR}/build"
 
