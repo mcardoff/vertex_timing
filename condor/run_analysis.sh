@@ -17,7 +17,7 @@
 set -euo pipefail
 
 # EDIT ME: absolute path to the vertex_timing checkout on the shared filesystem.
-PROJECT_DIR=/path/to/vertex_timing
+PROJECT_DIR=/home/mcardiff/project/vertex_timing
 
 EXECUTABLE=$1
 SAMPLE=$2
@@ -25,7 +25,7 @@ SAMPLE=$2
 # ATLAS/LCG environment (provides ROOT + Boost via cvmfs, matching the
 # `lsetup root` assumption baked into CMakeLists.txt's cvmfs discovery).
 source "${ATLAS_LOCAL_ROOT_BASE}/user/atlasLocalSetup.sh"
-lsetup root
+lsetup "root 6.38.04-x86_64-el9-gcc15-opt"
 
 cd "${PROJECT_DIR}/build"
 
