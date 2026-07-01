@@ -35,11 +35,15 @@
 #include <TTreeReader.h>
 #include <TTreeReaderArray.h>
 #include <TVector2.h>
+#include <ROOT/TTreeProcessorMT.hxx>
 
 #include <boost/filesystem.hpp>
 #include <algorithm>
+#include <atomic>
 #include <iomanip>
 #include <iostream>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -109,6 +113,62 @@ static inline double dR(double j_eta, double j_phi, double t_eta, double t_phi) 
   return std::sqrt(deta * deta + dphi * dphi);
 }
 
+// -----------------------------------------------------------------------------
+// Histogram binning + Scenario factory (file scope, not main()-local, so a
+// TTreeProcessorMT worker thread can build one full set per thread).
+//
+// Non-uniform binning: fine bins in [0, 2.5] for ROC granularity, then one
+// wide bin to capture the tail without bloating memory.  250 bins of width
+// 0.01 — coarse enough that the ROC + error bars aren't overcrowded.
+// -----------------------------------------------------------------------------
+static const std::vector<double> rpt_bins = []() {
+  std::vector<double> b;
+  b.reserve(252);
+  for (int i = 0; i <= 250; ++i) b.push_back(0.01 * i);
+  b.push_back(375.0);
+  return b;
+}();
+static const int rpt_nbin = (int)rpt_bins.size() - 1;  // 251
+
+static TH1D* makeHist(const char* name, const char* title) {
+  return new TH1D(name, title, rpt_nbin, rpt_bins.data());
+}
+
+static std::vector<Scenario> makeScenarios(const std::string& suffix) {
+  std::vector<Scenario> s = {
+    {"zonly",       "ITk-only",                    C05, nullptr, nullptr},
+    {"hgtd",        "HGTD t_{0}",                  C01, nullptr, nullptr},
+    {"waves",       "WAVeS t_{0}",                 C03, nullptr, nullptr},
+    {"waves_misas", "WAVeS t_{0} + clean timing",  C04, nullptr, nullptr},
+    {"truth",       "Truth t_{0}",                 C06, nullptr, nullptr},
+  };
+  for (auto& sc : s) {
+    sc.h_hs = makeHist(("HS_" + sc.name + suffix).c_str(),
+                       ("Hard Scatter R_{pT}: " + sc.legend + ";R_{pT};Entries").c_str());
+    sc.h_pu = makeHist(("PU_" + sc.name + suffix).c_str(),
+                       ("Pile-Up R_{pT}: "      + sc.legend + ";R_{pT};Entries").c_str());
+  }
+  return s;
+}
+
+// -----------------------------------------------------------------------------
+// ThreadState
+//   Everything one worker thread accumulates across whatever task ranges it
+//   services: its own copy of the two pT-slice Scenario sets (each worker's
+//   histograms are identically named to every other worker's -- harmless,
+//   since TH1::AddDirectory(kFALSE) means none of them register into any
+//   global directory) plus the event/floor-diagnostic counters. Built once
+//   per worker thread (lazily, on first use) and merged into one after the
+//   event loop.
+// -----------------------------------------------------------------------------
+struct ThreadState {
+  std::vector<Scenario> scen_lo = makeScenarios("_lo");  // 30–40 GeV
+  std::vector<Scenario> scen_hi = makeScenarios("_hi");  // >40 GeV
+  long n_total = 0, n_pass_basic = 0, n_hgtd_valid = 0;
+  double pu_tot_pt = 0, pu_floor_pt = 0, hs_tot_pt = 0, hs_floor_pt = 0;  // >40
+  double pu_tot_lo = 0, pu_floor_lo = 0, hs_tot_lo = 0, hs_floor_lo = 0;  // 30-40
+};
+
 // RpT using ghost association (paper definition): sum pT of tracks that are
 // both ghost-associated to the jet AND in the caller's z₀-selected set.
 static double computeRpT(BranchPointerWrapper* b,
@@ -125,10 +185,16 @@ int main(int argc, char** argv) {
   SetAtlasStyle();
   gStyle->SetOptStat(0);
 
+  // Must precede any histogram construction -- see the identical note in
+  // src/clustering_dt.cxx's main(). Every worker thread's ThreadState
+  // produces identically-named histograms, harmless only because of this.
+  TH1::AddDirectory(kFALSE);
+
   // --- Sample selection (--sample=vbf|zjets|dijet; default: local VBF ntuple) ---
   auto sample = MyUtl::resolveSample(argc, argv);
   MyUtl::ENERGY_LABEL = sample.energyLabel;
   MyUtl::OUTPUT_DIR   = sample.outputDir;
+  unsigned nThreads = MyUtl::resolveThreads(argc, argv);
 
   TChain chain("ntuple");
   setupChain(chain, sample.ntupleDir.c_str());
@@ -136,205 +202,238 @@ int main(int argc, char** argv) {
     std::cerr << "No ROOT files found.  Aborting.\n";
     return 1;
   }
+  ROOT::EnableImplicitMT(nThreads);
 
-  TTreeReader reader(&chain);
-  BranchPointerWrapper branch(reader);
+  // --- Per-thread state registry, merged into one after the event loop.
+  //     ThreadState (via Scenario's raw TH1D*) is trivially copy-constructible,
+  //     which would make ROOT::TThreadedObject silently *shallow*-copy the
+  //     TH1D pointers across "cloned" slots -- every worker would then Fill()
+  //     the same histograms with no synchronization. Use the same hand-rolled
+  //     mutex-guarded-registry + thread_local-pointer-cache pattern as
+  //     src/clustering_dt.cxx's per-thread AnalysisObj map instead.
+  //
+  //     The mutex also serializes the ThreadState construction itself, not
+  //     just the push_back -- defensive, matching a real crash found in
+  //     clustering_dt.cxx's AnalysisObj construction (SetFillColorAlpha()
+  //     racing on ROOT's global TColor table). ThreadState's construction
+  //     doesn't call any color-touching ROOT functions today, but the
+  //     serialization is a one-time per-thread cost, so there's no reason
+  //     to leave that door open. ---
+  std::mutex stateRegistryMutex;
+  std::vector<std::unique_ptr<ThreadState>> stateRegistry;
 
-  // Paper jet-label helper (ATL-HGTD-PUB-2022-001 Sec. 3).
-  // HS  : dR(reco, truthHS) < 0.3  AND  truthHS_pT > 10 GeV
-  auto paperIsHS = [&](double j_eta, double j_phi) {
-    for (int t = 0; t < (int)branch.truthHSJetPt.GetSize(); ++t) {
-      if (branch.truthHSJetPt[t] < 10.0) continue;
-      if (dR(j_eta, j_phi, branch.truthHSJetEta[t], branch.truthHSJetPhi[t]) < 0.3)
-        return true;
-    }
-    return false;
-  };
-  // PU: dR > 0.6 from any truth HS jet with pT > 4 GeV (Sec. 3).
-  auto paperIsPU = [&](double j_eta, double j_phi) {
-    for (int t = 0; t < (int)branch.truthHSJetPt.GetSize(); ++t) {
-      if (branch.truthHSJetPt[t] < 4.0) continue;
-      if (dR(j_eta, j_phi, branch.truthHSJetEta[t], branch.truthHSJetPhi[t]) < 0.6)
-        return false;
-    }
-    return true;
-  };
-
-  // Non-uniform binning: fine bins in [0, 2.5] for ROC granularity, then one
-  // wide bin to capture the tail without bloating memory.  250 bins of width
-  // 0.01 — coarse enough that the ROC + error bars aren't overcrowded.
-  static std::vector<double> rpt_bins = []() {
-    std::vector<double> b;
-    b.reserve(252);
-    for (int i = 0; i <= 250; ++i) b.push_back(0.01 * i);
-    b.push_back(375.0);
-    return b;
-  }();
-  const int nbin = (int)rpt_bins.size() - 1;  // 251
-
-  auto makeHist = [&](const char* name, const char* title) {
-    return new TH1D(name, title, nbin, rpt_bins.data());
-  };
-
-  auto makeScenarios = [&](const std::string& suffix) {
-    std::vector<Scenario> s = {
-      {"zonly",       "ITk-only",                    C05, nullptr, nullptr},
-      {"hgtd",        "HGTD t_{0}",                  C01, nullptr, nullptr},
-      {"waves",       "WAVeS t_{0}",                 C03, nullptr, nullptr},
-      {"waves_misas", "WAVeS t_{0} + clean timing",  C04, nullptr, nullptr},
-      {"truth",       "Truth t_{0}",                 C06, nullptr, nullptr},
-    };
-    for (auto& sc : s) {
-      sc.h_hs = makeHist(("HS_" + sc.name + suffix).c_str(),
-                         ("Hard Scatter R_{pT}: " + sc.legend + ";R_{pT};Entries").c_str());
-      sc.h_pu = makeHist(("PU_" + sc.name + suffix).c_str(),
-                         ("Pile-Up R_{pT}: "      + sc.legend + ";R_{pT};Entries").c_str());
-    }
-    return s;
-  };
-
-  std::vector<Scenario> scen_lo = makeScenarios("_lo");  // 30–40 GeV
-  std::vector<Scenario> scen_hi = makeScenarios("_hi");  // >40 GeV
-
-  long n_total = 0, n_pass_basic = 0, n_hgtd_valid = 0;
-
-  // Untimed-track-floor diagnostic (>40 GeV slice): of the ghost-associated,
-  // z-selected track pT in each jet, how much is carried by tracks with NO valid
-  // HGTD time?  Those tracks pass every timing gate unconditionally, so they set
-  // the irreducible RpT floor that no timing method (even Truth) can remove.
-  double pu_tot_pt = 0, pu_floor_pt = 0, hs_tot_pt = 0, hs_floor_pt = 0;        // >40
-  double pu_tot_lo = 0, pu_floor_lo = 0, hs_tot_lo = 0, hs_floor_lo = 0;        // 30-40
+  std::atomic<Long64_t> progressCounter{0};
 
   std::cout << "Starting Event Loop\n";
   const Long64_t N_EVENT = chain.GetEntries();
 
-  while (reader.Next()) {
-    ++n_total;
+  ROOT::TTreeProcessorMT proc(chain, nThreads);
+  proc.Process([&](TTreeReader& reader) {
+    // Fresh per invocation: a worker thread can be handed a different
+    // TTreeReader across task ranges, so this cannot be thread_local.
+    BranchPointerWrapper branch(reader);
 
-    if (n_total % 100 == 0)
-      std::cout << "Progress: " << n_total << "/" << N_EVENT << "\r" << std::flush;
-
-    // ── Require only vertex quality (paper Sec. 3: |z_reco − z_truth| < 2 mm).
-    if (branch.recoVtxZ.GetSize() == 0 || branch.truthVtxZ.GetSize() == 0) continue;
-    if (std::abs(branch.recoVtxZ[0] - branch.truthVtxZ[0]) > MAX_VTX_DZ) continue;
-    ++n_pass_basic;
-
-    // ── Track selection: all tracks by z-significance (no eta cut) for the
-    //    z-only baseline, matching the paper's ITk-only scenario. ────────────
-    std::vector<int> trk_all;
-    for (size_t trk = 0; trk < branch.trackZ0.GetSize(); ++trk) {
-      double trkPt = branch.trackPt[trk];
-      if (trkPt < MIN_TRACK_PT || trkPt > MAX_TRACK_PT) continue;
-      if (!branch.trackQuality[trk]) continue;
-      if (passTrackVertexAssociation((int)trk, 0, &branch, 2.5))
-        trk_all.push_back((int)trk);
+    // Lazily build this thread's state once; reused across however many
+    // task ranges this worker thread services.
+    thread_local ThreadState* tlState = nullptr;
+    if (!tlState) {
+      std::lock_guard<std::mutex> lock(stateRegistryMutex);
+      stateRegistry.push_back(std::make_unique<ThreadState>());
+      tlState = stateRegistry.back().get();
     }
+    ThreadState& state = *tlState;
 
-    // ── HGTD-acceptance tracks only (used for WAVeS clustering). ────────────
-    std::vector<int> trk_z = getAssociatedTracks(&branch, MIN_TRACK_PT, MAX_TRACK_PT, 2.5);
-
-    // ── WAVeS clustering + selection. ────────────────────────────────────────
-    auto clusters = clusterTracksInTime(
-        trk_z, &branch, DIST_CUT_CONE,
-        /*useSmearedTimes=*/false, /*checkTimeValid=*/true, IDEAL_TRACK_RES,
-        ClusteringMethod::ITERATIVE, /*useZ0=*/false,
-        /*sortTracks=*/false, /*calcPurityFlag=*/true);
-
-    // WAVeS selection: highest WAVeS-score cluster; time via in-jet refinement.
-    double t_waves = 0.0, var_waves = 0.0;
-    bool   waves_ok = false;
-    if (!clusters.empty()) {
-      auto best   = chooseCluster(clusters, Score::WAVES);
-      t_waves     = best.calculateTime(Score::WAVES, &branch);  // in-jet refined
-      var_waves   = best.sigmas[0] * best.sigmas[0];
-      waves_ok    = true;
-    }
-
-    // ── HGTD ntuple vertex time. ─────────────────────────────────────────────
-    double t_hgtd         = branch.recoVtxTime[0];
-    double var_hgtd       = branch.recoVtxTimeRes[0] * branch.recoVtxTimeRes[0];
-    bool   hgtd_vtx_valid = (branch.recoVtxValid[0] == 1);
-    if (hgtd_vtx_valid) ++n_hgtd_valid;
-
-    // ── Per-track time gate.  pull width ~1.5 → var_vtx ×2.25. ──────────────
-    auto applyTimeGate = [&](const std::vector<int>& base,
-                              double t_vtx, double var_vtx, bool vtx_valid,
-                              double sigma = 2.0) {
-      std::vector<int> out;
-      out.reserve(base.size());
-      for (int idx : base) {
-        bool apply = vtx_valid && branch.trackTimeValid[idx] == 1;
-        if (!apply) { out.push_back(idx); continue; }
-        double dt    = branch.trackTime[idx] - t_vtx;
-        double var_t = branch.trackTimeRes[idx] * branch.trackTimeRes[idx];
-        double pull  = std::abs(dt) / std::sqrt(2.25 * var_vtx + var_t);
-        if (pull < sigma) out.push_back(idx);
+    // Redefined fresh per invocation alongside branch (cheap -- no
+    // precomputation, just captures branch by reference).
+    // Paper jet-label helper (ATL-HGTD-PUB-2022-001 Sec. 3).
+    // HS  : dR(reco, truthHS) < 0.3  AND  truthHS_pT > 10 GeV
+    auto paperIsHS = [&](double j_eta, double j_phi) {
+      for (int t = 0; t < (int)branch.truthHSJetPt.GetSize(); ++t) {
+        if (branch.truthHSJetPt[t] < 10.0) continue;
+        if (dR(j_eta, j_phi, branch.truthHSJetEta[t], branch.truthHSJetPhi[t]) < 0.3)
+          return true;
       }
-      return out;
+      return false;
+    };
+    // PU: dR > 0.6 from any truth HS jet with pT > 4 GeV (Sec. 3).
+    auto paperIsPU = [&](double j_eta, double j_phi) {
+      for (int t = 0; t < (int)branch.truthHSJetPt.GetSize(); ++t) {
+        if (branch.truthHSJetPt[t] < 4.0) continue;
+        if (dR(j_eta, j_phi, branch.truthHSJetEta[t], branch.truthHSJetPhi[t]) < 0.6)
+          return false;
+      }
+      return true;
     };
 
-    std::vector<int> trk_hgtd  = applyTimeGate(trk_all, t_hgtd,  var_hgtd,  hgtd_vtx_valid, GATE_SIGMA);
-    std::vector<int> trk_waves = applyTimeGate(trk_all, t_waves, var_waves, waves_ok,       GATE_SIGMA);
+    while (reader.Next()) {
+      ++state.n_total;
 
-    // ── Truth-vertex-t₀: gate the reco track times against the perfect HS
-    //    vertex time (var_vtx = 0). ──────────────────────────────────────────
-    double t_truth = branch.truthVtxTime[0];
-    std::vector<int> trk_truth = applyTimeGate(trk_all, t_truth, 0.0, true, GATE_SIGMA);
+      Long64_t n = ++progressCounter;
+      if (n % 5000 == 0)
+        std::cout << "Progress: " << n << "/" << N_EVENT << "\r" << std::flush;
 
-    // ── "Clean timing" event filter: only fill the waves_misas scenario in
-    //    events whose HS timing purity clears MISAS_PURITY_CUT.  Same WAVeS time
-    //    gate otherwise. ───────────────────────────────────────────────────────
-    bool gate_misas = (calcHSTimingPurity(trk_z, &branch) >= MISAS_PURITY_CUT);
+      // ── Require only vertex quality (paper Sec. 3: |z_reco − z_truth| < 2 mm).
+      if (branch.recoVtxZ.GetSize() == 0 || branch.truthVtxZ.GetSize() == 0) continue;
+      if (std::abs(branch.recoVtxZ[0] - branch.truthVtxZ[0]) > MAX_VTX_DZ) continue;
+      ++state.n_pass_basic;
 
-    // Build per-scenario sets once per event for O(1) ghost-index lookup.
-    std::unordered_set<int> set_all  (trk_all.begin(),   trk_all.end());
-    std::unordered_set<int> set_hgtd (trk_hgtd.begin(),  trk_hgtd.end());
-    std::unordered_set<int> set_waves(trk_waves.begin(), trk_waves.end());
-    std::unordered_set<int> set_truth(trk_truth.begin(), trk_truth.end());
+      // ── Track selection: all tracks by z-significance (no eta cut) for the
+      //    z-only baseline, matching the paper's ITk-only scenario. ────────────
+      std::vector<int> trk_all;
+      for (size_t trk = 0; trk < branch.trackZ0.GetSize(); ++trk) {
+        double trkPt = branch.trackPt[trk];
+        if (trkPt < MIN_TRACK_PT || trkPt > MAX_TRACK_PT) continue;
+        if (!branch.trackQuality[trk]) continue;
+        if (passTrackVertexAssociation((int)trk, 0, &branch, 2.5))
+          trk_all.push_back((int)trk);
+      }
 
-    // ── Fill jets into pT slices. ─────────────────────────────────────────────
-    auto fillJets = [&](std::vector<Scenario>& sv, double pt_lo, double pt_hi) {
-      for (int j = 0; j < (int)branch.topoJetPt.GetSize(); ++j) {
-        double j_pt  = branch.topoJetPt[j];
-        double j_eta = branch.topoJetEta[j];
-        double j_phi = branch.topoJetPhi[j];
-        if (j_pt <= pt_lo || j_pt >= pt_hi) continue;
-        if (std::abs(j_eta) < JET_ETA_MIN || std::abs(j_eta) > JET_ETA_MAX) continue;
-        bool isHS = paperIsHS(j_eta, j_phi);
-        bool isPU = paperIsPU(j_eta, j_phi);
-        if (!isHS && !isPU) continue;
-        const auto& ghost = branch.topoJetGhostTrackIdx[j];
-        auto fill = [&](Scenario& s, const std::unordered_set<int>& s_set, bool ok = true) {
-          if (!ok) return;
-          double r = computeRpT(&branch, ghost, j_pt, s_set);
-          if (isHS) s.h_hs->Fill(r);
-          else      s.h_pu->Fill(r);
-        };
-        fill(sv[0], set_all);                       // ITk-only
-        fill(sv[1], set_hgtd);                      // HGTD t0
-        fill(sv[2], set_waves);                     // WAVeS t0
-        fill(sv[3], set_waves, gate_misas);         // WAVeS t0 + clean timing (event filter)
-        fill(sv[4], set_truth);                     // Truth t0
+      // ── HGTD-acceptance tracks only (used for WAVeS clustering). ────────────
+      std::vector<int> trk_z = getAssociatedTracks(&branch, MIN_TRACK_PT, MAX_TRACK_PT, 2.5);
 
-        // Untimed floor accounting, per slice.
-        for (int idx : ghost) {
-          if (!set_all.count(idx)) continue;
-          double pt = branch.trackPt[idx];
-          bool untimed = (branch.trackTimeValid[idx] != 1);
-          if (pt_lo >= 40.0) {
-            if (isHS) { hs_tot_pt += pt; if (untimed) hs_floor_pt += pt; }
-            else      { pu_tot_pt += pt; if (untimed) pu_floor_pt += pt; }
-          } else {
-            if (isHS) { hs_tot_lo += pt; if (untimed) hs_floor_lo += pt; }
-            else      { pu_tot_lo += pt; if (untimed) pu_floor_lo += pt; }
+      // ── WAVeS clustering + selection. ────────────────────────────────────────
+      auto clusters = clusterTracksInTime(
+          trk_z, &branch, DIST_CUT_CONE,
+          /*useSmearedTimes=*/false, /*checkTimeValid=*/true, IDEAL_TRACK_RES,
+          ClusteringMethod::ITERATIVE, /*useZ0=*/false,
+          /*sortTracks=*/false, /*calcPurityFlag=*/true);
+
+      // WAVeS selection: highest WAVeS-score cluster; time via in-jet refinement.
+      double t_waves = 0.0, var_waves = 0.0;
+      bool   waves_ok = false;
+      if (!clusters.empty()) {
+        auto best   = chooseCluster(clusters, Score::WAVES);
+        t_waves     = best.calculateTime(Score::WAVES, &branch);  // in-jet refined
+        var_waves   = best.sigmas[0] * best.sigmas[0];
+        waves_ok    = true;
+      }
+
+      // ── HGTD ntuple vertex time. ─────────────────────────────────────────────
+      double t_hgtd         = branch.recoVtxTime[0];
+      double var_hgtd       = branch.recoVtxTimeRes[0] * branch.recoVtxTimeRes[0];
+      bool   hgtd_vtx_valid = (branch.recoVtxValid[0] == 1);
+      if (hgtd_vtx_valid) ++state.n_hgtd_valid;
+
+      // ── Per-track time gate.  pull width ~1.5 → var_vtx ×2.25. ──────────────
+      auto applyTimeGate = [&](const std::vector<int>& base,
+                                double t_vtx, double var_vtx, bool vtx_valid,
+                                double sigma = 2.0) {
+        std::vector<int> out;
+        out.reserve(base.size());
+        for (int idx : base) {
+          bool apply = vtx_valid && branch.trackTimeValid[idx] == 1;
+          if (!apply) { out.push_back(idx); continue; }
+          double dt    = branch.trackTime[idx] - t_vtx;
+          double var_t = branch.trackTimeRes[idx] * branch.trackTimeRes[idx];
+          double pull  = std::abs(dt) / std::sqrt(2.25 * var_vtx + var_t);
+          if (pull < sigma) out.push_back(idx);
+        }
+        return out;
+      };
+
+      std::vector<int> trk_hgtd  = applyTimeGate(trk_all, t_hgtd,  var_hgtd,  hgtd_vtx_valid, GATE_SIGMA);
+      std::vector<int> trk_waves = applyTimeGate(trk_all, t_waves, var_waves, waves_ok,       GATE_SIGMA);
+
+      // ── Truth-vertex-t₀: gate the reco track times against the perfect HS
+      //    vertex time (var_vtx = 0). ──────────────────────────────────────────
+      double t_truth = branch.truthVtxTime[0];
+      std::vector<int> trk_truth = applyTimeGate(trk_all, t_truth, 0.0, true, GATE_SIGMA);
+
+      // ── "Clean timing" event filter: only fill the waves_misas scenario in
+      //    events whose HS timing purity clears MISAS_PURITY_CUT.  Same WAVeS time
+      //    gate otherwise. ───────────────────────────────────────────────────────
+      bool gate_misas = (calcHSTimingPurity(trk_z, &branch) >= MISAS_PURITY_CUT);
+
+      // Build per-scenario sets once per event for O(1) ghost-index lookup.
+      std::unordered_set<int> set_all  (trk_all.begin(),   trk_all.end());
+      std::unordered_set<int> set_hgtd (trk_hgtd.begin(),  trk_hgtd.end());
+      std::unordered_set<int> set_waves(trk_waves.begin(), trk_waves.end());
+      std::unordered_set<int> set_truth(trk_truth.begin(), trk_truth.end());
+
+      // ── Fill jets into pT slices. ─────────────────────────────────────────────
+      auto fillJets = [&](std::vector<Scenario>& sv, double pt_lo, double pt_hi) {
+        for (int j = 0; j < (int)branch.topoJetPt.GetSize(); ++j) {
+          double j_pt  = branch.topoJetPt[j];
+          double j_eta = branch.topoJetEta[j];
+          double j_phi = branch.topoJetPhi[j];
+          if (j_pt <= pt_lo || j_pt >= pt_hi) continue;
+          if (std::abs(j_eta) < JET_ETA_MIN || std::abs(j_eta) > JET_ETA_MAX) continue;
+          bool isHS = paperIsHS(j_eta, j_phi);
+          bool isPU = paperIsPU(j_eta, j_phi);
+          if (!isHS && !isPU) continue;
+          const auto& ghost = branch.topoJetGhostTrackIdx[j];
+          auto fill = [&](Scenario& s, const std::unordered_set<int>& s_set, bool ok = true) {
+            if (!ok) return;
+            double r = computeRpT(&branch, ghost, j_pt, s_set);
+            if (isHS) s.h_hs->Fill(r);
+            else      s.h_pu->Fill(r);
+          };
+          fill(sv[0], set_all);                       // ITk-only
+          fill(sv[1], set_hgtd);                      // HGTD t0
+          fill(sv[2], set_waves);                     // WAVeS t0
+          fill(sv[3], set_waves, gate_misas);         // WAVeS t0 + clean timing (event filter)
+          fill(sv[4], set_truth);                     // Truth t0
+
+          // Untimed floor accounting, per slice.
+          for (int idx : ghost) {
+            if (!set_all.count(idx)) continue;
+            double pt = branch.trackPt[idx];
+            bool untimed = (branch.trackTimeValid[idx] != 1);
+            if (pt_lo >= 40.0) {
+              if (isHS) { state.hs_tot_pt += pt; if (untimed) state.hs_floor_pt += pt; }
+              else      { state.pu_tot_pt += pt; if (untimed) state.pu_floor_pt += pt; }
+            } else {
+              if (isHS) { state.hs_tot_lo += pt; if (untimed) state.hs_floor_lo += pt; }
+              else      { state.pu_tot_lo += pt; if (untimed) state.pu_floor_lo += pt; }
+            }
           }
         }
-      }
-    };
+      };
 
-    fillJets(scen_lo, 30.0, 40.0);
-    fillJets(scen_hi, 40.0, 1e9);
+      fillJets(state.scen_lo, 30.0, 40.0);
+      fillJets(state.scen_hi, 40.0, 1e9);
+    }
+  });
+  std::cout << "\n";
+
+  // --- Merge per-thread state into one ---
+  if (stateRegistry.empty()) {
+    std::cerr << "No events processed.  Aborting.\n";
+    return 1;
   }
+  ThreadState& merged = *stateRegistry.front();
+  for (size_t i = 1; i < stateRegistry.size(); ++i) {
+    ThreadState& other = *stateRegistry[i];
+    for (size_t k = 0; k < merged.scen_lo.size(); ++k) {
+      merged.scen_lo[k].h_hs->Add(other.scen_lo[k].h_hs);
+      merged.scen_lo[k].h_pu->Add(other.scen_lo[k].h_pu);
+    }
+    for (size_t k = 0; k < merged.scen_hi.size(); ++k) {
+      merged.scen_hi[k].h_hs->Add(other.scen_hi[k].h_hs);
+      merged.scen_hi[k].h_pu->Add(other.scen_hi[k].h_pu);
+    }
+    merged.n_total      += other.n_total;
+    merged.n_pass_basic += other.n_pass_basic;
+    merged.n_hgtd_valid += other.n_hgtd_valid;
+    merged.pu_tot_pt    += other.pu_tot_pt;
+    merged.pu_floor_pt  += other.pu_floor_pt;
+    merged.hs_tot_pt    += other.hs_tot_pt;
+    merged.hs_floor_pt  += other.hs_floor_pt;
+    merged.pu_tot_lo    += other.pu_tot_lo;
+    merged.pu_floor_lo  += other.pu_floor_lo;
+    merged.hs_tot_lo    += other.hs_tot_lo;
+    merged.hs_floor_lo  += other.hs_floor_lo;
+  }
+
+  std::vector<Scenario>& scen_lo = merged.scen_lo;
+  std::vector<Scenario>& scen_hi = merged.scen_hi;
+  long n_total      = merged.n_total;
+  long n_pass_basic = merged.n_pass_basic;
+  long n_hgtd_valid = merged.n_hgtd_valid;
+  double pu_tot_pt = merged.pu_tot_pt, pu_floor_pt = merged.pu_floor_pt;
+  double hs_tot_pt = merged.hs_tot_pt, hs_floor_pt = merged.hs_floor_pt;
+  double pu_tot_lo = merged.pu_tot_lo, pu_floor_lo = merged.pu_floor_lo;
+  double hs_tot_lo = merged.hs_tot_lo, hs_floor_lo = merged.hs_floor_lo;
 
   // ── Output paths ─────────────────────────────────────────────────────────────
   boost::filesystem::create_directories(MyUtl::OUTPUT_DIR + "/rpt_plots");

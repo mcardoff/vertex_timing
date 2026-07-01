@@ -28,6 +28,7 @@
 #include <chrono>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -138,14 +139,7 @@ namespace {
 
 int main(int argc, char** argv) {
   auto sample = MyUtl::resolveSample(argc, argv);
-
-  unsigned nThreads = std::thread::hardware_concurrency();
-  for (int i = 1; i < argc; ++i) {
-    std::string arg = argv[i];
-    if (arg.rfind("--threads=", 0) == 0)
-      nThreads = static_cast<unsigned>(std::stoul(arg.substr(10)));
-  }
-  if (nThreads == 0) nThreads = 4;
+  unsigned nThreads = MyUtl::resolveThreads(argc, argv);
 
   // Must precede any histogram construction: prevents concurrent TH1
   // self-registration into gDirectory from racing across worker threads.
@@ -190,6 +184,18 @@ int main(int argc, char** argv) {
     ROOT::TThreadedObject<std::vector<std::pair<EventKey, EventResult>>> tsResults;
     ROOT::TTreeProcessorMT proc(chain, nThreads);
 
+    // Guards AnalysisObj construction below -- AnalysisObj's constructor
+    // calls SetFillColorAlpha(), which lazily creates+registers a new TColor
+    // into ROOT's *global* color table the first time a given (color, alpha)
+    // pair is used. That registration isn't thread-safe: two worker threads
+    // racing to build their first AnalysisObj map concurrently can corrupt
+    // the heap (confirmed via a crash report: SIGABRT inside
+    // TColor::GetColorTransparent, malloc "pointer being freed was not
+    // allocated"). Serializing the whole construction, not just the registry
+    // push_back, means only one thread ever runs it at a time -- by the next
+    // thread's turn, the colors it needs already exist and no race occurs.
+    std::mutex analysisBuildMutex;
+
     auto t0 = std::chrono::steady_clock::now();
     proc.Process([&](TTreeReader& reader) {
       // Fresh BranchPointerWrapper per invocation: TTreeProcessorMT may hand
@@ -203,8 +209,10 @@ int main(int argc, char** argv) {
       // tied to any particular TTreeReader, and rebuilding ~7 AnalysisObj
       // (~60 histograms) on every task range would be wasteful.
       thread_local std::unique_ptr<std::map<Score, AnalysisObj>> tlAnalyses;
-      if (!tlAnalyses)
+      if (!tlAnalyses) {
+        std::lock_guard<std::mutex> lock(analysisBuildMutex);
         tlAnalyses = std::make_unique<std::map<Score, AnalysisObj>>(buildAnalysisMap());
+      }
 
       auto resVec = tsResults.Get();  // resolve this thread's slot once, not per-event
       while (reader.Next()) {
