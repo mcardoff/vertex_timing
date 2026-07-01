@@ -4,7 +4,7 @@
 //   1. zonly       — z-significance tracks only, no time gate
 //   2. hgtd        — ntuple RecoVtx_time, RecoVtx_timeRes  (per-track gate; no event-level recoVtxValid gate)
 //   3. mine        — TRKPTZ-selected cluster time
-//   4. mine_pure   — same time as #3, only events with TRKPTZ cluster purity > 0.75   (TEST_MISCL gate)
+//   4. mine_pure   — same time as #3, only events with TRKPTZ cluster purity > 0.75
 //   5. mine_misas  — same time as #3, only events with HS timing purity >= 0.95       (TEST_MISAS gate)
 //
 // Event/track selection mirrors clustering_dt (passBasicCuts + passJetPtCut +
@@ -245,7 +245,7 @@ int main() {
       h_res_mine->Fill(std::sqrt(var_trkptz));
 
     // ── Event-level oracle gates for scenarios 4 / 5 (TRKPTZ-based). ────────
-    bool gate_pure  = trkptz_ok && (cluster_purity > 0.50f);          // TEST_MISCL
+    bool gate_pure  = trkptz_ok && (cluster_purity > 0.50f);          // pure-cluster gate
     float hs_tp     = calcHSTimingPurity(trk_z, &branch);
     bool gate_misas = (hs_tp >= 0.9f);                                // TEST_MISAS
     if (gate_pure)  ++n_pure_evt;

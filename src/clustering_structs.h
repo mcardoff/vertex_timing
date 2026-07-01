@@ -23,7 +23,6 @@
 
 #include "clustering_includes.h"
 #include "clustering_constants.h"
-#include "ml_model.h"
 #include <cstdlib>
 
 namespace MyUtl {
@@ -155,33 +154,61 @@ namespace MyUtl {
     }
 
     // -----------------------------------------------------------------------
+    // calcBestVbsDeltaEta
+    //   Among the given pT-passing jet indices, finds the pair in opposite
+    //   η hemispheres (η_i · η_j < 0) with the largest invariant mass m_jj
+    //   — the standard VBS-candidate-jet definition — and returns their |Δη|.
+    //   Returns -1 if no opposite-hemisphere pair exists.
+    // -----------------------------------------------------------------------
+    double calcBestVbsDeltaEta(const std::vector<int>& passPtIdx) const {
+      double bestMjj = -1.0, bestDEta = -1.0;
+      for (size_t a = 0; a < passPtIdx.size(); ++a) {
+        for (size_t b = a + 1; b < passPtIdx.size(); ++b) {
+          int i = passPtIdx[a], j = passPtIdx[b];
+          float etaI = this->topoJetEta[i], etaJ = this->topoJetEta[j];
+          if (etaI * etaJ >= 0) continue;  // require opposite hemispheres
+
+          TLorentzVector ji, jj;
+          ji.SetPtEtaPhiM(this->topoJetPt[i], etaI, this->topoJetPhi[i], 0.0);
+          jj.SetPtEtaPhiM(this->topoJetPt[j], etaJ, this->topoJetPhi[j], 0.0);
+          double mjj = (ji + jj).M();
+
+          if (mjj > bestMjj) {
+            bestMjj  = mjj;
+            bestDEta = std::abs(etaI - etaJ);
+          }
+        }
+      }
+      return bestDEta;
+    }
+
+    // -----------------------------------------------------------------------
     // passJetPtCut
-    //   Requires at least MIN_PASSPT_JETS reco jets above MIN_JET_PT that are
-    //   matched to a truth-HS jet (non-empty AntiKt4EMTopoJets_truthHSJet_idx),
+    //   Requires at least MIN_PASSPT_JETS reco jets above MIN_JET_PT,
     //   at least MIN_PASSETA_JETS of which are in the forward HGTD acceptance,
-    //   and that the two leading matched jets have an η separation ≥
-    //   VBS_JET_D_ETA (VBS topology selection).
+    //   and that the VBS candidate pair — the opposite-hemisphere,
+    //   pT-passing jet pair with the largest m_jj — has an η separation ≥
+    //   VBS_JET_D_ETA. No truth-HS matching required.
     // -----------------------------------------------------------------------
     bool passJetPtCut() {
       int passptcount = 0, passptetacount = 0;
-      std::vector<float> matchedEtas;  // signed η of pT-passing HS-matched jets
+      std::vector<int> passPtIdx;  // indices of pT-passing jets
 
       for (int jetIdx = 0; jetIdx < (int)this->topoJetPt.GetSize(); ++jetIdx) {
-        if (this->topoJetTruthHSIdx[jetIdx].empty()) continue;  // not HS-matched
         float eta = std::abs(this->topoJetEta[jetIdx]);
         float pt  = this->topoJetPt[jetIdx];
-        if (DEBUG) std::cout << "reco HS-matched jet pt, eta: " << pt << ", " << eta << '\n';
+        if (DEBUG) std::cout << "reco jet pt, eta: " << pt << ", " << eta << '\n';
         bool passpt    = pt > MIN_JET_PT;
         bool passpteta = passpt && eta > MIN_ABS_ETA_JET && eta < MAX_ABS_ETA_JET;
         passptcount    += passpt    ? 1 : 0;
         passptetacount += passpteta ? 1 : 0;
-        if (passpt) matchedEtas.push_back(this->topoJetEta[jetIdx]);
+        if (passpt) passPtIdx.push_back(jetIdx);
       }
 
       bool passesPt   = passptcount   >= MIN_PASSPT_JETS;
       bool passesEta  = passptetacount >= MIN_PASSETA_JETS;
-      bool passesDEta = (int)matchedEtas.size() >= 2 &&
-                        std::abs(matchedEtas[0] - matchedEtas[1]) >= VBS_JET_D_ETA;
+      double bestDEta = calcBestVbsDeltaEta(passPtIdx);
+      bool passesDEta = bestDEta >= VBS_JET_D_ETA;
       return passesPt && passesEta && passesDEta;
     }
 
@@ -325,315 +352,6 @@ namespace MyUtl {
       return returnScore;
     }
 
-    // -----------------------------------------------------------------------
-    // VBF H→Invisible signal region selection
-    //   Implements the kinematic cuts from JHEP08(2022)104.
-    //   Jets are assumed to be pT-sorted in descending order (leading jet
-    //   at index 0, sub-leading at index 1) — verified to be 100% true in
-    //   this sample via check_jet_sorting.cxx.
-    //   Some thresholds are loosened relative to the published analysis to
-    //   retain more events for timing studies; see individual comments.
-    //
-    //   Individual predicates (each returns bool unless noted):
-    //     countJetsAbovePt    — count jets above a pT threshold
-    //     passJetMultiplicity — ≥ 2 jets with pT > 25 GeV
-    //     passLeadingJetPt    — leading > 60 GeV, sub-leading > 40 GeV
-    //     passJetDeltaPhi     — |Δφ_jj| < 2 (not back-to-back)
-    //     passOppositeHemispheres — η_j1 · η_j2 < 0
-    //     passLargeDeltaEta   — |Δη_jj| > 3.0
-    //     calcDijetMass       — computes m_jj (GeV); used by passLargeDijetMass
-    //     passLargeDijetMass  — m_jj > 300 GeV
-    //     calcAllJetsPtSum    — scalar sum of all jet pT (GeV)
-    //     passAllJetsPtSum    — scalar sum > 140 GeV
-    //     passForwardJet      — ≥ 1 leading jet in HGTD η acceptance
-    //     calcCentrality      — centrality C_i for jet i relative to j1/j2
-    //     calcRelativeMass    — relative mass m_rel_i = min(m_j1i,m_j2i)/m_jj
-    //     passFSRCompatibility — C_i < 0.6 and m_rel < 0.05 for j3, j4
-    //     passVBFSignalRegion — AND of all above (FSR cut currently disabled)
-    // -----------------------------------------------------------------------
-
-    // -----------------------------------------------------------------------
-    // countJetsAbovePt
-    //   Returns the number of reco jets with pT above ptThreshold (GeV).
-    //   Helper for passJetMultiplicity.
-    // -----------------------------------------------------------------------
-    int countJetsAbovePt(double ptThreshold = 25.0) const {
-      int count = 0;
-      for (int jetIdx = 0; jetIdx < this->topoJetPt.GetSize(); ++jetIdx) {
-        if (this->topoJetPt[jetIdx] > ptThreshold) {
-          count++;
-        }
-      }
-      return count;
-    }
-
-    // -----------------------------------------------------------------------
-    // passJetMultiplicity
-    //   Requires at least 2 reco jets with pT > 25 GeV.
-    // -----------------------------------------------------------------------
-    bool passJetMultiplicity() const {
-      int nJets = countJetsAbovePt(25.0);
-      return (nJets >= 2);
-    }
-
-    // -----------------------------------------------------------------------
-    // passLeadingJetPt
-    //   Requires leading jet pT > 60 GeV and sub-leading jet pT > 40 GeV.
-    //   Original ATLAS cuts (JHEP08(2022)104): leading > 80 GeV,
-    //   sub-leading > 50 GeV — loosened here to retain more events for
-    //   timing studies.
-    // -----------------------------------------------------------------------
-    bool passLeadingJetPt() const {
-      if (this->topoJetPt.GetSize() < 2) return false;
-
-      // Jets are assumed to be pT-sorted
-      double leadingPt = this->topoJetPt[0];
-      double subleadingPt = this->topoJetPt[1];
-
-      return (leadingPt > 60.0 && subleadingPt > 40.0);
-    }
-
-    // -----------------------------------------------------------------------
-    // passJetDeltaPhi
-    //   Requires |Δφ_jj| < 2 between the two leading jets, rejecting
-    //   back-to-back topologies inconsistent with VBF kinematics.
-    // -----------------------------------------------------------------------
-    bool passJetDeltaPhi() const {
-      if (this->topoJetPt.GetSize() < 2) return false;
-
-      double phi1 = this->topoJetPhi[0];
-      double phi2 = this->topoJetPhi[1];
-      double deltaPhi = std::abs(TVector2::Phi_mpi_pi(phi1 - phi2));
-
-      return (deltaPhi < 2.0);
-    }
-
-    // -----------------------------------------------------------------------
-    // passOppositeHemispheres
-    //   Requires the two leading jets to be in opposite η hemispheres
-    //   (η_j1 · η_j2 < 0), a hallmark of VBF topology.
-    // -----------------------------------------------------------------------
-    bool passOppositeHemispheres() const {
-      if (this->topoJetEta.GetSize() < 2) return false;
-
-      double eta1 = this->topoJetEta[0];
-      double eta2 = this->topoJetEta[1];
-
-      return (eta1 * eta2 < 0);
-    }
-
-    // -----------------------------------------------------------------------
-    // passLargeDeltaEta
-    //   Requires |Δη_jj| > minDeltaEta (default 3.0) between the two
-    //   leading jets.  Original ATLAS cut is Δη_jj > 3.8; loosened here
-    //   for timing studies.
-    // -----------------------------------------------------------------------
-    bool passLargeDeltaEta(double minDeltaEta = 3.0) const {
-      if (this->topoJetEta.GetSize() < 2) return false;
-
-      double eta1 = this->topoJetEta[0];
-      double eta2 = this->topoJetEta[1];
-      double deltaEta = std::abs(eta1 - eta2);
-
-      return (deltaEta > minDeltaEta);
-    }
-
-    // -----------------------------------------------------------------------
-    // calcDijetMass
-    //   Builds TLorentzVectors for the two leading jets (assumed massless)
-    //   and returns their invariant mass in GeV.  Returns -1 if fewer than
-    //   2 jets are present.
-    // -----------------------------------------------------------------------
-    double calcDijetMass() const {
-      if (this->topoJetPt.GetSize() < 2) return -1.0;
-
-      // Build TLorentzVectors for the two leading jets
-      TLorentzVector jet1, jet2;
-
-      // Assume massless jets for simplicity
-      jet1.SetPtEtaPhiM(this->topoJetPt[0], this->topoJetEta[0],
-                        this->topoJetPhi[0], 0.0);
-      jet2.SetPtEtaPhiM(this->topoJetPt[1], this->topoJetEta[1],
-                        this->topoJetPhi[1], 0.0);
-
-      TLorentzVector dijet = jet1 + jet2;
-      return dijet.M(); // Return in GeV (jets already in GeV)
-    }
-
-    // -----------------------------------------------------------------------
-    // passLargeDijetMass
-    //   Requires dijet invariant mass m_jj > minMass GeV (default 300 GeV,
-    //   i.e. 0.3 TeV).  Original ATLAS cut is m_jj > 0.8 TeV; loosened
-    //   here for timing studies.
-    // -----------------------------------------------------------------------
-    bool passLargeDijetMass(double minMass = 300.0) const {
-      double mjj = calcDijetMass();
-      return (mjj > minMass);
-    }
-
-    // -----------------------------------------------------------------------
-    // calcAllJetsPtSum
-    //   Returns the scalar sum of pT over all reco jets (GeV).
-    //   Used by passAllJetsPtSum to apply the H_T-like requirement.
-    // -----------------------------------------------------------------------
-    double calcAllJetsPtSum() const {
-      double ptSum = 0.0;
-      for (int jetIdx = 0; jetIdx < this->topoJetPt.GetSize(); ++jetIdx) {
-        ptSum += this->topoJetPt[jetIdx];
-      }
-      return ptSum;
-    }
-
-    // -----------------------------------------------------------------------
-    // passAllJetsPtSum
-    //   Requires the scalar sum of all jet pT to exceed minPtSum GeV
-    //   (default 140 GeV), applying the H_T-like requirement.
-    // -----------------------------------------------------------------------
-    bool passAllJetsPtSum(double minPtSum = 140.0) const {
-      double ptSum = calcAllJetsPtSum();
-      return (ptSum > minPtSum);
-    }
-
-    // -----------------------------------------------------------------------
-    // passForwardJet
-    //   Requires at least one of the two leading jets to fall within the
-    //   HGTD η acceptance (MIN_HGTD_ETA < |η| < MAX_HGTD_ETA), ensuring
-    //   the event can be studied with HGTD timing information.
-    // -----------------------------------------------------------------------
-    bool passForwardJet() const {
-      if (this->topoJetEta.GetSize() < 2) return false;
-
-      double eta1 = std::abs(this->topoJetEta[0]);
-      double eta2 = std::abs(this->topoJetEta[1]);
-
-      bool jet1Forward = (eta1 > MIN_HGTD_ETA && eta1 < MAX_HGTD_ETA);
-      bool jet2Forward = (eta2 > MIN_HGTD_ETA && eta2 < MAX_HGTD_ETA);
-
-      return (jet1Forward || jet2Forward);
-    }
-
-    // -----------------------------------------------------------------------
-    // calcCentrality
-    //   Computes the rapidity centrality C_i for jet at jetIdx relative to
-    //   the two leading jets:
-    //     C_i = exp(−4 · (η_i − η_centre)² / Δη_jj²)
-    //   where η_centre = (η_j1 + η_j2) / 2.
-    //   C_i → 1 for a jet sitting between j1 and j2; C_i → 0 for a jet
-    //   outside the rapidity gap.  Used to identify FSR jets in
-    //   passFSRCompatibility.
-    // -----------------------------------------------------------------------
-    double calcCentrality(int jetIdx) const {
-      if (this->topoJetEta.GetSize() < 2) return -1.0;
-      if (jetIdx >= this->topoJetEta.GetSize()) return -1.0;
-
-      double etaJ1 = this->topoJetEta[0];
-      double etaJ2 = this->topoJetEta[1];
-      double etaI = this->topoJetEta[jetIdx];
-
-      // Central position between the two leading jets
-      double etaCenter = (etaJ1 + etaJ2) / 2.0;
-      double deltaEtaJj = etaJ1 - etaJ2;
-
-      // Calculate centrality
-      double numerator = etaI - etaCenter;
-      double cI = std::exp(-4.0 / (deltaEtaJj * deltaEtaJj) * numerator * numerator);
-
-      return cI;
-    }
-
-    // -----------------------------------------------------------------------
-    // calcRelativeMass
-    //   Returns the relative invariant mass for jet at jetIdx:
-    //     m_rel_i = min(m_j1i, m_j2i) / m_jj
-    //   where m_j1i (m_j2i) is the invariant mass of jet i with the leading
-    //   (sub-leading) VBF jet.  Small m_rel indicates the extra jet is
-    //   consistent with FSR off one of the VBF jets.
-    // -----------------------------------------------------------------------
-    double calcRelativeMass(int jetIdx) const {
-      if (this->topoJetPt.GetSize() < 2) return -1.0;
-      if (jetIdx >= this->topoJetPt.GetSize()) return -1.0;
-
-      // Build TLorentzVectors (assume massless jets)
-      TLorentzVector jet1, jet2, jetI;
-      jet1.SetPtEtaPhiM(this->topoJetPt[0], this->topoJetEta[0], this->topoJetPhi[0], 0.0);
-      jet2.SetPtEtaPhiM(this->topoJetPt[1], this->topoJetEta[1], this->topoJetPhi[1], 0.0);
-      jetI.SetPtEtaPhiM(this->topoJetPt[jetIdx], this->topoJetEta[jetIdx], this->topoJetPhi[jetIdx], 0.0);
-
-      // Calculate invariant masses
-      double mJj = (jet1 + jet2).M();
-      double mJ1i = (jet1 + jetI).M();
-      double mJ2i = (jet2 + jetI).M();
-
-      // Return relative mass
-      double mRel = std::min(mJ1i, mJ2i) / mJj;
-      return mRel;
-    }
-
-    // -----------------------------------------------------------------------
-    // passFSRCompatibility
-    //   For the third and fourth reco jets (if present), checks that each
-    //   satisfies C_i < 0.6 and m_rel_i < 0.05, consistent with being FSR
-    //   rather than additional hard-scatter activity.  Events with only 2
-    //   jets pass automatically.
-    //   Note: this cut is currently commented out in passVBFSignalRegion.
-    // -----------------------------------------------------------------------
-    bool passFSRCompatibility() const {
-      int nJets = this->topoJetPt.GetSize();
-
-      // If only 2 jets, automatically pass (no FSR jets to check)
-      if (nJets <= 2) return true;
-
-      // Check third jet (index 2)
-      if (nJets >= 3) {
-        double cJ3 = calcCentrality(2);
-        double mRelJ3 = calcRelativeMass(2);
-        if (cJ3 >= 0.6 || mRelJ3 >= 0.05) return false;
-      }
-
-      // Check fourth jet (index 3) if it exists
-      if (nJets >= 4) {
-        double cJ4 = calcCentrality(3);
-        double mRelJ4 = calcRelativeMass(3);
-        if (cJ4 >= 0.6 || mRelJ4 >= 0.05) return false;
-      }
-
-      return true;
-    }
-
-    // -----------------------------------------------------------------------
-    // passVBFSignalRegion
-    //   AND of all individual VBF predicates above.  Excludes requirements
-    //   that are not available in this ntuple: lepton veto, b-tagging, JVT,
-    //   E_T^miss, and soft-term requirements.  passFSRCompatibility is
-    //   evaluated but currently excluded from the final AND.
-    // -----------------------------------------------------------------------
-    bool passVBFSignalRegion() const {
-      bool passMultiplicity = passJetMultiplicity();
-      bool passLeadPt = passLeadingJetPt();
-      bool passDeltaPhi = passJetDeltaPhi();
-      bool passOppositeEta = passOppositeHemispheres();
-      bool passDeltaEta = passLargeDeltaEta();
-      bool passMjj = passLargeDijetMass();
-      bool passPtSum = passAllJetsPtSum();
-      bool passForward = passForwardJet();
-      bool passFSR = passFSRCompatibility();
-
-      if (DEBUG) {
-        std::cout << "VBF Selection:" << std::endl;
-        std::cout << "  Jet multiplicity (2-4 jets, pT>25): " << passMultiplicity << std::endl;
-        std::cout << "  Leading jet pT (>60,>40 GeV): " << passLeadPt << std::endl;
-        std::cout << "  Delta phi_jj (<2): " << passDeltaPhi << std::endl;
-        std::cout << "  Opposite hemispheres: " << passOppositeEta << std::endl;
-        std::cout << "  Delta eta_jj (>3.0): " << passDeltaEta << std::endl;
-        std::cout << "  Dijet mass (>600 GeV): " << passMjj << std::endl;
-        std::cout << "  All jets pT sum (>140 GeV): " << passPtSum << std::endl;
-        std::cout << "  At least one forward jet (2.38<|eta|<4.0): " << passForward << std::endl;
-        std::cout << "  FSR compatibility (C_i<0.6, m_rel<0.05 for j3,j4): " << passFSR << std::endl;
-      }
-
-      return passMultiplicity && passLeadPt && passDeltaPhi &&
-             passOppositeEta && passDeltaEta && passMjj && passPtSum && passForward; // && passFSR;
-    }
   };
 
   // ---------------------------------------------------------------------------
@@ -657,7 +375,6 @@ namespace MyUtl {
     int    effFillValHSTrack;
     int    effFillValPUTrack;
     double effFillValPURatio;
-    double effFillValVtxDz;
 
     EventCounts(BranchPointerWrapper* branch,
                 const std::vector<int>& tracks,
@@ -673,7 +390,6 @@ namespace MyUtl {
       effFillValHSTrack = folded(nForwardTrackHS, (int)FOLD_HS_TRACK);
       effFillValPUTrack = folded(nForwardTrackPU, (int)FOLD_PU_TRACK);
       effFillValPURatio = folded(puRatio,         FOLD_PU_FRAC);
-      effFillValVtxDz   = std::abs(branch->recoVtxZ[0] - branch->truthVtxZ[0]);
     }
   };
 
@@ -689,7 +405,7 @@ namespace MyUtl {
   //   Member methods:
   //     operator== / !=  — equality by (values[0], sigmas[0], nConstituents)
   //     calcPurity        — fraction of cluster pT belonging to truth HS vertex
-  //     updateScores      — computes TRKPTZ, CALO*, TEST_ML, TEST_MISCL scores
+  //     updateScores      — computes TRKPTZ, WAVES, JET_T_REFINED, WAVES_MISCL/MISAS, TEST_MISAS scores
   //     timeSpread        — std-dev of raw track times within the cluster
   //     zSpread           — std-dev of track z₀ values within the cluster
   //     passEfficiency    — true if cluster time is within 3·PASS_SIGMA of truth
@@ -702,7 +418,6 @@ namespace MyUtl {
     std::vector<int> trackIndices;
     std::unordered_map<int,double> scores;
     double purity = 0.0;
-    bool maxPtCluster = false;
     bool wasMerged = false;
     int nConstituents=1;
 
@@ -729,8 +444,8 @@ namespace MyUtl {
     // calcPurity
     //   Computes the pT-weighted fraction of cluster tracks that originate
     //   from the hard-scatter vertex (truth vertex index 0).  Stores the
-    //   result in this->purity.  Called only when TEST_MISCL is active
-    //   (calcPurityFlag == true) to avoid unnecessary truth-matching work.
+    //   result in this->purity.  Called only when a purity-gated score is
+    //   active (calcPurityFlag == true) to avoid unnecessary truth-matching work.
     // -----------------------------------------------------------------------
     void calcPurity(BranchPointerWrapper *branch) {
       double num = 0.0, denom = 0.0;
@@ -752,14 +467,9 @@ namespace MyUtl {
     //              When z₀ is available as values[1] it is used directly;
     //              otherwise a precision-weighted average over track z₀ is
     //              computed on the fly.
-    //   TEST_ML  — Output of the DNN (MLModel::predict) on the 8 normalised
-    //              features returned by calcFeatures.
-    //   TEST_MISCL — Copies TRKPTZ so that the same selection is used; the
-    //              purity gate is applied later in event_processing.h.
     // -----------------------------------------------------------------------
     void updateScores(
-      BranchPointerWrapper *branch,
-      MLModel *mlModel
+      BranchPointerWrapper *branch
     ) {
       // Call calcFeatures once — it returns the normalised feature vector and
       // the raw deltaZ (cluster z − reco vertex z).  Reusing the returned
@@ -777,15 +487,6 @@ namespace MyUtl {
         this->scores[Score::TRKPTZ.id] =
           this->scores.at(Score::TRKPT.id) * std::exp(-1.5 * std::abs(rawDeltaZ));
       }
-
-      // ML score for TEST_ML — DISABLED: the model is not loaded (no weights
-      // file read at all).  TEST_ML is pinned to 0 so the score map stays
-      // populated.  To re-enable, restore the predict() call below and the
-      // static MLModel loader in clustering_functions.h.
-      (void)mlModel;
-      // float mlScore = mlModel->predict(features);
-      // this->scores[Score::TEST_ML.id] = mlScore;
-      this->scores[Score::TEST_ML.id] = 0.0f;
 
       // WAVES: WAVeS-style score — Σ_i pT_i × pT_jet(i) / max(ΔR_i, DR_FLOOR)
       // multiplied by exp(−1.5|Δz_cluster|), where Δz is the pT-weighted cluster z centroid
@@ -833,13 +534,9 @@ namespace MyUtl {
       this->scores[Score::WAVES_MISCL.id] = this->scores.at(Score::WAVES.id);
       this->scores[Score::WAVES_MISAS.id] = this->scores.at(Score::WAVES.id);
 
-      // TEST_MISCL uses TRKPTZ as its selection score; the purity gate is applied
+      // TEST_MISAS uses TRKPTZ as its selection score; the purity gate is applied
       // at efficiency-check time in event_processing.h (both pass and total fills).
-      this->scores[Score::TEST_MISCL.id] = this->scores.at(Score::TRKPTZ.id);
       this->scores[Score::TEST_MISAS.id] = this->scores.at(Score::TRKPTZ.id);
-      this->scores[Score::PERF_EVT.id]   = this->scores.at(Score::TRKPTZ.id);
-      this->scores[Score::Z_REFINED.id]  = this->scores.at(Score::TRKPTZ.id);
-      this->scores[Score::ZT_REFINED.id] = this->scores.at(Score::TRKPTZ.id);
     }
     
     // -----------------------------------------------------------------------
@@ -894,16 +591,7 @@ namespace MyUtl {
       if (diff > PASS_SIGMA)
 	return false;
 
-      // return diff < PASS_SIGMA;
-
       return true;
-      // int nHSTrack = 0;
-      // for (auto idx: this->trackIndices) {
-      // 	if (idx == -1 or branch->trackToTruthvtx[idx] == 0)
-      // 	  nHSTrack++;
-      // }
-
-      // return nHSTrack > 0;
     }
 
     // -----------------------------------------------------------------------

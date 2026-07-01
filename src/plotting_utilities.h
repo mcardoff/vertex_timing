@@ -41,6 +41,7 @@
 #include "RtypesCore.h"
 #include "clustering_includes.h"
 #include "clustering_constants.h"
+#include "sample_config.h"
 #include "AtlasLabels.h"
 #include <TEfficiency.h>
 #include <TGraph.h>
@@ -801,7 +802,7 @@ namespace MyUtl {
                           TString::Format("Core Fraction (#pm%d ps)", (int)(PASS_SIGMA)), "l");
       efflegend->Draw("SAME");
       ATLASLabel(0.18, 0.88, "Simulation Internal");
-      ATLASEnergyLabel(0.18, 0.82);
+      ATLASEnergyLabel(0.18, 0.82, MyUtl::ENERGY_LABEL.c_str());
       canvas->Print(fname);
 
       // Draw Resolution
@@ -823,7 +824,7 @@ namespace MyUtl {
 	  minExpRes->Draw("SAME");
 	  resoLegend->Draw("SAME");
 	  ATLASLabel(0.18, 0.88, "Simulation Internal");
-	  ATLASEnergyLabel(0.18, 0.82);
+	  ATLASEnergyLabel(0.18, 0.82, MyUtl::ENERGY_LABEL.c_str());
 	} else if (key == BSIGMA) {
 	  hist->GetYaxis()->SetRangeUser(BKG_RES_YMIN, BKG_RES_YMAX);
 	  TLegend* resoLegend = new TLegend(0.6, 0.8, 0.8, 0.9);
@@ -836,7 +837,7 @@ namespace MyUtl {
 	  minExpRes->Draw("SAME");
 	  resoLegend->Draw("SAME");
 	  ATLASLabel(0.18, 0.88, "Simulation Internal");
-	  ATLASEnergyLabel(0.18, 0.82);
+	  ATLASEnergyLabel(0.18, 0.82, MyUtl::ENERGY_LABEL.c_str());
 	}
 	canvas->Print(fname);
       }
@@ -1021,7 +1022,7 @@ namespace MyUtl {
   // AnalysisObj
   //   Top-level container for one (timing scenario, Score) combination.
   //   Holds a map of PlotObjs keyed by variable name ("fjet", "ftrack",
-  //   "pu_frac", "hs_track", "pu_track", "vtx_dz") plus an inclusive
+  //   "pu_frac", "hs_track", "pu_track") plus an inclusive
   //   timing-residual histogram and an inclusive purity histogram.
   //
   //   The constructor books all PlotObjs with the histogram binning defined
@@ -1055,21 +1056,6 @@ namespace MyUtl {
     std::unique_ptr<TH1D> inclusiveResoNhit3pSig;  // avg >= 2.5
     std::unique_ptr<TH1D> inclusiveResoNhit3pMix;
     std::unique_ptr<TH1D> inclusiveResoNhit3pBkg;
-    // Inclusive resolution split by combined cluster quality score (two tiers)
-    std::unique_ptr<TH1D> inclusiveResoClusQHighSig;  // quality >= CLUS_QUALITY_SPLIT
-    std::unique_ptr<TH1D> inclusiveResoClusQHighMix;
-    std::unique_ptr<TH1D> inclusiveResoClusQHighBkg;
-    std::unique_ptr<TH1D> inclusiveResoClusQLowSig;   // quality < CLUS_QUALITY_SPLIT
-    std::unique_ptr<TH1D> inclusiveResoClusQLowMix;
-    std::unique_ptr<TH1D> inclusiveResoClusQLowBkg;
-    // Pull distribution Δt/σ_t split by the same two quality tiers
-    std::unique_ptr<TH1D> inclusivePullClusQHighSig;
-    std::unique_ptr<TH1D> inclusivePullClusQHighMix;
-    std::unique_ptr<TH1D> inclusivePullClusQHighBkg;
-    std::unique_ptr<TH1D> inclusivePullClusQLowSig;
-    std::unique_ptr<TH1D> inclusivePullClusQLowMix;
-    std::unique_ptr<TH1D> inclusivePullClusQLowBkg;
-
     // 2D mean |Δt| heatmap: cluster PU fraction (x) × avg nHGTD hits/track (y)
     std::unique_ptr<TProfile2D> prof2dPuFracVsNhit;
     // 2D σ(Δt) heatmap: same axes, "S" option stores std-dev in the error slot
@@ -1078,11 +1064,7 @@ namespace MyUtl {
     // In-time pile-up diagnostic — for each cluster with at least one PU track,
     // identifies the dominant PU truth vertex (mode of trackToTruthvtx among PU tracks)
     // and plots Δt(cluster − HS truth) vs Δz(dominant PU vertex − HS vertex).
-    // The inclusive version + per-quality-tier versions show how PU contamination
-    // structure differs between HIGH and LOW quality regions.
     std::unique_ptr<TH2D> dtClusterVsDzPU;       // all clusters
-    std::unique_ptr<TH2D> dtClusterVsDzPUHigh;   // Q ≥ CLUS_QUALITY_SPLIT
-    std::unique_ptr<TH2D> dtClusterVsDzPULow;    // Q <  CLUS_QUALITY_SPLIT
 
     // Pull distribution: Δt / σ_cluster — parallel to reso histograms
     std::unique_ptr<TH1D> inclusivePullSig;          // purity > 0.75
@@ -1098,15 +1080,11 @@ namespace MyUtl {
     // std::map string lookups (O(log N) string comparison) on every event.
     PlotObj* ptrFjet    = nullptr;
     PlotObj* ptrTruthJets = nullptr;  // n truth HS jets in the whole event
-    PlotObj* ptrVtxDz   = nullptr;
     PlotObj* ptrFtrack  = nullptr;
     PlotObj* ptrPuFrac  = nullptr;
     PlotObj* ptrHSTrack = nullptr;
     PlotObj* ptrPUTrack = nullptr;
-    PlotObj* ptrNhit        = nullptr;  // avg nHGTD hits per track in selected cluster
     PlotObj* ptrClusPuFrac  = nullptr;  // cluster PU fraction by track count
-    PlotObj* ptrClusSigmaT  = nullptr;  // cluster timing uncertainty σ_t (sigmas[0])
-    PlotObj* ptrClusQuality = nullptr;  // combined quality: (1-puFrac)*clamp(nhit/2,0,1)
 
     Score score;
     std::string timetypeIDer;
@@ -1156,7 +1134,7 @@ namespace MyUtl {
   
       dataObjects["fjet"] = std::make_unique<PlotObj>(
         "n Forward Jets", timetypeIDer,
-	TString::Format("../figs/fullplots/%s_nfjet.pdf",filenameIDer.Data()),
+	TString::Format("%s/fullplots/%s_nfjet.pdf", MyUtl::OUTPUT_DIR.c_str(), filenameIDer.Data()),
 	score,
 	FJET_MIN  , FJET_MAX  , FJET_WIDTH  ,
 	DIFF_MIN  , DIFF_MAX  , DIFF_WIDTH  ,
@@ -1165,25 +1143,16 @@ namespace MyUtl {
 
       dataObjects["truthjets"] = std::make_unique<PlotObj>(
         "n Truth HS Jets", timetypeIDer,
-	TString::Format("../figs/fullplots/%s_ntruthjet.pdf",filenameIDer.Data()),
+	TString::Format("%s/fullplots/%s_ntruthjet.pdf", MyUtl::OUTPUT_DIR.c_str(), filenameIDer.Data()),
 	score,
 	FJET_MIN  , FJET_MAX  , FJET_WIDTH  ,
 	DIFF_MIN  , DIFF_MAX  , DIFF_WIDTH  ,
 	PURITY_MIN, PURITY_MAX, PURITY_WIDTH,
 	FOLD_FJET, FOLD_FJET+FJET_WIDTH/2.0 );
 
-      dataObjects["vtx_dz"] = std::make_unique<PlotObj>(
-        "|Reco HS z - Truth HS z| (mm)", timetypeIDer,
-	TString::Format("../figs/fullplots/%s_vtx_dz.pdf",filenameIDer.Data()),
-	score,
-	VTX_DZ_MIN  , VTX_DZ_MAX  , VTX_DZ_WIDTH,
-	DIFF_MIN    , DIFF_MAX    , DIFF_WIDTH  ,
-	PURITY_MIN  , PURITY_MAX  , PURITY_WIDTH,
-	FOLD_VTX_DZ , FOLD_VTX_DZ+VTX_DZ_WIDTH  );
-  
       dataObjects["ftrack"] = std::make_unique<PlotObj>(
         "n Forward Tracks", timetypeIDer,
-	TString::Format("../figs/fullplots/%s_ntrack.pdf",filenameIDer.Data()),
+	TString::Format("%s/fullplots/%s_ntrack.pdf", MyUtl::OUTPUT_DIR.c_str(), filenameIDer.Data()),
 	score,
 	TRACK_MIN , TRACK_MAX , TRACK_WIDTH ,
 	DIFF_MIN  , DIFF_MAX  , DIFF_WIDTH  ,
@@ -1192,7 +1161,7 @@ namespace MyUtl {
   
       dataObjects["pu_frac"] = std::make_unique<PlotObj>(
         "Pile Up Fraction", timetypeIDer, 
-        TString::Format("../figs/fullplots/%s_pufrac.pdf",filenameIDer.Data()),
+        TString::Format("%s/fullplots/%s_pufrac.pdf", MyUtl::OUTPUT_DIR.c_str(), filenameIDer.Data()),
 	score,
 	PU_FRAC_MIN , PU_FRAC_MAX, PU_FRAC_WIDTH,
 	DIFF_MIN    , DIFF_MAX   , DIFF_WIDTH   ,
@@ -1201,7 +1170,7 @@ namespace MyUtl {
   
       dataObjects["hs_track"] = std::make_unique<PlotObj>(
         "n Forward HS Tracks", timetypeIDer, 
-	TString::Format("../figs/fullplots/%s_nhstrack.pdf",filenameIDer.Data()),
+	TString::Format("%s/fullplots/%s_nhstrack.pdf", MyUtl::OUTPUT_DIR.c_str(), filenameIDer.Data()),
 	score,
 	HS_TRACK_MIN, HS_TRACK_MAX, HS_TRACK_WIDTH ,
 	DIFF_MIN    , DIFF_MAX    , DIFF_WIDTH     ,
@@ -1210,48 +1179,21 @@ namespace MyUtl {
   
       dataObjects["pu_track"] = std::make_unique<PlotObj>(
         "n Forward PU Tracks", timetypeIDer,
-	TString::Format("../figs/fullplots/%s_nputrack.pdf",filenameIDer.Data()),
+	TString::Format("%s/fullplots/%s_nputrack.pdf", MyUtl::OUTPUT_DIR.c_str(), filenameIDer.Data()),
 	score,
 	PU_TRACK_MIN, PU_TRACK_MAX, PU_TRACK_WIDTH ,
 	DIFF_MIN    , DIFF_MAX    , DIFF_WIDTH     ,
 	PURITY_MIN  , PURITY_MAX  , PURITY_WIDTH   ,
 	FOLD_PU_TRACK, FOLD_PU_TRACK+PU_TRACK_WIDTH/2.0);
 
-      dataObjects["nhit"] = std::make_unique<PlotObj>(
-        "Avg. nHGTD Hits / Track", timetypeIDer,
-        TString::Format("../figs/fullplots/%s_nhit.pdf", filenameIDer.Data()),
-        score,
-        NHIT_MIN, NHIT_MAX, NHIT_WIDTH,
-        DIFF_MIN, DIFF_MAX, DIFF_WIDTH,
-        PURITY_MIN, PURITY_MAX, PURITY_WIDTH,
-        FOLD_NHIT, NHIT_MAX);
-
       dataObjects["clus_pu_frac"] = std::make_unique<PlotObj>(
         "Cluster PU Fraction", timetypeIDer,
-        TString::Format("../figs/fullplots/%s_cluspufrac.pdf", filenameIDer.Data()),
+        TString::Format("%s/fullplots/%s_cluspufrac.pdf", MyUtl::OUTPUT_DIR.c_str(), filenameIDer.Data()),
         score,
         CLUS_PU_FRAC_MIN, CLUS_PU_FRAC_MAX, CLUS_PU_FRAC_WIDTH,
         DIFF_MIN,          DIFF_MAX,          DIFF_WIDTH,
         PURITY_MIN,        PURITY_MAX,        PURITY_WIDTH,
         FOLD_CLUS_PU_FRAC, CLUS_PU_FRAC_MAX);
-
-      dataObjects["clus_sigma_t"] = std::make_unique<PlotObj>(
-        "Cluster #sigma_{t} [ps]", timetypeIDer,
-        TString::Format("../figs/fullplots/%s_clussigmat.pdf", filenameIDer.Data()),
-        score,
-        CLUS_SIGMA_T_MIN, CLUS_SIGMA_T_MAX, CLUS_SIGMA_T_WIDTH,
-        DIFF_MIN,          DIFF_MAX,          DIFF_WIDTH,
-        PURITY_MIN,        PURITY_MAX,        PURITY_WIDTH,
-        FOLD_CLUS_SIGMA_T, CLUS_SIGMA_T_MAX);
-
-      dataObjects["clus_quality"] = std::make_unique<PlotObj>(
-        "Cluster Quality", timetypeIDer,
-        TString::Format("../figs/fullplots/%s_clusquality.pdf", filenameIDer.Data()),
-        score,
-        CLUS_QUALITY_MIN, CLUS_QUALITY_MAX, CLUS_QUALITY_WIDTH,
-        DIFF_MIN,          DIFF_MAX,          DIFF_WIDTH,
-        PURITY_MIN,        PURITY_MAX,        PURITY_WIDTH,
-        FOLD_CLUS_QUALITY, CLUS_QUALITY_MAX);
 
       // Helper to construct one inclusive-reso histogram
       auto makeResoHist = [&](const char* prefix, const char* catLabel) {
@@ -1291,20 +1233,6 @@ namespace MyUtl {
       for (auto* h : {inclusiveResoNhit1Bkg.get(), inclusiveResoNhit2Bkg.get(), inclusiveResoNhit3pBkg.get()})
         { h->SetFillColorAlpha(C02, 0.6); h->SetLineColor(C02); }
 
-      // Cluster quality-binned inclusive resolution histograms (two tiers)
-      inclusiveResoClusQHighSig = makeResoHist("reso_cqhigh_sig", "Signal(Q#geq0.5)");
-      inclusiveResoClusQHighMix = makeResoHist("reso_cqhigh_mix", "Mixed(Q#geq0.5)");
-      inclusiveResoClusQHighBkg = makeResoHist("reso_cqhigh_bkg", "Bkg(Q#geq0.5)");
-      inclusiveResoClusQLowSig  = makeResoHist("reso_cqlow_sig",  "Signal(Q<0.5)");
-      inclusiveResoClusQLowMix  = makeResoHist("reso_cqlow_mix",  "Mixed(Q<0.5)");
-      inclusiveResoClusQLowBkg  = makeResoHist("reso_cqlow_bkg",  "Bkg(Q<0.5)");
-      for (auto* h : {inclusiveResoClusQHighSig.get(), inclusiveResoClusQLowSig.get()})
-        { h->SetFillColorAlpha(C01, 0.6); h->SetLineColor(C01); }
-      for (auto* h : {inclusiveResoClusQHighMix.get(), inclusiveResoClusQLowMix.get()})
-        { h->SetFillColorAlpha(C03, 0.6); h->SetLineColor(C03); }
-      for (auto* h : {inclusiveResoClusQHighBkg.get(), inclusiveResoClusQLowBkg.get()})
-        { h->SetFillColorAlpha(C02, 0.6); h->SetLineColor(C02); }
-
       // 2D profiles: mean |Δt| and σ(Δt) in (clusPuFrac, avgNHGTD) cells
       {
         int nBinsX = static_cast<int>(std::round((CLUS_PU_FRAC_MAX - CLUS_PU_FRAC_MIN) / CLUS_PU_FRAC_WIDTH));
@@ -1339,8 +1267,6 @@ namespace MyUtl {
           150, -300.0, 300.0);
       };
       dtClusterVsDzPU     = makeDtDzHist("",      "");
-      dtClusterVsDzPUHigh = makeDtDzHist("_high", " (Q#geq0.5)");
-      dtClusterVsDzPULow  = makeDtDzHist("_low",  " (Q<0.5)");
 
       // Pull histograms: Δt / σ_cluster, same purity stratification as reso
       auto makePullHist = [&](const char* prefix, const char* catLabel) {
@@ -1356,22 +1282,9 @@ namespace MyUtl {
       inclusivePullLowTrackSig = makePullHist("pull_lt_sig", "Signal(#leq5tk)");
       inclusivePullLowTrackMix = makePullHist("pull_lt_mix", "Mixed(#leq5tk)");
       inclusivePullLowTrackBkg = makePullHist("pull_lt_bkg", "Bkg(#leq5tk)");
-      // Per-quality-tier pull histograms — two tiers matching the reso split
-      inclusivePullClusQHighSig = makePullHist("pull_cqhigh_sig", "Signal(Q#geq0.5)");
-      inclusivePullClusQHighMix = makePullHist("pull_cqhigh_mix", "Mixed(Q#geq0.5)");
-      inclusivePullClusQHighBkg = makePullHist("pull_cqhigh_bkg", "Bkg(Q#geq0.5)");
-      inclusivePullClusQLowSig  = makePullHist("pull_cqlow_sig",  "Signal(Q<0.5)");
-      inclusivePullClusQLowMix  = makePullHist("pull_cqlow_mix",  "Mixed(Q<0.5)");
-      inclusivePullClusQLowBkg  = makePullHist("pull_cqlow_bkg",  "Bkg(Q<0.5)");
       inclusivePullSig->SetFillColorAlpha(C01, 0.6); inclusivePullSig->SetLineColor(C01);
       inclusivePullMix->SetFillColorAlpha(C03, 0.6); inclusivePullMix->SetLineColor(C03);
       inclusivePullBkg->SetFillColorAlpha(C02, 0.6); inclusivePullBkg->SetLineColor(C02);
-      for (auto* h : {inclusivePullClusQHighSig.get(), inclusivePullClusQLowSig.get()})
-        { h->SetFillColorAlpha(C01, 0.6); h->SetLineColor(C01); }
-      for (auto* h : {inclusivePullClusQHighMix.get(), inclusivePullClusQLowMix.get()})
-        { h->SetFillColorAlpha(C03, 0.6); h->SetLineColor(C03); }
-      for (auto* h : {inclusivePullClusQHighBkg.get(), inclusivePullClusQLowBkg.get()})
-        { h->SetFillColorAlpha(C02, 0.6); h->SetLineColor(C02); }
       inclusivePullLowTrackSig->SetFillColorAlpha(C01, 0.6); inclusivePullLowTrackSig->SetLineColor(C01);
       inclusivePullLowTrackMix->SetFillColorAlpha(C03, 0.6); inclusivePullLowTrackMix->SetLineColor(C03);
       inclusivePullLowTrackBkg->SetFillColorAlpha(C02, 0.6); inclusivePullLowTrackBkg->SetLineColor(C02);
@@ -1388,11 +1301,7 @@ namespace MyUtl {
       ptrHSTrack  = dataObjects["hs_track"].get();
       ptrPUTrack  = dataObjects["pu_track"].get();
       ptrPuFrac   = dataObjects["pu_frac" ].get();
-      ptrVtxDz    = dataObjects["vtx_dz"  ].get();
-      ptrNhit        = dataObjects["nhit"        ].get();
       ptrClusPuFrac  = dataObjects["clus_pu_frac"].get();
-      ptrClusSigmaT  = dataObjects["clus_sigma_t"].get();
-      ptrClusQuality = dataObjects["clus_quality"].get();
     }
 
     // -----------------------------------------------------------------------
@@ -1441,7 +1350,6 @@ namespace MyUtl {
     void fillTotals(const EventCounts& ev) {
       ptrFjet->    fillTotal(ev.effFillValFjet   );
       ptrTruthJets->fillTotal(ev.effFillValHSJet );
-      ptrVtxDz->   fillTotal(ev.effFillValVtxDz  );
       ptrFtrack->  fillTotal(ev.effFillValTrack  );
       ptrPuFrac->  fillTotal(ev.effFillValPURatio);
       ptrHSTrack-> fillTotal(ev.effFillValHSTrack);
@@ -1451,7 +1359,6 @@ namespace MyUtl {
     void fillPasses(const EventCounts& ev) {
       ptrFjet->    fillPass(ev.effFillValFjet   );
       ptrTruthJets->fillPass(ev.effFillValHSJet );
-      ptrVtxDz->   fillPass(ev.effFillValVtxDz  );
       ptrFtrack->  fillPass(ev.effFillValTrack  );
       ptrPuFrac->  fillPass(ev.effFillValPURatio);
       ptrHSTrack-> fillPass(ev.effFillValHSTrack);
@@ -1461,7 +1368,6 @@ namespace MyUtl {
     void fillDiffs(const EventCounts& ev, double diff) {
       ptrFjet->    fillDiff(ev.effFillValFjet,    diff);
       ptrTruthJets->fillDiff(ev.effFillValHSJet,  diff);
-      ptrVtxDz->   fillDiff(ev.effFillValVtxDz,  diff);
       ptrFtrack->  fillDiff(ev.effFillValTrack,   diff);
       ptrPuFrac->  fillDiff(ev.effFillValPURatio, diff);
       ptrHSTrack-> fillDiff(ev.effFillValHSTrack, diff);
@@ -1471,7 +1377,6 @@ namespace MyUtl {
     void fillPurities(const EventCounts& ev, double purity) {
       ptrFjet->    fillPurity(ev.nForwardJet,     purity);
       ptrTruthJets->fillPurity(ev.nTruthHSJet,    purity);
-      ptrVtxDz->   fillPurity(ev.effFillValVtxDz, purity);
       ptrFtrack->  fillPurity(ev.nForwardTrack,   purity);
       ptrPuFrac->  fillPurity(ev.puRatio,         purity);
       ptrHSTrack-> fillPurity(ev.nForwardTrackHS, purity);
@@ -1624,7 +1529,7 @@ namespace MyUtl {
 
       legend->Draw("SAME");
       ATLASLabel(0.18, 0.88, "Simulation Internal");
-      ATLASEnergyLabel(0.18, 0.82);
+      ATLASEnergyLabel(0.18, 0.82, MyUtl::ENERGY_LABEL.c_str());
       gPad->Modified();
       gPad->Update();
     };
@@ -1768,7 +1673,7 @@ namespace MyUtl {
         double bkgInt      = cBkg->Integral();
         double sigBkgRatio = 100 * sigMixInt / (bkgInt + sigMixInt);
         ATLASLabel(0.18, 0.88, "Simulation Internal");
-        ATLASEnergyLabel(0.18, 0.82);
+        ATLASEnergyLabel(0.18, 0.82, MyUtl::ENERGY_LABEL.c_str());
         latex.DrawLatexNDC(0.20, 0.76, plt->score.toStringShort());
         latex.DrawLatexNDC(0.20, 0.70,
           TString::Format("Core frac. = %.1f%%", coreFraction(plt)));
@@ -1791,7 +1696,7 @@ namespace MyUtl {
           if (yMinOverride > 0.0) c->SetMinimum(yMinOverride);
           fit->Draw("SAME");
           ATLASLabel(0.18, 0.88, "Simulation Internal");
-          ATLASEnergyLabel(0.18, 0.82);
+          ATLASEnergyLabel(0.18, 0.82, MyUtl::ENERGY_LABEL.c_str());
           latex.DrawLatexNDC(0.20, 0.76, plt->score.toStringShort());
           latex.DrawLatexNDC(0.20, 0.70, label);
           TLatex latexR;
@@ -1829,7 +1734,7 @@ namespace MyUtl {
         leg->Draw("SAME");
 
         ATLASLabel(0.18, 0.88, "Simulation Internal");
-        ATLASEnergyLabel(0.18, 0.82);
+        ATLASEnergyLabel(0.18, 0.82, MyUtl::ENERGY_LABEL.c_str());
         latex.DrawLatexNDC(0.20, 0.76, plt->score.toStringShort());
         latex.DrawLatexNDC(0.20, 0.70,
           TString::Format("Core frac. = %.1f%%", coreFraction(plt)));
@@ -1910,12 +1815,11 @@ namespace MyUtl {
       cTotal->Scale(1.0 / cTotal->Integral());
       globalMaxOut = std::max(globalMaxOut, cTotal->GetMaximum());
       // Score-specific colors matching the money-plot convention:
-      //   TRKPTZ=red, TEST_MISAS=orange, TEST_MISCL=violet; fallback to COLORS cycle.
+      //   TRKPTZ=red, TEST_MISAS=violet; fallback to COLORS cycle.
       Color_t col;
       switch (plt->score.id) {
         case 2:  col = C02; break;  // TRKPTZ     → red
         case 13: col = C04; break;  // TEST_MISAS → violet
-        case 12: col = C03; break;  // TEST_MISCL → yellow
         default: col = COLORS[colorCounter % COLORS.size()]; break;
       }
       ++colorCounter;
@@ -1964,7 +1868,7 @@ namespace MyUtl {
     leg->Draw("SAME");
 
     ATLASLabel(0.18, 0.88, "Simulation Internal");
-    ATLASEnergyLabel(0.18, 0.82);
+    ATLASEnergyLabel(0.18, 0.82, MyUtl::ENERGY_LABEL.c_str());
     canvas->Print(fname);
   }
 

@@ -47,6 +47,7 @@
 #include "AtlasStyle.h"
 #include "AtlasLabels.h"
 #include "clustering_constants.h"
+#include "sample_config.h"
 #include "clustering_includes.h"
 #include "clustering_structs.h"
 #include "clustering_functions.h"
@@ -120,12 +121,17 @@ static double computeRpT(BranchPointerWrapper* b,
   return sumpt / j_pt;
 }
 
-int main() {
+int main(int argc, char** argv) {
   SetAtlasStyle();
   gStyle->SetOptStat(0);
 
+  // --- Sample selection (--sample=vbf|zjets|dijet; default: local VBF ntuple) ---
+  auto sample = MyUtl::resolveSample(argc, argv);
+  MyUtl::ENERGY_LABEL = sample.energyLabel;
+  MyUtl::OUTPUT_DIR   = sample.outputDir;
+
   TChain chain("ntuple");
-  setupChain(chain, "../../highstats-ntuple/");
+  setupChain(chain, sample.ntupleDir.c_str());
   if (chain.GetEntries() == 0) {
     std::cerr << "No ROOT files found.  Aborting.\n";
     return 1;
@@ -199,8 +205,14 @@ int main() {
   double pu_tot_pt = 0, pu_floor_pt = 0, hs_tot_pt = 0, hs_floor_pt = 0;        // >40
   double pu_tot_lo = 0, pu_floor_lo = 0, hs_tot_lo = 0, hs_floor_lo = 0;        // 30-40
 
+  std::cout << "Starting Event Loop\n";
+  const Long64_t N_EVENT = chain.GetEntries();
+
   while (reader.Next()) {
     ++n_total;
+
+    if (n_total % 100 == 0)
+      std::cout << "Progress: " << n_total << "/" << N_EVENT << "\r" << std::flush;
 
     // ── Require only vertex quality (paper Sec. 3: |z_reco − z_truth| < 2 mm).
     if (branch.recoVtxZ.GetSize() == 0 || branch.truthVtxZ.GetSize() == 0) continue;
@@ -325,15 +337,15 @@ int main() {
   }
 
   // ── Output paths ─────────────────────────────────────────────────────────────
-  boost::filesystem::create_directories("../figs/rpt_plots");
-  const TString out_pdf = "../figs/rpt_plots/rpt_v5.pdf";
+  boost::filesystem::create_directories(MyUtl::OUTPUT_DIR + "/rpt_plots");
+  const TString out_pdf = TString::Format("%s/rpt_plots/rpt_v5.pdf", MyUtl::OUTPUT_DIR.c_str());
 
   TCanvas* canvas = new TCanvas("canvas", "RpT v5", 800, 700);
   canvas->Print(out_pdf + "[");
 
   auto drawLabels = [](const char* extra = nullptr) {
     ATLASLabel(0.18, 0.88, "Simulation Internal");
-    ATLASEnergyLabel(0.18, 0.82);
+    ATLASEnergyLabel(0.18, 0.82, MyUtl::ENERGY_LABEL.c_str());
     if (extra) {
       TLatex t; t.SetNDC(); t.SetTextFont(42); t.SetTextSize(0.032);
       t.DrawLatex(0.18, 0.76, extra);
@@ -408,7 +420,7 @@ int main() {
       TLatex t; t.SetNDC(); t.SetTextColor(1);
       t.SetTextFont(72); t.SetTextSize(0.05); t.DrawLatex(0.18, 0.88, "ATLAS");
       t.SetTextFont(42); t.SetTextSize(0.05); t.DrawLatex(0.28, 0.88, "Simulation Internal");
-      t.SetTextSize(0.044); t.DrawLatex(0.18, 0.80, "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv.");
+      t.SetTextSize(0.044); t.DrawLatex(0.18, 0.80, MyUtl::ENERGY_LABEL.c_str());
       if (extra_label) { t.SetTextSize(0.044); t.DrawLatex(0.18, 0.72, extra_label); }
     }
 

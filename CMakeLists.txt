@@ -50,7 +50,7 @@ add_executable(rpt_v5 util/rpt_v5.cxx)
 add_executable(export_training_data util/export_training_data.cxx)
 add_executable(failure_decomposition util/failure_decomposition.cxx)
 add_executable(maxpt_jet_test util/maxpt_jet_test.cxx)
-add_executable(waves_win_events util/scratch/waves_win_events.cxx)
+add_executable(track_dt util/track_dt.cxx)
 
 # Specify the include directories for your header files
 foreach(_tgt
@@ -63,7 +63,7 @@ foreach(_tgt
     export_training_data
     failure_decomposition
     maxpt_jet_test
-    waves_win_events
+    track_dt
 )
     target_include_directories(${_tgt}
         PRIVATE

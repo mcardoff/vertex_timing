@@ -77,11 +77,9 @@ namespace MyUtl {
   const double DIST_CUT_CONE      = 3.0;   // Distance cut for cone clustering
   const double DIST_CUT_SIMUL     = 3.0;   // Distance cut for simul. clustering
   const double DIST_CUT_ITER      = 3.0;   // Distance cut for iterative clustering
-  const double DIST_CUT_REFINE    = 2.0;   // Timing distance cut used by ZT_REFINED (legacy)
-  const double DIST_CUT_T_REFINED = 2.0;   // Re-clustering distance cut for T_REFINED and ZT_REFINED
+  const double DIST_CUT_T_REFINED = 2.0;   // Re-clustering distance cut for JET_T_REFINED (WAVES_RECLUST)
   const double WAVES_DR_FLOOR    = 0.05;  // Minimum ΔR for WAVeS 1/ΔR weight (prevents divergence)
-  const double TVA_CUT_Z_REFINED  = 2.0;   // z₀ TVA significance cut for Z_REFINED and ZT_REFINED
-  const int    CONE_ITER_K        = 3;     // Top cone clusters to refine (REFINED score)
+  const int    CONE_ITER_K        = 3;     // Top cone clusters to refine; used only by util/scratch/cone_iter_k_sweep.cxx
   const double TRUTH_PULL_CUT     = 3.0;   // |pull| < cut keeps track as truth-matched
   // z₀ pull-width inflation factor (measured from z0_pull_diag: σ ≈ 1.15 across all
   // η bins, indicating the covariance matrix underestimates the true z₀ resolution by
@@ -119,10 +117,9 @@ namespace MyUtl {
   //   runtime inside processEventData via a switch on this enum.
   //     ALL      — full forward track list (no pre-filtering)
   //     JET      — tracks falling inside a forward jet cone (FILTJET)
-  //     Z0_TVA   — tracks passing z₀ TVA at TVA_CUT_Z_REFINED (ZT_REFINED)
   //     HS_ONLY  — truth-HS-linked tracks only (TEST_HS)
   // ---------------------------------------------------------------------------
-  enum class TrackFilterType { ALL, JET, Z0_TVA, HS_ONLY };
+  enum class TrackFilterType { ALL, JET, HS_ONLY };
 
   // ---------------------------------------------------------------------------
   // 4. Histogram axis ranges and fold values
@@ -142,9 +139,6 @@ namespace MyUtl {
   const double FJET_MIN = -0.5, FJET_MAX = 31.5, FOLD_FJET = 5;
   const double FJET_WIDTH = 1.0;
 
-  const double VTX_DZ_MIN = 0, VTX_DZ_MAX = 5.0, FOLD_VTX_DZ = 2.0;
-  const double VTX_DZ_WIDTH = 0.1;
-
   const double TRACK_MIN = 2.5, TRACK_MAX = 100.5, FOLD_TRACK = 50;
   const double TRACK_WIDTH = 2.0;
 
@@ -158,15 +152,12 @@ namespace MyUtl {
   const double PU_FRAC_MIN = 0, PU_FRAC_MAX = 1.0 + PU_FRAC_WIDTH, FOLD_PU_FRAC = 1.0;
 
   // Avg nHGTD hits per track in the selected cluster (range 1–4; no folding needed)
-  const double NHIT_MIN = 0.75, NHIT_MAX = 4.25, FOLD_NHIT = 4.25;
+  const double NHIT_MIN = 0.75, NHIT_MAX = 4.25;
   const double NHIT_WIDTH = 0.5;
 
   // Cluster-level PU fraction by track count; mirrors event PU_FRAC_* for direct comparison
   const double CLUS_PU_FRAC_WIDTH = 0.1;
-
-  // Cluster timing uncertainty σ_t (scored.sigmas[0]); max = 30 ps (HGTD res/hit), no folding
-  const double CLUS_SIGMA_T_MIN = 0.0, CLUS_SIGMA_T_MAX = 20.0, FOLD_CLUS_SIGMA_T = 20.0;
-  const double CLUS_SIGMA_T_WIDTH = 1.0;
+  const double CLUS_PU_FRAC_MIN = 0.0, CLUS_PU_FRAC_MAX = 1.0 + CLUS_PU_FRAC_WIDTH, FOLD_CLUS_PU_FRAC = 1.0;
 
   // σ_t factor used as the third multiplicative term in cluster quality.
   // Linear roll-off: factor=1 below FLOOR, factor=0 above CEIL, linear between.
@@ -174,20 +165,6 @@ namespace MyUtl {
   // Ceil=20 ps marks the boundary where the cluster's own time estimate is unreliable.
   const double CLUS_SIGMA_T_FACTOR_FLOOR = 5.0;
   const double CLUS_SIGMA_T_FACTOR_CEIL  = 20.0;
-  const double CLUS_PU_FRAC_MIN = 0.0, CLUS_PU_FRAC_MAX = 1.0 + CLUS_PU_FRAC_WIDTH, FOLD_CLUS_PU_FRAC = 1.0;
-
-  // Combined cluster quality score: (1 - clusPuFrac)² * clamp(avgNHGTD/2, 0, 1) * σ_t factor
-  // Range [0, 1]: 0 = total failure, 1 = pure-HS multi-hit well-determined cluster.
-  // Histogram range shifted by half a bin so bin centers fall on 0.0, 0.1, ..., 1.0
-  // (more natural for axis reading than 0.05, 0.15, ..., 1.05).
-  const double CLUS_QUALITY_WIDTH = 0.1;
-  const double CLUS_QUALITY_MIN = -0.5 * CLUS_QUALITY_WIDTH;          // = -0.05
-  const double CLUS_QUALITY_MAX = 1.0 + 0.5 * CLUS_QUALITY_WIDTH;     // =  1.05
-  const double FOLD_CLUS_QUALITY = 1.0;
-  // Quality tier thresholds: two regions
-  //   LOW  : Q < CLUS_QUALITY_SPLIT  — PU-dominated smear, σ_tail ~ 200+ ps
-  //   HIGH : Q ≥ CLUS_QUALITY_SPLIT  — signal + mild contamination, σ_core ~ 7-12 ps
-  const double CLUS_QUALITY_SPLIT = 0.15;
 
   const double Z_MIN = -200, Z_MAX = 200, FOLD_Z = 100;
   const double Z_WIDTH = 10.0;
@@ -213,7 +190,7 @@ namespace MyUtl {
   //                        overload; collection built in section E (when
   //                        distCut ≥ 0) or directly in selectClusters
   //                        (HGTD, HGTD_SORT, CONE_BDT where distCut = -1).
-  //     requiresPurity   — true: fills gated on cluster purity (TEST_MISCL)
+  //     requiresPurity   — true: fills gated on cluster/event purity (TEST_MISAS, WAVES_MISCL, WAVES_MISAS)
   //     threshold        — score gate for passEfficiency; -1 = no gate
   //
   //   Collection spec fields (only used when usesOwnCollection && distCut≥0):
@@ -260,19 +237,12 @@ namespace MyUtl {
     static const Score TRKPT;
     static const Score TRKPTZ;
     static const Score PASS;
-    static const Score T_REFINED;
-    static const Score Z_REFINED;
-    static const Score ZT_REFINED;
     static const Score CONE;
     static const Score FILTJET;
     static const Score HGTD_SORT;
-    static const Score TEST_ML;
-    static const Score TEST_MISCL;
     static const Score CONE_BDT;
     static const Score TEST_MISAS;
     static const Score TEST_HS;
-    static const Score ZT_ITER;
-    static const Score PERF_EVT;
     static const Score WAVES;
     static const Score JET_T_REFINED;
     static const Score WAVES_MISCL;
@@ -296,30 +266,20 @@ namespace MyUtl {
     2, STR_TRKPTZ + " [Baseline Algorithm]", "TRKPTZ",
     false, false, -1.0f
   };
-  inline const Score Score::PASS       = {  
+  inline const Score Score::PASS       = {
     3, "Pass Cluster", "PASS",
     false, false, -1.0f
   };
-  inline const Score Score::Z_REFINED  = {  
-    5, "2#sigma z_{0} Refinement","Z_REFINED",
-    false, false, -1.0f
-  };
-  inline const Score Score::CONE_BDT   = {  
+  inline const Score Score::CONE_BDT   = {
     8, "Cone (BDT)", "CONE_BDT",
     true , false,  0.3f
   };
-  inline const Score Score::HGTD_SORT  = { 
+  inline const Score Score::HGTD_SORT  = {
     10, "HGTD BDT (pT-sorted)", "HGTD_SORT",
     true , false,  0.3f
   };
-  inline const Score Score::TEST_ML    = { 
-    11, "DNN Selection", "TEST_ML",
-    false, false,  0.3f
-  };
 
-  inline const Score Score::TEST_MISCL = { 12, STR_TRKPTZ + " [Events with Pure Clusters]"   , "TRKPTZ Pure Clust.",    false, true, -1.f };
   inline const Score Score::TEST_MISAS = { 13, STR_TRKPTZ + " [Events with Perfect Timing]"  , "TRKPTZ Perf. Time",    false, true, -1.f };
-  inline const Score Score::PERF_EVT   = { 17, STR_TRKPTZ + " [Pure Clusters + Perf. Timing]", "TRKPTZ Pure Clust. Perf. Time", false, true, -1.f };
   // WAVES: WAVeS-style selection score — Σ pT·pT_jet/max(ΔR,floor) × exp(−1.5|Δz|).
   // Pure selection: picks the highest-scoring main-collection cluster and reports its
   // standard weighted-mean time and full-cluster purity (no in-jet-only recomputation).
@@ -329,7 +289,7 @@ namespace MyUtl {
                                               DIST_CUT_T_REFINED, ClusteringMethod::ITERATIVE,
                                               false, TrackFilterType::JET };
   // WAVeS oracle variants: selection by the WAVeS score, denominator gates applied
-  // at fill time exactly like TEST_MISCL (cluster purity) / TEST_MISAS (HS timing purity)
+  // at fill time — cluster purity (MISCL-style) / HS timing purity (like TEST_MISAS)
   inline const Score Score::WAVES_MISCL  = { 20, "WAVeS [Events with Pure Clusters]" , "WAVES Pure Clust.", false, true, -1.f };
   inline const Score Score::WAVES_MISAS  = { 21, "WAVeS [Events with Perfect Timing]", "WAVES Perf. Time" , false, true, -1.f };
 
@@ -337,18 +297,13 @@ namespace MyUtl {
   inline const Score Score::CONE       = {  7, "Cone"                       , "CONE",     true , false, -1.f, DIST_CUT_CONE,      ClusteringMethod::CONE      };
   inline const Score Score::FILTJET    = {  9, "Filter Tracks in Jets"      , "FILTJET",  true , false, -1.f, DIST_CUT_CONE,      ClusteringMethod::CONE,      false, TrackFilterType::JET     };
   inline const Score Score::TEST_HS    = { 14, STR_TRKPTZ + " (HS only)"   , "TEST_HS",  true , false, -1.f, DIST_CUT_CONE,      ClusteringMethod::CONE,      false, TrackFilterType::HS_ONLY };
-  inline const Score Score::T_REFINED  = {  4, "2#sigma t Re-clustering"    , "T_REFINED",true , false, -1.f, DIST_CUT_T_REFINED, ClusteringMethod::ITERATIVE };
-  inline const Score Score::ZT_REFINED = {  6, "2#sigma z_{0}+t Re-clustering", "ZT_REFINED",true, false, -1.f, DIST_CUT_T_REFINED, ClusteringMethod::ITERATIVE, false, TrackFilterType::Z0_TVA  };
-  inline const Score Score::ZT_ITER    = { 16, "2D (z_{0},t) Iterative"     , "ZT_ITER",  true , false, -1.f, DIST_CUT_CONE,      ClusteringMethod::ITERATIVE, true  };
 
   inline const std::vector<Score> SCORE_REGISTRY = {
     Score::HGTD,      Score::TRKPT,     Score::TRKPTZ,    Score::PASS,
-    Score::T_REFINED, Score::Z_REFINED, Score::ZT_REFINED, Score::CONE,
+    Score::CONE,
     Score::FILTJET,   Score::HGTD_SORT,
-    Score::TEST_ML,   Score::TEST_MISCL, Score::CONE_BDT,
+    Score::CONE_BDT,
     Score::TEST_MISAS, Score::TEST_HS,
-    Score::ZT_ITER,
-    Score::PERF_EVT,
     Score::WAVES,
     Score::JET_T_REFINED,
     Score::WAVES_MISCL,

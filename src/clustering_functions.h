@@ -24,9 +24,6 @@
 
 #include "clustering_constants.h"
 #include "clustering_structs.h"
-#include "ml_model.h"
-#include "TMVA/Tools.h"
-#include "TMVA/Reader.h"
 
 namespace MyUtl {
 
@@ -126,7 +123,6 @@ namespace MyUtl {
     mergedCluster.trackIndices.insert(mergedCluster.trackIndices.end(), b.trackIndices.begin(), b.trackIndices.end());
     
     mergedCluster.nConstituents = a.nConstituents+b.nConstituents;
-    mergedCluster.maxPtCluster = a.maxPtCluster || b.maxPtCluster;
 
     for (auto [k,v] : a.scores) {
       mergedCluster.scores[k] = v;
@@ -478,7 +474,7 @@ namespace MyUtl {
      ClusteringMethod method,      // Clustering algorithm to use
      bool usez0 = false,           // Use z info in clustering as well
      bool sortTracks = false,      // Before clustering, sort tracks by pT
-     bool calcPurityFlag = false   // only compute purity when TEST_MISCL is active
+     bool calcPurityFlag = false   // only compute purity when a purity-gated score is active
   ) -> std::vector<Cluster> {
     if (trackIndices.empty() && DEBUG)
       std::cout << "EMPTY!!!!\n";
@@ -531,20 +527,10 @@ namespace MyUtl {
         break;
     }
 
-    // ML model loading DISABLED — the weights file is never read (TEST_ML is
-    // pinned to 0 in updateScores).  Re-enable by restoring this static loader
-    // and passing &mlModel to updateScores below.
-    // static MLModel mlModel = []() {
-    //     MLModel m;
-    //     m.load_weights("/Users/mcard/project/vertex_timing/share/models/model_weights.json");
-    //     std::cout << "✓ ML model loaded (one-time initialization)" << std::endl;
-    //     return m;
-    // }();
-
     for (Cluster& cluster: collection) {
       if (calcPurityFlag)
-        cluster.calcPurity(branch);  // only needed when TEST_MISCL is active
-      cluster.updateScores(branch, nullptr);
+        cluster.calcPurity(branch);  // only needed when a purity-gated score is active
+      cluster.updateScores(branch);
     }
     
     if (DEBUG) std::cout << "Finished Clustering\n";
