@@ -1,0 +1,34 @@
+# ---------------------------------------------------------------------------
+# clustering_dt.sub — condor submit template: one job per sample.
+#
+# Setup (once):
+#   cd build && cmake .. && make clustering_dt      # build BEFORE submitting
+#   chmod +x condor/run_analysis.sh
+#
+# Submit (from inside condor/, so relative paths below resolve correctly):
+#   cd condor && condor_submit clustering_dt.sub
+#
+# This queues 3 jobs, one per --sample value. Edit PROJECT_DIR in
+# run_analysis.sh first. To run rpt_v5 instead, copy this file and change
+# the `arguments` line below (rpt_v5 also supports --sample).
+# ---------------------------------------------------------------------------
+universe                = vanilla
+executable              = run_analysis.sh
+arguments               = clustering_dt $(sample)
+
+getenv                  = True
+should_transfer_files   = NO   # shared filesystem between submit/execute hosts
+
+# CERN-style job-length hint; harmless no-op on pools that don't read it,
+# remove if your condor pool doesn't recognize +JobFlavour.
++JobFlavour             = "nextweek"
+
+request_cpus            = 1
+request_memory          = 4GB
+request_disk            = 4GB
+
+output                  = logs/$(sample).$(ClusterId).$(ProcId).out
+error                   = logs/$(sample).$(ClusterId).$(ProcId).err
+log                     = logs/$(sample).$(ClusterId).$(ProcId).log
+
+queue sample in (vbf, zjets, dijet)

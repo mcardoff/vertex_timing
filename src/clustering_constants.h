@@ -294,20 +294,15 @@ namespace MyUtl {
   inline const Score Score::WAVES_MISAS  = { 21, "WAVeS [Events with Perfect Timing]", "WAVES Perf. Time" , false, true, -1.f };
 
   // Scores with a dedicated collection (distCut ≥ 0 → buildsCollection() = true)
-  inline const Score Score::CONE       = {  7, "Cone"                       , "CONE",     true , false, -1.f, DIST_CUT_CONE,      ClusteringMethod::CONE      };
-  inline const Score Score::FILTJET    = {  9, "Filter Tracks in Jets"      , "FILTJET",  true , false, -1.f, DIST_CUT_CONE,      ClusteringMethod::CONE,      false, TrackFilterType::JET     };
-  inline const Score Score::TEST_HS    = { 14, STR_TRKPTZ + " (HS only)"   , "TEST_HS",  true , false, -1.f, DIST_CUT_CONE,      ClusteringMethod::CONE,      false, TrackFilterType::HS_ONLY };
+  inline const Score Score::CONE       = {  7, "Cone"                       , "CONE",     true , false, -1.f, DIST_CUT_CONE, ClusteringMethod::CONE };
+  inline const Score Score::FILTJET    = {  9, "Filter Tracks in Jets"      , "FILTJET",  true , false, -1.f, DIST_CUT_CONE, ClusteringMethod::CONE, false, TrackFilterType::JET };
+  inline const Score Score::TEST_HS    = { 14, STR_TRKPTZ + " (HS only)"   , "TEST_HS",  true , false, -1.f,  DIST_CUT_CONE, ClusteringMethod::CONE, false, TrackFilterType::HS_ONLY };
 
   inline const std::vector<Score> SCORE_REGISTRY = {
-    Score::HGTD,      Score::TRKPT,     Score::TRKPTZ,    Score::PASS,
-    Score::CONE,
-    Score::FILTJET,   Score::HGTD_SORT,
-    Score::CONE_BDT,
-    Score::TEST_MISAS, Score::TEST_HS,
-    Score::WAVES,
-    Score::JET_T_REFINED,
-    Score::WAVES_MISCL,
-    Score::WAVES_MISAS,
+    Score::HGTD    , Score::TRKPT     , Score::TRKPTZ, Score::PASS,
+    Score::CONE    , Score::FILTJET   , Score::HGTD_SORT,
+    Score::CONE_BDT, Score::TEST_MISAS, Score::TEST_HS,
+    Score::WAVES,    Score::JET_T_REFINED, Score::WAVES_MISCL, Score::WAVES_MISAS,
   };
 
   // ---------------------------------------------------------------------------
