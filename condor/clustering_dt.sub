@@ -31,7 +31,7 @@ getenv                   = True
 
 # CERN-style job-length hint; harmless no-op on pools that don't read it,
 # remove if your condor pool doesn't recognize +JobFlavour.
-+JobFlavour              = "nextweek"
++JobFlavour              = "tomorrow"
 
 # clustering_dt now parallelizes its event loop via TTreeProcessorMT
 # (util/ttreemt_prototype.cxx validated ~3x speedup at 4 threads). The `4`
