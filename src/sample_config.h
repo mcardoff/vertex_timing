@@ -53,7 +53,7 @@ namespace MyUtl {
       return it->second;
     }
 
-    return {"../../ntuple-hgtd/", "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv.", "../figs"};
+    return {"/Users/mcard/project/ntuple-hgtd/", "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv.", "../figs"};
   }
 
   // ---------------------------------------------------------------------------

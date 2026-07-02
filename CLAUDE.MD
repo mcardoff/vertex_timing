@@ -44,7 +44,11 @@ vertex_timing/
 │   │                             #   Machine Learning section below
 │   ├── scripts/                  # ONNX export/inspection Python utilities (historical; no active consumer in src/)
 │   └── docs/                     # Design docs, incl. older ML integration guides
-├── condor/                       # Condor submit templates + run_analysis.sh wrapper
+├── condor/                        # HTCondor grid submission templates (see Grid Submission)
+│   ├── run_analysis.sh           # Generic job executable (any --sample/--threads-aware target)
+│   ├── clustering_dt.sub         # Submit file: one job per sample, for clustering_dt
+│   ├── rpt_v5.sub                # Submit file: one job per sample, for rpt_v5
+│   └── logs/                     # condor stdout/stderr/log output
 ├── CMakeLists.txt
 └── build/                        # Build output (created by `cmake ..`)
 ```
@@ -249,6 +253,28 @@ cd build && ./rpt_v5
 cd build && make
 ```
 
+## Grid Submission (condor)
+
+Templates in `condor/` run `clustering_dt` / `rpt_v5` on the UChicago AF HTCondor pool, one job per `--sample` value (`vbf`, `zjets`, `dijet`):
+
+- **`condor/run_analysis.sh`** — generic executable, invoked as `run_analysis.sh <executable> <sample> [<threads>]`. Sources `atlasLocalSetup.sh` + `lsetup "root <version>"` (relaxing `set -e`/`-u` around just that call — those scripts reference unset internal variables like `ALRB_frontlineSite` and aren't strict-mode safe), then moves the transferred `<executable>` into a `build/` subdir and runs it there with `--sample=<sample>` (mirroring the `cd build && ./clustering_dt` convention so the program's own `../<sample>` output-path logic lands at the job's scratch-directory root) and, if given, `--threads=<N>`.
+- **`condor/clustering_dt.sub`** / **`condor/rpt_v5.sub`** — one `.sub` file per executable, each queuing 3 jobs via `queue sample in (vbf, zjets, dijet)`. Submit each separately (own `condor_submit` call) to get independent job clusters. `arguments` passes `4` as the `<threads>` arg, matching `request_cpus = 4` — both executables now parallelize their event loop via `TTreeProcessorMT` (see Multicore in Development Notes), and condor's cgroup throttles any threads spawned beyond `request_cpus`, so the two must track each other.
+
+Execute hosts do **not** share a filesystem with the submit host on this pool — confirmed via a `TARGET.FileSystemDomain == MY.FileSystemDomain` match failure when `should_transfer_files = NO` was tried first (0 of 157 slots matched). Both `.sub` files instead use `transfer_input_files` (stages the prebuilt binary in) and `transfer_output_files = $(sample)` (stages the output directory back out). Ntuple inputs are read via the absolute `/data/mcardiff/exotic_superntuples/...` path baked into `--sample=` (see `src/sample_config.h`), so they don't need transferring.
+
+```bash
+cd build && cmake .. && make clustering_dt rpt_v5   # build before submitting; condor doesn't rebuild
+cd condor
+condor_submit -dump dryrun.ad clustering_dt.sub     # dry-run: validate without queuing
+condor_submit clustering_dt.sub
+condor_submit rpt_v5.sub                            # separate job cluster
+condor_q
+```
+
+Logs land in `condor/logs/<sample>.<ClusterId>.<ProcId>.{out,err,log}` (prefixed `rpt_v5_` for the rpt_v5 cluster).
+
+**Caveat:** the build uses `-march=native` (see Compiler Flags above), tuned to whichever machine ran `make`. If execute hosts have a different CPU microarchitecture than the build host, jobs can crash with an "Illegal instruction" (SIGILL) rather than a normal error.
+
 ## Score Registry
 
 All scores are defined as `static const Score` members of the `Score` struct in `src/clustering_constants.h` and listed in `SCORE_REGISTRY`. Each carries its own collection spec: `distCut`, `method` (`CONE`/`ITERATIVE`/`SIMULTANEOUS`/`ITERATIVE_SPLIT`), `useZ0`, `filter` (`TrackFilterType`: `ALL`, `JET`, `HS_ONLY`), plus `buildsCollection()` to indicate it manages its own cluster collection (only true when `usesOwnCollection && distCut >= 0`).
@@ -313,14 +339,15 @@ Key structures and entry points:
 - **Fit quality guard**: `plotPostProcessing` skips slices with too few entries and only calls `fillEach` when the relative uncertainty on the core σ is `< 50%`. Bins failing these guards are left empty rather than showing garbage fit results.
 - **y-axis labels**: efficiency-style plots use **"Core Fraction"**; the pass window is `PASS_SIGMA = 60 ps`.
 - **`AtlasStyle.h`**: calls `atlasStyle->SetErrorX(0)` globally (effective for TH1/TGraphErrors; TEfficiency uses the conversion approach above).
-- **Histogram directory registration**: `PlotObj`/`AnalysisObj` construction does not currently call `TH1::AddDirectory(kFALSE)` or otherwise manage `gDirectory` — fine for the current single-threaded event loop, but anything that constructs multiple `AnalysisObj` instances concurrently (e.g. per-thread duplication) must set `TH1::AddDirectory(kFALSE)` first to avoid racing on ROOT's global directory registry.
+- **Histogram directory registration**: both `clustering_dt.cxx` and `rpt_v5.cxx` call `TH1::AddDirectory(kFALSE)` early in `main()`, before any histogram construction — required now that both parallelize their event loop (see Multicore below): every worker thread's lazily-built histogram set is identically named, and without this call they'd race on `gDirectory`'s registry. `PlotObj`/`AnalysisObj`'s own constructors still don't manage `gDirectory` themselves; they rely on the caller having set this first.
 
 ## Development Notes
 
 - **Namespace**: all utilities live in `namespace MyUtl`
 - **Debug mode**: `MyUtl::DEBUG` (`src/clustering_constants.h`) for verbose per-event logging
-- **Multicore**: `ROOT::EnableImplicitMT()` is called in `main()` but only parallelises ROOT-internal operations — the `TTreeReader::Next()` event loop itself remains sequential. See `util/ttreemt_prototype.cxx` for an exploratory (not production-wired) `TTreeProcessorMT` prototype that parallelises the per-event loop itself.
+- **Multicore**: both `clustering_dt.cxx` and `rpt_v5.cxx` parallelize their per-event loop via `ROOT::TTreeProcessorMT` (`--threads=N`, `MyUtl::resolveThreads()` in `src/sample_config.h`, default `min(hardware_concurrency(), 8)`) — `ROOT::EnableImplicitMT()` alone only parallelises ROOT-internal operations, not the event loop itself. Per-thread accumulation state (`AnalysisObj` map / RpT `ThreadState`) is built lazily once per worker thread and merged into one result after the loop (`AnalysisObj::mergeFrom()` in `src/plotting_utilities.h`). See `util/ttreemt_prototype.cxx` for the standalone prototype this was validated against, and the "TTreeProcessorMT prototype" note below on a real thread-safety bug found via stress-testing.
 - **Constants**: modify analysis cuts in `src/clustering_constants.h`; always rebuild after header changes
 - **Plot styling**: ROOT `TColor`/`TCanvas`; ATLAS style via `AtlasStyle.h`/`AtlasLabels.h`
-- **Event loop**: `TTreeReader` + `BranchPointerWrapper` for branch access
-- **File identification**: within the sequential event loop, `branch.reader.GetTree()->GetCurrentFile()->GetName()` gives the current file path, and `chain.GetReadEntry() - chain.GetChainOffset()` gives the local (0-indexed) entry number within that file — both needed to reconstruct an event display command
+- **Event loop**: `TTreeProcessorMT::Process()` hands each task its own `TTreeReader`; a fresh `BranchPointerWrapper` is bound to it per invocation (cheap — pointer setup only)
+- **File identification**: inside the `TTreeProcessorMT` lambda, `reader.GetTree()->GetCurrentFile()->GetName()` gives the current file path, and `reader.GetTree()->GetReadEntry()` gives the local (0-indexed) entry number directly — both needed to reconstruct an event display command. This differs from the old sequential loop's `chain.GetReadEntry() - chain.GetChainOffset()` trick, which needed an outer `TChain` not available inside the lambda; a `TChain`-bound *sequential* `TTreeReader`'s `GetTree()->GetReadEntry()` returns the chain-global entry number, not local, which is exactly why that trick existed.
+- **TTreeProcessorMT thread-safety gotcha**: `AnalysisObj`'s constructor calls `SetFillColorAlpha()`, which lazily registers a new `TColor` into ROOT's *global* color table the first time a given (color, alpha) pair is used — not thread-safe. Worker threads racing to build their first `AnalysisObj`/`ThreadState` concurrently corrupted the heap (intermittent `SIGABRT`, found via stress-testing, not a one-off). Fixed by serializing each thread's entire lazy-init construction (not just registry bookkeeping) behind its mutex — see the per-thread registry pattern in both executables' `main()`.
