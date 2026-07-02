@@ -394,7 +394,7 @@ int main(int argc, char** argv) {
   // and an empty page.  Detect that per pT-slice and fall back to the actual
   // observed x-range instead of hardcoding a sample-specific override.
   auto pickXRange = [](const std::vector<TGraph*>& gs, double lo_default, double hi_default) {
-    double data_lo = 1.0, data_hi = 0.0;
+    double data_lo = 1.0, data_hi = 0.0, window_max = 0.0;
     bool any_in_window = false;
     for (auto* g : gs) {
       int n = g->GetN();
@@ -402,10 +402,21 @@ int main(int argc, char** argv) {
         double x = g->GetX()[j];
         data_lo = std::min(data_lo, x);
         data_hi = std::max(data_hi, x);
-        if (x >= lo_default && x <= hi_default) any_in_window = true;
+        if (x >= lo_default && x <= hi_default) {
+          any_in_window = true;
+          window_max = std::max(window_max, x);
+        }
       }
     }
-    if (any_in_window || data_hi <= data_lo) return std::make_pair(lo_default, hi_default);
+    // Requiring merely "one point somewhere in the window" isn't enough: a
+    // spike near R_pT=0 can make efficiency crash from ~1.0 to e.g. 0.85 in
+    // a single bin step, leaving only a stub hugging the window's low edge
+    // (e.g. zjets 30-40 GeV, cut off at eff~0.89) — technically non-empty,
+    // but the "high-efficiency working point" framing is meaningless there.
+    // Require the curve to actually reach near the window's top edge too.
+    bool reaches_near_top = window_max >= hi_default - 0.05;
+    if ((any_in_window && reaches_near_top) || data_hi <= data_lo)
+      return std::make_pair(lo_default, hi_default);
     double pad = 0.02 * (data_hi - data_lo);
     return std::make_pair(std::max(0.0, data_lo - pad), std::min(1.0, data_hi + pad));
   };
