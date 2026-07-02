@@ -32,6 +32,11 @@ vertex_timing/
 │   ├── event_display.py          # Interactive event visualization (vertices, tracks, jets)
 │   ├── event_tinkering.py        # Quick event inspection and jet printing via uproot
 │   └── clustering_animation.py   # Animates the iterative clustering algorithm for one event
+├── condor/                       # HTCondor grid submission templates
+│   ├── run_analysis.sh           # Generic job executable (any --sample-aware target)
+│   ├── clustering_dt.sub         # Submit file: one job per sample, for clustering_dt
+│   ├── rpt_v5.sub                # Submit file: one job per sample, for rpt_v5
+│   └── logs/                     # condor stdout/stderr/log output (created empty)
 ├── CMakeLists.txt                # Build configuration
 ├── build/                        # CMake build output directory
 ├── figs/                         # Output plots (PDF)
@@ -108,6 +113,39 @@ make
 # Visualize an event (script lives in python/)
 cd python && python event_display.py --file_num 000009 --event_num 1856 --extra_time 0.0
 ```
+
+---
+
+## Grid Submission (condor)
+
+Templates for running `clustering_dt` / `rpt_v5` on the UChicago AF HTCondor pool live in `condor/`:
+
+| File | Purpose |
+|---|---|
+| `run_analysis.sh` | Generic job executable — `run_analysis.sh <executable> <sample>`. Sources the ATLAS/LCG environment (`atlasLocalSetup.sh` + `lsetup "root <version>"`) then runs the transferred `<executable>` with `--sample=<sample>` (or no flag if `<sample>` is `default`). |
+| `clustering_dt.sub` | Submit file: one job per `--sample` value (`vbf`, `zjets`, `dijet`) for `clustering_dt`. |
+| `rpt_v5.sub` | Same, for `rpt_v5`. Submitted separately (its own `condor_submit` call) so it runs as an independent job cluster from `clustering_dt.sub`. |
+
+Execute hosts don't share a filesystem with the submit host on this pool (confirmed via a `FileSystemDomain` match failure when `should_transfer_files = NO` was tried), so both `.sub` files stage the prebuilt executable in via `transfer_input_files` and stage the output directory (`vbf/`, `zjets/`, or `dijet/`) back out via `transfer_output_files`. The ntuple inputs are read via the absolute `/data/mcardiff/exotic_superntuples/...` path baked into `--sample=`, so they don't need transferring — only the tiny compiled binary does.
+
+```bash
+# Build first — condor does not rebuild on the execute host
+cd build && cmake .. && make clustering_dt rpt_v5
+
+# Submit (from inside condor/, so relative paths resolve correctly)
+cd ../condor
+condor_submit -dump dryrun.ad clustering_dt.sub   # dry-run: validate without queuing
+condor_submit clustering_dt.sub
+condor_submit rpt_v5.sub                          # separate job cluster
+
+# Monitor
+condor_q
+condor_q -better-analyze <ClusterId>.<ProcId>     # if a job is idle/held
+```
+
+Logs land in `condor/logs/<sample>.<ClusterId>.<ProcId>.{out,err,log}` (prefixed `rpt_v5_` for the rpt_v5 cluster).
+
+**Caveat:** `CMakeLists.txt` compiles with `-march=native`, tuned to whichever machine ran `make`. If execute hosts have a different CPU microarchitecture than the build host, jobs can crash with an "Illegal instruction" (SIGILL) rather than a normal error — not a bug in the job scripts.
 
 ## Scoring Algorithms
 
