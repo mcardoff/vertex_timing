@@ -25,6 +25,24 @@ namespace MyUtl {
 
   // Mutable globals read by plotting code (event-label text, PDF output root).
   // Set once in main() right after resolveSample(), before any plots are made.
+  //
+  // Default (no --sample, local dev) keeps the "../figs" convention: you
+  // `cd build && ./clustering_hist`, and output lands in the repo-root
+  // figs/, one level up. This one is never run on condor, so the "assumes
+  // we're inside build/" convention is harmless here.
+  //
+  // The grid-sample entries (vbf/zjets/dijet) below are cwd-relative instead
+  // ("vbf" not "../vbf") -- deliberately, since those are the ones actually
+  // submitted to condor. The old "../<name>" convention only resolved
+  // correctly there because run_analysis.sh faked being inside a build/
+  // subdirectory (mkdir it, mv the binary in, cd into it) purely so "../"
+  // would land back at the job's scratch root. If that step were ever
+  // skipped -- e.g. running the transferred binary directly by hand on an
+  // execute node -- "../<name>" would climb OUT of the scratch directory
+  // into its parent, which may not be writable (or may belong to a
+  // different job entirely). A cwd-relative path can't escape the directory
+  // the job is actually confined to. See run_analysis.sh, which no longer
+  // needs the build/ indirection as a result.
   inline std::string ENERGY_LABEL = "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv.";
   inline std::string OUTPUT_DIR   = "../figs";
 
@@ -32,11 +50,11 @@ namespace MyUtl {
   inline SampleConfig resolveSample(int argc, char** argv) {
     static const std::map<std::string, SampleConfig> registry = {
       {"vbf",   {"/data/mcardiff/exotic_superntuples/highstats_vbf/",
-                 "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv.", "../vbf"}},
+                 "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv.", "vbf"}},
       {"zjets", {"/data/mcardiff/exotic_superntuples/zjets/",
-                 "#sqrt{s} = 14 TeV, HL-LHC, Z+jets",               "../zjets"}},
+                 "#sqrt{s} = 14 TeV, HL-LHC, Z+jets",               "zjets"}},
       {"dijet", {"/data/mcardiff/exotic_superntuples/dijet/",
-                 "#sqrt{s} = 14 TeV, HL-LHC, Dijet",                "../dijet"}},
+                 "#sqrt{s} = 14 TeV, HL-LHC, Dijet",                "dijet"}},
     };
 
     const std::string prefix = "--sample=";
@@ -76,6 +94,25 @@ namespace MyUtl {
     }
 
     return nThreads > 0 ? nThreads : 1u;
+  }
+
+  // ---------------------------------------------------------------------------
+  // resolveHistFile
+  //   Path to the histogram ROOT file a *_plot executable reads, via an
+  //   optional --hist-file=<path> CLI override (e.g. when a file transferred
+  //   back from condor lands somewhere other than the default --sample=
+  //   convention). Defaults to `defaultPath` (typically
+  //   OUTPUT_DIR + "/hists/<name>.root", matching what the corresponding
+  //   *_hist executable wrote).
+  // ---------------------------------------------------------------------------
+  inline std::string resolveHistFile(int argc, char** argv, const std::string& defaultPath) {
+    const std::string prefix = "--hist-file=";
+    for (int i = 1; i < argc; ++i) {
+      std::string arg = argv[i];
+      if (arg.rfind(prefix, 0) != 0) continue;
+      return arg.substr(prefix.size());
+    }
+    return defaultPath;
   }
 
 }

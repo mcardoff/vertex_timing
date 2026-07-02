@@ -1,0 +1,94 @@
+#ifndef RPT_V5_COMMON_H
+#define RPT_V5_COMMON_H
+
+// ---------------------------------------------------------------------------
+// rpt_v5_common.h
+//   Shared between rpt_v5_hist.cxx (event loop, writes histograms to a ROOT
+//   file) and rpt_v5_plot.cxx (reads that file, produces the RpT PDF) --
+//   split out of the former single rpt_v5.cxx. Houses the Scenario container,
+//   the shared RpT histogram binning/booking, and the save/load helpers that
+//   round-trip a Scenario set through histogram_io.h.
+// ---------------------------------------------------------------------------
+
+#include "clustering_constants.h"
+#include "histogram_io.h"
+
+#include <TH1.h>
+#include <TString.h>
+
+#include <string>
+#include <vector>
+
+using namespace MyUtl;
+
+// -----------------------------------------------------------------------------
+// Scenario container.
+// -----------------------------------------------------------------------------
+struct Scenario {
+  std::string name;
+  std::string legend;
+  Color_t color;
+  TH1D* h_hs;
+  TH1D* h_pu;
+};
+
+// -----------------------------------------------------------------------------
+// Histogram binning + Scenario factory (file scope, not main()-local, so a
+// TTreeProcessorMT worker thread can build one full set per thread, and so
+// the plotting stage can build an identically-binned empty set to load into).
+//
+// Non-uniform binning: fine bins in [0, 2.5] for ROC granularity, then one
+// wide bin to capture the tail without bloating memory.  250 bins of width
+// 0.01 — coarse enough that the ROC + error bars aren't overcrowded.
+// -----------------------------------------------------------------------------
+inline const std::vector<double> rpt_bins = []() {
+  std::vector<double> b;
+  b.reserve(252);
+  for (int i = 0; i <= 250; ++i) b.push_back(0.01 * i);
+  b.push_back(375.0);
+  return b;
+}();
+inline const int rpt_nbin = (int)rpt_bins.size() - 1;  // 251
+
+inline TH1D* makeHist(const char* name, const char* title) {
+  return new TH1D(name, title, rpt_nbin, rpt_bins.data());
+}
+
+inline std::vector<Scenario> makeScenarios(const std::string& suffix) {
+  std::vector<Scenario> s = {
+    {"zonly",       "ITk-only",                    C05, nullptr, nullptr},
+    {"hgtd",        "HGTD t_{0}",                  C01, nullptr, nullptr},
+    {"waves",       "WAVeS t_{0}",                 C03, nullptr, nullptr},
+    {"waves_misas", "WAVeS t_{0} + clean timing",  C04, nullptr, nullptr},
+    {"truth",       "Truth t_{0}",                 C06, nullptr, nullptr},
+  };
+  for (auto& sc : s) {
+    sc.h_hs = makeHist(("HS_" + sc.name + suffix).c_str(),
+                       ("Hard Scatter R_{pT}: " + sc.legend + ";R_{pT};Entries").c_str());
+    sc.h_pu = makeHist(("PU_" + sc.name + suffix).c_str(),
+                       ("Pile-Up R_{pT}: "      + sc.legend + ";R_{pT};Entries").c_str());
+  }
+  return s;
+}
+
+// -----------------------------------------------------------------------------
+// saveScenarios / loadScenarios
+//   Persist/restore a Scenario set's raw histograms through a
+//   HistWriter/HistReader. No derived data on Scenario to exclude (unlike
+//   AnalysisObj) -- every field is event-loop-filled.
+// -----------------------------------------------------------------------------
+inline void saveScenarios(MyUtl::HistWriter& w, const std::vector<Scenario>& sv) {
+  for (const auto& s : sv) {
+    w.WriteHist(s.h_hs);
+    w.WriteHist(s.h_pu);
+  }
+}
+
+inline void loadScenarios(MyUtl::HistReader& r, std::vector<Scenario>& sv) {
+  for (auto& s : sv) {
+    r.LoadInto(s.h_hs, s.h_hs->GetName());
+    r.LoadInto(s.h_pu, s.h_pu->GetName());
+  }
+}
+
+#endif  // RPT_V5_COMMON_H

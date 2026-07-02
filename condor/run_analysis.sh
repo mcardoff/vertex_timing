@@ -2,11 +2,13 @@
 # ---------------------------------------------------------------------------
 # run_analysis.sh — condor job executable template for vertex_timing.
 #
-# Invoked by clustering_dt.sub as:
+# Invoked by clustering_hist.sub as:
 #   run_analysis.sh <executable> <sample> [<threads>]
-#     <executable>  clustering_dt | rpt_v5   (any --sample/--threads-aware build/ target)
+#     <executable>  clustering_hist | rpt_v5_hist   (any --sample/--threads-aware target)
 #     <sample>      vbf | zjets | dijet | default   ("default" = no --sample flag,
-#                    i.e. the local ../../ntuple-hgtd/ + ../figs/ behavior)
+#                    i.e. the local ../../ntuple-hgtd/ + ../figs/ behavior --
+#                    not actually queued by any .sub file today, since condor
+#                    jobs always run against a named grid sample)
 #     <threads>     optional; forwarded as --threads=<N>. Should match this
 #                    job's request_cpus in the .sub file -- condor's cgroup
 #                    throttles any threads spawned beyond what was requested,
@@ -15,10 +17,13 @@
 #                    the executable's own default (min(hardware_concurrency(), 8)).
 #
 # No shared filesystem between submit and execute hosts: <executable>
-# arrives in this job's scratch directory via transfer_input_files. It's
-# moved into a build/ subdir so the program's own "../<sample>" output path
-# convention (mirroring `cd build && ./clustering_dt`) lands at the scratch
-# root, where transfer_output_files can stage it back.
+# arrives in this job's scratch directory via transfer_input_files and is run
+# directly from there. The grid-sample output paths (vbf/zjets/dijet in
+# src/sample_config.h) are resolved relative to the executable's own cwd, not
+# its parent, specifically so this never needs to escape the scratch
+# directory it's confined to -- see the comment in sample_config.h. (The
+# "default" sample above still uses the "../figs" local-dev convention, but
+# since no .sub file ever queues it, that's never exercised on condor.)
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
@@ -33,10 +38,6 @@ set +eu
 source "${ATLAS_LOCAL_ROOT_BASE}/user/atlasLocalSetup.sh"
 lsetup "root 6.38.04-x86_64-el9-gcc15-opt"   # match the version used to build
 set -euo pipefail
-
-mkdir -p build
-mv "${EXECUTABLE}" build/
-cd build
 
 SAMPLE_ARG=""
 if [ "${SAMPLE}" != "default" ]; then

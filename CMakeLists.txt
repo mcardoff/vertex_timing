@@ -45,11 +45,15 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Add your executables, specifying the path to the source files
 add_executable(clustering_dt src/clustering_dt.cxx)
+add_executable(clustering_hist src/clustering_hist.cxx)
+add_executable(clustering_plot src/clustering_plot.cxx)
 add_executable(generate_rpt util/generate_rpt.cxx)
 add_executable(rpt_v2 util/rpt_v2.cxx)
 add_executable(rpt_v3 util/rpt_v3.cxx)
 add_executable(rpt_v4 util/rpt_v4.cxx)
 add_executable(rpt_v5 util/rpt_v5.cxx)
+add_executable(rpt_v5_hist util/rpt_v5_hist.cxx)
+add_executable(rpt_v5_plot util/rpt_v5_plot.cxx)
 add_executable(export_training_data util/export_training_data.cxx)
 add_executable(failure_decomposition util/failure_decomposition.cxx)
 add_executable(maxpt_jet_test util/maxpt_jet_test.cxx)
@@ -59,11 +63,15 @@ add_executable(ttreemt_prototype util/ttreemt_prototype.cxx)
 # Specify the include directories for your header files
 foreach(_tgt
     clustering_dt
+    clustering_hist
+    clustering_plot
     generate_rpt
     rpt_v2
     rpt_v3
     rpt_v4
     rpt_v5
+    rpt_v5_hist
+    rpt_v5_plot
     export_training_data
     failure_decomposition
     maxpt_jet_test

@@ -41,7 +41,9 @@
 #include "RtypesCore.h"
 #include "clustering_includes.h"
 #include "clustering_constants.h"
+#include "clustering_structs.h"
 #include "sample_config.h"
+#include "histogram_io.h"
 #include "AtlasLabels.h"
 #include <TEfficiency.h>
 #include <TGraph.h>
@@ -647,7 +649,31 @@ namespace MyUtl {
 
     void fillTotal(const double val) { this->effTotal->Fill(val); }
     void fillTotal(const int val)    { this->effTotal->Fill(val); }
-    
+
+    // -----------------------------------------------------------------------
+    // saveTo / loadFrom
+    //   Persist/restore the raw, event-loop-filled histograms only (hist,
+    //   effPass, effTotal, purity) through a HistWriter/HistReader
+    //   (histogram_io.h). Deliberately mirrors mergeFrom's member list, and
+    //   deliberately excludes params/effEstimate/slicesHists/slicesFits/
+    //   slicesModels/efficiency -- all of those are purely derived by
+    //   plotPostProcessing() and must be recomputed after loadFrom(), not
+    //   persisted.
+    // -----------------------------------------------------------------------
+    void saveTo(MyUtl::HistWriter& w) const {
+      w.WriteHist(hist.get());
+      w.WriteHist(effPass.get());
+      w.WriteHist(effTotal.get());
+      w.WriteHist(purity.get());
+    }
+
+    void loadFrom(MyUtl::HistReader& r) {
+      r.LoadInto(hist.get(),     hist->GetName());
+      r.LoadInto(effPass.get(),  effPass->GetName());
+      r.LoadInto(effTotal.get(), effTotal->GetName());
+      r.LoadInto(purity.get(),   purity->GetName());
+    }
+
     // -----------------------------------------------------------------------
     // plotPostProcessing
     //   Post-event-loop processing: projects the 2D residual histogram into
@@ -1353,6 +1379,74 @@ namespace MyUtl {
       inclusivePullLowTrackMix->Add(other.inclusivePullLowTrackMix.get());
       inclusivePullLowTrackBkg->Add(other.inclusivePullLowTrackBkg.get());
       inclusivePurity         ->Add(other.inclusivePurity         .get());
+    }
+
+    // -----------------------------------------------------------------------
+    // saveTo / loadFrom
+    //   Persist/restore every raw, event-loop-filled histogram this object
+    //   owns through a HistWriter/HistReader (histogram_io.h). Mirrors
+    //   mergeFrom's exact member list (WriteHist/LoadInto in place of Add) so
+    //   the two stay in sync by construction -- if a new histogram is added
+    //   to one, add it to the other two at the same time.
+    // -----------------------------------------------------------------------
+    void saveTo(MyUtl::HistWriter& w) const {
+      for (const auto& [key, plt] : dataObjects) plt->saveTo(w);
+
+      w.WriteHist(inclusiveResoSig        .get());
+      w.WriteHist(inclusiveResoMix        .get());
+      w.WriteHist(inclusiveResoBkg        .get());
+      w.WriteHist(inclusiveResoLowTrackSig.get());
+      w.WriteHist(inclusiveResoLowTrackMix.get());
+      w.WriteHist(inclusiveResoLowTrackBkg.get());
+      w.WriteHist(inclusiveResoNhit1Sig   .get());
+      w.WriteHist(inclusiveResoNhit1Mix   .get());
+      w.WriteHist(inclusiveResoNhit1Bkg   .get());
+      w.WriteHist(inclusiveResoNhit2Sig   .get());
+      w.WriteHist(inclusiveResoNhit2Mix   .get());
+      w.WriteHist(inclusiveResoNhit2Bkg   .get());
+      w.WriteHist(inclusiveResoNhit3pSig  .get());
+      w.WriteHist(inclusiveResoNhit3pMix  .get());
+      w.WriteHist(inclusiveResoNhit3pBkg  .get());
+      w.WriteHist(prof2dPuFracVsNhit      .get());
+      w.WriteHist(prof2dPuFracVsNhitSigma .get());
+      w.WriteHist(dtClusterVsDzPU         .get());
+      w.WriteHist(inclusivePullSig        .get());
+      w.WriteHist(inclusivePullMix        .get());
+      w.WriteHist(inclusivePullBkg        .get());
+      w.WriteHist(inclusivePullLowTrackSig.get());
+      w.WriteHist(inclusivePullLowTrackMix.get());
+      w.WriteHist(inclusivePullLowTrackBkg.get());
+      w.WriteHist(inclusivePurity         .get());
+    }
+
+    void loadFrom(MyUtl::HistReader& r) {
+      for (auto& [key, plt] : dataObjects) plt->loadFrom(r);
+
+      r.LoadInto(inclusiveResoSig        .get(), inclusiveResoSig        ->GetName());
+      r.LoadInto(inclusiveResoMix        .get(), inclusiveResoMix        ->GetName());
+      r.LoadInto(inclusiveResoBkg        .get(), inclusiveResoBkg        ->GetName());
+      r.LoadInto(inclusiveResoLowTrackSig.get(), inclusiveResoLowTrackSig->GetName());
+      r.LoadInto(inclusiveResoLowTrackMix.get(), inclusiveResoLowTrackMix->GetName());
+      r.LoadInto(inclusiveResoLowTrackBkg.get(), inclusiveResoLowTrackBkg->GetName());
+      r.LoadInto(inclusiveResoNhit1Sig   .get(), inclusiveResoNhit1Sig   ->GetName());
+      r.LoadInto(inclusiveResoNhit1Mix   .get(), inclusiveResoNhit1Mix   ->GetName());
+      r.LoadInto(inclusiveResoNhit1Bkg   .get(), inclusiveResoNhit1Bkg   ->GetName());
+      r.LoadInto(inclusiveResoNhit2Sig   .get(), inclusiveResoNhit2Sig   ->GetName());
+      r.LoadInto(inclusiveResoNhit2Mix   .get(), inclusiveResoNhit2Mix   ->GetName());
+      r.LoadInto(inclusiveResoNhit2Bkg   .get(), inclusiveResoNhit2Bkg   ->GetName());
+      r.LoadInto(inclusiveResoNhit3pSig  .get(), inclusiveResoNhit3pSig  ->GetName());
+      r.LoadInto(inclusiveResoNhit3pMix  .get(), inclusiveResoNhit3pMix  ->GetName());
+      r.LoadInto(inclusiveResoNhit3pBkg  .get(), inclusiveResoNhit3pBkg  ->GetName());
+      r.LoadInto(prof2dPuFracVsNhit      .get(), prof2dPuFracVsNhit      ->GetName());
+      r.LoadInto(prof2dPuFracVsNhitSigma .get(), prof2dPuFracVsNhitSigma ->GetName());
+      r.LoadInto(dtClusterVsDzPU         .get(), dtClusterVsDzPU         ->GetName());
+      r.LoadInto(inclusivePullSig        .get(), inclusivePullSig        ->GetName());
+      r.LoadInto(inclusivePullMix        .get(), inclusivePullMix        ->GetName());
+      r.LoadInto(inclusivePullBkg        .get(), inclusivePullBkg        ->GetName());
+      r.LoadInto(inclusivePullLowTrackSig.get(), inclusivePullLowTrackSig->GetName());
+      r.LoadInto(inclusivePullLowTrackMix.get(), inclusivePullLowTrackMix->GetName());
+      r.LoadInto(inclusivePullLowTrackBkg.get(), inclusivePullLowTrackBkg->GetName());
+      r.LoadInto(inclusivePurity         .get(), inclusivePurity         ->GetName());
     }
 
     // -----------------------------------------------------------------------
