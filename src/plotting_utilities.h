@@ -1305,6 +1305,57 @@ namespace MyUtl {
     }
 
     // -----------------------------------------------------------------------
+    // mergeFrom
+    //   Adds another AnalysisObj's raw, event-loop-filled histograms into
+    //   this one via TH1::Add -- used to combine the per-worker-thread
+    //   AnalysisObj maps built under TTreeProcessorMT into one before
+    //   postProcessing()/fullPlotting() run (once) on the combined result.
+    //   `other` must have been built for the same Score (same histogram
+    //   binning/keys) as `this`.
+    //
+    //   Only touches histograms Filled during the event loop. Deliberately
+    //   does NOT touch effEstimate/slicesHists/slicesFits/params on any
+    //   PlotObj -- those are purely derived by plotPostProcessing() from the
+    //   histograms merged here, and must only be computed once, after every
+    //   thread's contribution has been combined.
+    // -----------------------------------------------------------------------
+    void mergeFrom(const AnalysisObj& other) {
+      for (auto& [key, plt] : dataObjects) {
+        const auto& oplt = other.dataObjects.at(key);
+        plt->hist    ->Add(oplt->hist    .get());
+        plt->effPass ->Add(oplt->effPass .get());
+        plt->effTotal->Add(oplt->effTotal.get());
+        plt->purity  ->Add(oplt->purity  .get());
+      }
+
+      inclusiveResoSig        ->Add(other.inclusiveResoSig        .get());
+      inclusiveResoMix        ->Add(other.inclusiveResoMix        .get());
+      inclusiveResoBkg        ->Add(other.inclusiveResoBkg        .get());
+      inclusiveResoLowTrackSig->Add(other.inclusiveResoLowTrackSig.get());
+      inclusiveResoLowTrackMix->Add(other.inclusiveResoLowTrackMix.get());
+      inclusiveResoLowTrackBkg->Add(other.inclusiveResoLowTrackBkg.get());
+      inclusiveResoNhit1Sig   ->Add(other.inclusiveResoNhit1Sig   .get());
+      inclusiveResoNhit1Mix   ->Add(other.inclusiveResoNhit1Mix   .get());
+      inclusiveResoNhit1Bkg   ->Add(other.inclusiveResoNhit1Bkg   .get());
+      inclusiveResoNhit2Sig   ->Add(other.inclusiveResoNhit2Sig   .get());
+      inclusiveResoNhit2Mix   ->Add(other.inclusiveResoNhit2Mix   .get());
+      inclusiveResoNhit2Bkg   ->Add(other.inclusiveResoNhit2Bkg   .get());
+      inclusiveResoNhit3pSig  ->Add(other.inclusiveResoNhit3pSig  .get());
+      inclusiveResoNhit3pMix  ->Add(other.inclusiveResoNhit3pMix  .get());
+      inclusiveResoNhit3pBkg  ->Add(other.inclusiveResoNhit3pBkg  .get());
+      prof2dPuFracVsNhit      ->Add(other.prof2dPuFracVsNhit      .get());
+      prof2dPuFracVsNhitSigma ->Add(other.prof2dPuFracVsNhitSigma .get());
+      dtClusterVsDzPU         ->Add(other.dtClusterVsDzPU         .get());
+      inclusivePullSig        ->Add(other.inclusivePullSig        .get());
+      inclusivePullMix        ->Add(other.inclusivePullMix        .get());
+      inclusivePullBkg        ->Add(other.inclusivePullBkg        .get());
+      inclusivePullLowTrackSig->Add(other.inclusivePullLowTrackSig.get());
+      inclusivePullLowTrackMix->Add(other.inclusivePullLowTrackMix.get());
+      inclusivePullLowTrackBkg->Add(other.inclusivePullLowTrackBkg.get());
+      inclusivePurity         ->Add(other.inclusivePurity         .get());
+    }
+
+    // -----------------------------------------------------------------------
     // postProcessing
     //   Calls plotPostProcessing() on every PlotObj in dataObjects.
     //   Must be called after the event loop and before fullPlotting.

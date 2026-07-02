@@ -30,7 +30,10 @@ endif()
 
 # Find the ROOT and Boost libraries
 # Assumes ROOT and Boost are installed and discoverable by find_package
-find_package(ROOT REQUIRED COMPONENTS RIO Core Gpad Graf Hist Tree)
+# Imt: needed for TTreeProcessorMT (util/ttreemt_prototype.cxx). EnableImplicitMT()
+# already works without listing it explicitly (pulled in transitively), but list it
+# so the dependency is correct against other ROOT configs.
+find_package(ROOT REQUIRED COMPONENTS RIO Core Gpad Graf Hist Tree Imt)
 # TMVA excluded: HGTD_SORT/CONE_BDT are disabled. Re-add when re-enabling those scores.
 find_package(Boost COMPONENTS filesystem REQUIRED)
 
@@ -51,6 +54,7 @@ add_executable(export_training_data util/export_training_data.cxx)
 add_executable(failure_decomposition util/failure_decomposition.cxx)
 add_executable(maxpt_jet_test util/maxpt_jet_test.cxx)
 add_executable(track_dt util/track_dt.cxx)
+add_executable(ttreemt_prototype util/ttreemt_prototype.cxx)
 
 # Specify the include directories for your header files
 foreach(_tgt
@@ -64,6 +68,7 @@ foreach(_tgt
     failure_decomposition
     maxpt_jet_test
     track_dt
+    ttreemt_prototype
 )
     target_include_directories(${_tgt}
         PRIVATE

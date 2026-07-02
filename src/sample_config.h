@@ -9,9 +9,11 @@
 //   default when no flag is given.
 // ---------------------------------------------------------------------------
 
+#include <algorithm>
 #include <iostream>
 #include <map>
 #include <string>
+#include <thread>
 
 namespace MyUtl {
 
@@ -52,6 +54,28 @@ namespace MyUtl {
     }
 
     return {"/Users/mcard/project/ntuple-hgtd/", "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv.", "../figs"};
+  }
+
+  // ---------------------------------------------------------------------------
+  // resolveThreads
+  //   Thread count for TTreeProcessorMT via a --threads=<N> CLI flag. Default
+  //   is capped (not raw hardware_concurrency()) so it doesn't silently drift
+  //   away from whatever request_cpus a condor job was submitted with --
+  //   threads beyond what condor's cgroup granted just get throttled, which
+  //   would eat the whole parallelization benefit without any visible error.
+  // ---------------------------------------------------------------------------
+  inline unsigned resolveThreads(int argc, char** argv) {
+    unsigned nThreads = std::min(std::thread::hardware_concurrency(), 8u);
+
+    const std::string prefix = "--threads=";
+    for (int i = 1; i < argc; ++i) {
+      std::string arg = argv[i];
+      if (arg.rfind(prefix, 0) != 0) continue;
+      nThreads = static_cast<unsigned>(std::stoul(arg.substr(prefix.size())));
+      break;
+    }
+
+    return nThreads > 0 ? nThreads : 1u;
   }
 
 }

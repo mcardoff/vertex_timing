@@ -1,6 +1,11 @@
+#include <atomic>
+#include <memory>
+#include <mutex>
 #include <random>
 #include <RtypesCore.h>
 #include <TROOT.h>
+#include <ROOT/TThreadedObject.hxx>
+#include <ROOT/TTreeProcessorMT.hxx>
 #include "clustering_constants.h"
 #include "sample_config.h"
 #include "event_processing.h"
@@ -116,9 +121,7 @@ void printEventDisplays(
 void makeComparisonPlots(
   const char* key,
   TCanvas* canvas,
-  std::map<Score, AnalysisObj>& mapHGTD,
-  std::map<Score, AnalysisObj>& mapIdealRes,
-  std::map<Score, AnalysisObj>& mapIdealEff
+  std::map<Score, AnalysisObj>& mapHGTD
 ) {
   const std::string compSubdir = SAVE_DIR + "/comparisons";
 
@@ -160,83 +163,161 @@ void makeComparisonPlots(
 auto main(int argc, char** argv) -> int {
   SetAtlasStyle();  // ATLAS publication style (fonts, margins, ticks, …)
 
+  // Must precede any histogram construction: prevents concurrent TH1
+  // self-registration into gDirectory from racing across worker threads
+  // below. Every worker thread's buildAnalysisMap() produces identically-
+  // named histograms, so removing this would silently reintroduce a
+  // gDirectory name collision across threads.
+  TH1::AddDirectory(kFALSE);
+
   // --- Sample selection (--sample=vbf|zjets|dijet; default: local VBF ntuple) ---
   auto sample = MyUtl::resolveSample(argc, argv);
   MyUtl::ENERGY_LABEL = sample.energyLabel;
   MyUtl::OUTPUT_DIR   = sample.outputDir;
   for (const char* sub : {"comparisons", "inclusive", "fullplots", "diagnostics"})
     boost::filesystem::create_directories(MyUtl::OUTPUT_DIR + "/" + sub);
+  unsigned nThreads = MyUtl::resolveThreads(argc, argv);
 
   // --- Data source ---
   TChain chain("ntuple");
   setupChain(chain, sample.ntupleDir.c_str());
-  TTreeReader reader(&chain);
-  BranchPointerWrapper branch(reader);
-  ROOT::EnableImplicitMT(); // use all CPU cores
+  ROOT::EnableImplicitMT(nThreads);
 
   gErrorIgnoreLevel = kFatal;
 
   // --- Canvas ---
   TCanvas* canvas = new TCanvas("canvas", "Histograms", 800, 600);
 
-  // --- Analysis maps (one per timing scenario) ---
-  auto mapHGTD     = buildAnalysisMap(Scenario::HGTD      );
-  auto mapIdealRes = buildAnalysisMap(Scenario::IDEAL_RES );
-  auto mapIdealEff = buildAnalysisMap(Scenario::IDEAL_EFF );
+  // --- Per-thread analysis-map registry, merged into one mapHGTD after the
+  //     event loop. AnalysisObj/PlotObj are move-only (unique_ptr members),
+  //     so this can't use ROOT::TThreadedObject (which clones its model via
+  //     copy-ctor or TObject::Clone(), neither of which applies here) --
+  //     each worker thread instead registers its own lazily-built map into
+  //     this mutex-guarded vector exactly once, then caches a raw pointer
+  //     to it in thread_local storage for lock-free access on every event.
+  //
+  //     The mutex also serializes the buildAnalysisMap() call itself, not
+  //     just the push_back: AnalysisObj's constructor calls
+  //     SetFillColorAlpha(), which lazily creates+registers a new TColor
+  //     into ROOT's *global* color table the first time a given
+  //     (color, alpha) pair is used, and that registration is not
+  //     thread-safe. Two worker threads racing to build their first
+  //     AnalysisObj map concurrently corrupted the heap (confirmed via a
+  //     crash report: SIGABRT inside TColor::GetColorTransparent, malloc
+  //     "pointer being freed was not allocated"). Serializing the whole
+  //     construction means only one thread ever runs it at a time -- by the
+  //     next thread's turn, the colors it needs already exist and no race
+  //     occurs. This only costs time once per thread (lazy init), not per
+  //     event. ---
+  std::mutex mapRegistryMutex;
+  std::vector<std::unique_ptr<std::map<Score, AnalysisObj>>> mapRegistry;
 
-  auto allMaps = { &mapHGTD}; //, &mapIdealRes, &mapIdealEff };
+  // --- Per-thread event-display candidate lists. TString/std::vector are
+  //     genuinely deep-copyable, so ROOT::TThreadedObject's clone-via-copy-
+  //     ctor is correct here (unlike the AnalysisObj map above). ---
+  ROOT::TThreadedObject<std::vector<TString>> tsEvtDisplayHGTD;
+  ROOT::TThreadedObject<std::vector<TString>> tsLowMultPass;
+  ROOT::TThreadedObject<std::vector<TString>> tsLowMultFail;
+  ROOT::TThreadedObject<std::vector<TString>> tsMisasPassEvents;
+  ROOT::TThreadedObject<std::vector<TString>> tsMisasFailEvents;
 
-  // --- Event display candidate lists ---
-  std::vector<TString> evtDisplayHGTD, evtDisplayIdealRes, evtDisplayIdealEff;
-  // Low-multiplicity (nFwdHS == LOW_MULT_NHS) pass and fail, HGTD scenario
-  std::vector<TString> lowMultPass, lowMultFail;
-  std::vector<TString> misasPassEvents;    // in TEST_MISAS denominator and PASSES
-  std::vector<TString> misasFailEvents;    // in TEST_MISAS denominator and FAILS   (returnCode==3)
+  std::atomic<Long64_t> progressCounter{0};
 
   // --- Event loop ---
   std::cout << "Starting Event Loop\n";
   const Long64_t N_EVENT = chain.GetEntries();
 
-  while (reader.Next()) {
-    const Long64_t READ_NUM  = chain.GetReadEntry() + 1;
-    const Long64_t EVENT_NUM = chain.GetReadEntry() - chain.GetChainOffset();
+  ROOT::TTreeProcessorMT proc(chain, nThreads);
+  proc.Process([&](TTreeReader& reader) {
+    // Fresh per invocation: a worker thread can be handed a different
+    // TTreeReader across task ranges, so this cannot be thread_local.
+    BranchPointerWrapper branch(reader);
 
-    // if (READ_NUM > 10000) break;
-
-    if (READ_NUM % 100 == 0)
-      std::cout << "Progress: " << READ_NUM << "/" << N_EVENT << "\r" << std::flush;
-
-    // Run the three timing scenarios
-    auto resHGTD     = processEventData(&branch, false, true,  mapHGTD    );
-    // auto resIdealRes = processEventData(&branch, true,  true,  mapIdealRes);
-    // auto resIdealEff = processEventData(&branch, true,  false, mapIdealEff);
-
-    // Extract file identifier from the full path (characters 49–54)
-    TString fileName = branch.reader.GetTree()->GetCurrentFile()->GetName();
-    TString fileNum  = fileName(49, 6);
-
-    // Collect events where TRKPTZ passes but TEST_MISAS does not (misassignment effect)
-    collectEventDisplay(evtDisplayHGTD,      3, resHGTD,     fileNum, EVENT_NUM);
-    // collectEventDisplay(evtDisplayIdealRes,  3, resIdealRes, fileNum, EVENT_NUM);
-    // collectEventDisplay(evtDisplayIdealEff,  3, resIdealEff, fileNum, EVENT_NUM);
-
-    // Low-multiplicity event display collection (HGTD scenario, n=LOW_MULT_NHS HS tracks)
-    if (resHGTD.code >= 0 && resHGTD.nFwdHS == LOW_MULT_NHS) {
-      TString cmd = TString::Format(EVTDISPLAY_FMT, fileNum.Data(), EVENT_NUM, resHGTD.time);
-      (resHGTD.trkptzPass ? lowMultPass : lowMultFail).push_back(cmd);
+    // Lazily build this thread's analysis map once; reused across however
+    // many task ranges this worker thread services.
+    thread_local std::map<Score, AnalysisObj>* tlMap = nullptr;
+    if (!tlMap) {
+      std::lock_guard<std::mutex> lock(mapRegistryMutex);
+      mapRegistry.push_back(std::make_unique<std::map<Score, AnalysisObj>>(buildAnalysisMap(Scenario::HGTD)));
+      tlMap = mapRegistry.back().get();
     }
 
-    if (resHGTD.code >= 0) {
-      TString cmd = TString::Format(EVTDISPLAY_FMT, fileNum.Data(), EVENT_NUM, resHGTD.time);
+    // Resolve this thread's event-display slot once per invocation (not per
+    // event -- TThreadedObject::Get() involves a thread-id lookup).
+    auto evtDisplayHGTD  = tsEvtDisplayHGTD.Get();
+    auto lowMultPass     = tsLowMultPass.Get();
+    auto lowMultFail     = tsLowMultFail.Get();
+    auto misasPassEvents = tsMisasPassEvents.Get();
+    auto misasFailEvents = tsMisasFailEvents.Get();
 
-      // Category: event is in TEST_MISAS denominator (clean HS timing) and PASSES
-      if (resHGTD.misasPass)
-        misasPassEvents.push_back(cmd);
-      // Category fail: event did NOT enter the TEST_MISAS denominator (hsTimingPurity < 95%)
-      if (!resHGTD.misasInDenom)
-        misasFailEvents.push_back(cmd);
+    while (reader.Next()) {
+      Long64_t n = ++progressCounter;
+      if (n % 5000 == 0)
+        std::cout << "Progress: " << n << "/" << N_EVENT << "\r" << std::flush;
+
+      // HGTD timing scenario (the only scenario currently active)
+      auto resHGTD = processEventData(&branch, false, true, *tlMap);
+
+      // Extract file identifier from the full path (characters 49–54)
+      TString fileName = reader.GetTree()->GetCurrentFile()->GetName();
+      TString fileNum  = fileName(49, 6);
+      // Local (per-file) entry number: reader.GetTree() is the currently-
+      // loaded per-file constituent tree here (no outer TChain is available
+      // inside this lambda to replicate the sequential-loop's
+      // chain.GetReadEntry()-chain.GetChainOffset() computation), and
+      // GetReadEntry() on it gives the correct local number directly --
+      // validated against a sequential baseline in util/ttreemt_prototype.cxx.
+      Long64_t EVENT_NUM = reader.GetTree()->GetReadEntry();
+
+      // Collect events where TRKPTZ passes but TEST_MISAS does not (misassignment effect)
+      collectEventDisplay(*evtDisplayHGTD, 3, resHGTD, fileNum, EVENT_NUM);
+
+      // Low-multiplicity event display collection (HGTD scenario, n=LOW_MULT_NHS HS tracks)
+      if (resHGTD.code >= 0 && resHGTD.nFwdHS == LOW_MULT_NHS) {
+        TString cmd = TString::Format(EVTDISPLAY_FMT, fileNum.Data(), EVENT_NUM, resHGTD.time);
+        (resHGTD.trkptzPass ? *lowMultPass : *lowMultFail).push_back(cmd);
+      }
+
+      if (resHGTD.code >= 0) {
+        TString cmd = TString::Format(EVTDISPLAY_FMT, fileNum.Data(), EVENT_NUM, resHGTD.time);
+
+        // Category: event is in TEST_MISAS denominator (clean HS timing) and PASSES
+        if (resHGTD.misasPass)
+          misasPassEvents->push_back(cmd);
+        // Category fail: event did NOT enter the TEST_MISAS denominator (hsTimingPurity < 95%)
+        if (!resHGTD.misasInDenom)
+          misasFailEvents->push_back(cmd);
+      }
     }
+  });
+  std::cout << "\n";
+
+  // --- Merge per-thread analysis maps into one ---
+  std::map<Score, AnalysisObj> mapHGTD;
+  if (mapRegistry.empty()) {
+    mapHGTD = buildAnalysisMap(Scenario::HGTD);
+  } else {
+    mapHGTD = std::move(*mapRegistry.front());
+    for (size_t i = 1; i < mapRegistry.size(); ++i)
+      for (auto& [score, analysis] : mapHGTD)
+        analysis.mergeFrom(mapRegistry[i]->at(score));
   }
+
+  auto allMaps = { &mapHGTD };
+
+  // --- Merge per-thread event-display candidate lists ---
+  auto mergeVec = [](std::vector<TString>& dest, ROOT::TThreadedObject<std::vector<TString>>& src) {
+    for (unsigned i = 0; i < src.GetNSlots(); ++i) {
+      auto v = src.GetAtSlot(i);
+      if (v) dest.insert(dest.end(), v->begin(), v->end());
+    }
+  };
+  std::vector<TString> evtDisplayHGTD, lowMultPass, lowMultFail, misasPassEvents, misasFailEvents;
+  mergeVec(evtDisplayHGTD,  tsEvtDisplayHGTD);
+  mergeVec(lowMultPass,     tsLowMultPass);
+  mergeVec(lowMultFail,     tsLowMultFail);
+  mergeVec(misasPassEvents, tsMisasPassEvents);
+  mergeVec(misasFailEvents, tsMisasFailEvents);
 
   for (auto* m : allMaps)
     for (auto& [k, analysis] : *m)
@@ -259,7 +340,7 @@ auto main(int argc, char** argv) -> int {
 
   // --- Comparison plots (per variable KEY) ---
   for (const auto* key : KEYS)
-    makeComparisonPlots(key, canvas, mapHGTD, mapIdealRes, mapIdealEff);
+    makeComparisonPlots(key, canvas, mapHGTD);
 
   // --- Inclusive resolution plots ---
   const std::initializer_list<AnalysisObj*> RESO_SET = {

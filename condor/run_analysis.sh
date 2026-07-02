@@ -3,10 +3,16 @@
 # run_analysis.sh — condor job executable template for vertex_timing.
 #
 # Invoked by clustering_dt.sub as:
-#   run_analysis.sh <executable> <sample>
-#     <executable>  clustering_dt | rpt_v5   (any --sample-aware build/ target)
+#   run_analysis.sh <executable> <sample> [<threads>]
+#     <executable>  clustering_dt | rpt_v5   (any --sample/--threads-aware build/ target)
 #     <sample>      vbf | zjets | dijet | default   ("default" = no --sample flag,
 #                    i.e. the local ../../ntuple-hgtd/ + ../figs/ behavior)
+#     <threads>     optional; forwarded as --threads=<N>. Should match this
+#                    job's request_cpus in the .sub file -- condor's cgroup
+#                    throttles any threads spawned beyond what was requested,
+#                    which would silently eat the whole parallelization
+#                    benefit without any visible error. Omit to fall back to
+#                    the executable's own default (min(hardware_concurrency(), 8)).
 #
 # No shared filesystem between submit and execute hosts: <executable>
 # arrives in this job's scratch directory via transfer_input_files. It's
@@ -18,6 +24,7 @@ set -euo pipefail
 
 EXECUTABLE=$1
 SAMPLE=$2
+THREADS=${3:-}
 
 # ATLAS/LCG environment (provides ROOT + Boost via cvmfs). atlasLocalSetup.sh
 # / lsetup reference unset variables internally (e.g. ALRB_frontlineSite) and
@@ -31,8 +38,14 @@ mkdir -p build
 mv "${EXECUTABLE}" build/
 cd build
 
-if [ "${SAMPLE}" = "default" ]; then
-  ./"${EXECUTABLE}"
-else
-  ./"${EXECUTABLE}" --sample="${SAMPLE}"
+SAMPLE_ARG=""
+if [ "${SAMPLE}" != "default" ]; then
+  SAMPLE_ARG="--sample=${SAMPLE}"
 fi
+
+THREADS_ARG=""
+if [ -n "${THREADS}" ]; then
+  THREADS_ARG="--threads=${THREADS}"
+fi
+
+./"${EXECUTABLE}" ${SAMPLE_ARG} ${THREADS_ARG}
