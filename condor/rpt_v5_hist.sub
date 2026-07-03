@@ -33,13 +33,20 @@ should_transfer_files    = YES
 when_to_transfer_output  = ON_EXIT
 transfer_input_files     = ../build/rpt_v5_hist
 transfer_output_files    = $(sample)/hists/rpt_v5_hist.root
-# Without this, condor's default output-transfer behavior flattens nested
+# Without a remap, condor's default output-transfer behavior flattens nested
 # paths to their basename when staging back -- it does NOT recreate
 # $(sample)/hists/ on the submit side, so all 3 queued jobs would each write
 # back a file literally named "rpt_v5_hist.root" directly into this
 # directory, silently overwriting each other (discovered by running the
 # actual jobs: only the last-to-finish sample's histogram survived).
-preserve_relative_paths  = True
+#
+# preserve_relative_paths = True also fixes this, but it's a submit-wide
+# knob that applies to transfer_input_files too -- and turned "../build/
+# rpt_v5_hist" (climbs OUT of the sandbox) from silently-flattened into a
+# hard "Attempt to write to illegal sandbox path" hold (confirmed by
+# running the actual jobs). transfer_output_remaps only touches the output
+# side, so it can't have that side effect.
+transfer_output_remaps   = "$(sample)/hists/rpt_v5_hist.root=$(sample)/hists/rpt_v5_hist.root"
 
 getenv                   = True
 
