@@ -372,6 +372,8 @@ Templates in `condor/` run `clustering_hist` / `rpt_v5_hist` on the UChicago AF 
 
 Execute hosts do **not** share a filesystem with the submit host on this pool — confirmed via a `TARGET.FileSystemDomain == MY.FileSystemDomain` match failure when `should_transfer_files = NO` was tried first (0 of 157 slots matched). The `*_hist.sub` files use `transfer_input_files` (stages the prebuilt binary in) and `transfer_output_files = $(sample)/hists/<name>.root` (stages back a single small histogram file — much smaller than the full PDF tree the legacy `.sub` files' `transfer_output_files = $(sample)` transfers). Ntuple inputs are read via the absolute `/data/mcardiff/exotic_superntuples/...` path baked into `--sample=` (see `src/sample_config.h`), so they don't need transferring.
 
+**`preserve_relative_paths = True` is required** on both `*_hist.sub` files — condor's default output-transfer behavior flattens any nested `transfer_output_files` path to its basename when staging back, it does not recreate `$(sample)/hists/` in the submit directory on its own. Without it, all 3 queued jobs (one per `--sample`) each try to write back a file literally named `clustering_hist.root`/`rpt_v5_hist.root` directly into the submit directory, silently overwriting each other — confirmed by running the real jobs once without this flag: only the last-to-finish sample's histogram survived, and no `vbf/`, `zjets/`, `dijet/` subdirectories were created at all. (The legacy `.sub` files' `transfer_output_files = $(sample)` isn't affected — that argument has no nested subdirectory, so its basename already equals the whole thing they want back.)
+
 ```bash
 cd build && cmake .. && make clustering_hist rpt_v5_hist   # build before submitting; condor doesn't rebuild
 cd condor
