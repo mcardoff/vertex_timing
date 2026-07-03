@@ -46,7 +46,16 @@ transfer_output_files    = $(sample)/hists/clustering_hist.root
 # a hard "Attempt to write to illegal sandbox path" hold (confirmed by
 # running the actual rpt_v5_hist jobs with that flag set). transfer_output_remaps
 # only touches the output side, so it can't have that side effect.
-transfer_output_remaps   = "$(sample)/hists/clustering_hist.root=$(sample)/hists/clustering_hist.root"
+#
+# The remap's LHS (`name`) must be a bare filename -- per condor_submit(1):
+# "You cannot specify directories to be remapped." A first attempt using
+# the full "$(sample)/hists/clustering_hist.root" on the LHS silently failed
+# to match anything (confirmed against the real rpt_v5_hist jobs: still
+# flattened to a single shared file), since condor tracks the transferred
+# file by its basename once inside the execution directory, not by the
+# path used to locate it via transfer_output_files. Directories ARE
+# allowed on the RHS (`newname`) and are created as needed.
+transfer_output_remaps   = "clustering_hist.root=$(sample)/hists/clustering_hist.root"
 
 getenv                   = True
 
