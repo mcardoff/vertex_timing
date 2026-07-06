@@ -1,0 +1,79 @@
+# ---------------------------------------------------------------------------
+# rpt_v5_hist.sub — condor submit template: one job per sample.
+#
+# Histogramming stage of the rpt_v5 split (see CLAUDE.md's "Main Executables"
+# section): runs the event loop and writes <sample>/hists/rpt_v5_hist.root,
+# nothing else. Transfers back a single small ROOT file instead of a full
+# rpt_plots/ directory -- run `./rpt_v5_plot --sample=<sample>` locally
+# afterward to produce the ROC/console-summary/PDF output from that file,
+# which is fast/local and needs no further condor submission.
+#
+# Setup (once):
+#   cd build && cmake .. && make rpt_v5_hist        # build BEFORE submitting
+#   chmod +x condor/run_analysis.sh
+#
+# Submit (from inside condor/, so relative paths below resolve correctly):
+#   cd condor && condor_submit rpt_v5_hist.sub
+#
+# Separate .sub file from clustering_hist.sub on purpose: each condor_submit
+# call gets its own ClusterId, so this runs as an independent job cluster
+# and won't interfere with already-running clustering_hist jobs.
+#
+# Same shared-filesystem caveat as clustering_hist.sub: execute hosts don't
+# share a filesystem with the submit host, so the built executable is
+# staged in via transfer_input_files and the histogram file staged back via
+# transfer_output_files. The ntuple inputs are read from /data/mcardiff/...
+# (an absolute path baked into --sample=vbf|zjets|dijet), not transferred.
+# ---------------------------------------------------------------------------
+universe                 = vanilla
+executable               = run_analysis.sh
+arguments                = rpt_v5_hist $(sample) 4
+
+should_transfer_files    = YES
+when_to_transfer_output  = ON_EXIT
+transfer_input_files     = ../build/rpt_v5_hist
+transfer_output_files    = $(sample)/hists/rpt_v5_hist.root
+# Without a remap, condor's default output-transfer behavior flattens nested
+# paths to their basename when staging back -- it does NOT recreate
+# $(sample)/hists/ on the submit side, so all 3 queued jobs would each write
+# back a file literally named "rpt_v5_hist.root" directly into this
+# directory, silently overwriting each other (discovered by running the
+# actual jobs: only the last-to-finish sample's histogram survived).
+#
+# preserve_relative_paths = True also fixes this, but it's a submit-wide
+# knob that applies to transfer_input_files too -- and turned "../build/
+# rpt_v5_hist" (climbs OUT of the sandbox) from silently-flattened into a
+# hard "Attempt to write to illegal sandbox path" hold (confirmed by
+# running the actual jobs). transfer_output_remaps only touches the output
+# side, so it can't have that side effect.
+#
+# The remap's LHS (`name`) must be a bare filename -- per condor_submit(1):
+# "You cannot specify directories to be remapped." A first attempt using
+# the full "$(sample)/hists/rpt_v5_hist.root" on the LHS silently failed to
+# match anything (confirmed against the real jobs: still flattened to a
+# single shared rpt_v5_hist.root), since condor tracks the transferred
+# file by its basename once inside the execution directory, not by the
+# path used to locate it via transfer_output_files. Directories ARE
+# allowed on the RHS (`newname`) and are created as needed.
+transfer_output_remaps   = "rpt_v5_hist.root=$(sample)/hists/rpt_v5_hist.root"
+
+getenv                   = True
+
+# CERN-style job-length hint; harmless no-op on pools that don't read it,
+# remove if your condor pool doesn't recognize +JobFlavour.
++JobFlavour              = "tomorrow"
+
+# rpt_v5_hist parallelizes its event loop via TTreeProcessorMT (validated
+# ~3x speedup at 4 threads). The `4` in `arguments` above is forwarded as
+# --threads=4 by run_analysis.sh -- request_cpus must track that value,
+# since condor's cgroup throttles any threads spawned beyond what was
+# requested, silently eating the speedup.
+request_cpus             = 4
+request_memory           = 4GB
+request_disk             = 4GB
+
+output                   = logs/rpt_v5_hist_$(sample).$(ClusterId).$(ProcId).out
+error                    = logs/rpt_v5_hist_$(sample).$(ClusterId).$(ProcId).err
+log                      = logs/rpt_v5_hist_$(sample).$(ClusterId).$(ProcId).log
+
+queue sample in (vbf, zjets, dijet)

@@ -1,0 +1,379 @@
+// rpt_v5_hist.cxx — Histogramming stage of the rpt_v5 split.
+//
+// Runs the same TTreeProcessorMT event loop and per-thread ThreadState merge
+// that the former monolithic rpt_v5.cxx did, then writes the merged
+// Hard-Scatter/Pile-Up RpT histograms (5 scenarios x 2 pT slices) plus the
+// scalar event-count/floor-counter accumulators to
+// <OUTPUT_DIR>/hists/rpt_v5_hist.root via histogram_io.h, instead of doing
+// any ROC/console-summary/PDF work directly. rpt_v5_plot.cxx reads that file
+// back and does all of that -- see CLAUDE.md's "Main Executables" section.
+//
+// Scenarios:
+//   1. zonly        — z-significance tracks only, no time gate   ("ITk-only")
+//   2. hgtd         — ntuple RecoVtx_time / RecoVtx_timeRes gate  ("HGTD t_{0}")
+//   3. waves        — WAVeS-selected cluster time gate            ("WAVeS t_{0}")
+//   4. waves_misas  — WAVeS time gate, events gated on HS timing  ("WAVeS t_{0} + clean timing")
+//                     purity ≥ MISAS_PURITY_CUT (event filter)
+//   5. truth        — reco track times gated vs truth vertex t_{0} ("Truth t_{0}")
+//
+// No event-level selection besides the MISAS filter on scenario 4 — every forward
+// jet in the acceptance contributes an independent RpT measurement.
+//
+// Two jet pT windows:
+//   Slice A: 30 < pT < 40 GeV
+//   Slice B: pT > 40 GeV
+// Jet eta acceptance: 2.4 < |eta| < 3.8.
+//
+// Output: <OUTPUT_DIR>/hists/rpt_v5_hist.root
+
+#include <TChain.h>
+#include <TH1.h>
+#include <TStyle.h>
+#include <TTreeReader.h>
+#include <TTreeReaderArray.h>
+#include <TVector2.h>
+#include <ROOT/TTreeProcessorMT.hxx>
+
+#include <boost/filesystem.hpp>
+#include <algorithm>
+#include <atomic>
+#include <iostream>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <unordered_set>
+#include <vector>
+
+#include "AtlasStyle.h"
+#include "clustering_constants.h"
+#include "sample_config.h"
+#include "clustering_includes.h"
+#include "clustering_structs.h"
+#include "clustering_functions.h"
+#include "event_processing.h"
+#include "rpt_v5_common.h"
+#include "histogram_io.h"
+
+using namespace MyUtl;
+
+// Jet acceptance for this script (paper values, distinct from rpt_v2).
+static constexpr double JET_ETA_MIN = 2.4;
+static constexpr double JET_ETA_MAX = 3.8;
+
+// Event-level HS-timing-purity threshold for the "clean timing" WAVeS scenario:
+// a jet's RpT is filled only in events where ≥ this fraction of HS pT is timed
+// within |pull| < 3σ (calcHSTimingPurity).  Mirrors the Score::WAVES_MISAS
+// oracle.
+static constexpr float MISAS_PURITY_CUT = 0.75f;
+
+// Per-track time-gate half-width in σ.  A 2σ cut over-trims genuine HS tracks
+// when the vertex time is slightly mis-estimated, dragging the high-efficiency
+// end of the ROC below ITk-only (worst in the >40 GeV slice).  Loosening it
+// recovers that region at a small low-efficiency cost.
+static constexpr double GATE_SIGMA = 2.5;
+
+static inline double dR(double j_eta, double j_phi, double t_eta, double t_phi) {
+  double deta = j_eta - t_eta;
+  double dphi = TVector2::Phi_mpi_pi(j_phi - t_phi);
+  return std::sqrt(deta * deta + dphi * dphi);
+}
+
+// -----------------------------------------------------------------------------
+// ThreadState
+//   Everything one worker thread accumulates across whatever task ranges it
+//   services: its own copy of the two pT-slice Scenario sets (each worker's
+//   histograms are identically named to every other worker's -- harmless,
+//   since TH1::AddDirectory(kFALSE) means none of them register into any
+//   global directory) plus the event/floor-diagnostic counters. Built once
+//   per worker thread (lazily, on first use) and merged into one after the
+//   event loop.
+// -----------------------------------------------------------------------------
+struct ThreadState {
+  std::vector<Scenario> scen_lo = makeScenarios("_lo");  // 30–40 GeV
+  std::vector<Scenario> scen_hi = makeScenarios("_hi");  // >40 GeV
+  long n_total = 0, n_pass_basic = 0, n_hgtd_valid = 0;
+  double pu_tot_pt = 0, pu_floor_pt = 0, hs_tot_pt = 0, hs_floor_pt = 0;  // >40
+  double pu_tot_lo = 0, pu_floor_lo = 0, hs_tot_lo = 0, hs_floor_lo = 0;  // 30-40
+};
+
+// RpT using ghost association (paper definition): sum pT of tracks that are
+// both ghost-associated to the jet AND in the caller's z₀-selected set.
+static double computeRpT(BranchPointerWrapper* b,
+                         const std::vector<int>& ghost_indices,
+                         double j_pt,
+                         const std::unordered_set<int>& assoc_set) {
+  double sumpt = 0.0;
+  for (int idx : ghost_indices)
+    if (assoc_set.count(idx)) sumpt += b->trackPt[idx];
+  return sumpt / j_pt;
+}
+
+int main(int argc, char** argv) {
+  SetAtlasStyle();
+  gStyle->SetOptStat(0);
+
+  // Must precede any histogram construction -- see the identical note in
+  // src/clustering_hist.cxx's main(). Every worker thread's ThreadState
+  // produces identically-named histograms, harmless only because of this.
+  TH1::AddDirectory(kFALSE);
+
+  // --- Sample selection (--sample=vbf|zjets|dijet; default: local VBF ntuple) ---
+  auto sample = MyUtl::resolveSample(argc, argv);
+  MyUtl::ENERGY_LABEL = sample.energyLabel;
+  MyUtl::OUTPUT_DIR   = sample.outputDir;
+  boost::filesystem::create_directories(MyUtl::OUTPUT_DIR + "/hists");
+  unsigned nThreads = MyUtl::resolveThreads(argc, argv);
+
+  TChain chain("ntuple");
+  setupChain(chain, sample.ntupleDir.c_str());
+  if (chain.GetEntries() == 0) {
+    std::cerr << "No ROOT files found.  Aborting.\n";
+    return 1;
+  }
+  ROOT::EnableImplicitMT(nThreads);
+
+  // --- Per-thread state registry, merged into one after the event loop.
+  //     ThreadState (via Scenario's raw TH1D*) is trivially copy-constructible,
+  //     which would make ROOT::TThreadedObject silently *shallow*-copy the
+  //     TH1D pointers across "cloned" slots -- every worker would then Fill()
+  //     the same histograms with no synchronization. Use the same hand-rolled
+  //     mutex-guarded-registry + thread_local-pointer-cache pattern as
+  //     src/clustering_hist.cxx's per-thread AnalysisObj map instead.
+  //
+  //     The mutex also serializes the ThreadState construction itself, not
+  //     just the push_back -- defensive, matching a real crash found in
+  //     clustering_dt.cxx's AnalysisObj construction (SetFillColorAlpha()
+  //     racing on ROOT's global TColor table). ThreadState's construction
+  //     doesn't call any color-touching ROOT functions today, but the
+  //     serialization is a one-time per-thread cost, so there's no reason
+  //     to leave that door open. ---
+  std::mutex stateRegistryMutex;
+  std::vector<std::unique_ptr<ThreadState>> stateRegistry;
+
+  std::atomic<Long64_t> progressCounter{0};
+
+  std::cout << "Starting Event Loop\n";
+  const Long64_t N_EVENT = chain.GetEntries();
+
+  ROOT::TTreeProcessorMT proc(chain, nThreads);
+  proc.Process([&](TTreeReader& reader) {
+    // Fresh per invocation: a worker thread can be handed a different
+    // TTreeReader across task ranges, so this cannot be thread_local.
+    BranchPointerWrapper branch(reader);
+
+    // Lazily build this thread's state once; reused across however many
+    // task ranges this worker thread services.
+    thread_local ThreadState* tlState = nullptr;
+    if (!tlState) {
+      std::lock_guard<std::mutex> lock(stateRegistryMutex);
+      stateRegistry.push_back(std::make_unique<ThreadState>());
+      tlState = stateRegistry.back().get();
+    }
+    ThreadState& state = *tlState;
+
+    // Redefined fresh per invocation alongside branch (cheap -- no
+    // precomputation, just captures branch by reference).
+    // Paper jet-label helper (ATL-HGTD-PUB-2022-001 Sec. 3).
+    // HS  : dR(reco, truthHS) < 0.3  AND  truthHS_pT > 10 GeV
+    auto paperIsHS = [&](double j_eta, double j_phi) {
+      for (int t = 0; t < (int)branch.truthHSJetPt.GetSize(); ++t) {
+        if (branch.truthHSJetPt[t] < 10.0) continue;
+        if (dR(j_eta, j_phi, branch.truthHSJetEta[t], branch.truthHSJetPhi[t]) < 0.3)
+          return true;
+      }
+      return false;
+    };
+    // PU: dR > 0.6 from any truth HS jet with pT > 4 GeV (Sec. 3).
+    auto paperIsPU = [&](double j_eta, double j_phi) {
+      for (int t = 0; t < (int)branch.truthHSJetPt.GetSize(); ++t) {
+        if (branch.truthHSJetPt[t] < 4.0) continue;
+        if (dR(j_eta, j_phi, branch.truthHSJetEta[t], branch.truthHSJetPhi[t]) < 0.6)
+          return false;
+      }
+      return true;
+    };
+
+    while (reader.Next()) {
+      ++state.n_total;
+
+      Long64_t n = ++progressCounter;
+      if (n % 5000 == 0)
+        std::cout << "Progress: " << n << "/" << N_EVENT << "\r" << std::flush;
+
+      // ── Require only vertex quality (paper Sec. 3: |z_reco − z_truth| < 2 mm).
+      if (branch.recoVtxZ.GetSize() == 0 || branch.truthVtxZ.GetSize() == 0) continue;
+      if (std::abs(branch.recoVtxZ[0] - branch.truthVtxZ[0]) > MAX_VTX_DZ) continue;
+      ++state.n_pass_basic;
+
+      // ── Track selection: all tracks by z-significance (no eta cut) for the
+      //    z-only baseline, matching the paper's ITk-only scenario. ────────────
+      std::vector<int> trk_all;
+      for (size_t trk = 0; trk < branch.trackZ0.GetSize(); ++trk) {
+        double trkPt = branch.trackPt[trk];
+        if (trkPt < MIN_TRACK_PT || trkPt > MAX_TRACK_PT) continue;
+        if (!branch.trackQuality[trk]) continue;
+        if (passTrackVertexAssociation((int)trk, 0, &branch, 2.5))
+          trk_all.push_back((int)trk);
+      }
+
+      // ── HGTD-acceptance tracks only (used for WAVeS clustering). ────────────
+      std::vector<int> trk_z = getAssociatedTracks(&branch, MIN_TRACK_PT, MAX_TRACK_PT, 2.5);
+
+      // ── WAVeS clustering + selection. ────────────────────────────────────────
+      auto clusters = clusterTracksInTime(
+          trk_z, &branch, DIST_CUT_CONE,
+          /*useSmearedTimes=*/false, /*checkTimeValid=*/true, IDEAL_TRACK_RES,
+          ClusteringMethod::ITERATIVE, /*useZ0=*/false,
+          /*sortTracks=*/false, /*calcPurityFlag=*/true);
+
+      // WAVeS selection: highest WAVeS-score cluster; time via in-jet refinement.
+      double t_waves = 0.0, var_waves = 0.0;
+      bool   waves_ok = false;
+      if (!clusters.empty()) {
+        auto best   = chooseCluster(clusters, Score::WAVES);
+        t_waves     = best.calculateTime(Score::WAVES, &branch);  // in-jet refined
+        var_waves   = best.sigmas[0] * best.sigmas[0];
+        waves_ok    = true;
+      }
+
+      // ── HGTD ntuple vertex time. ─────────────────────────────────────────────
+      double t_hgtd         = branch.recoVtxTime[0];
+      double var_hgtd       = branch.recoVtxTimeRes[0] * branch.recoVtxTimeRes[0];
+      bool   hgtd_vtx_valid = (branch.recoVtxValid[0] == 1);
+      if (hgtd_vtx_valid) ++state.n_hgtd_valid;
+
+      // ── Per-track time gate.  pull width ~1.5 → var_vtx ×2.25. ──────────────
+      auto applyTimeGate = [&](const std::vector<int>& base,
+                                double t_vtx, double var_vtx, bool vtx_valid,
+                                double sigma = 2.0) {
+        std::vector<int> out;
+        out.reserve(base.size());
+        for (int idx : base) {
+          bool apply = vtx_valid && branch.trackTimeValid[idx] == 1;
+          if (!apply) { out.push_back(idx); continue; }
+          double dt    = branch.trackTime[idx] - t_vtx;
+          double var_t = branch.trackTimeRes[idx] * branch.trackTimeRes[idx];
+          double pull  = std::abs(dt) / std::sqrt(2.25 * var_vtx + var_t);
+          if (pull < sigma) out.push_back(idx);
+        }
+        return out;
+      };
+
+      std::vector<int> trk_hgtd  = applyTimeGate(trk_all, t_hgtd,  var_hgtd,  hgtd_vtx_valid, GATE_SIGMA);
+      std::vector<int> trk_waves = applyTimeGate(trk_all, t_waves, var_waves, waves_ok,       GATE_SIGMA);
+
+      // ── Truth-vertex-t₀: gate the reco track times against the perfect HS
+      //    vertex time (var_vtx = 0). ──────────────────────────────────────────
+      double t_truth = branch.truthVtxTime[0];
+      std::vector<int> trk_truth = applyTimeGate(trk_all, t_truth, 0.0, true, GATE_SIGMA);
+
+      // ── "Clean timing" event filter: only fill the waves_misas scenario in
+      //    events whose HS timing purity clears MISAS_PURITY_CUT.  Same WAVeS time
+      //    gate otherwise. ───────────────────────────────────────────────────────
+      bool gate_misas = (calcHSTimingPurity(trk_z, &branch) >= MISAS_PURITY_CUT);
+
+      // Build per-scenario sets once per event for O(1) ghost-index lookup.
+      std::unordered_set<int> set_all  (trk_all.begin(),   trk_all.end());
+      std::unordered_set<int> set_hgtd (trk_hgtd.begin(),  trk_hgtd.end());
+      std::unordered_set<int> set_waves(trk_waves.begin(), trk_waves.end());
+      std::unordered_set<int> set_truth(trk_truth.begin(), trk_truth.end());
+
+      // ── Fill jets into pT slices. ─────────────────────────────────────────────
+      auto fillJets = [&](std::vector<Scenario>& sv, double pt_lo, double pt_hi) {
+        for (int j = 0; j < (int)branch.topoJetPt.GetSize(); ++j) {
+          double j_pt  = branch.topoJetPt[j];
+          double j_eta = branch.topoJetEta[j];
+          double j_phi = branch.topoJetPhi[j];
+          if (j_pt <= pt_lo || j_pt >= pt_hi) continue;
+          if (std::abs(j_eta) < JET_ETA_MIN || std::abs(j_eta) > JET_ETA_MAX) continue;
+          bool isHS = paperIsHS(j_eta, j_phi);
+          bool isPU = paperIsPU(j_eta, j_phi);
+          if (!isHS && !isPU) continue;
+          const auto& ghost = branch.topoJetGhostTrackIdx[j];
+          auto fill = [&](Scenario& s, const std::unordered_set<int>& s_set, bool ok = true) {
+            if (!ok) return;
+            double r = computeRpT(&branch, ghost, j_pt, s_set);
+            if (isHS) s.h_hs->Fill(r);
+            else      s.h_pu->Fill(r);
+          };
+          fill(sv[0], set_all);                       // ITk-only
+          fill(sv[1], set_hgtd);                      // HGTD t0
+          fill(sv[2], set_waves);                     // WAVeS t0
+          fill(sv[3], set_waves, gate_misas);         // WAVeS t0 + clean timing (event filter)
+          fill(sv[4], set_truth);                     // Truth t0
+
+          // Untimed floor accounting, per slice.
+          for (int idx : ghost) {
+            if (!set_all.count(idx)) continue;
+            double pt = branch.trackPt[idx];
+            bool untimed = (branch.trackTimeValid[idx] != 1);
+            if (pt_lo >= 40.0) {
+              if (isHS) { state.hs_tot_pt += pt; if (untimed) state.hs_floor_pt += pt; }
+              else      { state.pu_tot_pt += pt; if (untimed) state.pu_floor_pt += pt; }
+            } else {
+              if (isHS) { state.hs_tot_lo += pt; if (untimed) state.hs_floor_lo += pt; }
+              else      { state.pu_tot_lo += pt; if (untimed) state.pu_floor_lo += pt; }
+            }
+          }
+        }
+      };
+
+      fillJets(state.scen_lo, 30.0, 40.0);
+      fillJets(state.scen_hi, 40.0, 1e9);
+    }
+  });
+  std::cout << "\n";
+
+  // --- Merge per-thread state into one ---
+  if (stateRegistry.empty()) {
+    std::cerr << "No events processed.  Aborting.\n";
+    return 1;
+  }
+  ThreadState& merged = *stateRegistry.front();
+  for (size_t i = 1; i < stateRegistry.size(); ++i) {
+    ThreadState& other = *stateRegistry[i];
+    for (size_t k = 0; k < merged.scen_lo.size(); ++k) {
+      merged.scen_lo[k].h_hs->Add(other.scen_lo[k].h_hs);
+      merged.scen_lo[k].h_pu->Add(other.scen_lo[k].h_pu);
+    }
+    for (size_t k = 0; k < merged.scen_hi.size(); ++k) {
+      merged.scen_hi[k].h_hs->Add(other.scen_hi[k].h_hs);
+      merged.scen_hi[k].h_pu->Add(other.scen_hi[k].h_pu);
+    }
+    merged.n_total      += other.n_total;
+    merged.n_pass_basic += other.n_pass_basic;
+    merged.n_hgtd_valid += other.n_hgtd_valid;
+    merged.pu_tot_pt    += other.pu_tot_pt;
+    merged.pu_floor_pt  += other.pu_floor_pt;
+    merged.hs_tot_pt    += other.hs_tot_pt;
+    merged.hs_floor_pt  += other.hs_floor_pt;
+    merged.pu_tot_lo    += other.pu_tot_lo;
+    merged.pu_floor_lo  += other.pu_floor_lo;
+    merged.hs_tot_lo    += other.hs_tot_lo;
+    merged.hs_floor_lo  += other.hs_floor_lo;
+  }
+
+  std::cout << "\nFINISHED PROCESSING\n";
+
+  // --- Save every histogram + scalar accumulator to a ROOT file ---
+  const std::string histPath = MyUtl::OUTPUT_DIR + "/hists/rpt_v5_hist.root";
+  MyUtl::HistWriter writer(histPath);
+  saveScenarios(writer, merged.scen_lo);
+  saveScenarios(writer, merged.scen_hi);
+  writer.WriteScalar("meta_n_total",      static_cast<Long64_t>(merged.n_total));
+  writer.WriteScalar("meta_n_pass_basic", static_cast<Long64_t>(merged.n_pass_basic));
+  writer.WriteScalar("meta_n_hgtd_valid", static_cast<Long64_t>(merged.n_hgtd_valid));
+  writer.WriteScalar("meta_pu_tot_pt",    merged.pu_tot_pt);
+  writer.WriteScalar("meta_pu_floor_pt",  merged.pu_floor_pt);
+  writer.WriteScalar("meta_hs_tot_pt",    merged.hs_tot_pt);
+  writer.WriteScalar("meta_hs_floor_pt",  merged.hs_floor_pt);
+  writer.WriteScalar("meta_pu_tot_lo",    merged.pu_tot_lo);
+  writer.WriteScalar("meta_pu_floor_lo",  merged.pu_floor_lo);
+  writer.WriteScalar("meta_hs_tot_lo",    merged.hs_tot_lo);
+  writer.WriteScalar("meta_hs_floor_lo",  merged.hs_floor_lo);
+  writer.WriteRunMeta(MyUtl::ENERGY_LABEL, N_EVENT);
+  writer.Close();
+  std::cout << "Wrote histograms to " << histPath << "\n";
+
+  return 0;
+}

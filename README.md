@@ -6,8 +6,12 @@ HGTD vertex timing reconstruction and clustering analysis for ATLAS.
 
 ```
 vertex_timing/
-├── src/                          # Core library headers + main analysis executable
-│   ├── clustering_dt.cxx         # Main clustering analysis (primary entry point)
+├── src/                          # Core library headers + main analysis executables
+│   ├── clustering_hist.cxx       # Histogramming stage: event loop only, writes hists/clustering_hist.root
+│   ├── clustering_plot.cxx       # Plotting stage: reads that file, produces all PDFs, no ntuple access
+│   ├── clustering_dt_common.h    # Shared by the pair above: Scenario enum, buildAnalysisMap, makeComparisonPlots
+│   ├── clustering_dt.cxx         # Legacy monolithic executable (event loop + plotting); kept as reference/fallback
+│   ├── histogram_io.h            # HistWriter/HistReader: TFile-based histogram+scalar I/O for the *_hist/*_plot split
 │   ├── clustering_constants.h    # Analysis constants, cuts, Score enum
 │   ├── clustering_functions.h    # Core clustering and scoring algorithms
 │   ├── clustering_includes.h     # Aggregated ROOT/Boost/STL includes
@@ -17,6 +21,10 @@ vertex_timing/
 │   └── AtlasLabels.h / AtlasStyle.h  # ATLAS plot style utilities
 ├── util/                         # Diagnostic and utility executables
 │   ├── sweep_utilities.h         # Shared helpers for 1-D parameter sweep executables
+│   ├── rpt_v5_hist.cxx           # Histogramming stage: event loop only, writes hists/rpt_v5_hist.root
+│   ├── rpt_v5_plot.cxx           # Plotting stage: ROC/console-summary/PDF from that file, no ntuple access
+│   ├── rpt_v5_common.h           # Shared by the pair above: Scenario struct, RpT binning, save/load helpers
+│   ├── rpt_v5.cxx                # Legacy monolithic executable; kept as reference/fallback
 │   ├── generate_rpt.cxx          # ROC curve / timing distribution report generator
 │   ├── export_training_data.cxx  # Exports cluster features to CSV for DNN retraining
 │   └── failure_decomposition.cxx # Failure mode categorisation + pie chart
@@ -34,12 +42,14 @@ vertex_timing/
 │   └── clustering_animation.py   # Animates the iterative clustering algorithm for one event
 ├── condor/                       # HTCondor grid submission templates
 │   ├── run_analysis.sh           # Generic job executable (any --sample-aware target)
-│   ├── clustering_dt.sub         # Submit file: one job per sample, for clustering_dt
-│   ├── rpt_v5.sub                # Submit file: one job per sample, for rpt_v5
+│   ├── clustering_hist.sub       # Submit file: one job per sample, for clustering_hist (histogramming stage)
+│   ├── rpt_v5_hist.sub           # Submit file: one job per sample, for rpt_v5_hist (histogramming stage)
+│   ├── clustering_dt.sub         # Submit file for the legacy clustering_dt (reference/fallback)
+│   ├── rpt_v5.sub                # Submit file for the legacy rpt_v5 (reference/fallback)
 │   └── logs/                     # condor stdout/stderr/log output (created empty)
 ├── CMakeLists.txt                # Build configuration
 ├── build/                        # CMake build output directory
-├── figs/                         # Output plots (PDF)
+├── figs/                         # Output: hists/ (saved ROOT histogram files) + PDF plots
 └── CLAUDE.md                     # Full project documentation for Claude Code
 ```
 
@@ -49,18 +59,77 @@ vertex_timing/
 
 The following targets are defined in `CMakeLists.txt` and built in the `build/` directory:
 
+Both primary analyses are split into a **histogramming stage** (event loop
+against the ntuples, writes a ROOT file of histograms, no plotting) and a
+**plotting stage** (reads that file, produces PDFs, touches no ntuples) — see
+"Run Process" below for why and how to use the two-step workflow. The
+original single-executable versions still build as a reference/fallback.
+
 | Executable | Source | Description |
 |---|---|---|
-| `clustering_dt` | `src/clustering_dt.cxx` | Main analysis. Runs timing-based vertex reconstruction across three scenarios (real HGTD, ideal resolution, ideal efficiency) and several scoring algorithms. Supports `--sample=vbf\|zjets\|dijet` to switch input ntuple, energy-label annotation, and output directory. Generates comparison PDFs in `figs/` (or `vbf/`, `zjets/`, `dijet/`). |
+| `clustering_hist` | `src/clustering_hist.cxx` | Histogramming stage of the main analysis. Runs the event loop across the active scoring algorithms and writes every histogram + run metadata to `<sample-dir>/hists/clustering_hist.root`. Supports `--sample=vbf\|zjets\|dijet` and `--threads=N`. |
+| `clustering_plot` | `src/clustering_plot.cxx` | Plotting stage. Reads `clustering_hist.root` and produces the comparison/inclusive/shape/fullplots PDFs in `<sample-dir>/` — no ntuple access, runs in seconds. Supports `--sample=` (to find the right file/output dir) and `--hist-file=<path>` (explicit override). |
+| `clustering_dt` | `src/clustering_dt.cxx` | Legacy monolithic executable (event loop + plotting in one run); kept as a validated reference/fallback, not the primary workflow. |
 | `failure_decomposition` | `util/failure_decomposition.cxx` | Classifies every TRKPTZ-failing event into four failure categories (selection, timing misassignment, misclustering, track efficiency). Produces efficiency curves + pie chart. |
 | `generate_rpt` | `util/generate_rpt.cxx` | Generates timing distribution plots and ROC curves comparing pT-weighted and pT+time-weighted track timing for hard-scatter vs. pileup separation. |
 | `rpt_v2` | `util/rpt_v2.cxx` | RpT discrimination study using the main-analysis event selection (z-only / HGTD / TRKPTZ scenarios, with purity and HS-timing oracle gates). |
 | `rpt_v3` | `util/rpt_v3.cxx` | Jet-level RpT analysis with no event selection, matching the paper's approach. |
 | `rpt_v4` | `util/rpt_v4.cxx` | Jet-level RpT analysis with a 30–40 GeV / >40 GeV jet-pT split. |
-| `rpt_v5` | `util/rpt_v5.cxx` | Jet-level RpT analysis using the WAVeS-selected cluster time; supports `--sample=vbf\|zjets\|dijet`. |
+| `rpt_v5_hist` | `util/rpt_v5_hist.cxx` | Histogramming stage of the RpT study. Runs the event loop and writes the 5-scenario × 2-slice HS/PU histograms + event-count/floor-counter scalars to `<sample-dir>/hists/rpt_v5_hist.root`. Supports `--sample=` / `--threads=N`. |
+| `rpt_v5_plot` | `util/rpt_v5_plot.cxx` | Plotting stage. Reads `rpt_v5_hist.root` and produces the ROC curves, console summary tables, and `rpt_plots/rpt_v5.pdf` — no ntuple access. Supports `--sample=` / `--hist-file=<path>`. |
+| `rpt_v5` | `util/rpt_v5.cxx` | Legacy monolithic executable using the WAVeS-selected cluster time; kept as a validated reference/fallback. |
 | `export_training_data` | `util/export_training_data.cxx` | Exports per-cluster feature vectors to CSV for DNN retraining. |
 | `maxpt_jet_test` | `util/maxpt_jet_test.cxx` | Compares WAVeS/TRKPTZ efficiency under different track pT upper-cut choices. |
 | `track_dt` | `util/track_dt.cxx` | Inclusive per-track timing residual (HGTD track time − truth particle production-vertex time), no event/track selection. |
+
+---
+
+## Run Process
+
+Both primary analyses (`clustering_hist`/`clustering_plot` and
+`rpt_v5_hist`/`rpt_v5_plot`) follow the same two-step pattern: run the event
+loop once to produce a ROOT file of histograms, then iterate on plotting as
+many times as needed against that file without touching the ntuples again.
+This exists because a full event loop over the high-stats samples (zjets
+alone is 8M events) takes minutes locally and much longer as a condor job —
+too slow to be the feedback loop for a plot tweak.
+
+**Local, main analysis:**
+```bash
+cd build
+./clustering_hist                 # event loop, writes ../figs/hists/clustering_hist.root
+./clustering_plot                 # reads that file, writes all PDFs — fast, no ntuple access
+```
+Rerunning just `./clustering_plot` (no `clustering_hist` rerun) is the way to
+iterate on styling, binning, or a new comparison group.
+
+**Local, RpT study:**
+```bash
+cd build
+./rpt_v5_hist                     # writes ../figs/hists/rpt_v5_hist.root
+./rpt_v5_plot                     # ROC curves, console summary, rpt_plots/rpt_v5.pdf
+```
+Same idea — `./rpt_v5_plot` alone is the fast loop for tuning display/derived
+logic (e.g. the ROC-window efficiency floor in `pickXRange`).
+
+**Different sample:** pass `--sample=vbf|zjets|dijet` to *both* stages of a
+pair so the plotting stage finds the histogram file the histogramming stage
+just wrote:
+```bash
+./clustering_hist --sample=zjets && ./clustering_plot --sample=zjets
+```
+
+**Histogram file living somewhere non-default** (e.g. after copying a file
+transferred back from condor): override with `--hist-file=<path>` on the
+plotting-stage executable instead of relying on `--sample=`'s default
+`<OUTPUT_DIR>/hists/<name>.root` location.
+
+**On condor:** only the histogramming stage runs on the grid — see "Grid
+Submission" below. The plotting stage always runs locally afterward.
+
+**Legacy / fallback:** `./clustering_dt` and `./rpt_v5` still build and
+behave exactly as before (single run, event loop + plotting together) —
+useful as a sanity check, but no longer the recommended path.
 
 ---
 
@@ -104,8 +173,9 @@ cd build
 cmake ..
 make
 
-# Run main analysis (outputs to figs/, or vbf|zjets|dijet with --sample)
-./clustering_dt
+# Run main analysis (two-step: histogram once, then plot — see "Run Process" above)
+./clustering_hist              # writes ../figs/hists/clustering_hist.root (or vbf|zjets|dijet with --sample)
+./clustering_plot              # produces the PDFs from that file, fast, no ntuple access
 
 # Run failure decomposition
 ./failure_decomposition
@@ -118,32 +188,42 @@ cd python && python event_display.py --file_num 000009 --event_num 1856 --extra_
 
 ## Grid Submission (condor)
 
-Templates for running `clustering_dt` / `rpt_v5` on the UChicago AF HTCondor pool live in `condor/`:
+Templates for running `clustering_hist` / `rpt_v5_hist` on the UChicago AF HTCondor pool live in `condor/`. Only the **histogramming stage** goes to condor — the plotting stage is fast/local and runs afterward wherever the resulting `.root` file lands, no further submission needed:
 
 | File | Purpose |
 |---|---|
-| `run_analysis.sh` | Generic job executable — `run_analysis.sh <executable> <sample>`. Sources the ATLAS/LCG environment (`atlasLocalSetup.sh` + `lsetup "root <version>"`) then runs the transferred `<executable>` with `--sample=<sample>` (or no flag if `<sample>` is `default`). |
-| `clustering_dt.sub` | Submit file: one job per `--sample` value (`vbf`, `zjets`, `dijet`) for `clustering_dt`. |
-| `rpt_v5.sub` | Same, for `rpt_v5`. Submitted separately (its own `condor_submit` call) so it runs as an independent job cluster from `clustering_dt.sub`. |
+| `run_analysis.sh` | Generic job executable — `run_analysis.sh <executable> <sample>`. Sources the ATLAS/LCG environment (`atlasLocalSetup.sh` + `lsetup "root <version>"`) then runs the transferred `<executable>` **directly from the job's scratch directory** with `--sample=<sample>` (or no flag if `<sample>` is `default`). |
+| `clustering_hist.sub` | Submit file: one job per `--sample` value (`vbf`, `zjets`, `dijet`) for `clustering_hist`. |
+| `rpt_v5_hist.sub` | Same, for `rpt_v5_hist`. Submitted separately (its own `condor_submit` call) so it runs as an independent job cluster from `clustering_hist.sub`. |
+| `clustering_dt.sub` / `rpt_v5.sub` | Legacy templates for the monolithic executables — still work, kept for reference/fallback. |
 
-Execute hosts don't share a filesystem with the submit host on this pool (confirmed via a `FileSystemDomain` match failure when `should_transfer_files = NO` was tried), so both `.sub` files stage the prebuilt executable in via `transfer_input_files` and stage the output directory (`vbf/`, `zjets/`, or `dijet/`) back out via `transfer_output_files`. The ntuple inputs are read via the absolute `/data/mcardiff/exotic_superntuples/...` path baked into `--sample=`, so they don't need transferring — only the tiny compiled binary does.
+Execute hosts don't share a filesystem with the submit host on this pool (confirmed via a `FileSystemDomain` match failure when `should_transfer_files = NO` was tried), so the `*_hist.sub` files stage the prebuilt executable in via `transfer_input_files` and stage back a **single small histogram file** (`$(sample)/hists/<name>.root`) via `transfer_output_files` — much smaller than the full PDF tree the legacy `.sub` files transfer back. The ntuple inputs are read via the absolute `/data/mcardiff/exotic_superntuples/...` path baked into `--sample=`, so they don't need transferring — only the tiny compiled binary does.
+
+Both `*_hist.sub` files also set `transfer_output_remaps` — without it, condor flattens `transfer_output_files` paths with nested subdirectories to their basename when staging back, so all 3 queued jobs would each write a file literally named `clustering_hist.root`/`rpt_v5_hist.root` straight into the submit directory, silently overwriting each other instead of landing at `vbf/hists/...`, `zjets/hists/...`, `dijet/hists/...`. (`preserve_relative_paths = True` looks like the obvious fix but isn't — it's submit-wide, so it also applies to `transfer_input_files = ../build/<exe>`, and turned that "climbs out of the sandbox" path into a hold instead of leaving it flattened as before. `transfer_output_remaps` only affects output, so it doesn't have that problem.) The remap's left-hand side must be a bare filename — `condor_submit(1)` is explicit that "you cannot specify directories to be remapped" — so it's `"clustering_hist.root=$(sample)/hists/clustering_hist.root"` (basename on the left, full destination path with directories on the right, which condor creates as needed).
+
+**Output-path safety:** for grid samples (`--sample=vbf|zjets|dijet`), `src/sample_config.h`'s output directory is resolved relative to the executable's own current working directory, not its parent — so `run_analysis.sh` can run the transferred binary straight from the job's scratch root with no setup dance, and output can never land outside the directory the job is actually confined to. (The local-dev default, no `--sample`, still uses the `../figs` convention via `cd build && ./<executable>` — that one's never run on condor.)
 
 ```bash
 # Build first — condor does not rebuild on the execute host
-cd build && cmake .. && make clustering_dt rpt_v5
+cd build && cmake .. && make clustering_hist rpt_v5_hist
 
 # Submit (from inside condor/, so relative paths resolve correctly)
 cd ../condor
-condor_submit -dump dryrun.ad clustering_dt.sub   # dry-run: validate without queuing
-condor_submit clustering_dt.sub
-condor_submit rpt_v5.sub                          # separate job cluster
+condor_submit -dump dryrun.ad clustering_hist.sub   # dry-run: validate without queuing
+condor_submit clustering_hist.sub
+condor_submit rpt_v5_hist.sub                       # separate job cluster
 
 # Monitor
 condor_q
-condor_q -better-analyze <ClusterId>.<ProcId>     # if a job is idle/held
+condor_q -better-analyze <ClusterId>.<ProcId>       # if a job is idle/held
+
+# Once jobs complete and the .root files land in ../<sample>/hists/, plot locally:
+cd ../build
+./clustering_plot --sample=<sample>
+./rpt_v5_plot --sample=<sample>
 ```
 
-Logs land in `condor/logs/<sample>.<ClusterId>.<ProcId>.{out,err,log}` (prefixed `rpt_v5_` for the rpt_v5 cluster).
+Logs land in `condor/logs/clustering_hist_<sample>.<ClusterId>.<ProcId>.{out,err,log}` (prefixed `rpt_v5_hist_` for the rpt_v5_hist cluster).
 
 **Caveat:** `CMakeLists.txt` compiles with `-march=native`, tuned to whichever machine ran `make`. If execute hosts have a different CPU microarchitecture than the build host, jobs can crash with an "Illegal instruction" (SIGILL) rather than a normal error — not a bug in the job scripts.
 
