@@ -13,3 +13,7 @@
 *.pdf
 *.png
 *.jpg
+*.err
+*.out
+*.log
+
