@@ -3,8 +3,8 @@
 #
 # Histogramming stage of the clustering_dt split (see CLAUDE.md's "Main
 # Executables" section): runs the event loop and writes
-# <sample>/hists/clustering_hist.root, nothing else. Transfers back a single
-# small ROOT file instead of a full figs/ directory of PDFs -- run
+# <sample>/<sample>_clustering_hist.root, nothing else. Transfers back a
+# single small ROOT file instead of a full figs/ directory of PDFs -- run
 # `./clustering_plot --sample=<sample>` locally afterward to produce the PDFs
 # from that file, which is fast/local and needs no further condor submission.
 #
@@ -31,31 +31,35 @@ arguments                = clustering_hist $(sample) 4
 should_transfer_files    = YES
 when_to_transfer_output  = ON_EXIT
 transfer_input_files     = ../build/clustering_hist
-transfer_output_files    = $(sample)/hists/clustering_hist.root
-# Without a remap, condor's default output-transfer behavior flattens nested
-# paths to their basename when staging back -- it does NOT recreate
-# $(sample)/hists/ on the submit side, so all 3 queued jobs would each write
-# back a file literally named "clustering_hist.root" directly into this
-# directory, silently overwriting each other (discovered by running the
-# actual rpt_v5_hist jobs: only the last-to-finish sample's histogram
-# survived).
+transfer_output_files    = $(sample)/$(sample)_clustering_hist.root
+# The histogram file name is now sample-prefixed (src/sample_config.h's
+# histFilePath()), so the 3 queued jobs' output basenames
+# (vbf_clustering_hist.root, zjets_clustering_hist.root,
+# dijet_clustering_hist.root) no longer collide even after condor's default
+# output-transfer flattening -- unlike when the file was just
+# "clustering_hist.root" for every sample (see git history for that bug). A
+# remap is still used below, purely so the file lands nested under
+# $(sample)/ on the submit side, matching the local --sample= convention
+# (clustering_plot --sample=<sample> looks for it there without needing
+# --hist-file=).
 #
-# preserve_relative_paths = True also fixes this, but it's a submit-wide
-# knob that applies to transfer_input_files too -- and turned "../build/
-# clustering_hist" (climbs OUT of the sandbox) from silently-flattened into
-# a hard "Attempt to write to illegal sandbox path" hold (confirmed by
-# running the actual rpt_v5_hist jobs with that flag set). transfer_output_remaps
-# only touches the output side, so it can't have that side effect.
+# preserve_relative_paths = True also fixes the old collision, but it's a
+# submit-wide knob that applies to transfer_input_files too -- and turned
+# "../build/clustering_hist" (climbs OUT of the sandbox) from
+# silently-flattened into a hard "Attempt to write to illegal sandbox path"
+# hold (confirmed by running the actual rpt_v5_hist jobs with that flag
+# set). transfer_output_remaps only touches the output side, so it can't
+# have that side effect.
 #
 # The remap's LHS (`name`) must be a bare filename -- per condor_submit(1):
-# "You cannot specify directories to be remapped." A first attempt using
-# the full "$(sample)/hists/clustering_hist.root" on the LHS silently failed
-# to match anything (confirmed against the real rpt_v5_hist jobs: still
-# flattened to a single shared file), since condor tracks the transferred
-# file by its basename once inside the execution directory, not by the
-# path used to locate it via transfer_output_files. Directories ARE
-# allowed on the RHS (`newname`) and are created as needed.
-transfer_output_remaps   = "clustering_hist.root=$(sample)/hists/clustering_hist.root"
+# "You cannot specify directories to be remapped." A first attempt using a
+# full nested path on the LHS silently failed to match anything (confirmed
+# against the real rpt_v5_hist jobs: still flattened to a single shared
+# file), since condor tracks the transferred file by its basename once
+# inside the execution directory, not by the path used to locate it via
+# transfer_output_files. Directories ARE allowed on the RHS (`newname`) and
+# are created as needed.
+transfer_output_remaps   = "$(sample)_clustering_hist.root=$(sample)/$(sample)_clustering_hist.root"
 
 getenv                   = True
 

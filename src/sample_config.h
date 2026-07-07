@@ -21,6 +21,7 @@ namespace MyUtl {
     std::string ntupleDir;
     std::string energyLabel;
     std::string outputDir;
+    std::string sampleName;  // "" for the local/default run; e.g. "vbf" when --sample= is given
   };
 
   // Mutable globals read by plotting code (event-label text, PDF output root).
@@ -46,15 +47,21 @@ namespace MyUtl {
   inline std::string ENERGY_LABEL = "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv.";
   inline std::string OUTPUT_DIR   = "../figs";
 
+  // Sample name for the current run ("" for the local/default run, otherwise
+  // e.g. "vbf"). Mirrors ENERGY_LABEL/OUTPUT_DIR: set once in main() right
+  // after resolveSample(). Read by histFilePath()/plotFilePath() below to
+  // decide whether output file names get a sample prefix.
+  inline std::string SAMPLE_NAME  = "";
+
   // Default (no --sample flag): local VBF ntuple, VBF label, ../figs output.
   inline SampleConfig resolveSample(int argc, char** argv) {
     static const std::map<std::string, SampleConfig> registry = {
       {"vbf",   {"/data/mcardiff/exotic_superntuples/highstats_vbf/",
-                 "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv.", "vbf"}},
+                 "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv.", "vbf",   "vbf"}},
       {"zjets", {"/data/mcardiff/exotic_superntuples/zjets/",
-                 "#sqrt{s} = 14 TeV, HL-LHC, Z+jets",               "zjets"}},
+                 "#sqrt{s} = 14 TeV, HL-LHC, Z+jets",               "zjets", "zjets"}},
       {"dijet", {"/data/mcardiff/exotic_superntuples/dijet/",
-                 "#sqrt{s} = 14 TeV, HL-LHC, Dijet",                "dijet"}},
+                 "#sqrt{s} = 14 TeV, HL-LHC, Dijet",                "dijet", "dijet"}},
     };
 
     const std::string prefix = "--sample=";
@@ -71,7 +78,7 @@ namespace MyUtl {
       return it->second;
     }
 
-    return {"/Users/mcard/project/ntuple-hgtd/", "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv.", "../figs"};
+    return {"/Users/mcard/project/ntuple-hgtd/", "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv.", "../figs", ""};
   }
 
   // ---------------------------------------------------------------------------
@@ -113,6 +120,31 @@ namespace MyUtl {
       return arg.substr(prefix.size());
     }
     return defaultPath;
+  }
+
+  // ---------------------------------------------------------------------------
+  // histFilePath / plotFilePath
+  //   Sample-aware output path builders, read by both stages of the
+  //   *_hist/*_plot split. When a --sample was given (SAMPLE_NAME non-empty),
+  //   every output file name is prefixed with "<SAMPLE_NAME>_" so files stay
+  //   distinguishable if copied out of their per-sample directory into a
+  //   shared one. For histograms this also flattens away the old "hists/"
+  //   subdirectory (a single sample-prefixed file directly under OUTPUT_DIR
+  //   no longer needs it to stay unambiguous). Plots keep their existing
+  //   subdirectory layout (comparisons/, inclusive/, rpt_plots/, ...) -- only
+  //   the file name gets prefixed. For the local/default run (no --sample,
+  //   SAMPLE_NAME == ""), both fall back to the original unprefixed
+  //   conventions.
+  // ---------------------------------------------------------------------------
+  inline std::string histFilePath(const std::string& baseName) {
+    if (!SAMPLE_NAME.empty())
+      return OUTPUT_DIR + "/" + SAMPLE_NAME + "_" + baseName;
+    return OUTPUT_DIR + "/hists/" + baseName;
+  }
+
+  inline std::string plotFilePath(const std::string& subdir, const std::string& baseName) {
+    const std::string name = SAMPLE_NAME.empty() ? baseName : SAMPLE_NAME + "_" + baseName;
+    return OUTPUT_DIR + "/" + subdir + "/" + name;
   }
 
 }

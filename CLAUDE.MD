@@ -29,7 +29,7 @@ vertex_timing/
 │   ├── AtlasLabels.h / AtlasStyle.h  # ATLAS plot style utilities
 │   ├── clustering_dt_common.h    # Shared by clustering_hist.cxx/clustering_plot.cxx: Scenario enum,
 │   │                             #   buildAnalysisMap, makeComparisonPlots
-│   ├── clustering_hist.cxx       # Histogramming stage: event loop only, writes hists/clustering_hist.root
+│   ├── clustering_hist.cxx       # Histogramming stage: event loop only, writes <sample-prefixed>_clustering_hist.root
 │   ├── clustering_plot.cxx       # Plotting stage: reads that file, produces all PDFs, no ntuple access
 │   └── clustering_dt.cxx         # Legacy monolithic executable (event loop + plotting in one run); retained
 │                                 #   only as the validation ground truth for the split above, see Main Executables
@@ -40,7 +40,7 @@ vertex_timing/
 │   ├── rpt_v2.cxx .. rpt_v4.cxx  # RpT discrimination study iterations
 │   ├── rpt_v5_common.h           # Shared by rpt_v5_hist.cxx/rpt_v5_plot.cxx: Scenario struct, RpT histogram
 │   │                             #   binning/booking, saveScenarios/loadScenarios
-│   ├── rpt_v5_hist.cxx           # Histogramming stage: event loop only, writes hists/rpt_v5_hist.root
+│   ├── rpt_v5_hist.cxx           # Histogramming stage: event loop only, writes <sample-prefixed>_rpt_v5_hist.root
 │   ├── rpt_v5_plot.cxx           # Plotting stage: ROC/console-summary/PDF from that file, no ntuple access
 │   ├── rpt_v5.cxx                # Legacy monolithic executable; retained only as validation ground truth
 │   ├── maxpt_jet_test.cxx        # A/B/C test of the MAX_TRACK_PT cap vs per-event leading-jet pT
@@ -90,7 +90,8 @@ primary workflow.
   HGTD timing scenario is currently built/processed — `Scenario::IDEAL_RES`/
   `IDEAL_EFF` and `buildAnalysisMap`'s branching for them still exist for
   future reuse, but `main()` no longer instantiates or iterates those maps)
-  and writes `<OUTPUT_DIR>/hists/clustering_hist.root`. `clustering_plot`
+  and writes its histogram file via `MyUtl::histFilePath()` (see
+  "Sample-prefixed output paths" below). `clustering_plot`
   reads that file and produces the `theplot_*`, `waves_oracle_*`, and
   `hgtd_trkptz_waves_*` comparison PDF groups (see Score Registry section),
   plus inclusive resolution/pull plots and shape-comparison plots — no
@@ -114,12 +115,12 @@ primary workflow.
 - **rpt_v5_hist.cxx** / **rpt_v5_plot.cxx** (`util/`): Split of the current
   RpT (jet-level pileup-discrimination) study. `rpt_v5_hist` runs the event
   loop (same `TTreeProcessorMT`/`ThreadState` structure as the legacy
-  version) and writes `<OUTPUT_DIR>/hists/rpt_v5_hist.root` (5 scenarios × 2
-  pT slices × {HS, PU} histograms, plus event-count/floor-counter scalars).
-  `rpt_v5_plot` reads that file and does `generate_roc`, `rejAtEff`,
-  `pickXRange` (including the `MIN_HS_EFF = 0.5` ROC-window floor — see
-  below), the console summary tables, and all PDF drawing — no ntuple
-  access. Shared `Scenario`/binning/save-load logic lives in
+  version) and writes its histogram file via `MyUtl::histFilePath()` (see
+  "Sample-prefixed output paths" below) (5 scenarios × 2 pT slices × {HS, PU}
+  histograms, plus event-count/floor-counter scalars). `rpt_v5_plot` reads
+  that file and does `generate_roc`, `rejAtEff`, the harmonized `[0.6, 1.0]`
+  ROC window (see below), the console summary tables, and all PDF drawing —
+  no ntuple access. Shared `Scenario`/binning/save-load logic lives in
   `util/rpt_v5_common.h`.
 - **generate_rpt.cxx**, **rpt_v2.cxx**..**rpt_v4.cxx** (`util/`): Earlier
   iterations of the same study (z-only, real-HGTD, TRKPTZ-selected timing
@@ -164,6 +165,25 @@ condor-scale for real work) even though the underlying data hadn't changed.
   `TParameter<Double_t>` under a `meta_`-prefixed key (event counts,
   accumulator doubles); the energy label is a `TObjString` under
   `meta_energy_label`.
+- **Sample-prefixed output paths** (`src/sample_config.h`'s `histFilePath()`/
+  `plotFilePath()`): when a run is given `--sample=<name>`, every output file
+  name is prefixed with `<name>_` so files stay distinguishable if copied out
+  of their per-sample directory into a shared one. For histograms this also
+  flattens away the old `hists/` subdirectory — a single sample-prefixed file
+  directly under `OUTPUT_DIR` no longer needs it to stay unambiguous — e.g.
+  `vbf/vbf_clustering_hist.root`, `vbf/vbf_rpt_v5_hist.root`. Plots keep their
+  existing subdirectory layout (`comparisons/`, `inclusive/`, `fullplots/`,
+  `rpt_plots/`, ...); only the file name gets prefixed, e.g.
+  `vbf/comparisons/vbf_theplot_pu_frac.pdf`,
+  `vbf/rpt_plots/vbf_rpt_v5.pdf`. For the local/default run (no `--sample`),
+  both helpers fall back to the original unprefixed conventions
+  (`<OUTPUT_DIR>/hists/<name>.root`, `<OUTPUT_DIR>/<subdir>/<name>.pdf`) —
+  `MyUtl::SAMPLE_NAME` is only set to a non-empty value by the four primary
+  split executables (`clustering_hist`/`clustering_plot`/`rpt_v5_hist`/
+  `rpt_v5_plot`) when `resolveSample()` matched a real `--sample=` flag; the
+  legacy monolithic executables (`clustering_dt.cxx`, `rpt_v5.cxx`) never set
+  it and so keep their original unprefixed, un-flattened output paths
+  unconditionally, even when run with `--sample=`.
 - **Reconstruction pattern**: the plotting stage always "construct-empty-
   then-load" — it re-runs the *same* booking logic the histogramming stage
   used (`buildAnalysisMap()` / `makeScenarios()`) to get correctly-named,
@@ -187,13 +207,15 @@ condor-scale for real work) even though the underlying data hadn't changed.
   `styleScen` is a local lambda whose *definition* is placed lexically after
   the entire derived-numbers block, so calling it earlier would be a compile
   error (undeclared identifier), not a silent runtime bug.
-- **ROC-window floor fix**: `pickXRange()`'s populated-but-shifted-low
-  fallback previously had no lower bound — for Z+jets (many forward "HS"
-  jets with ~no tracks) it could widen down past 50% HS efficiency, a
-  physically meaningless "high-efficiency working point". `rpt_v5_plot.cxx`
-  now clamps that fallback's lower edge to `MIN_HS_EFF = 0.5`. Tunable purely
-  by editing the constant and rerunning `rpt_v5_plot --sample=zjets` locally
-  against an already-saved `rpt_v5_hist.root` — no condor resubmission.
+- **Harmonized ROC window**: the ROC x-axis ("Hard Scatter Efficiency") is a
+  fixed `[0.6, 1.0]` window for every sample and pT-slice, so plots are
+  directly comparable across vbf/zjets/dijet. This replaced an earlier
+  adaptive `pickXRange()` fallback (default `[0.8, 1.0]`, widening down to a
+  `MIN_HS_EFF = 0.5` floor when a sample's curve didn't reach the default
+  window — e.g. Z+jets, where many forward "HS" jets carry ~no tracks).
+  Tunable purely by editing `roc_xmin_default`/`roc_xmax_default` in
+  `rpt_v5_plot.cxx` and rerunning `rpt_v5_plot --sample=<sample>` locally
+  against an already-saved histogram file — no condor resubmission.
 - **Validated** (bin-for-bin histogram identity + pixel-for-pixel PDF
   identity) against the local default VBF sample for both split pairs before
   ever touching a grid sample — see git history for the validation method
@@ -355,7 +377,8 @@ cd python && python event_display.py --file_num 000009 --event_num 1856 --extra_
 # RpT study (WAVeS-based), two-step
 cd build && ./rpt_v5_hist && ./rpt_v5_plot
 
-# Iterate on rpt_v5's plotting only (e.g. tuning pickXRange's MIN_HS_EFF)
+# Iterate on rpt_v5's plotting only (e.g. tuning the harmonized ROC window's
+# roc_xmin_default/roc_xmax_default)
 cd build && ./rpt_v5_plot
 
 # Rebuild after header change
@@ -370,11 +393,11 @@ Templates in `condor/` run `clustering_hist` / `rpt_v5_hist` on the UChicago AF 
 - **`condor/clustering_hist.sub`** / **`condor/rpt_v5_hist.sub`** — one `.sub` file per histogramming executable, each queuing 3 jobs via `queue sample in (vbf, zjets, dijet)`. Submit each separately (own `condor_submit` call) to get independent job clusters. `arguments` passes `4` as the `<threads>` arg, matching `request_cpus = 4` — both `*_hist` executables parallelize their event loop via `TTreeProcessorMT` (see Multicore in Development Notes), and condor's cgroup throttles any threads spawned beyond `request_cpus`, so the two must track each other.
 - **`condor/clustering_dt.sub`** / **`condor/rpt_v5.sub`** — legacy templates for the monolithic executables; still work, kept for reference/fallback, not the primary workflow.
 
-Execute hosts do **not** share a filesystem with the submit host on this pool — confirmed via a `TARGET.FileSystemDomain == MY.FileSystemDomain` match failure when `should_transfer_files = NO` was tried first (0 of 157 slots matched). The `*_hist.sub` files use `transfer_input_files` (stages the prebuilt binary in) and `transfer_output_files = $(sample)/hists/<name>.root` (stages back a single small histogram file — much smaller than the full PDF tree the legacy `.sub` files' `transfer_output_files = $(sample)` transfers). Ntuple inputs are read via the absolute `/data/mcardiff/exotic_superntuples/...` path baked into `--sample=` (see `src/sample_config.h`), so they don't need transferring.
+Execute hosts do **not** share a filesystem with the submit host on this pool — confirmed via a `TARGET.FileSystemDomain == MY.FileSystemDomain` match failure when `should_transfer_files = NO` was tried first (0 of 157 slots matched). The `*_hist.sub` files use `transfer_input_files` (stages the prebuilt binary in) and `transfer_output_files = $(sample)/$(sample)_<name>.root` (stages back a single small histogram file — much smaller than the full PDF tree the legacy `.sub` files' `transfer_output_files = $(sample)` transfers). Ntuple inputs are read via the absolute `/data/mcardiff/exotic_superntuples/...` path baked into `--sample=` (see `src/sample_config.h`), so they don't need transferring.
 
-**`transfer_output_remaps` is required** on both `*_hist.sub` files — condor's default output-transfer behavior flattens any nested `transfer_output_files` path to its basename when staging back, it does not recreate `$(sample)/hists/` in the submit directory on its own. Without a remap, all 3 queued jobs (one per `--sample`) each try to write back a file literally named `clustering_hist.root`/`rpt_v5_hist.root` directly into the submit directory, silently overwriting each other — confirmed by running the real `rpt_v5_hist` jobs once without one: only the last-to-finish sample's histogram survived, and no `vbf/`, `zjets/`, `dijet/` subdirectories were created at all. (The legacy `.sub` files' `transfer_output_files = $(sample)` isn't affected — that argument has no nested subdirectory, so its basename already equals the whole thing they want back.) The obvious alternative, `preserve_relative_paths = True`, was tried first and rejected: it's a submit-wide knob that also governs `transfer_input_files`, and turned `../build/<exe>` (which deliberately climbs *out* of the sandbox to reach the built binary) from silently-flattened into a hard `Attempt to write to illegal sandbox path` hold — confirmed by running the real jobs with it set. `transfer_output_remaps` only touches the output side, so it can't have that side effect.
+**`transfer_output_remaps` is used** on both `*_hist.sub` files, though its role has narrowed since output file names became sample-prefixed (see "Sample-prefixed output paths" above): condor's default output-transfer behavior flattens any nested `transfer_output_files` path to its basename when staging back, it does not recreate `$(sample)/` in the submit directory on its own. Historically (when every sample wrote a bare `clustering_hist.root`/`rpt_v5_hist.root`), skipping the remap meant all 3 queued jobs silently overwrote each other's output — confirmed by running the real `rpt_v5_hist` jobs once without one: only the last-to-finish sample's histogram survived, and no `vbf/`, `zjets/`, `dijet/` subdirectories were created at all. Now that each job's basename is already unique (`vbf_clustering_hist.root`, `zjets_clustering_hist.root`, `dijet_clustering_hist.root`, ...), that particular collision can no longer happen — the remap is kept purely so the file lands nested under `$(sample)/` on the submit side, matching the local `--sample=` convention (so `clustering_plot --sample=<sample>` finds it without needing `--hist-file=`). (The legacy `.sub` files' `transfer_output_files = $(sample)` isn't affected either way — that argument has no nested subdirectory, so its basename already equals the whole thing they want back.) The obvious alternative, `preserve_relative_paths = True`, was tried first and rejected: it's a submit-wide knob that also governs `transfer_input_files`, and turned `../build/<exe>` (which deliberately climbs *out* of the sandbox to reach the built binary) from silently-flattened into a hard `Attempt to write to illegal sandbox path` hold — confirmed by running the real jobs with it set. `transfer_output_remaps` only touches the output side, so it can't have that side effect.
 
-**`transfer_output_remaps`'s LHS (`name`) must be a bare filename** — per `condor_submit(1)`: "You cannot specify directories to be remapped." A first attempt using the full nested path (`$(sample)/hists/clustering_hist.root`) on the LHS silently failed to match anything and fell back to the same basename-flattening bug it was meant to fix — confirmed against the real jobs. Directories *are* allowed on the RHS (`newname`) and are created as needed, so the working form is `transfer_output_remaps = "clustering_hist.root=$(sample)/hists/clustering_hist.root"` (basename on the left, full destination path on the right).
+**`transfer_output_remaps`'s LHS (`name`) must be a bare filename** — per `condor_submit(1)`: "You cannot specify directories to be remapped." A first attempt using a full nested path (`$(sample)/hists/clustering_hist.root`, back when the histogram still lived under a `hists/` subdirectory) on the LHS silently failed to match anything and fell back to the same basename-flattening bug it was meant to fix — confirmed against the real jobs. Directories *are* allowed on the RHS (`newname`) and are created as needed, so the working form is `transfer_output_remaps = "$(sample)_clustering_hist.root=$(sample)/$(sample)_clustering_hist.root"` (bare sample-prefixed basename on the left, full destination path on the right).
 
 ```bash
 cd build && cmake .. && make clustering_hist rpt_v5_hist   # build before submitting; condor doesn't rebuild
@@ -383,8 +406,9 @@ condor_submit -dump dryrun.ad clustering_hist.sub          # dry-run: validate w
 condor_submit clustering_hist.sub
 condor_submit rpt_v5_hist.sub                               # separate job cluster
 condor_q
-# After jobs complete, the .root files land in ../<sample>/hists/. Plot
-# locally — fast, no further condor submission:
+# After jobs complete, the .root files land in
+# ../<sample>/<sample>_{clustering,rpt_v5}_hist.root. Plot locally — fast, no
+# further condor submission:
 cd ../build
 ./clustering_plot --sample=<sample>
 ./rpt_v5_plot --sample=<sample>

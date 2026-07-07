@@ -2,11 +2,12 @@
 # rpt_v5_hist.sub — condor submit template: one job per sample.
 #
 # Histogramming stage of the rpt_v5 split (see CLAUDE.md's "Main Executables"
-# section): runs the event loop and writes <sample>/hists/rpt_v5_hist.root,
-# nothing else. Transfers back a single small ROOT file instead of a full
-# rpt_plots/ directory -- run `./rpt_v5_plot --sample=<sample>` locally
-# afterward to produce the ROC/console-summary/PDF output from that file,
-# which is fast/local and needs no further condor submission.
+# section): runs the event loop and writes
+# <sample>/<sample>_rpt_v5_hist.root, nothing else. Transfers back a single
+# small ROOT file instead of a full rpt_plots/ directory -- run
+# `./rpt_v5_plot --sample=<sample>` locally afterward to produce the
+# ROC/console-summary/PDF output from that file, which is fast/local and
+# needs no further condor submission.
 #
 # Setup (once):
 #   cd build && cmake .. && make rpt_v5_hist        # build BEFORE submitting
@@ -32,30 +33,33 @@ arguments                = rpt_v5_hist $(sample) 4
 should_transfer_files    = YES
 when_to_transfer_output  = ON_EXIT
 transfer_input_files     = ../build/rpt_v5_hist
-transfer_output_files    = $(sample)/hists/rpt_v5_hist.root
-# Without a remap, condor's default output-transfer behavior flattens nested
-# paths to their basename when staging back -- it does NOT recreate
-# $(sample)/hists/ on the submit side, so all 3 queued jobs would each write
-# back a file literally named "rpt_v5_hist.root" directly into this
-# directory, silently overwriting each other (discovered by running the
-# actual jobs: only the last-to-finish sample's histogram survived).
+transfer_output_files    = $(sample)/$(sample)_rpt_v5_hist.root
+# The histogram file name is now sample-prefixed (src/sample_config.h's
+# histFilePath()), so the 3 queued jobs' output basenames
+# (vbf_rpt_v5_hist.root, zjets_rpt_v5_hist.root, dijet_rpt_v5_hist.root) no
+# longer collide even after condor's default output-transfer flattening --
+# unlike when the file was just "rpt_v5_hist.root" for every sample (see git
+# history for that bug). A remap is still used below, purely so the file
+# lands nested under $(sample)/ on the submit side, matching the local
+# --sample= convention (rpt_v5_plot --sample=<sample> looks for it there
+# without needing --hist-file=).
 #
-# preserve_relative_paths = True also fixes this, but it's a submit-wide
-# knob that applies to transfer_input_files too -- and turned "../build/
-# rpt_v5_hist" (climbs OUT of the sandbox) from silently-flattened into a
-# hard "Attempt to write to illegal sandbox path" hold (confirmed by
-# running the actual jobs). transfer_output_remaps only touches the output
-# side, so it can't have that side effect.
+# preserve_relative_paths = True also fixes the old collision, but it's a
+# submit-wide knob that applies to transfer_input_files too -- and turned
+# "../build/rpt_v5_hist" (climbs OUT of the sandbox) from
+# silently-flattened into a hard "Attempt to write to illegal sandbox path"
+# hold (confirmed by running the actual jobs). transfer_output_remaps only
+# touches the output side, so it can't have that side effect.
 #
 # The remap's LHS (`name`) must be a bare filename -- per condor_submit(1):
-# "You cannot specify directories to be remapped." A first attempt using
-# the full "$(sample)/hists/rpt_v5_hist.root" on the LHS silently failed to
-# match anything (confirmed against the real jobs: still flattened to a
-# single shared rpt_v5_hist.root), since condor tracks the transferred
-# file by its basename once inside the execution directory, not by the
-# path used to locate it via transfer_output_files. Directories ARE
-# allowed on the RHS (`newname`) and are created as needed.
-transfer_output_remaps   = "rpt_v5_hist.root=$(sample)/hists/rpt_v5_hist.root"
+# "You cannot specify directories to be remapped." A first attempt using a
+# full nested path on the LHS silently failed to match anything (confirmed
+# against the real jobs: still flattened to a single shared rpt_v5_hist.root),
+# since condor tracks the transferred file by its basename once inside the
+# execution directory, not by the path used to locate it via
+# transfer_output_files. Directories ARE allowed on the RHS (`newname`) and
+# are created as needed.
+transfer_output_remaps   = "$(sample)_rpt_v5_hist.root=$(sample)/$(sample)_rpt_v5_hist.root"
 
 getenv                   = True
 

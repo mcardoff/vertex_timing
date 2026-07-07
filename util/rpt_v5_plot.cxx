@@ -8,7 +8,8 @@
 // Structured in four lexical sections, in order:
 //   1. Load histograms (raw, unstyled) from the saved ROOT file.
 //   2. Derive every Integral()/GetMean()-based number (ROC graphs,
-//      pickXRange's window, the console summary, the rejection table).
+//      the harmonized [0.6, 1.0] ROC window, the console summary, the
+//      rejection table).
 //      styleScen (cosmetic axis restriction) is NOT YET DEFINED here --
 //      see the sentinel comment below marking the end of this section.
 //   3. Define + call styleScen. Because styleScen is a local lambda whose
@@ -79,12 +80,13 @@ int main(int argc, char** argv) {
   auto sample = MyUtl::resolveSample(argc, argv);
   MyUtl::ENERGY_LABEL = sample.energyLabel;
   MyUtl::OUTPUT_DIR   = sample.outputDir;
+  MyUtl::SAMPLE_NAME  = sample.sampleName;
 
   // ===========================================================================
   // SECTION 1: Load histograms (raw, unstyled) from the saved ROOT file.
   // ===========================================================================
   const std::string histFile = MyUtl::resolveHistFile(
-    argc, argv, MyUtl::OUTPUT_DIR + "/hists/rpt_v5_hist.root");
+    argc, argv, MyUtl::histFilePath("rpt_v5_hist.root"));
   std::cout << "Reading histograms from " << histFile << '\n';
 
   std::vector<Scenario> scen_lo = makeScenarios("_lo");
@@ -111,7 +113,7 @@ int main(int argc, char** argv) {
 
   // ── Output paths ─────────────────────────────────────────────────────────────
   boost::filesystem::create_directories(MyUtl::OUTPUT_DIR + "/rpt_plots");
-  const TString out_pdf = TString::Format("%s/rpt_plots/rpt_v5.pdf", MyUtl::OUTPUT_DIR.c_str());
+  const TString out_pdf = MyUtl::plotFilePath("rpt_plots", "rpt_v5.pdf").c_str();
 
   TCanvas* canvas = new TCanvas("canvas", "RpT v5", 800, 700);
   canvas->Print(out_pdf + "[");
@@ -132,52 +134,17 @@ int main(int argc, char** argv) {
   // NOT defined yet -- see the sentinel comment at the end of this section.
   // ===========================================================================
 
-  // Preferred "high-efficiency working point" window, as used in the paper.
-  const double roc_xmin_default = 0.8, roc_xmax_default = 1.0;
+  // Harmonized "high-efficiency working point" window: fixed at [0.6, 1.0]
+  // for every sample and pT-slice (rather than a per-sample adaptive range)
+  // so plots are directly comparable across samples, showing as much of the
+  // curve as possible without letting any one sample drag the window around.
+  const double roc_xmin_default = 0.6, roc_xmax_default = 1.0;
   std::vector<TGraph*> rocs_lo, rocs_hi;
   for (auto& s : scen_lo) rocs_lo.push_back(generate_roc(s.h_pu, s.h_hs));
   for (auto& s : scen_hi) rocs_hi.push_back(generate_roc(s.h_pu, s.h_hs));
 
-  // A "high-efficiency working point" plot is meaningless below 50% HS
-  // efficiency (e.g. Z+jets forward "HS" jets with ~no tracks can otherwise
-  // drag the fallback window's lower edge down arbitrarily far).
-  static constexpr double MIN_HS_EFF = 0.5;
-
-  // Some samples (e.g. Z+jets, where a large fraction of forward "HS" jets
-  // carry ~no tracks) collapse the ROC curve to efficiencies well below the
-  // default window, leaving zero points in [roc_xmin_default, roc_xmax_default]
-  // and an empty page.  Detect that per pT-slice and fall back to the actual
-  // observed x-range instead of hardcoding a sample-specific override.
-  auto pickXRange = [](const std::vector<TGraph*>& gs, double lo_default, double hi_default) {
-    double data_lo = 1.0, data_hi = 0.0, window_max = 0.0;
-    bool any_in_window = false;
-    for (auto* g : gs) {
-      int n = g->GetN();
-      for (int j = 0; j < n; ++j) {
-        double x = g->GetX()[j];
-        data_lo = std::min(data_lo, x);
-        data_hi = std::max(data_hi, x);
-        if (x >= lo_default && x <= hi_default) {
-          any_in_window = true;
-          window_max = std::max(window_max, x);
-        }
-      }
-    }
-    // Requiring merely "one point somewhere in the window" isn't enough: a
-    // spike near R_pT=0 can make efficiency crash from ~1.0 to e.g. 0.85 in
-    // a single bin step, leaving only a stub hugging the window's low edge
-    // (e.g. zjets 30-40 GeV, cut off at eff~0.89) — technically non-empty,
-    // but the "high-efficiency working point" framing is meaningless there.
-    // Require the curve to actually reach near the window's top edge too.
-    bool reaches_near_top = window_max >= hi_default - 0.05;
-    if ((any_in_window && reaches_near_top) || data_hi <= data_lo)
-      return std::make_pair(lo_default, hi_default);
-    double pad = 0.02 * (data_hi - data_lo);
-    double lo  = std::max(MIN_HS_EFF, data_lo - pad);
-    return std::make_pair(lo, std::min(1.0, data_hi + pad));
-  };
-  auto [roc_xmin_lo, roc_xmax_lo] = pickXRange(rocs_lo, roc_xmin_default, roc_xmax_default);
-  auto [roc_xmin_hi, roc_xmax_hi] = pickXRange(rocs_hi, roc_xmin_default, roc_xmax_default);
+  const double roc_xmin_lo = roc_xmin_default, roc_xmax_lo = roc_xmax_default;
+  const double roc_xmin_hi = roc_xmin_default, roc_xmax_hi = roc_xmax_default;
 
   auto styleRoc = [&](TGraph* g, Color_t col, double xmin, double xmax) {
     g->SetTitle("R_{pT} Discriminant;Hard Scatter Efficiency;Pile-Up Rejection (1 / Mistag Rate)");

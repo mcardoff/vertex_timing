@@ -5,10 +5,10 @@
 # Whitespace/empty borders are automatically trimmed.
 #
 # Usage:
-#   ./pdf_to_jpg.sh file1.pdf [file2.pdf ...]
-#   ./pdf_to_jpg.sh figs/*.pdf
+#   ./pdf_to_jpg.sh <output_dir> file1.pdf [file2.pdf ...]
+#   ./pdf_to_jpg.sh <output_dir> figs/*.pdf
 #
-# Output: ~/project/vertex_timing/talk_figs/<basename>[_pN].jpg
+# Output: <output_dir>/<basename>[_pN].jpg
 #   Single-page PDFs  → <basename>.jpg
 #   Multi-page PDFs   → <basename>_p1.jpg, <basename>_p2.jpg, ...
 
@@ -18,7 +18,6 @@ set -euo pipefail
 export PATH="/opt/homebrew/bin:$PATH"
 
 MAGICK=/opt/homebrew/bin/magick
-OUT_DIR="${HOME}/project/vertex_timing/talk_figs"
 DENSITY=600    # DPI for rasterisation (600 = high-res, good for zoom)
 QUALITY=95     # JPEG quality (0-100)
 FUZZ=2         # trim fuzz % — catches near-white/near-black border pixels
@@ -26,10 +25,13 @@ BORDER=30      # pixels of white padding added back after trimming
 
 # ---------------------------------------------------------------------------
 
-if [[ $# -eq 0 ]]; then
-    echo "Usage: $(basename "$0") file1.pdf [file2.pdf ...]"
+if [[ $# -lt 2 ]]; then
+    echo "Usage: $(basename "$0") <output_dir> file1.pdf [file2.pdf ...]"
     exit 1
 fi
+
+OUT_DIR="$1"
+shift
 
 mkdir -p "$OUT_DIR"
 

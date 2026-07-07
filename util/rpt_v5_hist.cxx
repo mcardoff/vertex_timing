@@ -121,7 +121,10 @@ int main(int argc, char** argv) {
   auto sample = MyUtl::resolveSample(argc, argv);
   MyUtl::ENERGY_LABEL = sample.energyLabel;
   MyUtl::OUTPUT_DIR   = sample.outputDir;
-  boost::filesystem::create_directories(MyUtl::OUTPUT_DIR + "/hists");
+  MyUtl::SAMPLE_NAME  = sample.sampleName;
+  boost::filesystem::create_directories(MyUtl::OUTPUT_DIR);
+  if (MyUtl::SAMPLE_NAME.empty())
+    boost::filesystem::create_directories(MyUtl::OUTPUT_DIR + "/hists");
   unsigned nThreads = MyUtl::resolveThreads(argc, argv);
 
   TChain chain("ntuple");
@@ -356,7 +359,7 @@ int main(int argc, char** argv) {
   std::cout << "\nFINISHED PROCESSING\n";
 
   // --- Save every histogram + scalar accumulator to a ROOT file ---
-  const std::string histPath = MyUtl::OUTPUT_DIR + "/hists/rpt_v5_hist.root";
+  const std::string histPath = MyUtl::histFilePath("rpt_v5_hist.root");
   MyUtl::HistWriter writer(histPath);
   saveScenarios(writer, merged.scen_lo);
   saveScenarios(writer, merged.scen_hi);

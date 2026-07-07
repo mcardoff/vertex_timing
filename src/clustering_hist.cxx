@@ -93,8 +93,10 @@ auto main(int argc, char** argv) -> int {
   auto sample = MyUtl::resolveSample(argc, argv);
   MyUtl::ENERGY_LABEL = sample.energyLabel;
   MyUtl::OUTPUT_DIR   = sample.outputDir;
-  for (const char* sub : {"hists"})
-    boost::filesystem::create_directories(MyUtl::OUTPUT_DIR + "/" + sub);
+  MyUtl::SAMPLE_NAME  = sample.sampleName;
+  boost::filesystem::create_directories(MyUtl::OUTPUT_DIR);
+  if (MyUtl::SAMPLE_NAME.empty())
+    boost::filesystem::create_directories(MyUtl::OUTPUT_DIR + "/hists");
   unsigned nThreads = MyUtl::resolveThreads(argc, argv);
 
   // --- Data source ---
@@ -236,11 +238,12 @@ auto main(int argc, char** argv) -> int {
   std::cout << "\nFINISHED PROCESSING\n";
 
   // --- Save every histogram to a ROOT file for the plotting stage ---
-  MyUtl::HistWriter writer(MyUtl::OUTPUT_DIR + "/hists/clustering_hist.root");
+  const std::string histPath = MyUtl::histFilePath("clustering_hist.root");
+  MyUtl::HistWriter writer(histPath);
   for (auto& [score, analysis] : mapHGTD) analysis.saveTo(writer);
   writer.WriteRunMeta(MyUtl::ENERGY_LABEL, N_EVENT);
   writer.Close();
-  std::cout << "Wrote histograms to " << MyUtl::OUTPUT_DIR << "/hists/clustering_hist.root\n";
+  std::cout << "Wrote histograms to " << histPath << '\n';
 
   // --- Print event display commands (toggle PRINT_EVENT_DISPLAYS above) ---
   printEventDisplays("HGTD times: TRKPTZ passes, TEST_MISAS fails (misassignment)", evtDisplayHGTD    );

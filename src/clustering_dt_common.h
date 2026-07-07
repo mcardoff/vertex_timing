@@ -72,9 +72,7 @@ inline void makeComparisonPlots(
   TCanvas* canvas,
   std::map<Score, AnalysisObj>& mapHGTD
 ) {
-  const std::string compSubdir = MyUtl::OUTPUT_DIR + "/comparisons";
-
-  moneyPlot(TString::Format("%s/theplot_%s.pdf",compSubdir.c_str(), key), key, canvas,
+  moneyPlot(MyUtl::plotFilePath("comparisons", TString::Format("theplot_%s.pdf", key).Data()).c_str(), key, canvas,
 	    {
 	      &mapHGTD.at(Score::HGTD),
 	      &mapHGTD.at(Score::TRKPTZ),
@@ -85,7 +83,7 @@ inline void makeComparisonPlots(
   // Focus on the timing-misassignment oracle: HGTD, TRKPTZ, WAVeS, and WAVeS
   // with ideal timing (WAVES_MISAS).  Misclustering case removed.
   // Color override: WAVES yellow, ideal timing violet.
-  moneyPlot(TString::Format("%s/waves_oracle_%s.pdf",compSubdir.c_str(), key), key, canvas,
+  moneyPlot(MyUtl::plotFilePath("comparisons", TString::Format("waves_oracle_%s.pdf", key).Data()).c_str(), key, canvas,
 	    {
 	      &mapHGTD.at(Score::HGTD),
 	      &mapHGTD.at(Score::TRKPTZ),
@@ -95,7 +93,7 @@ inline void makeComparisonPlots(
 	    {C01, C02, C03, C04});
 
   // Simple three-way comparison: HGTD vs TRKPTZ vs WAVeS (no oracles).
-  moneyPlot(TString::Format("%s/hgtd_trkptz_waves_%s.pdf",compSubdir.c_str(), key), key, canvas,
+  moneyPlot(MyUtl::plotFilePath("comparisons", TString::Format("hgtd_trkptz_waves_%s.pdf", key).Data()).c_str(), key, canvas,
 	    {
 	      &mapHGTD.at(Score::HGTD),
 	      &mapHGTD.at(Score::TRKPTZ),

@@ -24,6 +24,7 @@ auto main(int argc, char** argv) -> int {
   auto sample = MyUtl::resolveSample(argc, argv);
   MyUtl::ENERGY_LABEL = sample.energyLabel;
   MyUtl::OUTPUT_DIR   = sample.outputDir;
+  MyUtl::SAMPLE_NAME  = sample.sampleName;
   for (const char* sub : {"comparisons", "inclusive", "fullplots", "diagnostics"})
     boost::filesystem::create_directories(MyUtl::OUTPUT_DIR + "/" + sub);
 
@@ -34,7 +35,7 @@ auto main(int argc, char** argv) -> int {
 
   // --- Load histograms written by clustering_hist.cxx ---
   const std::string histFile = MyUtl::resolveHistFile(
-    argc, argv, MyUtl::OUTPUT_DIR + "/hists/clustering_hist.root");
+    argc, argv, MyUtl::histFilePath("clustering_hist.root"));
   std::cout << "Reading histograms from " << histFile << '\n';
 
   std::map<Score, AnalysisObj> mapHGTD = buildAnalysisMap(Scenario::HGTD);
@@ -108,9 +109,9 @@ auto main(int argc, char** argv) -> int {
   const double INCL_PULL_YMAX_LIN = 1.1 * globalPullMax;
   const double INCL_YMIN_LOG      = 0.5;
 
-  inclusivePlot(TString::Format("%s/inclusive/inclusivereso_logscale.pdf", MyUtl::OUTPUT_DIR.c_str()),
+  inclusivePlot(MyUtl::plotFilePath("inclusive", "inclusivereso_logscale.pdf").c_str(),
 		true,  false, -400, 400, canvas, RESO_SET, resoGetter, &FIT_TRPGAUS, diffLabel, false, INCL_RESO_YMAX_LOG, INCL_YMIN_LOG);
-  inclusivePlot(TString::Format("%s/inclusive/inclusivereso_linscale.pdf", MyUtl::OUTPUT_DIR.c_str()),
+  inclusivePlot(MyUtl::plotFilePath("inclusive", "inclusivereso_linscale.pdf").c_str(),
 		false, false, -200, 200, canvas, RESO_SET, resoGetter, &FIT_TRPGAUS, diffLabel, false, INCL_RESO_YMAX_LIN, 0.0);
 
 
@@ -119,10 +120,10 @@ auto main(int argc, char** argv) -> int {
              a->inclusivePullMix.get(),
              a->inclusivePullBkg.get() }; };
   const char* pullLabel = "(t_{0}-t_{truth})/#sigma_{t}";
-  inclusivePlot(TString::Format("%s/inclusive/inclusivepull_logscale.pdf", MyUtl::OUTPUT_DIR.c_str()),
+  inclusivePlot(MyUtl::plotFilePath("inclusive", "inclusivepull_logscale.pdf").c_str(),
 		true,  false, -10, 10, canvas, RESO_SET,
 		pullGetter, &FIT_PULLGAUS, pullLabel, false, INCL_PULL_YMAX_LOG, INCL_YMIN_LOG);
-  inclusivePlot(TString::Format("%s/inclusive/inclusivepull_linscale.pdf", MyUtl::OUTPUT_DIR.c_str()),
+  inclusivePlot(MyUtl::plotFilePath("inclusive", "inclusivepull_linscale.pdf").c_str(),
 		false, false, -10, 10, canvas, RESO_SET,
 		pullGetter, &FIT_PULLGAUS, pullLabel, false, INCL_PULL_YMAX_LIN, 0.0);
 
@@ -133,13 +134,13 @@ auto main(int argc, char** argv) -> int {
     &mapHGTD.at(Score::WAVES_MISAS)
   };
   shapeComparisonPlot(
-    TString::Format("%s/inclusive/shape_comparison_linscale.pdf", MyUtl::OUTPUT_DIR.c_str()),
+    MyUtl::plotFilePath("inclusive", "shape_comparison_linscale.pdf").c_str(),
     false, -200, 200, canvas, SHAPE_SET, resoGetter, nullptr, diffLabel);
   shapeComparisonPlot(
-    TString::Format("%s/inclusive/shape_comparison_logscale.pdf", MyUtl::OUTPUT_DIR.c_str()),
+    MyUtl::plotFilePath("inclusive", "shape_comparison_logscale.pdf").c_str(),
     true, -400, 400, canvas, SHAPE_SET, resoGetter, nullptr, diffLabel);
   shapeComparisonPlotPair(
-    TString::Format("%s/inclusive/shape_comparison.pdf", MyUtl::OUTPUT_DIR.c_str()),
+    MyUtl::plotFilePath("inclusive", "shape_comparison.pdf").c_str(),
     -200, 200, -400, 400, canvas, SHAPE_SET, resoGetter, nullptr, diffLabel);
 
   std::cout << "FINISHED PLOT PRINTING\n";

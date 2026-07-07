@@ -1160,7 +1160,7 @@ namespace MyUtl {
   
       dataObjects["fjet"] = std::make_unique<PlotObj>(
         "n Forward Jets", timetypeIDer,
-	TString::Format("%s/fullplots/%s_nfjet.pdf", MyUtl::OUTPUT_DIR.c_str(), filenameIDer.Data()),
+	MyUtl::plotFilePath("fullplots", TString::Format("%s_nfjet.pdf", filenameIDer.Data()).Data()).c_str(),
 	score,
 	FJET_MIN  , FJET_MAX  , FJET_WIDTH  ,
 	DIFF_MIN  , DIFF_MAX  , DIFF_WIDTH  ,
@@ -1169,7 +1169,7 @@ namespace MyUtl {
 
       dataObjects["truthjets"] = std::make_unique<PlotObj>(
         "n Truth HS Jets", timetypeIDer,
-	TString::Format("%s/fullplots/%s_ntruthjet.pdf", MyUtl::OUTPUT_DIR.c_str(), filenameIDer.Data()),
+	MyUtl::plotFilePath("fullplots", TString::Format("%s_ntruthjet.pdf", filenameIDer.Data()).Data()).c_str(),
 	score,
 	FJET_MIN  , FJET_MAX  , FJET_WIDTH  ,
 	DIFF_MIN  , DIFF_MAX  , DIFF_WIDTH  ,
@@ -1178,7 +1178,7 @@ namespace MyUtl {
 
       dataObjects["ftrack"] = std::make_unique<PlotObj>(
         "n Forward Tracks", timetypeIDer,
-	TString::Format("%s/fullplots/%s_ntrack.pdf", MyUtl::OUTPUT_DIR.c_str(), filenameIDer.Data()),
+	MyUtl::plotFilePath("fullplots", TString::Format("%s_ntrack.pdf", filenameIDer.Data()).Data()).c_str(),
 	score,
 	TRACK_MIN , TRACK_MAX , TRACK_WIDTH ,
 	DIFF_MIN  , DIFF_MAX  , DIFF_WIDTH  ,
@@ -1187,7 +1187,7 @@ namespace MyUtl {
   
       dataObjects["pu_frac"] = std::make_unique<PlotObj>(
         "Pile Up Fraction", timetypeIDer, 
-        TString::Format("%s/fullplots/%s_pufrac.pdf", MyUtl::OUTPUT_DIR.c_str(), filenameIDer.Data()),
+        MyUtl::plotFilePath("fullplots", TString::Format("%s_pufrac.pdf", filenameIDer.Data()).Data()).c_str(),
 	score,
 	PU_FRAC_MIN , PU_FRAC_MAX, PU_FRAC_WIDTH,
 	DIFF_MIN    , DIFF_MAX   , DIFF_WIDTH   ,
@@ -1196,7 +1196,7 @@ namespace MyUtl {
   
       dataObjects["hs_track"] = std::make_unique<PlotObj>(
         "n Forward HS Tracks", timetypeIDer, 
-	TString::Format("%s/fullplots/%s_nhstrack.pdf", MyUtl::OUTPUT_DIR.c_str(), filenameIDer.Data()),
+	MyUtl::plotFilePath("fullplots", TString::Format("%s_nhstrack.pdf", filenameIDer.Data()).Data()).c_str(),
 	score,
 	HS_TRACK_MIN, HS_TRACK_MAX, HS_TRACK_WIDTH ,
 	DIFF_MIN    , DIFF_MAX    , DIFF_WIDTH     ,
@@ -1205,7 +1205,7 @@ namespace MyUtl {
   
       dataObjects["pu_track"] = std::make_unique<PlotObj>(
         "n Forward PU Tracks", timetypeIDer,
-	TString::Format("%s/fullplots/%s_nputrack.pdf", MyUtl::OUTPUT_DIR.c_str(), filenameIDer.Data()),
+	MyUtl::plotFilePath("fullplots", TString::Format("%s_nputrack.pdf", filenameIDer.Data()).Data()).c_str(),
 	score,
 	PU_TRACK_MIN, PU_TRACK_MAX, PU_TRACK_WIDTH ,
 	DIFF_MIN    , DIFF_MAX    , DIFF_WIDTH     ,
@@ -1214,7 +1214,7 @@ namespace MyUtl {
 
       dataObjects["clus_pu_frac"] = std::make_unique<PlotObj>(
         "Cluster PU Fraction", timetypeIDer,
-        TString::Format("%s/fullplots/%s_cluspufrac.pdf", MyUtl::OUTPUT_DIR.c_str(), filenameIDer.Data()),
+        MyUtl::plotFilePath("fullplots", TString::Format("%s_cluspufrac.pdf", filenameIDer.Data()).Data()).c_str(),
         score,
         CLUS_PU_FRAC_MIN, CLUS_PU_FRAC_MAX, CLUS_PU_FRAC_WIDTH,
         DIFF_MIN,          DIFF_MAX,          DIFF_WIDTH,
