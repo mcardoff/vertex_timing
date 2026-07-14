@@ -103,9 +103,14 @@ namespace MyUtl {
     // when OVERLAP_REMOVAL is set, so samples whose ntuples lack the branch
     // (vbf/dijet/local) never touch it. removedJet is the per-event mask filled
     // by computeOverlapRemoval(); empty ⇒ nothing removed.
-    // NOTE: Track_leptonID is assumed to be an int branch. If it was written as
-    // bool/char, change the template type below to match (ROOT type-checks at read).
-    std::unique_ptr<TTreeReaderArray<int>> trackLeptonID;
+    // Track_leptonID is a `char` branch (holds the signed lepton PDG id: ±11/±13,
+    // 0 for non-leptons — all within char's −128..127 range). It MUST be read
+    // with a matching TTreeReaderArray<char>; a mismatched type (e.g. <int>)
+    // silently yields size 0 (ROOT logs a CreateContentProxy error, which
+    // clustering_hist's gErrorIgnoreLevel=kFatal hides), which would veto every
+    // Z+jets event. Read individual values via leptonPdg() below so the sign is
+    // correct regardless of whether `char` is signed on the build platform.
+    std::unique_ptr<TTreeReaderArray<char>> trackLeptonID;
     std::vector<char> removedJet;
 
   BranchPointerWrapper(TTreeReader& r)
@@ -143,7 +148,19 @@ namespace MyUtl {
       // Only bind the lepton branch when overlap removal is active (Z+jets),
       // so other samples' readers never register a branch their ntuples lack.
       if (OVERLAP_REMOVAL)
-        trackLeptonID = std::make_unique<TTreeReaderArray<int>>(r, "Track_leptonID");
+        trackLeptonID = std::make_unique<TTreeReaderArray<char>>(r, "Track_leptonID");
+    }
+
+    // -----------------------------------------------------------------------
+    // leptonPdg
+    //   Signed lepton PDG id for track t from the char Track_leptonID branch.
+    //   The static_cast<signed char> reinterprets the stored 8-bit pattern as
+    //   signed, so negative ids (e.g. -11) come back correctly even if `char`
+    //   is unsigned on the build platform. Callers must ensure trackLeptonID is
+    //   bound and t is in range.
+    // -----------------------------------------------------------------------
+    int leptonPdg(int t) const {
+      return static_cast<int>(static_cast<signed char>((*trackLeptonID)[t]));
     }
 
     // -----------------------------------------------------------------------
@@ -155,7 +172,7 @@ namespace MyUtl {
     //   over the Track_leptonID array size).
     // -----------------------------------------------------------------------
     bool isGoodLepton(int t) const {
-      return trackLeptonID && (*trackLeptonID)[t] != 0
+      return trackLeptonID && leptonPdg(t) != 0
              && this->trackPt[t] > LEPTON_MIN_PT;
     }
 
@@ -171,11 +188,10 @@ namespace MyUtl {
     // -----------------------------------------------------------------------
     bool passLeptonSelection() const {
       if (!OVERLAP_REMOVAL || !trackLeptonID) return true;
-      TTreeReaderArray<int>& lep = *trackLeptonID;
-      const int n = (int)lep.GetSize();
+      const int n = (int)trackLeptonID->GetSize();
       std::vector<int> ids;  // signed PDG ids of selected leptons
       for (int t = 0; t < n; ++t)
-        if (isGoodLepton(t)) ids.push_back(lep[t]);
+        if (isGoodLepton(t)) ids.push_back(leptonPdg(t));
       for (size_t a = 0; a < ids.size(); ++a)
         for (size_t b = a + 1; b < ids.size(); ++b)
           if (std::abs(ids[a]) == std::abs(ids[b]) && ids[a] * ids[b] < 0)
@@ -198,8 +214,7 @@ namespace MyUtl {
       const int nJets = (int)this->topoJetPt.GetSize();
       removedJet.assign(nJets, 0);
 
-      TTreeReaderArray<int>& lep = *trackLeptonID;
-      const int nLep = (int)lep.GetSize();
+      const int nLep = (int)trackLeptonID->GetSize();
       for (int t = 0; t < nLep; ++t) {
         if (!isGoodLepton(t)) continue;  // flagged lepton with pt > LEPTON_MIN_PT
         double lEta = this->trackEta[t];
