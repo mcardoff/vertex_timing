@@ -214,6 +214,9 @@ int main(int argc, char** argv) {
       // vetoes the whole event on any overlap; REMOVE_JETS mode instead has
       // fillJets skip the flagged jets via isJetRemoved.
       branch.computeOverlapRemoval();
+      // Z→ℓℓ selection (Z+jets only): require an opposite-sign same-flavour
+      // lepton pair with pt > LEPTON_MIN_PT; no-op on other samples.
+      if (!branch.passLeptonSelection()) continue;
       if (branch.vetoLeptonOverlap()) continue;
 
       // ── Track selection: all tracks by z-significance (no eta cut) for the
