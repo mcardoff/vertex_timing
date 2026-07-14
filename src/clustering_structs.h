@@ -179,12 +179,31 @@ namespace MyUtl {
     // -----------------------------------------------------------------------
     // isJetRemoved
     //   True if reco jet j was dropped by lepton–jet overlap removal this event.
-    //   Always false when removedJet is empty (non-Z+jets samples, or before
+    //   Only meaningful in OverlapMode::REMOVE_JETS — in SKIP_EVENT mode the
+    //   whole event is vetoed up front (see vetoLeptonOverlap), so no per-jet
+    //   removal is applied and this returns false. Also always false when
+    //   removedJet is empty (non-Z+jets samples, or before
     //   computeOverlapRemoval() has run), so every jet loop can guard on it
     //   unconditionally with zero effect on other samples.
     // -----------------------------------------------------------------------
     bool isJetRemoved(int j) const {
+      if (OVERLAP_MODE != OverlapMode::REMOVE_JETS) return false;
       return j >= 0 && j < (int)removedJet.size() && removedJet[j] != 0;
+    }
+
+    // -----------------------------------------------------------------------
+    // vetoLeptonOverlap
+    //   True if this event should be skipped entirely because of a lepton–jet
+    //   overlap. Only fires in OverlapMode::SKIP_EVENT (and only for Z+jets,
+    //   via OVERLAP_REMOVAL); returns false in REMOVE_JETS mode, where the
+    //   overlap is handled per-jet via isJetRemoved instead. Call after
+    //   computeOverlapRemoval() has populated removedJet.
+    // -----------------------------------------------------------------------
+    bool vetoLeptonOverlap() const {
+      if (!OVERLAP_REMOVAL || OVERLAP_MODE != OverlapMode::SKIP_EVENT) return false;
+      for (char c : removedJet)
+        if (c) return true;
+      return false;
     }
 
     // -----------------------------------------------------------------------

@@ -443,8 +443,11 @@ namespace MyUtl {
   ) {
     // ── A. Event selection ──────────────────────────────────────────────────
     // Lepton–jet overlap removal (Z+jets only): rebuild the removed-jet mask for
-    // this event before any jet loop below. No-op on other samples.
+    // this event before any jet loop below. No-op on other samples. In
+    // SKIP_EVENT mode, veto the whole event if any lepton–jet overlap exists;
+    // in REMOVE_JETS mode the mask is instead consulted per-jet via isJetRemoved.
     branch->computeOverlapRemoval();
+    if (branch->vetoLeptonOverlap())  return {};
     if (!branch->passBasicCuts()) return {};
     if (!branch->passJetPtCut())  return {};
 

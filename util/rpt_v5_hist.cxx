@@ -210,8 +210,11 @@ int main(int argc, char** argv) {
       ++state.n_pass_basic;
 
       // Lepton–jet overlap removal (Z+jets only): flag reco jets within
-      // LEPTON_JET_DR of a lepton track so fillJets skips them. No-op otherwise.
+      // LEPTON_JET_DR of a lepton track. No-op otherwise. SKIP_EVENT mode
+      // vetoes the whole event on any overlap; REMOVE_JETS mode instead has
+      // fillJets skip the flagged jets via isJetRemoved.
       branch.computeOverlapRemoval();
+      if (branch.vetoLeptonOverlap()) continue;
 
       // ── Track selection: all tracks by z-significance (no eta cut) for the
       //    z-only baseline, matching the paper's ITk-only scenario. ────────────

@@ -88,6 +88,13 @@ namespace MyUtl {
   // the branch is never bound and the removal is a no-op, so behaviour is
   // bit-for-bit unchanged on those samples.
   inline bool  OVERLAP_REMOVAL   = false;
+  // Overlap-removal behavior when a Z+jets event has a lepton–jet overlap:
+  //   REMOVE_JETS — drop only the overlapping reco jet(s), keep the event.
+  //   SKIP_EVENT  — veto the whole event if any lepton–jet overlap exists.
+  // Runtime so both can be produced without a recompile. Only consulted when
+  // OVERLAP_REMOVAL is true (i.e. Z+jets); a no-op on vbf/dijet/local.
+  enum class OverlapMode { REMOVE_JETS, SKIP_EVENT };
+  inline OverlapMode OVERLAP_MODE = OverlapMode::SKIP_EVENT;
   const int    CONE_ITER_K        = 3;     // Top cone clusters to refine; used only by util/scratch/cone_iter_k_sweep.cxx
   const double TRUTH_PULL_CUT     = 3.0;   // |pull| < cut keeps track as truth-matched
   // z₀ pull-width inflation factor (measured from z0_pull_diag: σ ≈ 1.15 across all
