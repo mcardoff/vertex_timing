@@ -22,6 +22,7 @@ namespace MyUtl {
     std::string energyLabel;
     std::string outputDir;
     std::string sampleName;  // "" for the local/default run; e.g. "vbf" when --sample= is given
+    bool        overlapRemoval = false;  // lepton–jet overlap removal (Z+jets only; see OVERLAP_REMOVAL)
   };
 
   // Mutable globals read by plotting code (event-label text, PDF output root).
@@ -57,11 +58,11 @@ namespace MyUtl {
   inline SampleConfig resolveSample(int argc, char** argv) {
     static const std::map<std::string, SampleConfig> registry = {
       {"vbf",   {"/data/mcardiff/exotic_superntuples/highstats_vbf/",
-                 "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv.", "vbf",   "vbf"}},
+                 "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv.", "vbf",   "vbf",   false}},
       {"zjets", {"/data/mcardiff/exotic_superntuples/zjets/",
-                 "#sqrt{s} = 14 TeV, HL-LHC, Z+jets",               "zjets", "zjets"}},
+                 "#sqrt{s} = 14 TeV, HL-LHC, Z+jets",               "zjets", "zjets", true}},
       {"dijet", {"/data/mcardiff/exotic_superntuples/dijet/",
-                 "#sqrt{s} = 14 TeV, HL-LHC, Dijet",                "dijet", "dijet"}},
+                 "#sqrt{s} = 14 TeV, HL-LHC, Dijet",                "dijet", "dijet", false}},
     };
 
     const std::string prefix = "--sample=";
@@ -78,7 +79,7 @@ namespace MyUtl {
       return it->second;
     }
 
-    return {"/Users/mcard/project/ntuple-hgtd/", "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv.", "../figs", ""};
+    return {"/Users/mcard/project/ntuple-hgtd/", "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv.", "../figs", "", false};
   }
 
   // ---------------------------------------------------------------------------

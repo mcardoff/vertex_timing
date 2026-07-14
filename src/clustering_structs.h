@@ -97,6 +97,17 @@ namespace MyUtl {
 
     TTreeReaderArray<float> particleT;
 
+    // Lepton–jet overlap removal (Z+jets only). Track_leptonID flags tracks that
+    // are leptons; a non-zero value means "lepton" (works whether the branch
+    // stores 0/1 or a signed PDG-style code). Bound lazily via unique_ptr only
+    // when OVERLAP_REMOVAL is set, so samples whose ntuples lack the branch
+    // (vbf/dijet/local) never touch it. removedJet is the per-event mask filled
+    // by computeOverlapRemoval(); empty ⇒ nothing removed.
+    // NOTE: Track_leptonID is assumed to be an int branch. If it was written as
+    // bool/char, change the template type below to match (ROOT type-checks at read).
+    std::unique_ptr<TTreeReaderArray<int>> trackLeptonID;
+    std::vector<char> removedJet;
+
   BranchPointerWrapper(TTreeReader& r)
     : reader (r),
       weight (r, "weight"),
@@ -128,7 +139,53 @@ namespace MyUtl {
       topoJetTruthHSIdx (r, "AntiKt4EMTopoJets_truthHSJet_idx"),
       topoJetGhostTrackIdx (r, "AntiKt4EMTopoJets_ghostTrack_idx"),
       particleT (r, "TruthPart_prodVtx_time")
-    {}
+    {
+      // Only bind the lepton branch when overlap removal is active (Z+jets),
+      // so other samples' readers never register a branch their ntuples lack.
+      if (OVERLAP_REMOVAL)
+        trackLeptonID = std::make_unique<TTreeReaderArray<int>>(r, "Track_leptonID");
+    }
+
+    // -----------------------------------------------------------------------
+    // computeOverlapRemoval
+    //   Rebuilds removedJet for the current event: a reco jet is flagged
+    //   removed if it lies within LEPTON_JET_DR of any Track_leptonID-flagged
+    //   track (standard ATLAS lepton–jet overlap removal, all η, pT handled by
+    //   downstream cuts). Must be called once per event before any jet loop.
+    //   No-op (mask cleared to all-false) unless OVERLAP_REMOVAL is set, so on
+    //   vbf/dijet/local isJetRemoved() is always false and behaviour is
+    //   unchanged. Cheap: leptons per event are O(2).
+    // -----------------------------------------------------------------------
+    void computeOverlapRemoval() {
+      if (!OVERLAP_REMOVAL || !trackLeptonID) { removedJet.clear(); return; }
+      const int nJets = (int)this->topoJetPt.GetSize();
+      removedJet.assign(nJets, 0);
+
+      TTreeReaderArray<int>& lep = *trackLeptonID;
+      const int nLep = (int)lep.GetSize();
+      for (int t = 0; t < nLep; ++t) {
+        if (lep[t] == 0) continue;  // 0 ⇒ not a lepton
+        double lEta = this->trackEta[t];
+        double lPhi = this->trackPhi[t];
+        for (int j = 0; j < nJets; ++j) {
+          if (removedJet[j]) continue;  // already removed by another lepton
+          double deta = this->topoJetEta[j] - lEta;
+          double dphi = TVector2::Phi_mpi_pi(this->topoJetPhi[j] - lPhi);
+          if (std::hypot(deta, dphi) < LEPTON_JET_DR) removedJet[j] = 1;
+        }
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // isJetRemoved
+    //   True if reco jet j was dropped by lepton–jet overlap removal this event.
+    //   Always false when removedJet is empty (non-Z+jets samples, or before
+    //   computeOverlapRemoval() has run), so every jet loop can guard on it
+    //   unconditionally with zero effect on other samples.
+    // -----------------------------------------------------------------------
+    bool isJetRemoved(int j) const {
+      return j >= 0 && j < (int)removedJet.size() && removedJet[j] != 0;
+    }
 
     // -----------------------------------------------------------------------
     // passBasicCuts
@@ -195,6 +252,7 @@ namespace MyUtl {
       std::vector<int> passPtIdx;  // indices of pT-passing jets
 
       for (int jetIdx = 0; jetIdx < (int)this->topoJetPt.GetSize(); ++jetIdx) {
+        if (this->isJetRemoved(jetIdx)) continue;  // lepton-overlap removed (Z+jets)
         float eta = std::abs(this->topoJetEta[jetIdx]);
         float pt  = this->topoJetPt[jetIdx];
         if (DEBUG) std::cout << "reco jet pt, eta: " << pt << ", " << eta << '\n';
@@ -235,6 +293,7 @@ namespace MyUtl {
     void countForwardJets(int& nForwardJet) {
     nForwardJet = 0;
     for(int jetIdx = 0; jetIdx < this->topoJetEta.GetSize(); ++jetIdx) {
+      if (this->isJetRemoved(jetIdx)) continue;  // lepton-overlap removed (Z+jets)
       float
 	jetEta = std::abs(this->topoJetEta[jetIdx]),
 	jetPt = this->topoJetPt[jetIdx];
@@ -505,6 +564,7 @@ namespace MyUtl {
           double minDR     = 1e6;
           double nearJetPt = 0.0;
           for (int j = 0; j < (int)branch->topoJetEta.GetSize(); ++j) {
+            if (branch->isJetRemoved(j)) continue;  // lepton-overlap removed (Z+jets)
             double jEta = branch->topoJetEta[j];
             double jPt  = branch->topoJetPt[j];
             if (jPt < MIN_JET_PT) continue;

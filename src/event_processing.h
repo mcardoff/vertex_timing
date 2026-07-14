@@ -112,6 +112,7 @@ namespace MyUtl {
       std::vector<std::pair<double,double>> hsJets;
       const int nJets = (int)branch->topoJetPt.GetSize();
       for (int j = 0; j < nJets; ++j) {
+        if (branch->isJetRemoved(j)) continue;  // lepton-overlap removed (Z+jets)
         double jEta = branch->topoJetEta[j];
         if (branch->topoJetPt[j] < MIN_JET_PT) continue;
         if (std::abs(jEta) < MIN_ABS_ETA_JET || std::abs(jEta) > MAX_ABS_ETA_JET) continue;
@@ -160,6 +161,7 @@ namespace MyUtl {
     std::vector<std::pair<double,double>> hsJets;
     const int nJets = (int)branch->topoJetPt.GetSize();
     for (int j = 0; j < nJets; ++j) {
+      if (branch->isJetRemoved(j)) continue;  // lepton-overlap removed (Z+jets)
       double jEta = branch->topoJetEta[j];
       if (branch->topoJetPt[j] < MIN_JET_PT) continue;
       if (std::abs(jEta) < MIN_ABS_ETA_JET || std::abs(jEta) > MAX_ABS_ETA_JET) continue;
@@ -207,6 +209,7 @@ namespace MyUtl {
 	trkPhi = branch->trackPhi[trk];
       bool inCone = false;
       for (int jetIdx = 0; jetIdx < N_JETS; ++jetIdx) {
+	if (branch->isJetRemoved(jetIdx)) continue;  // lepton-overlap removed (Z+jets)
 	if (branch->topoJetPt[jetIdx] < MIN_JET_PT) continue;
 	double
 	  deta = branch->topoJetEta[jetIdx] - trkEta,
@@ -439,6 +442,9 @@ namespace MyUtl {
     std::map<Score,AnalysisObj>& analyses
   ) {
     // ── A. Event selection ──────────────────────────────────────────────────
+    // Lepton–jet overlap removal (Z+jets only): rebuild the removed-jet mask for
+    // this event before any jet loop below. No-op on other samples.
+    branch->computeOverlapRemoval();
     if (!branch->passBasicCuts()) return {};
     if (!branch->passJetPtCut())  return {};
 

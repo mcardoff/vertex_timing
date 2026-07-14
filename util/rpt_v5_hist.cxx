@@ -122,6 +122,7 @@ int main(int argc, char** argv) {
   MyUtl::ENERGY_LABEL = sample.energyLabel;
   MyUtl::OUTPUT_DIR   = sample.outputDir;
   MyUtl::SAMPLE_NAME  = sample.sampleName;
+  MyUtl::OVERLAP_REMOVAL = sample.overlapRemoval;  // Z+jets lepton–jet overlap removal
   boost::filesystem::create_directories(MyUtl::OUTPUT_DIR);
   if (MyUtl::SAMPLE_NAME.empty())
     boost::filesystem::create_directories(MyUtl::OUTPUT_DIR + "/hists");
@@ -208,6 +209,10 @@ int main(int argc, char** argv) {
       if (std::abs(branch.recoVtxZ[0] - branch.truthVtxZ[0]) > MAX_VTX_DZ) continue;
       ++state.n_pass_basic;
 
+      // Lepton–jet overlap removal (Z+jets only): flag reco jets within
+      // LEPTON_JET_DR of a lepton track so fillJets skips them. No-op otherwise.
+      branch.computeOverlapRemoval();
+
       // ── Track selection: all tracks by z-significance (no eta cut) for the
       //    z-only baseline, matching the paper's ITk-only scenario. ────────────
       std::vector<int> trk_all;
@@ -284,6 +289,7 @@ int main(int argc, char** argv) {
       // ── Fill jets into pT slices. ─────────────────────────────────────────────
       auto fillJets = [&](std::vector<Scenario>& sv, double pt_lo, double pt_hi) {
         for (int j = 0; j < (int)branch.topoJetPt.GetSize(); ++j) {
+          if (branch.isJetRemoved(j)) continue;  // lepton-overlap removed (Z+jets)
           double j_pt  = branch.topoJetPt[j];
           double j_eta = branch.topoJetEta[j];
           double j_phi = branch.topoJetPhi[j];
