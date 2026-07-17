@@ -422,11 +422,16 @@ namespace MyUtl {
   //                     -1  rejected, cause not distinguished (generic; kept
   //                         for any future early-return that doesn't need its
   //                         own bucket)
-  //                     -2  rejected: Z+jets lepton selection (passLeptonSelection)
+  //                     -2  rejected: Z+jets lepton selection, 0 qualifying
+  //                         leptons found (isGoodLepton: flagged + pt>20)
   //                     -3  rejected: SKIP_EVENT lepton–jet overlap veto
   //                         (inert unless OverlapMode::SKIP_EVENT)
   //                     -4  rejected: passBasicCuts (vertex quality / MIN_JETS)
   //                     -5  rejected: passJetPtCut (jet-pT/VBS topology)
+  //                     -6  rejected: Z+jets lepton selection, exactly 1
+  //                         qualifying lepton found (missing the other leg)
+  //                     -7  rejected: Z+jets lepton selection, ≥2 qualifying
+  //                         leptons found but no OS-SF pair among them
   //                   All rejection codes are negative; `code >= 0` still means
   //                   "event was processed" everywhere that check is used.
   //   time           — TRKPTZ-selected cluster time
@@ -460,8 +465,16 @@ namespace MyUtl {
     // in REMOVE_JETS mode the mask is instead consulted per-jet via isJetRemoved.
     branch->computeOverlapRemoval();
     // Z→ℓℓ selection (Z+jets only): require an opposite-sign same-flavour
-    // lepton pair with pt > LEPTON_MIN_PT; no-op on other samples.
-    if (!branch->passLeptonSelection()) return {-2};
+    // lepton pair with pt > LEPTON_MIN_PT; no-op on other samples. Classify
+    // the failure (see EventResult::code doc above) so a low survival rate
+    // can be attributed to "too few qualifying leptons" vs. "found some but
+    // no OS-SF pair" instead of guessed at.
+    if (!branch->passLeptonSelection()) {
+      int nGood = branch->countGoodLeptons();
+      if (nGood == 0) return {-2};
+      if (nGood == 1) return {-6};
+      return {-7};
+    }
     if (branch->vetoLeptonOverlap())  return {-3};
     if (!branch->passBasicCuts()) return {-4};
     if (!branch->passJetPtCut())  return {-5};

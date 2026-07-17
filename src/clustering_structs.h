@@ -177,6 +177,23 @@ namespace MyUtl {
     }
 
     // -----------------------------------------------------------------------
+    // countGoodLeptons
+    //   Number of tracks passing isGoodLepton in this event. Diagnostic-only
+    //   helper (see LeptonSelDiag below) -- lets a low Z->ll survival rate be
+    //   attributed to "too few qualifying leptons" vs. "found some but no
+    //   OS-SF pair among them" instead of guessed at. Returns 0 when
+    //   trackLeptonID isn't bound (non-Z+jets samples).
+    // -----------------------------------------------------------------------
+    int countGoodLeptons() const {
+      if (!trackLeptonID) return 0;
+      const int n = (int)trackLeptonID->GetSize();
+      int count = 0;
+      for (int t = 0; t < n; ++t)
+        if (isGoodLepton(t)) ++count;
+      return count;
+    }
+
+    // -----------------------------------------------------------------------
     // passLeptonSelection
     //   Z-boson event selection for Z+jets: require at least one opposite-sign
     //   same-flavour lepton pair among the selected leptons (isGoodLepton) —

@@ -145,8 +145,8 @@ auto main(int argc, char** argv) -> int {
   //     no lazy per-thread construction needed, unlike AnalysisObj/TColor.
   //     Lets a low post-selection yield (e.g. on Z+jets) be diagnosed from the
   //     printed breakdown instead of guessed at. ---
-  std::atomic<Long64_t> nRejLeptonSel{0}, nRejOverlapVeto{0},
-                         nRejBasicCuts{0}, nRejJetPtCut{0},
+  std::atomic<Long64_t> nRejNoLepton{0}, nRejOneLepton{0}, nRejNoOSSFPair{0},
+                         nRejOverlapVeto{0}, nRejBasicCuts{0}, nRejJetPtCut{0},
                          nRejOther{0}, nAccepted{0};
 
   std::atomic<Long64_t> progressCounter{0};
@@ -204,10 +204,12 @@ auto main(int argc, char** argv) -> int {
 
       // Tally rejection cause (see EventResult::code in event_processing.h).
       switch (resHGTD.code) {
-        case -2: ++nRejLeptonSel;   break;
+        case -2: ++nRejNoLepton;    break;
         case -3: ++nRejOverlapVeto; break;
         case -4: ++nRejBasicCuts;   break;
         case -5: ++nRejJetPtCut;    break;
+        case -6: ++nRejOneLepton;   break;
+        case -7: ++nRejNoOSSFPair;  break;
         default: (resHGTD.code < 0 ? nRejOther : nAccepted)++; break;
       }
 
@@ -279,19 +281,23 @@ auto main(int argc, char** argv) -> int {
 
   // --- Event-selection rejection-cause breakdown ---
   std::cout << "\n=== EVENT SELECTION BREAKDOWN (of " << nEventsProcessed << " total) ===\n";
-  std::cout << "  Accepted                       : " << nAccepted      << '\n';
-  std::cout << "  Rejected: Z->ll lepton sel.     : " << nRejLeptonSel   << '\n';
-  std::cout << "  Rejected: overlap veto (SKIP)   : " << nRejOverlapVeto << '\n';
-  std::cout << "  Rejected: vertex/MIN_JETS       : " << nRejBasicCuts   << '\n';
-  std::cout << "  Rejected: jet-pT/VBS topology   : " << nRejJetPtCut    << '\n';
-  std::cout << "  Rejected: other/undistinguished : " << nRejOther       << '\n';
+  std::cout << "  Accepted                        : " << nAccepted       << '\n';
+  std::cout << "  Rejected: Z->ll, 0 good leptons  : " << nRejNoLepton    << '\n';
+  std::cout << "  Rejected: Z->ll, 1 good lepton   : " << nRejOneLepton   << '\n';
+  std::cout << "  Rejected: Z->ll, no OS-SF pair   : " << nRejNoOSSFPair  << '\n';
+  std::cout << "  Rejected: overlap veto (SKIP)    : " << nRejOverlapVeto << '\n';
+  std::cout << "  Rejected: vertex/MIN_JETS        : " << nRejBasicCuts   << '\n';
+  std::cout << "  Rejected: jet-pT/VBS topology    : " << nRejJetPtCut    << '\n';
+  std::cout << "  Rejected: other/undistinguished  : " << nRejOther       << '\n';
 
   // --- Save every histogram to a ROOT file for the plotting stage ---
   const std::string histPath = MyUtl::histFilePath("clustering_hist.root");
   MyUtl::HistWriter writer(histPath);
   for (auto& [score, analysis] : mapHGTD) analysis.saveTo(writer);
   writer.WriteScalar("meta_n_accepted",         static_cast<Long64_t>(nAccepted));
-  writer.WriteScalar("meta_n_rej_lepton_sel",   static_cast<Long64_t>(nRejLeptonSel));
+  writer.WriteScalar("meta_n_rej_no_lepton",    static_cast<Long64_t>(nRejNoLepton));
+  writer.WriteScalar("meta_n_rej_one_lepton",   static_cast<Long64_t>(nRejOneLepton));
+  writer.WriteScalar("meta_n_rej_no_ossf_pair", static_cast<Long64_t>(nRejNoOSSFPair));
   writer.WriteScalar("meta_n_rej_overlap_veto", static_cast<Long64_t>(nRejOverlapVeto));
   writer.WriteScalar("meta_n_rej_basic_cuts",   static_cast<Long64_t>(nRejBasicCuts));
   writer.WriteScalar("meta_n_rej_jetpt_cut",    static_cast<Long64_t>(nRejJetPtCut));
