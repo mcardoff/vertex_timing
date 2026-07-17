@@ -155,6 +155,17 @@ auto main(int argc, char** argv) -> int {
   std::cout << "Starting Event Loop\n";
   const Long64_t N_EVENT = chain.GetEntries();
 
+  // Optional --max-events=<N> cap for quick local checks (see resolveMaxEvents
+  // in sample_config.h). -1 means unlimited -- every existing invocation
+  // without the flag is unaffected. progressDenom is just for the progress
+  // print below; the actual stopping condition is the per-event check inside
+  // the loop, keyed off the same shared progressCounter every worker thread
+  // increments, so all threads converge on the cap together.
+  const Long64_t maxEvents    = MyUtl::resolveMaxEvents(argc, argv);
+  const Long64_t progressDenom = (maxEvents > 0) ? std::min(maxEvents, N_EVENT) : N_EVENT;
+  if (maxEvents > 0)
+    std::cout << "Restricting to first " << progressDenom << " events (--max-events)\n";
+
   ROOT::TTreeProcessorMT proc(chain, nThreads);
   proc.Process([&](TTreeReader& reader) {
     // Fresh per invocation: a worker thread can be handed a different
@@ -180,8 +191,13 @@ auto main(int argc, char** argv) -> int {
 
     while (reader.Next()) {
       Long64_t n = ++progressCounter;
+      // Stop this worker's current task range once the shared counter has
+      // already crossed the cap -- other in-flight/future task ranges hit
+      // the same check within their own next iteration, so overshoot across
+      // threads is bounded by ~nThreads events, not the whole remaining tree.
+      if (maxEvents > 0 && n > maxEvents) break;
       if (n % 5000 == 0)
-        std::cout << "Progress: " << n << "/" << N_EVENT << "\r" << std::flush;
+        std::cout << "Progress: " << n << "/" << progressDenom << "\r" << std::flush;
 
       // HGTD timing scenario (the only scenario currently active)
       auto resHGTD = processEventData(&branch, false, true, *tlMap);
@@ -256,8 +272,13 @@ auto main(int argc, char** argv) -> int {
 
   std::cout << "\nFINISHED PROCESSING\n";
 
+  // Actual events processed -- equals N_EVENT when --max-events was not given;
+  // otherwise reflects the (slightly-overshoot-bounded) cap. Read only after
+  // proc.Process() has returned, so every worker thread's increments are in.
+  const Long64_t nEventsProcessed = progressCounter.load();
+
   // --- Event-selection rejection-cause breakdown ---
-  std::cout << "\n=== EVENT SELECTION BREAKDOWN (of " << N_EVENT << " total) ===\n";
+  std::cout << "\n=== EVENT SELECTION BREAKDOWN (of " << nEventsProcessed << " total) ===\n";
   std::cout << "  Accepted                       : " << nAccepted      << '\n';
   std::cout << "  Rejected: Z->ll lepton sel.     : " << nRejLeptonSel   << '\n';
   std::cout << "  Rejected: overlap veto (SKIP)   : " << nRejOverlapVeto << '\n';
@@ -275,7 +296,7 @@ auto main(int argc, char** argv) -> int {
   writer.WriteScalar("meta_n_rej_basic_cuts",   static_cast<Long64_t>(nRejBasicCuts));
   writer.WriteScalar("meta_n_rej_jetpt_cut",    static_cast<Long64_t>(nRejJetPtCut));
   writer.WriteScalar("meta_n_rej_other",        static_cast<Long64_t>(nRejOther));
-  writer.WriteRunMeta(MyUtl::ENERGY_LABEL, N_EVENT);
+  writer.WriteRunMeta(MyUtl::ENERGY_LABEL, nEventsProcessed);
   writer.Close();
   std::cout << "Wrote histograms to " << histPath << '\n';
 

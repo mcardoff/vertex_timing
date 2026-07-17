@@ -164,6 +164,14 @@ int main(int argc, char** argv) {
   std::cout << "Starting Event Loop\n";
   const Long64_t N_EVENT = chain.GetEntries();
 
+  // Optional --max-events=<N> cap for quick local checks (see resolveMaxEvents
+  // in sample_config.h). -1 means unlimited -- every existing invocation
+  // without the flag is unaffected.
+  const Long64_t maxEvents     = MyUtl::resolveMaxEvents(argc, argv);
+  const Long64_t progressDenom = (maxEvents > 0) ? std::min(maxEvents, N_EVENT) : N_EVENT;
+  if (maxEvents > 0)
+    std::cout << "Restricting to first " << progressDenom << " events (--max-events)\n";
+
   ROOT::TTreeProcessorMT proc(chain, nThreads);
   proc.Process([&](TTreeReader& reader) {
     // Fresh per invocation: a worker thread can be handed a different
@@ -203,11 +211,15 @@ int main(int argc, char** argv) {
     };
 
     while (reader.Next()) {
+      Long64_t n = ++progressCounter;
+      // Stop this worker's current task range once the shared counter has
+      // already crossed the cap; see the identical pattern/rationale in
+      // src/clustering_hist.cxx.
+      if (maxEvents > 0 && n > maxEvents) break;
       ++state.n_total;
 
-      Long64_t n = ++progressCounter;
       if (n % 5000 == 0)
-        std::cout << "Progress: " << n << "/" << N_EVENT << "\r" << std::flush;
+        std::cout << "Progress: " << n << "/" << progressDenom << "\r" << std::flush;
 
       // ── Require only vertex quality (paper Sec. 3: |z_reco − z_truth| < 2 mm).
       if (branch.recoVtxZ.GetSize() == 0 || branch.truthVtxZ.GetSize() == 0) continue;
@@ -394,7 +406,7 @@ int main(int argc, char** argv) {
   writer.WriteScalar("meta_pu_floor_lo",  merged.pu_floor_lo);
   writer.WriteScalar("meta_hs_tot_lo",    merged.hs_tot_lo);
   writer.WriteScalar("meta_hs_floor_lo",  merged.hs_floor_lo);
-  writer.WriteRunMeta(MyUtl::ENERGY_LABEL, N_EVENT);
+  writer.WriteRunMeta(MyUtl::ENERGY_LABEL, merged.n_total);
   writer.Close();
   std::cout << "Wrote histograms to " << histPath << "\n";
 

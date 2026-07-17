@@ -9,6 +9,8 @@
 //   default when no flag is given.
 // ---------------------------------------------------------------------------
 
+#include <Rtypes.h>  // Long64_t
+
 #include <algorithm>
 #include <iostream>
 #include <map>
@@ -102,6 +104,23 @@ namespace MyUtl {
     }
 
     return nThreads > 0 ? nThreads : 1u;
+  }
+
+  // ---------------------------------------------------------------------------
+  // resolveMaxEvents
+  //   Optional event cap via a --max-events=<N> CLI flag, for quick local
+  //   sanity checks (e.g. a diagnostic breakdown) without waiting on a full
+  //   multi-million-event condor-scale run. Returns -1 (no cap; default) when
+  //   the flag is absent, so every existing invocation is unaffected.
+  // ---------------------------------------------------------------------------
+  inline Long64_t resolveMaxEvents(int argc, char** argv) {
+    const std::string prefix = "--max-events=";
+    for (int i = 1; i < argc; ++i) {
+      std::string arg = argv[i];
+      if (arg.rfind(prefix, 0) != 0) continue;
+      return static_cast<Long64_t>(std::stoll(arg.substr(prefix.size())));
+    }
+    return -1;
   }
 
   // ---------------------------------------------------------------------------
