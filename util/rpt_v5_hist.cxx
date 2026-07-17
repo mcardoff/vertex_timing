@@ -92,6 +92,11 @@ struct ThreadState {
   std::vector<Scenario> scen_lo = makeScenarios("_lo");  // 30–40 GeV
   std::vector<Scenario> scen_hi = makeScenarios("_hi");  // >40 GeV
   long n_total = 0, n_pass_basic = 0, n_hgtd_valid = 0;
+  // Z+jets-only breakdown (see event_processing.h EventResult::code doc for the
+  // analogous clustering-side counters): n_pass_basic above is vertex-quality
+  // only (checked BEFORE lepton selection here); n_pass_lepton_sel further
+  // requires the Z->ll selection. No-ops (both equal n_pass_basic) elsewhere.
+  long n_pass_lepton_sel = 0;
   double pu_tot_pt = 0, pu_floor_pt = 0, hs_tot_pt = 0, hs_floor_pt = 0;  // >40
   double pu_tot_lo = 0, pu_floor_lo = 0, hs_tot_lo = 0, hs_floor_lo = 0;  // 30-40
 };
@@ -217,6 +222,7 @@ int main(int argc, char** argv) {
       // Z→ℓℓ selection (Z+jets only): require an opposite-sign same-flavour
       // lepton pair with pt > LEPTON_MIN_PT; no-op on other samples.
       if (!branch.passLeptonSelection()) continue;
+      ++state.n_pass_lepton_sel;
       if (branch.vetoLeptonOverlap()) continue;
 
       // ── Track selection: all tracks by z-significance (no eta cut) for the
@@ -358,6 +364,7 @@ int main(int argc, char** argv) {
     merged.n_total      += other.n_total;
     merged.n_pass_basic += other.n_pass_basic;
     merged.n_hgtd_valid += other.n_hgtd_valid;
+    merged.n_pass_lepton_sel += other.n_pass_lepton_sel;
     merged.pu_tot_pt    += other.pu_tot_pt;
     merged.pu_floor_pt  += other.pu_floor_pt;
     merged.hs_tot_pt    += other.hs_tot_pt;
@@ -378,6 +385,7 @@ int main(int argc, char** argv) {
   writer.WriteScalar("meta_n_total",      static_cast<Long64_t>(merged.n_total));
   writer.WriteScalar("meta_n_pass_basic", static_cast<Long64_t>(merged.n_pass_basic));
   writer.WriteScalar("meta_n_hgtd_valid", static_cast<Long64_t>(merged.n_hgtd_valid));
+  writer.WriteScalar("meta_n_pass_lepton_sel", static_cast<Long64_t>(merged.n_pass_lepton_sel));
   writer.WriteScalar("meta_pu_tot_pt",    merged.pu_tot_pt);
   writer.WriteScalar("meta_pu_floor_pt",  merged.pu_floor_pt);
   writer.WriteScalar("meta_hs_tot_pt",    merged.hs_tot_pt);
@@ -389,6 +397,19 @@ int main(int argc, char** argv) {
   writer.WriteRunMeta(MyUtl::ENERGY_LABEL, N_EVENT);
   writer.Close();
   std::cout << "Wrote histograms to " << histPath << "\n";
+
+  // --- Z+jets event-selection breakdown (no-op elsewhere: n_pass_lepton_sel
+  //     == n_pass_basic when OVERLAP_REMOVAL is unset). Printed directly here
+  //     rather than added to rpt_v5_plot's console summary, since that reads
+  //     mandatory scalars from the hist file and would break on older files
+  //     that predate meta_n_pass_lepton_sel. ---
+  std::cout << "\n=== Z+JETS EVENT SELECTION (of " << merged.n_pass_basic
+            << " passing vertex quality) ===\n";
+  std::cout << "  Pass Z->ll lepton selection : " << merged.n_pass_lepton_sel
+            << " (" << std::fixed << std::setprecision(1)
+            << (merged.n_pass_basic > 0
+                  ? 100.0 * merged.n_pass_lepton_sel / merged.n_pass_basic : 0.0)
+            << "%)\n";
 
   return 0;
 }

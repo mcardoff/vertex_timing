@@ -416,7 +416,19 @@ namespace MyUtl {
   //
   // ---------------------------------------------------------------------------
   // EventResult — returned by processEventData
-  //   code           — -1: rejected by selection; 0: normal; 3: MISAS fail
+  //   code           — rejection/status code:
+  //                      0  normal
+  //                      3  MISAS fail (TRKPTZ passes, TEST_MISAS fails)
+  //                     -1  rejected, cause not distinguished (generic; kept
+  //                         for any future early-return that doesn't need its
+  //                         own bucket)
+  //                     -2  rejected: Z+jets lepton selection (passLeptonSelection)
+  //                     -3  rejected: SKIP_EVENT lepton–jet overlap veto
+  //                         (inert unless OverlapMode::SKIP_EVENT)
+  //                     -4  rejected: passBasicCuts (vertex quality / MIN_JETS)
+  //                     -5  rejected: passJetPtCut (jet-pT/VBS topology)
+  //                   All rejection codes are negative; `code >= 0` still means
+  //                   "event was processed" everywhere that check is used.
   //   time           — TRKPTZ-selected cluster time
   //   nFwdHS         — n forward HS tracks (3σ counting step)
   //   trkptzPass     — true if TRKPTZ passed the PASS_SIGMA timing window
@@ -449,10 +461,10 @@ namespace MyUtl {
     branch->computeOverlapRemoval();
     // Z→ℓℓ selection (Z+jets only): require an opposite-sign same-flavour
     // lepton pair with pt > LEPTON_MIN_PT; no-op on other samples.
-    if (!branch->passLeptonSelection()) return {};
-    if (branch->vetoLeptonOverlap())  return {};
-    if (!branch->passBasicCuts()) return {};
-    if (!branch->passJetPtCut())  return {};
+    if (!branch->passLeptonSelection()) return {-2};
+    if (branch->vetoLeptonOverlap())  return {-3};
+    if (!branch->passBasicCuts()) return {-4};
+    if (!branch->passJetPtCut())  return {-5};
 
     // ── B. Track selection ──────────────────────────────────────────────────
     // Scan once at 3σ so counting statistics include slightly-displaced tracks,

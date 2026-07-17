@@ -140,6 +140,15 @@ auto main(int argc, char** argv) -> int {
   ROOT::TThreadedObject<std::vector<TString>> tsMisasPassEvents;
   ROOT::TThreadedObject<std::vector<TString>> tsMisasFailEvents;
 
+  // --- Event-selection rejection-cause tally, keyed on EventResult::code (see
+  //     its definition in event_processing.h). Plain atomics suffice here --
+  //     no lazy per-thread construction needed, unlike AnalysisObj/TColor.
+  //     Lets a low post-selection yield (e.g. on Z+jets) be diagnosed from the
+  //     printed breakdown instead of guessed at. ---
+  std::atomic<Long64_t> nRejLeptonSel{0}, nRejOverlapVeto{0},
+                         nRejBasicCuts{0}, nRejJetPtCut{0},
+                         nRejOther{0}, nAccepted{0};
+
   std::atomic<Long64_t> progressCounter{0};
 
   // --- Event loop ---
@@ -176,6 +185,15 @@ auto main(int argc, char** argv) -> int {
 
       // HGTD timing scenario (the only scenario currently active)
       auto resHGTD = processEventData(&branch, false, true, *tlMap);
+
+      // Tally rejection cause (see EventResult::code in event_processing.h).
+      switch (resHGTD.code) {
+        case -2: ++nRejLeptonSel;   break;
+        case -3: ++nRejOverlapVeto; break;
+        case -4: ++nRejBasicCuts;   break;
+        case -5: ++nRejJetPtCut;    break;
+        default: (resHGTD.code < 0 ? nRejOther : nAccepted)++; break;
+      }
 
       // Extract file identifier from the full path (characters 49–54)
       TString fileName = reader.GetTree()->GetCurrentFile()->GetName();
@@ -238,10 +256,25 @@ auto main(int argc, char** argv) -> int {
 
   std::cout << "\nFINISHED PROCESSING\n";
 
+  // --- Event-selection rejection-cause breakdown ---
+  std::cout << "\n=== EVENT SELECTION BREAKDOWN (of " << N_EVENT << " total) ===\n";
+  std::cout << "  Accepted                       : " << nAccepted      << '\n';
+  std::cout << "  Rejected: Z->ll lepton sel.     : " << nRejLeptonSel   << '\n';
+  std::cout << "  Rejected: overlap veto (SKIP)   : " << nRejOverlapVeto << '\n';
+  std::cout << "  Rejected: vertex/MIN_JETS       : " << nRejBasicCuts   << '\n';
+  std::cout << "  Rejected: jet-pT/VBS topology   : " << nRejJetPtCut    << '\n';
+  std::cout << "  Rejected: other/undistinguished : " << nRejOther       << '\n';
+
   // --- Save every histogram to a ROOT file for the plotting stage ---
   const std::string histPath = MyUtl::histFilePath("clustering_hist.root");
   MyUtl::HistWriter writer(histPath);
   for (auto& [score, analysis] : mapHGTD) analysis.saveTo(writer);
+  writer.WriteScalar("meta_n_accepted",         static_cast<Long64_t>(nAccepted));
+  writer.WriteScalar("meta_n_rej_lepton_sel",   static_cast<Long64_t>(nRejLeptonSel));
+  writer.WriteScalar("meta_n_rej_overlap_veto", static_cast<Long64_t>(nRejOverlapVeto));
+  writer.WriteScalar("meta_n_rej_basic_cuts",   static_cast<Long64_t>(nRejBasicCuts));
+  writer.WriteScalar("meta_n_rej_jetpt_cut",    static_cast<Long64_t>(nRejJetPtCut));
+  writer.WriteScalar("meta_n_rej_other",        static_cast<Long64_t>(nRejOther));
   writer.WriteRunMeta(MyUtl::ENERGY_LABEL, N_EVENT);
   writer.Close();
   std::cout << "Wrote histograms to " << histPath << '\n';
