@@ -97,6 +97,11 @@ struct ThreadState {
   // only (checked BEFORE lepton selection here); n_pass_lepton_sel further
   // requires the Z->ll selection. No-ops (both equal n_pass_basic) elsewhere.
   long n_pass_lepton_sel = 0;
+  // Finer breakdown of the lepton-selection failures (mirrors event_processing.h's
+  // EventResult::code -2/-6/-7): among vertex-passing events that fail
+  // passLeptonSelection, how many had 0 / exactly 1 / >=2 qualifying
+  // (isGoodLepton) leptons but no OS-SF pair.
+  long n_rej_no_lepton = 0, n_rej_one_lepton = 0, n_rej_no_ossf_pair = 0;
   double pu_tot_pt = 0, pu_floor_pt = 0, hs_tot_pt = 0, hs_floor_pt = 0;  // >40
   double pu_tot_lo = 0, pu_floor_lo = 0, hs_tot_lo = 0, hs_floor_lo = 0;  // 30-40
 };
@@ -232,8 +237,17 @@ int main(int argc, char** argv) {
       // fillJets skip the flagged jets via isJetRemoved.
       branch.computeOverlapRemoval();
       // Z→ℓℓ selection (Z+jets only): require an opposite-sign same-flavour
-      // lepton pair with pt > LEPTON_MIN_PT; no-op on other samples.
-      if (!branch.passLeptonSelection()) continue;
+      // lepton pair with pt > LEPTON_MIN_PT; no-op on other samples. Classify
+      // the failure the same way event_processing.h's EventResult::code does
+      // (0 / 1 / >=2 qualifying leptons) so a low survival rate can be
+      // attributed to too-few-leptons vs. a pairing-logic issue.
+      if (!branch.passLeptonSelection()) {
+        int nGood = branch.countGoodLeptons();
+        if      (nGood == 0) ++state.n_rej_no_lepton;
+        else if (nGood == 1) ++state.n_rej_one_lepton;
+        else                 ++state.n_rej_no_ossf_pair;
+        continue;
+      }
       ++state.n_pass_lepton_sel;
       if (branch.vetoLeptonOverlap()) continue;
 
@@ -377,6 +391,9 @@ int main(int argc, char** argv) {
     merged.n_pass_basic += other.n_pass_basic;
     merged.n_hgtd_valid += other.n_hgtd_valid;
     merged.n_pass_lepton_sel += other.n_pass_lepton_sel;
+    merged.n_rej_no_lepton   += other.n_rej_no_lepton;
+    merged.n_rej_one_lepton  += other.n_rej_one_lepton;
+    merged.n_rej_no_ossf_pair += other.n_rej_no_ossf_pair;
     merged.pu_tot_pt    += other.pu_tot_pt;
     merged.pu_floor_pt  += other.pu_floor_pt;
     merged.hs_tot_pt    += other.hs_tot_pt;
@@ -398,6 +415,9 @@ int main(int argc, char** argv) {
   writer.WriteScalar("meta_n_pass_basic", static_cast<Long64_t>(merged.n_pass_basic));
   writer.WriteScalar("meta_n_hgtd_valid", static_cast<Long64_t>(merged.n_hgtd_valid));
   writer.WriteScalar("meta_n_pass_lepton_sel", static_cast<Long64_t>(merged.n_pass_lepton_sel));
+  writer.WriteScalar("meta_n_rej_no_lepton",    static_cast<Long64_t>(merged.n_rej_no_lepton));
+  writer.WriteScalar("meta_n_rej_one_lepton",   static_cast<Long64_t>(merged.n_rej_one_lepton));
+  writer.WriteScalar("meta_n_rej_no_ossf_pair", static_cast<Long64_t>(merged.n_rej_no_ossf_pair));
   writer.WriteScalar("meta_pu_tot_pt",    merged.pu_tot_pt);
   writer.WriteScalar("meta_pu_floor_pt",  merged.pu_floor_pt);
   writer.WriteScalar("meta_hs_tot_pt",    merged.hs_tot_pt);
@@ -422,6 +442,9 @@ int main(int argc, char** argv) {
             << (merged.n_pass_basic > 0
                   ? 100.0 * merged.n_pass_lepton_sel / merged.n_pass_basic : 0.0)
             << "%)\n";
+  std::cout << "    Rejected, 0 good leptons  : " << merged.n_rej_no_lepton    << '\n';
+  std::cout << "    Rejected, 1 good lepton   : " << merged.n_rej_one_lepton   << '\n';
+  std::cout << "    Rejected, no OS-SF pair   : " << merged.n_rej_no_ossf_pair << '\n';
 
   return 0;
 }
