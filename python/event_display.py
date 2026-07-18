@@ -20,7 +20,11 @@ from matplotlib.backends.backend_pdf import PdfPages
 # --- Argument Parsing and Data Loading ---
 parser = argparse.ArgumentParser(description='Process event and vertex data.')
 parser.add_argument('--event_num', type=int, required=True)
-parser.add_argument('--file_num', type=str, required=True)
+parser.add_argument('--file_path', type=str, required=True,
+                    help='Full path to the ntuple ROOT file (any sample -- '
+                         'vbf/zjets/dijet/local). Replaces the old --file_num, '
+                         'which only worked for the local default VBF ntuple\'s '
+                         'fixed naming convention.')
 parser.add_argument('--extra_time', type=float, required=False)
 parser.add_argument('--jet_idx', type=int, required=False, default=None,
                     help='Index of jet to highlight (orange) in R-Z and eta-phi displays')
@@ -35,14 +39,16 @@ parser.add_argument('--output_dir', type=str, required=False,
                     help='Directory to save the output PDF (created if absent)')
 args = parser.parse_args()
 
-event_num, file_num = args.event_num, args.file_num
+event_num, file_path = args.event_num, args.file_path
 
 import os
 os.makedirs(args.output_dir, exist_ok=True)
 
 IDEALEFF = False
-filename = f'{args.output_dir}/event_display_{file_num}_{event_num:04d}.pdf'
-# filename = f'event_displays/failing_5/event_display_{file_num}_{event_num:04d}.pdf'
+# Short identifier for the output filename -- basename minus extension, works
+# for any sample's naming convention (unlike the old bare file_num).
+file_tag = os.path.splitext(os.path.basename(file_path))[0]
+filename = f'{args.output_dir}/event_display_{file_tag}_{event_num:04d}.pdf'
 
 def generate_cluster_colors(n):
     """Generate n perceptually distinct colors using golden-ratio HSV spacing."""
@@ -58,8 +64,7 @@ def generate_cluster_colors(n):
         hue = (hue + golden_ratio) % 1.0
     return colors
 
-ANA_FILE = f'../../highstats-ntuple/user.mcardiff.51010390.Output._{file_num}.SuperNtuple.root'
-tree = uproot.open(ANA_FILE)["ntuple"]
+tree = uproot.open(file_path)["ntuple"]
 
 branch = tree.arrays([
     # vertex properties
@@ -146,7 +151,7 @@ for idx, jet_pt in enumerate(branch.AntiKt4EMTopoJets_pt[event_num]):
 
 # --- ROOT Macro Execution and Clustering ---
 try:
-    MACRO_CALL = f'runHGTD_Clustering.cxx("{file_num}",{event_num})'
+    MACRO_CALL = f'runHGTD_Clustering.cxx("{file_path}",{event_num})'
     print(MACRO_CALL)
     result = subprocess.run(['root', '-l', '-q', '-b', MACRO_CALL],
                             check=True, capture_output=True, text=True)

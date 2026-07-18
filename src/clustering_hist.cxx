@@ -27,9 +27,10 @@ using namespace MyUtl;
 //   does all plotting -- see CLAUDE.md's "Main Executables" section.
 // ---------------------------------------------------------------------------
 
-// Event display command template (filled with file number, event number, extra time)
+// Event display command template (filled with full file path, event number, extra time).
+// Quoted since --file_path takes an arbitrary absolute path.
 static constexpr const char* EVTDISPLAY_FMT =
-  "cd python && python3 event_display.py --file_num %s --event_num %lld --extra_time %.2f";
+  "cd python && python3 event_display.py --file_path \"%s\" --event_num %lld --extra_time %.2f";
 
 // Set to true to print event display commands to stdout after the event loop.
 static constexpr bool PRINT_EVENT_DISPLAYS = false;
@@ -51,11 +52,11 @@ void collectEventDisplay(
   std::vector<TString>& list,
   int returnCode,
   const EventResult& result,
-  const TString& fileNum,
+  const TString& filePath,
   Long64_t eventNum
 ) {
   if (result.code == returnCode)
-    list.push_back(TString::Format(EVTDISPLAY_FMT, fileNum.Data(), eventNum, result.time));
+    list.push_back(TString::Format(EVTDISPLAY_FMT, filePath.Data(), eventNum, result.time));
 }
 
 // ---------------------------------------------------------------------------
@@ -213,9 +214,11 @@ auto main(int argc, char** argv) -> int {
         default: (resHGTD.code < 0 ? nRejOther : nAccepted)++; break;
       }
 
-      // Extract file identifier from the full path (characters 49–54)
-      TString fileName = reader.GetTree()->GetCurrentFile()->GetName();
-      TString fileNum  = fileName(49, 6);
+      // Full ntuple file path -- passed to event_display.py as-is (--file_path),
+      // which works uniformly across every sample (vbf/zjets/dijet/local),
+      // unlike the old fixed-offset substring (fileName(49,6)) that only
+      // matched the local default VBF ntuple's one absolute path length.
+      TString filePath = reader.GetTree()->GetCurrentFile()->GetName();
       // Local (per-file) entry number: reader.GetTree() is the currently-
       // loaded per-file constituent tree here (no outer TChain is available
       // inside this lambda to replicate the sequential-loop's
@@ -225,16 +228,16 @@ auto main(int argc, char** argv) -> int {
       Long64_t EVENT_NUM = reader.GetTree()->GetReadEntry();
 
       // Collect events where TRKPTZ passes but TEST_MISAS does not (misassignment effect)
-      collectEventDisplay(*evtDisplayHGTD, 3, resHGTD, fileNum, EVENT_NUM);
+      collectEventDisplay(*evtDisplayHGTD, 3, resHGTD, filePath, EVENT_NUM);
 
       // Low-multiplicity event display collection (HGTD scenario, n=LOW_MULT_NHS HS tracks)
       if (resHGTD.code >= 0 && resHGTD.nFwdHS == LOW_MULT_NHS) {
-        TString cmd = TString::Format(EVTDISPLAY_FMT, fileNum.Data(), EVENT_NUM, resHGTD.time);
+        TString cmd = TString::Format(EVTDISPLAY_FMT, filePath.Data(), EVENT_NUM, resHGTD.time);
         (resHGTD.trkptzPass ? *lowMultPass : *lowMultFail).push_back(cmd);
       }
 
       if (resHGTD.code >= 0) {
-        TString cmd = TString::Format(EVTDISPLAY_FMT, fileNum.Data(), EVENT_NUM, resHGTD.time);
+        TString cmd = TString::Format(EVTDISPLAY_FMT, filePath.Data(), EVENT_NUM, resHGTD.time);
 
         // Category: event is in TEST_MISAS denominator (clean HS timing) and PASSES
         if (resHGTD.misasPass)

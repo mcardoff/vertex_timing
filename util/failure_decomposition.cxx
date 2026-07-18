@@ -626,16 +626,15 @@ auto main() -> int {
       if (waves_irreducible) {
         n_irred++;
         if (nHSTrack == 0) n_irred_zerohs++;
-        std::string fpath   = chain.GetCurrentFile()->GetName();
-        std::string fileNum = "?";
-        auto p1 = fpath.rfind("._");
-        auto p2 = fpath.rfind(".SuperNtuple");
-        if (p1 != std::string::npos && p2 != std::string::npos)
-          fileNum = fpath.substr(p1 + 2, p2 - p1 - 2);
+        // Full ntuple file path -- passed to event_display.py as-is (--file_path),
+        // works uniformly across every sample, unlike the old
+        // rfind("._")/rfind(".SuperNtuple") extraction that only matched the
+        // local default VBF ntuple's naming convention.
+        std::string filePath = chain.GetCurrentFile()->GetName();
         const Long64_t localEntry = chain.GetTree()->GetReadEntry();
         std::cout << "\n===== irreducible WAVeS failure =====\n";
-        printf("cd python && python3 event_display.py --file_num %s --event_num %lld --extra_time 0.00\n",
-               fileNum.c_str(), localEntry);
+        printf("cd python && python3 event_display.py --file_path \"%s\" --event_num %lld --extra_time 0.00\n",
+               filePath.c_str(), localEntry);
         printf("truth HS time: %.2f ps | HS pT mis-timed frac: %.2f | pT-cut recovers? %d\n",
                branch.truthVtxTime[0],
                hs_pt_tot > 0. ? hs_pt_bad / hs_pt_tot : -1., (int)miscl_ptcut);

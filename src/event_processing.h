@@ -7,12 +7,11 @@
 //   pre-selection, clustering, cluster selection, and histogram filling.
 //   All functions live inside the MyUtl namespace.  Sections:
 //     1. setupChain (directory overload) — add all ROOT files in a directory
-//     2. setupChain (single-file overload) — add one file by run number
-//     3. passTrackVertexAssociation — |z₀ - vtx_z| / σ significance cut
-//     4. filterTracksInJets         — keep only tracks within ΔR of a jet
-//     5. getAssociatedTracks        — full HGTD-acceptance + pTV selection
-//     6. selectClusters             — choose best cluster for every active score
-//     7. processEventData           — main per-event analysis orchestrator
+//     2. passTrackVertexAssociation — |z₀ - vtx_z| / σ significance cut
+//     3. filterTracksInJets         — keep only tracks within ΔR of a jet
+//     4. getAssociatedTracks        — full HGTD-acceptance + pTV selection
+//     5. selectClusters             — choose best cluster for every active score
+//     6. processEventData           — main per-event analysis orchestrator
 // ---------------------------------------------------------------------------
 
 #include "clustering_includes.h"
@@ -57,19 +56,7 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
-  // 2. setupChain  [single-file overload]
-  //   Adds a single SuperNtuple file to chain, selected by its numeric run
-  //   identifier.  Convenience wrapper for quick single-file checks.
-  //   Only used by python/runHGTD_Clustering.cxx, run with CWD=python/.
-  // ---------------------------------------------------------------------------
-  void setupChain(
-    TChain &chain, const std::string& number
-  ) {
-    chain.Add(TString::Format("../../highstats-ntuple/user.mcardiff.51010390.Output._%s.SuperNtuple.root", number.c_str()));
-  }
-
-  // ---------------------------------------------------------------------------
-  // 3. passTrackVertexAssociation
+  // 2. passTrackVertexAssociation
   //   Returns true if the z₀ distance between track trackIdx and vertex
   //   vertexIdx is within significanceCut standard deviations:
   //     |z0_trk - z_vtx| / sqrt(var_z0_trk) < significanceCut
@@ -93,7 +80,7 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
-  // 3b. Cluster::calculateTime — out-of-line implementation
+  // 2b. Cluster::calculateTime — out-of-line implementation
   //   Defined here (after passTrackVertexAssociation) to avoid circular includes:
   //   clustering_structs.h cannot include event_processing.h.
   // ---------------------------------------------------------------------------
@@ -145,7 +132,7 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
-  // 3c. Cluster::calculatePurity — out-of-line implementation
+  // 2c. Cluster::calculatePurity — out-of-line implementation
   //   For most scores: returns the pre-computed this->purity (HS ΣpT fraction
   //   of the full cluster).  For WAVES: re-evaluates purity using only the
   //   constituent tracks within dR < 0.4 of a forward reco jet, so the reported
@@ -189,7 +176,7 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
-  // 4. filterTracksInJets
+  // 3. filterTracksInJets
   //   Retains only tracks that lie within minDRCut of at least one reco jet
   //   with pT > MIN_JET_PT.  ΔR is computed using the standard
   //   sqrt(Δη² + Δφ²) metric.  Used to build the FILTJET collection, which
@@ -226,7 +213,7 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
-  // 6. getAssociatedTracks
+  // 4. getAssociatedTracks
   //   Scans the full track array and returns indices of tracks that pass:
   //     • HGTD η acceptance: MIN_HGTD_ETA < |η| < MAX_HGTD_ETA
   //     • pT window: minTrkPt < pT < maxTrkPt
@@ -327,7 +314,7 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
-  // 7. selectClusters
+  // 5. selectClusters
   //   Chooses the best cluster for every active score and returns a map of
   //   Score.id → Cluster.  Two collection types:
   //     main clusters   — iterative clustering on all tracks; all scores with
@@ -400,7 +387,7 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
-  // 8. processEventData
+  // 6. processEventData
   //   Main per-event analysis orchestrator.  Called once per event per timing
   //   scenario (HGTD / IdealRes / IdealEff).  Pipeline:
   //     A) Event selection — passBasicCuts, passJetPtCut.
