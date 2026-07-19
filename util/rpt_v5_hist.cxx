@@ -118,6 +118,9 @@ struct HurtJet {
   double      j_pt, j_eta, j_phi;
   double      rpt_z, rpt_mine;
   int         n_lost;
+  double      t_mine;  // WAVeS cluster time, for the --extra_time annotation.
+                        // Always meaningful whenever a HurtJet is recorded --
+                        // see the collection site's comment for why.
 };
 
 // Keep the top max_n cases by |delta|.
@@ -499,6 +502,9 @@ int main(int argc, char** argv) {
       // set_waves falls back to set_all (applyTimeGate's no-op path), so
       // rpt_mine>=rpt_z always holds and the n_lost/rpt_mine<rpt_z checks
       // below naturally skip these events, matching v4's original structure.
+      // (This also means t_waves below is always meaningful whenever a
+      // HurtJet is actually recorded -- waves_ok must have been true, or the
+      // event would already have been skipped.)
       // Capped per-thread (not globally, since each worker races
       // independently); merged lists are concatenated, not re-sorted,
       // matching v4's original first-come-first-served collection order.
@@ -523,7 +529,7 @@ int main(int argc, char** argv) {
           if (rpt_mine >= rpt_z) continue;  // shouldn't happen, but skip no-op cases
 
           state.hurt_events.push_back({filePath, localEntry, j_pt, j_eta, j_phi,
-                                        rpt_z, rpt_mine, n_lost});
+                                        rpt_z, rpt_mine, n_lost, t_waves});
         }
       }
     }
@@ -628,8 +634,8 @@ int main(int argc, char** argv) {
     for (auto& h : merged.hurt_events) {
       std::printf("  jet pT=%.1f  eta=%.2f  phi=%.2f  RpT: %.3f->%.3f  tracks_lost=%d\n",
                   h.j_pt, h.j_eta, h.j_phi, h.rpt_z, h.rpt_mine, h.n_lost);
-      std::printf("  cd python && python3 event_display.py --file_path \"%s\" --event_num %lld --extra_time 0.00\n\n",
-                  h.file_path.c_str(), h.entry);
+      std::printf("  cd python && python3 event_display.py --file_path \"%s\" --event_num %lld --extra_time %.2f\n\n",
+                  h.file_path.c_str(), h.entry, h.t_mine);
     }
     if (merged.hurt_events.empty())
       std::cout << "  (none found)\n";

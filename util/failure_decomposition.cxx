@@ -633,8 +633,17 @@ auto main() -> int {
         std::string filePath = chain.GetCurrentFile()->GetName();
         const Long64_t localEntry = chain.GetTree()->GetReadEntry();
         std::cout << "\n===== irreducible WAVeS failure =====\n";
-        printf("cd python && python3 event_display.py --file_path \"%s\" --event_num %lld --extra_time 0.00\n",
-               filePath.c_str(), localEntry);
+        // --extra_time is optional: include the WAVeS-selected cluster's real
+        // time when one exists, omit the flag entirely otherwise -- no fake
+        // placeholder value.
+        if (hgtdBestW) {
+          double t_waves = hgtdBestW->calculateTime(Score::WAVES, &branch);
+          printf("cd python && python3 event_display.py --file_path \"%s\" --event_num %lld --extra_time %.2f\n",
+                 filePath.c_str(), localEntry, t_waves);
+        } else {
+          printf("cd python && python3 event_display.py --file_path \"%s\" --event_num %lld\n",
+                 filePath.c_str(), localEntry);
+        }
         printf("truth HS time: %.2f ps | HS pT mis-timed frac: %.2f | pT-cut recovers? %d\n",
                branch.truthVtxTime[0],
                hs_pt_tot > 0. ? hs_pt_bad / hs_pt_tot : -1., (int)miscl_ptcut);
