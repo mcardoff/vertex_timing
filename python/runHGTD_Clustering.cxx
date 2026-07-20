@@ -9,11 +9,13 @@ R__LOAD_LIBRARY(libboost_filesystem)
 
 using namespace MyUtl;
 
-void runHGTD_Clustering(std::string number, Long64_t eventNum) {
-  // Initialize TChain to read the ntuple files
+void runHGTD_Clustering(std::string filePath, Long64_t eventNum) {
+  // Initialize TChain to read the ntuple file. A single Add() of the full
+  // path (any sample -- vbf/zjets/dijet/local) replaces the old
+  // setupChain(chain, std::string) single-file overload, which only worked
+  // for the local default VBF ntuple's fixed naming convention.
   TChain chain("ntuple");
-  // Setup the chain using the utility function from clustering_utilities.h
-  setupChain(chain, number);
+  chain.Add(filePath.c_str());
   TTreeReader reader(&chain);
   BranchPointerWrapper branch(reader);
 

@@ -10,7 +10,7 @@ import subprocess
 import sys
 from itertools import chain
 
-import uproot
+import ROOT
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
@@ -20,7 +20,11 @@ from matplotlib.backends.backend_pdf import PdfPages
 # --- Argument Parsing and Data Loading ---
 parser = argparse.ArgumentParser(description='Process event and vertex data.')
 parser.add_argument('--event_num', type=int, required=True)
-parser.add_argument('--file_num', type=str, required=True)
+parser.add_argument('--file_path', type=str, required=True,
+                    help='Full path to the ntuple ROOT file (any sample -- '
+                         'vbf/zjets/dijet/local). Replaces the old --file_num, '
+                         'which only worked for the local default VBF ntuple\'s '
+                         'fixed naming convention.')
 parser.add_argument('--extra_time', type=float, required=False)
 parser.add_argument('--jet_idx', type=int, required=False, default=None,
                     help='Index of jet to highlight (orange) in R-Z and eta-phi displays')
@@ -35,14 +39,16 @@ parser.add_argument('--output_dir', type=str, required=False,
                     help='Directory to save the output PDF (created if absent)')
 args = parser.parse_args()
 
-event_num, file_num = args.event_num, args.file_num
+event_num, file_path = args.event_num, args.file_path
 
 import os
 os.makedirs(args.output_dir, exist_ok=True)
 
 IDEALEFF = False
-filename = f'{args.output_dir}/event_display_{file_num}_{event_num:04d}.pdf'
-# filename = f'event_displays/failing_5/event_display_{file_num}_{event_num:04d}.pdf'
+# Short identifier for the output filename -- basename minus extension, works
+# for any sample's naming convention (unlike the old bare file_num).
+file_tag = os.path.splitext(os.path.basename(file_path))[0]
+filename = f'{args.output_dir}/event_display_{file_tag}_{event_num:04d}.pdf'
 
 def generate_cluster_colors(n):
     """Generate n perceptually distinct colors using golden-ratio HSV spacing."""
@@ -58,65 +64,72 @@ def generate_cluster_colors(n):
         hue = (hue + golden_ratio) % 1.0
     return colors
 
-ANA_FILE = f'../../highstats-ntuple/user.mcardiff.51010390.Output._{file_num}.SuperNtuple.root'
-tree = uproot.open(ANA_FILE)["ntuple"]
+root_file = ROOT.TFile.Open(file_path)
+tree = root_file.Get("ntuple")
+tree.GetEntry(event_num)
 
-branch = tree.arrays([
+# Flat (one value per track/vertex/jet) branches -- read via GetEntry(event_num)
+# above, then materialized into plain numpy arrays so every downstream access
+# below (branch.<Name>[idx]) works exactly as it did with uproot's
+# branch.<Name>[idx], minus the now-redundant event_num index
+# (we're already positioned at exactly that one entry).
+# Goes through list(...) rather than np.asarray(...) directly: PyROOT doesn't
+# guarantee the numpy buffer protocol for every underlying vector element type
+# (e.g. vector<bool>/vector<char>), so iterate via Python's iteration protocol
+# (which every std::vector<T> supports) for reliability across whatever types
+# this ntuple actually uses.
+_FLAT_BRANCHES = [
     # vertex properties
-    'RecoVtx_z'           ,
-    'RecoVtx_time'        ,
-    'RecoVtx_isHS'        ,
-    'TruthVtx_z'          ,
-    'TruthVtx_time'       ,
-    'TruthVtx_isHS'       ,
+    'RecoVtx_z', 'RecoVtx_time', 'RecoVtx_isHS',
+    'TruthVtx_z', 'TruthVtx_time', 'TruthVtx_isHS',
     'RecoVtx_hasValidTime',
-    # track propertries
-    'Track_z0'          ,
-    'Track_var_z0'      ,
-    'Track_pt'          , 
-    'Track_eta'         ,
-    'Track_theta'       , 
-    'Track_phi'         ,
-    'Track_time'        , 
-    'Track_timeRes'     ,
-    'Track_qOverP'      , 
-    'Track_quality'     ,
-    'Track_nHGTDHits'   ,
-    'Track_hasValidTime',
-    'Track_truthVtx_idx',
+    # track properties
+    'Track_z0', 'Track_var_z0', 'Track_pt', 'Track_eta', 'Track_theta', 'Track_phi',
+    'Track_time', 'Track_timeRes', 'Track_qOverP', 'Track_quality', 'Track_nHGTDHits',
+    'Track_hasValidTime', 'Track_truthVtx_idx',
     # reco jet properties
-    'AntiKt4EMTopoJets_pt' ,
-    'AntiKt4EMTopoJets_eta',
-    'AntiKt4EMTopoJets_phi',
-    'AntiKt4EMTopoJets_truthHSJet_idx',
-])
+    'AntiKt4EMTopoJets_pt', 'AntiKt4EMTopoJets_eta', 'AntiKt4EMTopoJets_phi',
+]
 
-reco_hs_z = branch.RecoVtx_z[event_num][0]
-reco_hs_t = branch.RecoVtx_time[event_num][0]
+class _Branches:
+    pass
 
-truth_hs_z = branch.TruthVtx_z[event_num][0]
-truth_hs_t = branch.TruthVtx_time[event_num][0]
+branch = _Branches()
+for _name in _FLAT_BRANCHES:
+    setattr(branch, _name, np.array(list(getattr(tree, _name))))
+
+# Jagged (per-jet list of matched truth-HS-jet indices) -- kept as a plain
+# list of lists rather than numpy, since it isn't rectangular.
+branch.AntiKt4EMTopoJets_truthHSJet_idx = [
+    list(inner) for inner in tree.AntiKt4EMTopoJets_truthHSJet_idx
+]
+
+reco_hs_z = branch.RecoVtx_z[0]
+reco_hs_t = branch.RecoVtx_time[0]
+
+truth_hs_z = branch.TruthVtx_z[0]
+truth_hs_t = branch.TruthVtx_time[0]
 
 # --- Track and Jet Processing ---
 connected_tracks = []
-for (idx, eta) in enumerate(branch.Track_eta[event_num]):
+for (idx, eta) in enumerate(branch.Track_eta):
     in_hgtd = abs(eta) > 2.38 and abs(eta) < 4.0
-    time_valid = True if IDEALEFF else branch.Track_hasValidTime[event_num][idx] == 1
-    track_quality = branch.Track_quality[event_num][idx] == 1
-    dz = branch.Track_z0[event_num][idx] - branch.RecoVtx_z[event_num][0]
-    nsigma = abs(dz / np.sqrt(branch.Track_var_z0[event_num][idx]))
-    if nsigma < 3.0 and branch.Track_pt[event_num][idx] > 1.0 and in_hgtd and time_valid:
+    time_valid = True if IDEALEFF else branch.Track_hasValidTime[idx] == 1
+    track_quality = branch.Track_quality[idx] == 1
+    dz = branch.Track_z0[idx] - branch.RecoVtx_z[0]
+    nsigma = abs(dz / np.sqrt(branch.Track_var_z0[idx]))
+    if nsigma < 3.0 and branch.Track_pt[idx] > 1.0 and in_hgtd and time_valid:
         connected_tracks.append(idx)
 
 track_info = []
 for idx in connected_tracks:
-    p         = abs(1 / branch.Track_qOverP[event_num][idx])
-    track_eta = branch.Track_eta[event_num][idx]
-    track_phi = branch.Track_phi[event_num][idx]
-    track_pT  = branch.Track_pt[event_num][idx]
-    track_z0  = branch.Track_z0[event_num][idx]
-    track_vtx = branch.Track_truthVtx_idx[event_num][idx]
-    status    = branch.TruthVtx_isHS[event_num][track_vtx]
+    p         = abs(1 / branch.Track_qOverP[idx])
+    track_eta = branch.Track_eta[idx]
+    track_phi = branch.Track_phi[idx]
+    track_pT  = branch.Track_pt[idx]
+    track_z0  = branch.Track_z0[idx]
+    track_vtx = branch.Track_truthVtx_idx[idx]
+    status    = branch.TruthVtx_isHS[track_vtx]
 
     pz = track_pT * np.sinh(track_eta)
     signX = np.sign(track_eta) if track_eta != 0 else 1
@@ -127,12 +140,12 @@ for idx in connected_tracks:
     track_info.append({'z0':track_z0, 'x':x, 'y':y, 'stat':status, 'idx':idx})
 
 jet_info = []
-for idx, jet_pt in enumerate(branch.AntiKt4EMTopoJets_pt[event_num]):
+for idx, jet_pt in enumerate(branch.AntiKt4EMTopoJets_pt):
     if jet_pt < 30.0:
         continue
-    jet_eta = branch.AntiKt4EMTopoJets_eta[event_num][idx]
-    jet_phi = branch.AntiKt4EMTopoJets_phi[event_num][idx]
-    isHS = len(branch.AntiKt4EMTopoJets_truthHSJet_idx[event_num][idx])
+    jet_eta = branch.AntiKt4EMTopoJets_eta[idx]
+    jet_phi = branch.AntiKt4EMTopoJets_phi[idx]
+    isHS = len(branch.AntiKt4EMTopoJets_truthHSJet_idx[idx])
 
     pz = jet_pt * np.sinh(jet_eta)
     signX = np.sign(jet_eta) if jet_eta != 0 else 1
@@ -146,7 +159,7 @@ for idx, jet_pt in enumerate(branch.AntiKt4EMTopoJets_pt[event_num]):
 
 # --- ROOT Macro Execution and Clustering ---
 try:
-    MACRO_CALL = f'runHGTD_Clustering.cxx("{file_num}",{event_num})'
+    MACRO_CALL = f'runHGTD_Clustering.cxx("{file_path}",{event_num})'
     print(MACRO_CALL)
     result = subprocess.run(['root', '-l', '-q', '-b', MACRO_CALL],
                             check=True, capture_output=True, text=True)
@@ -212,30 +225,30 @@ pt_wghts = []
 
 for i_trk, cluster in enumerate(track_clusters):
     # Use list comprehensions to extract relevant data for the cluster
-    this_zcluster = [branch.Track_z0[event_num][idx] for idx in cluster]
-    this_var_z0 = [branch.Track_var_z0[event_num][idx] for idx in cluster]
+    this_zcluster = [branch.Track_z0[idx] for idx in cluster]
+    this_var_z0 = [branch.Track_var_z0[idx] for idx in cluster]
     zbar_num = np.sum(np.array(this_zcluster) / np.array(this_var_z0))
     zbar_den = np.sum(1 / np.array(this_var_z0))
 
     hs_times.extend(track_times[i_trk][j_trk]
                     for (j_trk,idx) in enumerate(cluster)
-                    if branch.Track_truthVtx_idx[event_num][idx] == 0)
-    hs_zs.extend(branch.Track_z0[event_num][idx]
+                    if branch.Track_truthVtx_idx[idx] == 0)
+    hs_zs.extend(branch.Track_z0[idx]
                  for idx in cluster
-                 if branch.Track_truthVtx_idx[event_num][idx] == 0)
+                 if branch.Track_truthVtx_idx[idx] == 0)
 
     hist_times.append(track_times[i_trk])
     hist_zs.append(this_zcluster)
 
     if IDEALEFF:
-        time_errors.append([branch.Track_timeRes[event_num][idx]/np.sqrt(branch.Track_nHGTDHits[event_num][idx])
-                            if branch.Track_hasValidTime[event_num][idx]==1 and branch.Track_nHGTDHits[event_num][idx] > 0 else 30
+        time_errors.append([branch.Track_timeRes[idx]/np.sqrt(branch.Track_nHGTDHits[idx])
+                            if branch.Track_hasValidTime[idx]==1 and branch.Track_nHGTDHits[idx] > 0 else 30
                             for idx in cluster])
     else:
-        time_errors.append([branch.Track_timeRes[event_num][idx] for idx in cluster])
+        time_errors.append([branch.Track_timeRes[idx] for idx in cluster])
     z_errors.append(np.sqrt(this_var_z0))
     cluster_zs.append(zbar_num / zbar_den)
-    pt_wghts.append([branch.Track_pt[event_num][idx] for idx in cluster])
+    pt_wghts.append([branch.Track_pt[idx] for idx in cluster])
 
 print(hs_times)
 print(hs_zs)
@@ -243,12 +256,12 @@ print(hs_zs)
 ### NEW STUFF
 pu_removed_tracks = []
 for idx_trk in connected_tracks:
-    z0_trk = branch.Track_z0[event_num][idx_trk]
-    var_z0_trk = branch.Track_var_z0[event_num][idx_trk]
+    z0_trk = branch.Track_z0[idx_trk]
+    var_z0_trk = branch.Track_var_z0[idx_trk]
 
     closest_nsigma = np.inf
     closest_reco_vtx = -1
-    for (idx_vtx, z_vtx) in enumerate(branch.RecoVtx_z[event_num]):
+    for (idx_vtx, z_vtx) in enumerate(branch.RecoVtx_z):
         nsigma = np.abs(z_vtx - z0_trk)/np.sqrt(var_z0_trk)
         if nsigma < closest_nsigma:
             closest_nsigma = nsigma
@@ -310,14 +323,14 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
     ax.set_yticks([])
 
     # Add vertices and labels
-    ax.scatter(branch.RecoVtx_z[event_num], [0]*len(branch.RecoVtx_z[event_num]),
+    ax.scatter(branch.RecoVtx_z, [0]*len(branch.RecoVtx_z),
                marker='o', s=100,
-               color=['blue' if z == reco_hs_z else 'black' for z in branch.RecoVtx_z[event_num]])
+               color=['blue' if z == reco_hs_z else 'black' for z in branch.RecoVtx_z])
     ax.axhline(y=0.0, color='black', linestyle='--')
 
-    ax.scatter(branch.TruthVtx_z[event_num], [-0.75]*len(branch.TruthVtx_z[event_num]),
+    ax.scatter(branch.TruthVtx_z, [-0.75]*len(branch.TruthVtx_z),
                marker='|', s=100,
-               color=['blue' if z == truth_hs_z else 'black' for z in branch.TruthVtx_z[event_num]])
+               color=['blue' if z == truth_hs_z else 'black' for z in branch.TruthVtx_z])
     ax.axhline(y=-0.75, color='black', linestyle='--')
 
     ax.text(reco_hs_z + 4.5, 0.05, 'Reco vertices', fontsize=12)
@@ -378,7 +391,7 @@ def add_annotation(ax, truth_text_y, reco_text_y):
                 arrowprops={'arrowstyle':'->','color':'blue','lw':2})
     ax.axvline(x=truth_hs_t, ymin=y_min, ymax=y_max, color='blue', lw=2)
 
-    if branch.RecoVtx_hasValidTime[event_num][0] == 1:
+    if branch.RecoVtx_hasValidTime[0] == 1:
         ax.annotate("HGTD Time", xytext=(reco_hs_t-5*x_step, y_min-2*y_step),
                     xy=(reco_hs_t, reco_text_y), xycoords='data',
                     ha='left', va='top', color='black',
@@ -591,10 +604,10 @@ with PdfPages(filename) as pdf:
     for i_cl, cluster in enumerate(track_clusters):
         col = cluster_colors[i_cl]
         for idx in cluster:
-            eta = float(branch.Track_eta[event_num][idx])
-            phi = float(branch.Track_phi[event_num][idx])
-            pt  = float(branch.Track_pt[event_num][idx])
-            is_hs = branch.Track_truthVtx_idx[event_num][idx] == 0
+            eta = float(branch.Track_eta[idx])
+            phi = float(branch.Track_phi[idx])
+            pt  = float(branch.Track_pt[idx])
+            is_hs = branch.Track_truthVtx_idx[idx] == 0
             _eta_ax(eta).scatter(eta, phi,
                         s=max(20, pt * 8),
                         color=col,
@@ -606,8 +619,8 @@ with PdfPages(filename) as pdf:
     # Cluster centroids: signed mean η and circular mean φ
     for i_cl, cluster in enumerate(track_clusters):
         col  = cluster_colors[i_cl]
-        etas = np.array([float(branch.Track_eta[event_num][idx]) for idx in cluster])
-        phis = np.array([float(branch.Track_phi[event_num][idx]) for idx in cluster])
+        etas = np.array([float(branch.Track_eta[idx]) for idx in cluster])
+        phis = np.array([float(branch.Track_phi[idx]) for idx in cluster])
         eta_c = np.mean(etas)
         phi_c = np.arctan2(np.mean(np.sin(phis)), np.mean(np.cos(phis)))
         _eta_ax(eta_c).scatter(eta_c, phi_c,

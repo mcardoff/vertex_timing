@@ -9,6 +9,8 @@
 //   default when no flag is given.
 // ---------------------------------------------------------------------------
 
+#include <Rtypes.h>  // Long64_t
+
 #include <algorithm>
 #include <iostream>
 #include <map>
@@ -22,6 +24,7 @@ namespace MyUtl {
     std::string energyLabel;
     std::string outputDir;
     std::string sampleName;  // "" for the local/default run; e.g. "vbf" when --sample= is given
+    bool        overlapRemoval = false;  // lepton–jet overlap removal (Z+jets only; see OVERLAP_REMOVAL)
   };
 
   // Mutable globals read by plotting code (event-label text, PDF output root).
@@ -57,11 +60,11 @@ namespace MyUtl {
   inline SampleConfig resolveSample(int argc, char** argv) {
     static const std::map<std::string, SampleConfig> registry = {
       {"vbf",   {"/data/mcardiff/exotic_superntuples/highstats_vbf/",
-                 "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv.", "vbf",   "vbf"}},
+                 "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv.", "vbf",   "vbf",   false}},
       {"zjets", {"/data/mcardiff/exotic_superntuples/zjets/",
-                 "#sqrt{s} = 14 TeV, HL-LHC, Z+jets",               "zjets", "zjets"}},
+                 "#sqrt{s} = 14 TeV, HL-LHC, Z+jets",               "zjets", "zjets", true}},
       {"dijet", {"/data/mcardiff/exotic_superntuples/dijet/",
-                 "#sqrt{s} = 14 TeV, HL-LHC, Dijet",                "dijet", "dijet"}},
+                 "#sqrt{s} = 14 TeV, HL-LHC, Dijet",                "dijet", "dijet", false}},
     };
 
     const std::string prefix = "--sample=";
@@ -78,7 +81,7 @@ namespace MyUtl {
       return it->second;
     }
 
-    return {"/Users/mcard/project/ntuple-hgtd/", "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv.", "../figs", ""};
+    return {"/Users/mcard/project/ntuple-hgtd/", "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv.", "../figs", "", false};
   }
 
   // ---------------------------------------------------------------------------
@@ -101,6 +104,23 @@ namespace MyUtl {
     }
 
     return nThreads > 0 ? nThreads : 1u;
+  }
+
+  // ---------------------------------------------------------------------------
+  // resolveMaxEvents
+  //   Optional event cap via a --max-events=<N> CLI flag, for quick local
+  //   sanity checks (e.g. a diagnostic breakdown) without waiting on a full
+  //   multi-million-event condor-scale run. Returns -1 (no cap; default) when
+  //   the flag is absent, so every existing invocation is unaffected.
+  // ---------------------------------------------------------------------------
+  inline Long64_t resolveMaxEvents(int argc, char** argv) {
+    const std::string prefix = "--max-events=";
+    for (int i = 1; i < argc; ++i) {
+      std::string arg = argv[i];
+      if (arg.rfind(prefix, 0) != 0) continue;
+      return static_cast<Long64_t>(std::stoll(arg.substr(prefix.size())));
+    }
+    return -1;
   }
 
   // ---------------------------------------------------------------------------

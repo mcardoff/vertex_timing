@@ -7,12 +7,11 @@
 //   pre-selection, clustering, cluster selection, and histogram filling.
 //   All functions live inside the MyUtl namespace.  Sections:
 //     1. setupChain (directory overload) — add all ROOT files in a directory
-//     2. setupChain (single-file overload) — add one file by run number
-//     3. passTrackVertexAssociation — |z₀ - vtx_z| / σ significance cut
-//     4. filterTracksInJets         — keep only tracks within ΔR of a jet
-//     5. getAssociatedTracks        — full HGTD-acceptance + pTV selection
-//     6. selectClusters             — choose best cluster for every active score
-//     7. processEventData           — main per-event analysis orchestrator
+//     2. passTrackVertexAssociation — |z₀ - vtx_z| / σ significance cut
+//     3. filterTracksInJets         — keep only tracks within ΔR of a jet
+//     4. getAssociatedTracks        — full HGTD-acceptance + pTV selection
+//     5. selectClusters             — choose best cluster for every active score
+//     6. processEventData           — main per-event analysis orchestrator
 // ---------------------------------------------------------------------------
 
 #include "clustering_includes.h"
@@ -57,19 +56,7 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
-  // 2. setupChain  [single-file overload]
-  //   Adds a single SuperNtuple file to chain, selected by its numeric run
-  //   identifier.  Convenience wrapper for quick single-file checks.
-  //   Only used by python/runHGTD_Clustering.cxx, run with CWD=python/.
-  // ---------------------------------------------------------------------------
-  void setupChain(
-    TChain &chain, const std::string& number
-  ) {
-    chain.Add(TString::Format("../../highstats-ntuple/user.mcardiff.51010390.Output._%s.SuperNtuple.root", number.c_str()));
-  }
-
-  // ---------------------------------------------------------------------------
-  // 3. passTrackVertexAssociation
+  // 2. passTrackVertexAssociation
   //   Returns true if the z₀ distance between track trackIdx and vertex
   //   vertexIdx is within significanceCut standard deviations:
   //     |z0_trk - z_vtx| / sqrt(var_z0_trk) < significanceCut
@@ -93,7 +80,7 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
-  // 3b. Cluster::calculateTime — out-of-line implementation
+  // 2b. Cluster::calculateTime — out-of-line implementation
   //   Defined here (after passTrackVertexAssociation) to avoid circular includes:
   //   clustering_structs.h cannot include event_processing.h.
   // ---------------------------------------------------------------------------
@@ -112,6 +99,7 @@ namespace MyUtl {
       std::vector<std::pair<double,double>> hsJets;
       const int nJets = (int)branch->topoJetPt.GetSize();
       for (int j = 0; j < nJets; ++j) {
+        if (branch->isJetRemoved(j)) continue;  // lepton-overlap removed (Z+jets)
         double jEta = branch->topoJetEta[j];
         if (branch->topoJetPt[j] < MIN_JET_PT) continue;
         if (std::abs(jEta) < MIN_ABS_ETA_JET || std::abs(jEta) > MAX_ABS_ETA_JET) continue;
@@ -144,7 +132,7 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
-  // 3c. Cluster::calculatePurity — out-of-line implementation
+  // 2c. Cluster::calculatePurity — out-of-line implementation
   //   For most scores: returns the pre-computed this->purity (HS ΣpT fraction
   //   of the full cluster).  For WAVES: re-evaluates purity using only the
   //   constituent tracks within dR < 0.4 of a forward reco jet, so the reported
@@ -160,6 +148,7 @@ namespace MyUtl {
     std::vector<std::pair<double,double>> hsJets;
     const int nJets = (int)branch->topoJetPt.GetSize();
     for (int j = 0; j < nJets; ++j) {
+      if (branch->isJetRemoved(j)) continue;  // lepton-overlap removed (Z+jets)
       double jEta = branch->topoJetEta[j];
       if (branch->topoJetPt[j] < MIN_JET_PT) continue;
       if (std::abs(jEta) < MIN_ABS_ETA_JET || std::abs(jEta) > MAX_ABS_ETA_JET) continue;
@@ -187,7 +176,7 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
-  // 4. filterTracksInJets
+  // 3. filterTracksInJets
   //   Retains only tracks that lie within minDRCut of at least one reco jet
   //   with pT > MIN_JET_PT.  ΔR is computed using the standard
   //   sqrt(Δη² + Δφ²) metric.  Used to build the FILTJET collection, which
@@ -207,6 +196,7 @@ namespace MyUtl {
 	trkPhi = branch->trackPhi[trk];
       bool inCone = false;
       for (int jetIdx = 0; jetIdx < N_JETS; ++jetIdx) {
+	if (branch->isJetRemoved(jetIdx)) continue;  // lepton-overlap removed (Z+jets)
 	if (branch->topoJetPt[jetIdx] < MIN_JET_PT) continue;
 	double
 	  deta = branch->topoJetEta[jetIdx] - trkEta,
@@ -223,7 +213,7 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
-  // 6. getAssociatedTracks
+  // 4. getAssociatedTracks
   //   Scans the full track array and returns indices of tracks that pass:
   //     • HGTD η acceptance: MIN_HGTD_ETA < |η| < MAX_HGTD_ETA
   //     • pT window: minTrkPt < pT < maxTrkPt
@@ -324,7 +314,7 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
-  // 7. selectClusters
+  // 5. selectClusters
   //   Chooses the best cluster for every active score and returns a map of
   //   Score.id → Cluster.  Two collection types:
   //     main clusters   — iterative clustering on all tracks; all scores with
@@ -397,7 +387,7 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
-  // 8. processEventData
+  // 6. processEventData
   //   Main per-event analysis orchestrator.  Called once per event per timing
   //   scenario (HGTD / IdealRes / IdealEff).  Pipeline:
   //     A) Event selection — passBasicCuts, passJetPtCut.
@@ -413,7 +403,24 @@ namespace MyUtl {
   //
   // ---------------------------------------------------------------------------
   // EventResult — returned by processEventData
-  //   code           — -1: rejected by selection; 0: normal; 3: MISAS fail
+  //   code           — rejection/status code:
+  //                      0  normal
+  //                      3  MISAS fail (TRKPTZ passes, TEST_MISAS fails)
+  //                     -1  rejected, cause not distinguished (generic; kept
+  //                         for any future early-return that doesn't need its
+  //                         own bucket)
+  //                     -2  rejected: Z+jets lepton selection, 0 qualifying
+  //                         leptons found (isGoodLepton: flagged + pt>20)
+  //                     -3  rejected: SKIP_EVENT lepton–jet overlap veto
+  //                         (inert unless OverlapMode::SKIP_EVENT)
+  //                     -4  rejected: passBasicCuts (vertex quality / MIN_JETS)
+  //                     -5  rejected: passJetPtCut (jet-pT/VBS topology)
+  //                     -6  rejected: Z+jets lepton selection, exactly 1
+  //                         qualifying lepton found (missing the other leg)
+  //                     -7  rejected: Z+jets lepton selection, ≥2 qualifying
+  //                         leptons found but no OS-SF pair among them
+  //                   All rejection codes are negative; `code >= 0` still means
+  //                   "event was processed" everywhere that check is used.
   //   time           — TRKPTZ-selected cluster time
   //   nFwdHS         — n forward HS tracks (3σ counting step)
   //   trkptzPass     — true if TRKPTZ passed the PASS_SIGMA timing window
@@ -439,8 +446,25 @@ namespace MyUtl {
     std::map<Score,AnalysisObj>& analyses
   ) {
     // ── A. Event selection ──────────────────────────────────────────────────
-    if (!branch->passBasicCuts()) return {};
-    if (!branch->passJetPtCut())  return {};
+    // Lepton–jet overlap removal (Z+jets only): rebuild the removed-jet mask for
+    // this event before any jet loop below. No-op on other samples. In
+    // SKIP_EVENT mode, veto the whole event if any lepton–jet overlap exists;
+    // in REMOVE_JETS mode the mask is instead consulted per-jet via isJetRemoved.
+    branch->computeOverlapRemoval();
+    // Z→ℓℓ selection (Z+jets only): require an opposite-sign same-flavour
+    // lepton pair with pt > LEPTON_MIN_PT; no-op on other samples. Classify
+    // the failure (see EventResult::code doc above) so a low survival rate
+    // can be attributed to "too few qualifying leptons" vs. "found some but
+    // no OS-SF pair" instead of guessed at.
+    if (!branch->passLeptonSelection()) {
+      int nGood = branch->countGoodLeptons();
+      if (nGood == 0) return {-2};
+      if (nGood == 1) return {-6};
+      return {-7};
+    }
+    if (branch->vetoLeptonOverlap())  return {-3};
+    if (!branch->passBasicCuts()) return {-4};
+    if (!branch->passJetPtCut())  return {-5};
 
     // ── B. Track selection ──────────────────────────────────────────────────
     // Scan once at 3σ so counting statistics include slightly-displaced tracks,

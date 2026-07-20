@@ -97,6 +97,22 @@ namespace MyUtl {
 
     TTreeReaderArray<float> particleT;
 
+    // Lepton–jet overlap removal (Z+jets only). Track_leptonID flags tracks that
+    // are leptons; a non-zero value means "lepton" (works whether the branch
+    // stores 0/1 or a signed PDG-style code). Bound lazily via unique_ptr only
+    // when OVERLAP_REMOVAL is set, so samples whose ntuples lack the branch
+    // (vbf/dijet/local) never touch it. removedJet is the per-event mask filled
+    // by computeOverlapRemoval(); empty ⇒ nothing removed.
+    // Track_leptonID is a `char` branch (holds the signed lepton PDG id: ±11/±13,
+    // 0 for non-leptons — all within char's −128..127 range). It MUST be read
+    // with a matching TTreeReaderArray<char>; a mismatched type (e.g. <int>)
+    // silently yields size 0 (ROOT logs a CreateContentProxy error, which
+    // clustering_hist's gErrorIgnoreLevel=kFatal hides), which would veto every
+    // Z+jets event. Read individual values via leptonPdg() below so the sign is
+    // correct regardless of whether `char` is signed on the build platform.
+    std::unique_ptr<TTreeReaderArray<char>> trackLeptonID;
+    std::vector<char> removedJet;
+
   BranchPointerWrapper(TTreeReader& r)
     : reader (r),
       weight (r, "weight"),
@@ -128,7 +144,136 @@ namespace MyUtl {
       topoJetTruthHSIdx (r, "AntiKt4EMTopoJets_truthHSJet_idx"),
       topoJetGhostTrackIdx (r, "AntiKt4EMTopoJets_ghostTrack_idx"),
       particleT (r, "TruthPart_prodVtx_time")
-    {}
+    {
+      // Only bind the lepton branch when overlap removal is active (Z+jets),
+      // so other samples' readers never register a branch their ntuples lack.
+      if (OVERLAP_REMOVAL)
+        trackLeptonID = std::make_unique<TTreeReaderArray<char>>(r, "Track_leptonID");
+    }
+
+    // -----------------------------------------------------------------------
+    // leptonPdg
+    //   Signed lepton PDG id for track t from the char Track_leptonID branch.
+    //   The static_cast<signed char> reinterprets the stored 8-bit pattern as
+    //   signed, so negative ids (e.g. -11) come back correctly even if `char`
+    //   is unsigned on the build platform. Callers must ensure trackLeptonID is
+    //   bound and t is in range.
+    // -----------------------------------------------------------------------
+    int leptonPdg(int t) const {
+      return static_cast<int>(static_cast<signed char>((*trackLeptonID)[t]));
+    }
+
+    // -----------------------------------------------------------------------
+    // isGoodLepton
+    //   Track t is a selected lepton: Track_leptonID-flagged (non-zero signed
+    //   PDG id) AND pt > LEPTON_MIN_PT. Single-sourced lepton definition shared
+    //   by both the overlap removal and the Z-selection so the pT quality cut
+    //   is applied consistently. Assumes t indexes a valid track (callers loop
+    //   over the Track_leptonID array size).
+    // -----------------------------------------------------------------------
+    bool isGoodLepton(int t) const {
+      return trackLeptonID && leptonPdg(t) != 0
+             && this->trackPt[t] > LEPTON_MIN_PT;
+    }
+
+    // -----------------------------------------------------------------------
+    // countGoodLeptons
+    //   Number of tracks passing isGoodLepton in this event. Diagnostic-only
+    //   helper (see LeptonSelDiag below) -- lets a low Z->ll survival rate be
+    //   attributed to "too few qualifying leptons" vs. "found some but no
+    //   OS-SF pair among them" instead of guessed at. Returns 0 when
+    //   trackLeptonID isn't bound (non-Z+jets samples).
+    // -----------------------------------------------------------------------
+    int countGoodLeptons() const {
+      if (!trackLeptonID) return 0;
+      const int n = (int)trackLeptonID->GetSize();
+      int count = 0;
+      for (int t = 0; t < n; ++t)
+        if (isGoodLepton(t)) ++count;
+      return count;
+    }
+
+    // -----------------------------------------------------------------------
+    // passLeptonSelection
+    //   Z-boson event selection for Z+jets: require at least one opposite-sign
+    //   same-flavour lepton pair among the selected leptons (isGoodLepton) —
+    //   |pdg_i| == |pdg_j| and pdg_i·pdg_j < 0. Skips events with no
+    //   reconstructed Z→ℓℓ. Returns true (no-op) when OVERLAP_REMOVAL is unset
+    //   (vbf/dijet/local), leaving those samples unaffected. Unlike the
+    //   SKIP_EVENT overlap veto, this is a clean physics selection (defines the
+    //   Z→ℓℓ+jets fiducial region), not a pileup-biased cut.
+    // -----------------------------------------------------------------------
+    bool passLeptonSelection() const {
+      if (!OVERLAP_REMOVAL || !trackLeptonID) return true;
+      const int n = (int)trackLeptonID->GetSize();
+      std::vector<int> ids;  // signed PDG ids of selected leptons
+      for (int t = 0; t < n; ++t)
+        if (isGoodLepton(t)) ids.push_back(leptonPdg(t));
+      for (size_t a = 0; a < ids.size(); ++a)
+        for (size_t b = a + 1; b < ids.size(); ++b)
+          if (std::abs(ids[a]) == std::abs(ids[b]) && ids[a] * ids[b] < 0)
+            return true;  // opposite-sign same-flavour pair found
+      return false;
+    }
+
+    // -----------------------------------------------------------------------
+    // computeOverlapRemoval
+    //   Rebuilds removedJet for the current event: a reco jet is flagged
+    //   removed if it lies within LEPTON_JET_DR of any selected lepton
+    //   (isGoodLepton — flagged AND pt > LEPTON_MIN_PT; standard ATLAS
+    //   lepton–jet overlap removal, all η). Must be called once per event
+    //   before any jet loop. No-op (mask cleared to all-false) unless
+    //   OVERLAP_REMOVAL is set, so on vbf/dijet/local isJetRemoved() is always
+    //   false and behaviour is unchanged. Cheap: leptons per event are O(2).
+    // -----------------------------------------------------------------------
+    void computeOverlapRemoval() {
+      if (!OVERLAP_REMOVAL || !trackLeptonID) { removedJet.clear(); return; }
+      const int nJets = (int)this->topoJetPt.GetSize();
+      removedJet.assign(nJets, 0);
+
+      const int nLep = (int)trackLeptonID->GetSize();
+      for (int t = 0; t < nLep; ++t) {
+        if (!isGoodLepton(t)) continue;  // flagged lepton with pt > LEPTON_MIN_PT
+        double lEta = this->trackEta[t];
+        double lPhi = this->trackPhi[t];
+        for (int j = 0; j < nJets; ++j) {
+          if (removedJet[j]) continue;  // already removed by another lepton
+          double deta = this->topoJetEta[j] - lEta;
+          double dphi = TVector2::Phi_mpi_pi(this->topoJetPhi[j] - lPhi);
+          if (std::hypot(deta, dphi) < LEPTON_JET_DR) removedJet[j] = 1;
+        }
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // isJetRemoved
+    //   True if reco jet j was dropped by lepton–jet overlap removal this event.
+    //   Only meaningful in OverlapMode::REMOVE_JETS — in SKIP_EVENT mode the
+    //   whole event is vetoed up front (see vetoLeptonOverlap), so no per-jet
+    //   removal is applied and this returns false. Also always false when
+    //   removedJet is empty (non-Z+jets samples, or before
+    //   computeOverlapRemoval() has run), so every jet loop can guard on it
+    //   unconditionally with zero effect on other samples.
+    // -----------------------------------------------------------------------
+    bool isJetRemoved(int j) const {
+      if (OVERLAP_MODE != OverlapMode::REMOVE_JETS) return false;
+      return j >= 0 && j < (int)removedJet.size() && removedJet[j] != 0;
+    }
+
+    // -----------------------------------------------------------------------
+    // vetoLeptonOverlap
+    //   True if this event should be skipped entirely because of a lepton–jet
+    //   overlap. Only fires in OverlapMode::SKIP_EVENT (and only for Z+jets,
+    //   via OVERLAP_REMOVAL); returns false in REMOVE_JETS mode, where the
+    //   overlap is handled per-jet via isJetRemoved instead. Call after
+    //   computeOverlapRemoval() has populated removedJet.
+    // -----------------------------------------------------------------------
+    bool vetoLeptonOverlap() const {
+      if (!OVERLAP_REMOVAL || OVERLAP_MODE != OverlapMode::SKIP_EVENT) return false;
+      for (char c : removedJet)
+        if (c) return true;
+      return false;
+    }
 
     // -----------------------------------------------------------------------
     // passBasicCuts
@@ -195,6 +340,7 @@ namespace MyUtl {
       std::vector<int> passPtIdx;  // indices of pT-passing jets
 
       for (int jetIdx = 0; jetIdx < (int)this->topoJetPt.GetSize(); ++jetIdx) {
+        if (this->isJetRemoved(jetIdx)) continue;  // lepton-overlap removed (Z+jets)
         float eta = std::abs(this->topoJetEta[jetIdx]);
         float pt  = this->topoJetPt[jetIdx];
         if (DEBUG) std::cout << "reco jet pt, eta: " << pt << ", " << eta << '\n';
@@ -235,6 +381,7 @@ namespace MyUtl {
     void countForwardJets(int& nForwardJet) {
     nForwardJet = 0;
     for(int jetIdx = 0; jetIdx < this->topoJetEta.GetSize(); ++jetIdx) {
+      if (this->isJetRemoved(jetIdx)) continue;  // lepton-overlap removed (Z+jets)
       float
 	jetEta = std::abs(this->topoJetEta[jetIdx]),
 	jetPt = this->topoJetPt[jetIdx];
@@ -505,6 +652,7 @@ namespace MyUtl {
           double minDR     = 1e6;
           double nearJetPt = 0.0;
           for (int j = 0; j < (int)branch->topoJetEta.GetSize(); ++j) {
+            if (branch->isJetRemoved(j)) continue;  // lepton-overlap removed (Z+jets)
             double jEta = branch->topoJetEta[j];
             double jPt  = branch->topoJetPt[j];
             if (jPt < MIN_JET_PT) continue;

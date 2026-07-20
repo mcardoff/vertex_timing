@@ -134,11 +134,14 @@ int main(int argc, char** argv) {
   // NOT defined yet -- see the sentinel comment at the end of this section.
   // ===========================================================================
 
-  // Harmonized "high-efficiency working point" window: fixed at [0.6, 1.0]
-  // for every sample and pT-slice (rather than a per-sample adaptive range)
-  // so plots are directly comparable across samples, showing as much of the
-  // curve as possible without letting any one sample drag the window around.
-  const double roc_xmin_default = 0.6, roc_xmax_default = 1.0;
+  // Harmonized "high-efficiency working point" window: fixed for every sample
+  // and pT-slice (rather than a per-sample adaptive range) so plots are
+  // directly comparable across samples. Zoomed to [0.85, 1.0] -- the
+  // high-efficiency region that is actually the working point of interest;
+  // the wider [0.6, 1.0] view was only needed while Z+jets curves fell short
+  // of this window, which the lepton overlap removal fixed (its HS-efficiency
+  // reach now extends to ~0.96).
+  const double roc_xmin_default = 0.85, roc_xmax_default = 1.0;
   std::vector<TGraph*> rocs_lo, rocs_hi;
   for (auto& s : scen_lo) rocs_lo.push_back(generate_roc(s.h_pu, s.h_hs));
   for (auto& s : scen_hi) rocs_hi.push_back(generate_roc(s.h_pu, s.h_hs));
@@ -336,11 +339,34 @@ int main(int argc, char** argv) {
     canvas->Print(out_pdf);
   };
 
-  // (1) ROC — 30–40 GeV.  Linear, shared y maxima: ROC ymax = 300, ratio ymax = 4.
-  drawRocWithRatio(rocs_lo, scen_lo, 300.0, 4.0, roc_xmin_lo, roc_xmax_lo, lbl_lo);
+  // ROC y-maximum, auto-scaled to the curves actually visible in the x-window.
+  // This was previously hard-coded to 300, which only suited the old [0.6, 1.0]
+  // view: pile-up rejection falls steeply with efficiency, so a zoomed
+  // high-efficiency window leaves every curve squashed into the bottom of a
+  // fixed 0-300 frame. Computed once across BOTH pT slices so they keep a
+  // shared, directly-comparable scale (as the fixed 300 did). The 1.5 headroom
+  // keeps the topmost curve near ~2/3 pad height, clear of the ATLAS/sample
+  // labels. Reads the graphs via GetPoint, so it is unaffected by any
+  // SetRangeUser applied for display.
+  auto rocYMaxIn = [](const std::vector<TGraph*>& gs, double xmin, double xmax) {
+    double m = 0.0;
+    for (auto* g : gs)
+      for (int i = 0; i < g->GetN(); ++i) {
+        double x, y;
+        g->GetPoint(i, x, y);
+        if (x >= xmin && x <= xmax) m = std::max(m, y);
+      }
+    return m;
+  };
+  double roc_ymax = 1.5 * std::max(rocYMaxIn(rocs_lo, roc_xmin_lo, roc_xmax_lo),
+                                   rocYMaxIn(rocs_hi, roc_xmin_hi, roc_xmax_hi));
+  if (!(roc_ymax > 0.0)) roc_ymax = 300.0;  // fallback: no points in window
+
+  // (1) ROC — 30–40 GeV.  Linear, shared y maxima across slices; ratio ymax = 4.
+  drawRocWithRatio(rocs_lo, scen_lo, roc_ymax, 4.0, roc_xmin_lo, roc_xmax_lo, lbl_lo);
 
   // (2) ROC — >40 GeV.
-  drawRocWithRatio(rocs_hi, scen_hi, 300.0, 4.0, roc_xmin_hi, roc_xmax_hi, lbl_hi);
+  drawRocWithRatio(rocs_hi, scen_hi, roc_ymax, 4.0, roc_xmin_hi, roc_xmax_hi, lbl_hi);
 
   // (3+) Per-scenario HS vs PU, 30–40 GeV slice, log-y.
   canvas->Clear();

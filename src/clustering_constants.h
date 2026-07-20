@@ -79,6 +79,23 @@ namespace MyUtl {
   const double DIST_CUT_ITER      = 3.0;   // Distance cut for iterative clustering
   const double DIST_CUT_T_REFINED = 2.0;   // Re-clustering distance cut for JET_T_REFINED (WAVES_RECLUST)
   const double WAVES_DR_FLOOR    = 0.05;  // Minimum ΔR for WAVeS 1/ΔR weight (prevents divergence)
+  const double LEPTON_JET_DR      = 0.5;   // ΔR(lepton, jet) overlap-removal cone (Z+jets only)
+  const double LEPTON_MIN_PT       = 20.0;  // GeV — min pT for a selected lepton (Z+jets only)
+  // Lepton–jet overlap removal switch. Runtime (not compile-time) so it can be
+  // driven from the resolved --sample: set true only for Z+jets in each main()
+  // right after resolveSample() (mirrors SAMPLE_NAME/OUTPUT_DIR). When true,
+  // BranchPointerWrapper binds Track_leptonID and every jet loop skips reco jets
+  // within LEPTON_JET_DR of a flagged lepton track; when false (vbf/dijet/local)
+  // the branch is never bound and the removal is a no-op, so behaviour is
+  // bit-for-bit unchanged on those samples.
+  inline bool  OVERLAP_REMOVAL   = false;
+  // Overlap-removal behavior when a Z+jets event has a lepton–jet overlap:
+  //   REMOVE_JETS — drop only the overlapping reco jet(s), keep the event.
+  //   SKIP_EVENT  — veto the whole event if any lepton–jet overlap exists.
+  // Runtime so both can be produced without a recompile. Only consulted when
+  // OVERLAP_REMOVAL is true (i.e. Z+jets); a no-op on vbf/dijet/local.
+  enum class OverlapMode { REMOVE_JETS, SKIP_EVENT };
+  inline OverlapMode OVERLAP_MODE = OverlapMode::REMOVE_JETS;
   const int    CONE_ITER_K        = 3;     // Top cone clusters to refine; used only by util/scratch/cone_iter_k_sweep.cxx
   const double TRUTH_PULL_CUT     = 3.0;   // |pull| < cut keeps track as truth-matched
   // z₀ pull-width inflation factor (measured from z0_pull_diag: σ ≈ 1.15 across all
