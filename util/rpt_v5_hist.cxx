@@ -488,8 +488,11 @@ int main(int argc, char** argv) {
             if (in_lo) insertCase(state.cases_pu_mine_corrects_lo, c);
             else       insertCase(state.cases_pu_mine_corrects_hi, c);
           }
-          // PU jets where WAVeS gives higher RpT than HGTD (makes PU look more HS-like).
-          if (isPU && delta > 0 && rpt_mine_j > 0.1) {
+          // WAVeS's OWN pile-up mistags: truth-PU jets the WAVeS ("mine") RpT tags as
+          // HS-like (rpt_mine > 0.1), gated on the new algorithm alone -- NOT on the
+          // HGTD comparison (delta). This surfaces where WAVeS itself fails, independent
+          // of whether HGTD does better or worse, which is the set to study/fix.
+          if (isPU && rpt_mine_j > 0.1) {
             if (in_lo) insertCase(state.cases_pu_mine_worse_lo, c);
             else       insertCase(state.cases_pu_mine_worse_hi, c);
           }
@@ -634,7 +637,7 @@ int main(int argc, char** argv) {
     for (auto& h : merged.hurt_events) {
       std::printf("  jet pT=%.1f  eta=%.2f  phi=%.2f  RpT: %.3f->%.3f  tracks_lost=%d\n",
                   h.j_pt, h.j_eta, h.j_phi, h.rpt_z, h.rpt_mine, h.n_lost);
-      std::printf("  cd python && python3 event_display.py --file_path \"%s\" --event_num %lld --extra_time %.2f\n\n",
+      std::printf("  python3 event_display.py --file_path \"%s\" --event_num %lld --extra_time %.2f\n\n",
                   h.file_path.c_str(), h.entry, h.t_mine);
     }
     if (merged.hurt_events.empty())
@@ -647,7 +650,7 @@ int main(int argc, char** argv) {
         std::printf("  jet pT=%.1f GeV  eta=%.2f  %s  RpT: mine=%.3f  hgtd=%.3f  delta=%.3f\n",
                     c.j_pt, c.j_eta, c.isHS ? "HS" : "PU",
                     c.rpt_mine, c.rpt_hgtd, c.delta);
-        std::printf("  cd python && python3 event_display.py --file_path \"%s\" --event_num %lld"
+        std::printf("  python3 event_display.py --file_path \"%s\" --event_num %lld"
                     " --extra_time %.2f --jet_idx %d --jet_label %s"
                     " --rpt_hgtd %.3f --rpt_mine %.3f\n\n",
                     c.file_path.c_str(), c.entry, c.t_mine, c.jet_idx,
@@ -666,10 +669,10 @@ int main(int argc, char** argv) {
     printCases("CASE 5 - WAVeS corrects PU mistag (30-40 GeV)", merged.cases_pu_mine_corrects_lo);
     printCases("CASE 6 - WAVeS corrects PU mistag (>40 GeV)",   merged.cases_pu_mine_corrects_hi);
 
-    std::cout << "\n=== PU MISTAG WORSENING: WAVeS pushes PU jet closer to HS ===\n";
-    std::cout << "  (PU jets with rpt_mine > 0.1 where WAVeS gives higher RpT than HGTD)\n";
-    printCases("CASE 7 - WAVeS worsens PU mistag (30-40 GeV)", merged.cases_pu_mine_worse_lo);
-    printCases("CASE 8 - WAVeS worsens PU mistag (>40 GeV)",   merged.cases_pu_mine_worse_hi);
+    std::cout << "\n=== WAVeS PU MISTAGS: truth-PU jets WAVeS tags as HS-like (gate on rpt_mine) ===\n";
+    std::cout << "  (PU jets with rpt_mine > 0.1 -- WAVeS's own mistags, independent of HGTD)\n";
+    printCases("CASE 7 - WAVeS mistags PU (30-40 GeV)", merged.cases_pu_mine_worse_lo);
+    printCases("CASE 8 - WAVeS mistags PU (>40 GeV)",   merged.cases_pu_mine_worse_hi);
   }
 
   return 0;

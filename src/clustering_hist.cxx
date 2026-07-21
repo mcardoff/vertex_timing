@@ -30,7 +30,7 @@ using namespace MyUtl;
 // Event display command template (filled with full file path, event number, extra time).
 // Quoted since --file_path takes an arbitrary absolute path.
 static constexpr const char* EVTDISPLAY_FMT =
-  "cd python && python3 event_display.py --file_path \"%s\" --event_num %lld --extra_time %.2f";
+  "python3 event_display.py --file_path \"%s\" --event_num %lld --extra_time %.2f";
 
 // Set to true to print event display commands to stdout after the event loop.
 static constexpr bool PRINT_EVENT_DISPLAYS = false;
