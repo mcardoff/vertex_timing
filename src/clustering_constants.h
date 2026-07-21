@@ -78,7 +78,7 @@ namespace MyUtl {
   const double DIST_CUT_SIMUL     = 3.0;   // Distance cut for simul. clustering
   const double DIST_CUT_ITER      = 3.0;   // Distance cut for iterative clustering
   const double DIST_CUT_T_REFINED = 2.0;   // Re-clustering distance cut for JET_T_REFINED (WAVES_RECLUST)
-  const double WAVES_DR_FLOOR    = 0.05;  // Minimum ΔR for WAVeS 1/ΔR weight (prevents divergence)
+  const double WAVES_DR_FLOOR    = 0.1;  // Minimum ΔR for WAVeS 1/ΔR weight (prevents divergence)
   const double LEPTON_JET_DR      = 0.5;   // ΔR(lepton, jet) overlap-removal cone (Z+jets only)
   const double LEPTON_MIN_PT       = 20.0;  // GeV — min pT for a selected lepton (Z+jets only)
   // Lepton–jet overlap removal switch. Runtime (not compile-time) so it can be
