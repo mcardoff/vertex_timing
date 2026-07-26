@@ -79,6 +79,15 @@ namespace MyUtl {
   const double DIST_CUT_ITER      = 3.0;   // Distance cut for iterative clustering
   const double DIST_CUT_T_REFINED = 2.0;   // Re-clustering distance cut for JET_T_REFINED (WAVES_RECLUST)
   const double WAVES_DR_FLOOR    = 0.1;  // Minimum ΔR for WAVeS 1/ΔR weight (prevents divergence)
+  // --- WAVeS fix-variant parameters (WAVES_LOJO / WAVES_JETCAP / WAVES_KERNEL) ---
+  // Motivation: on Z+jets the baseline WAVeS score is hijacked by a self-selection
+  // loop — a forward PU jet inflates the score of the cluster built from that jet's
+  // OWN tracks, so the wrong cluster wins by a median factor of ~6x. Raising
+  // WAVES_DR_FLOOR (0.05→0.1) was measured to flip 0/82 curated events, because the
+  // floor rescales every cluster equally. These three variants attack the three
+  // distinct unbounded/self-referential factors instead.
+  const double WAVES_JET_PT_CAP  = 50.0;  // GeV — ceiling on nearJetPt for WAVES_JETCAP
+  const double WAVES_KERNEL_WIDTH = 0.4;  // jet-cone-scale σ of the bounded Gaussian ΔR kernel (WAVES_KERNEL)
   const double LEPTON_JET_DR      = 0.5;   // ΔR(lepton, jet) overlap-removal cone (Z+jets only)
   const double LEPTON_MIN_PT       = 20.0;  // GeV — min pT for a selected lepton (Z+jets only)
   // Lepton–jet overlap removal switch. Runtime (not compile-time) so it can be
@@ -264,6 +273,9 @@ namespace MyUtl {
     static const Score JET_T_REFINED;
     static const Score WAVES_MISCL;
     static const Score WAVES_MISAS;
+    static const Score WAVES_LOJO;
+    static const Score WAVES_JETCAP;
+    static const Score WAVES_KERNEL;
   };
 
   inline const std::string STR_TRKPTZ = "#Sigma p_{T}e^{-|#Delta z|}";
@@ -310,6 +322,24 @@ namespace MyUtl {
   inline const Score Score::WAVES_MISCL  = { 20, "WAVeS [Events with Pure Clusters]" , "WAVES Pure Clust.", false, true, -1.f };
   inline const Score Score::WAVES_MISAS  = { 21, "WAVeS [Events with Perfect Timing]", "WAVES Perf. Time" , false, true, -1.f };
 
+  // --- WAVeS fix variants -----------------------------------------------------
+  // Three independent attacks on the self-selection loop (see WAVES_JET_PT_CAP note
+  // above). All three reuse the baseline WAVeS selection machinery (main collection,
+  // standard weighted-mean time, full-cluster purity) and differ ONLY in how each
+  // track's contribution to the score is formed, so their difference vs Score::WAVES
+  // isolates exactly one change each:
+  //   LOJO   — a jet may not vote via its own ghost-associated tracks (breaks the
+  //            self-selection loop structurally: a cluster built from a jet's tracks
+  //            no longer gets boosted by that jet).
+  //   JETCAP — nearJetPt capped at WAVES_JET_PT_CAP (bounds the second unbounded
+  //            factor: a 200 GeV forward PU jet no longer counts 4x a 50 GeV one).
+  //   KERNEL — the divergent 1/max(ΔR,floor) replaced by a bounded Gaussian kernel
+  //            exp(−ΔR²/2σ²) ∈ (0,1]; the score becomes a pT-weighted COUNT of
+  //            jet-associated tracks, rewarding many-tracks-agree over one-track-close.
+  inline const Score Score::WAVES_LOJO   = { 22, "WAVeS [Leave-One-Jet-Out]"  , "WAVES_LOJO"  , false, false, -1.f };
+  inline const Score Score::WAVES_JETCAP = { 23, "WAVeS [Jet p_{T} Capped]"   , "WAVES_JETCAP", false, false, -1.f };
+  inline const Score Score::WAVES_KERNEL = { 24, "WAVeS [Bounded #DeltaR Kernel]", "WAVES_KERNEL", false, false, -1.f };
+
   // Scores with a dedicated collection (distCut ≥ 0 → buildsCollection() = true)
   inline const Score Score::CONE       = {  7, "Cone"                       , "CONE",     true , false, -1.f, DIST_CUT_CONE, ClusteringMethod::CONE };
   inline const Score Score::FILTJET    = {  9, "Filter Tracks in Jets"      , "FILTJET",  true , false, -1.f, DIST_CUT_CONE, ClusteringMethod::CONE, false, TrackFilterType::JET };
@@ -320,6 +350,7 @@ namespace MyUtl {
     Score::CONE    , Score::FILTJET   , Score::HGTD_SORT,
     Score::CONE_BDT, Score::TEST_MISAS, Score::TEST_HS,
     Score::WAVES,    Score::JET_T_REFINED, Score::WAVES_MISCL, Score::WAVES_MISAS,
+    Score::WAVES_LOJO, Score::WAVES_JETCAP, Score::WAVES_KERNEL,
   };
 
   // ---------------------------------------------------------------------------

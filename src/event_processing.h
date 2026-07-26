@@ -94,7 +94,12 @@ namespace MyUtl {
     // purifies the time by dropping absorbed PU tracks, worth ~+1% efficiency.
     // WAVES_MISCL / WAVES_MISAS share this path so the oracle rows report the same
     // time as the WAVES row they gate.
-    if (score == Score::WAVES || score == Score::WAVES_MISCL || score == Score::WAVES_MISAS) {
+    // The WAVeS fix variants (LOJO/JETCAP/KERNEL) also share it deliberately: they
+    // differ from the baseline ONLY in the selection score, so giving them the same
+    // in-jet timing keeps the comparison a clean test of the selection change rather
+    // than mixing in the loss of this ~+1% timing refinement.
+    if (score == Score::WAVES || score == Score::WAVES_MISCL || score == Score::WAVES_MISAS ||
+        score == Score::WAVES_LOJO || score == Score::WAVES_JETCAP || score == Score::WAVES_KERNEL) {
       // Collect (eta, phi) of qualifying forward reco jets — no truth matching
       std::vector<std::pair<double,double>> hsJets;
       const int nJets = (int)branch->topoJetPt.GetSize();
@@ -141,7 +146,11 @@ namespace MyUtl {
   //   so their purity gates stay directly comparable to TEST_MISAS.
   // ---------------------------------------------------------------------------
   inline double Cluster::calculatePurity(Score score, BranchPointerWrapper* branch) const {
-    if (score != Score::WAVES)
+    // The WAVeS fix variants share the in-jet purity recomputation for the same
+    // reason they share the in-jet time (see calculateTime): only the selection
+    // score should differ from the baseline WAVES row.
+    if (score != Score::WAVES && score != Score::WAVES_LOJO &&
+        score != Score::WAVES_JETCAP && score != Score::WAVES_KERNEL)
       return this->purity;
 
     // Collect (eta, phi) of qualifying forward reco jets — no truth matching.
@@ -437,6 +446,18 @@ namespace MyUtl {
     // Combined cluster quality for the TRKPTZ-selected cluster:
     // (1 - clusPuFrac)² * clamp(avgNHGTD/2, 0, 1) * sigmaTFactor
     double clusQuality   =  0.0;
+
+    // --- Per-score timing residuals (selected time − truth HS time), in ps ------
+    // Populated for the WAVeS-family scores so the event-display collection can
+    // curate events by WHICH fix rescues them, instead of drawing at random.
+    // NaN means the score did not fill this event (missing cluster / gated out).
+    // diffOracle is the truth-closest cluster in the main collection — the ceiling
+    // any selector could reach, and the criterion that makes an event "recoverable".
+    double diffWaves  = std::nan("");
+    double diffLojo   = std::nan("");
+    double diffJetcap = std::nan("");
+    double diffKernel = std::nan("");
+    double diffOracle = std::nan("");
   };
 
   EventResult processEventData(
@@ -539,6 +560,11 @@ namespace MyUtl {
     double trkptzClusQuality = 0.0;  // quality of TRKPTZ-selected cluster; exported in EventResult
     bool passesMine = false, passesMisas = false;
     bool misasInDenominator = false;
+    // Per-score residuals for display curation (see EventResult).
+    double diffWaves  = std::nan("");
+    double diffLojo   = std::nan("");
+    double diffJetcap = std::nan("");
+    double diffKernel = std::nan("");
 
     for (auto& [score, analysis] : analyses) {
       if (DEBUG) std::cout << "Filling: " << score.toString() << '\n';
@@ -601,6 +627,13 @@ namespace MyUtl {
 
       // Expose time for the caller's event-display collection
       if (score == Score::TRKPTZ || score.requiresPurity) returnVal = t;
+
+      // Capture the WAVeS-family residuals so the display collection can select
+      // events by which fix rescues (or breaks) them.
+      if      (score == Score::WAVES)        diffWaves  = diff;
+      else if (score == Score::WAVES_LOJO)   diffLojo   = diff;
+      else if (score == Score::WAVES_JETCAP) diffJetcap = diff;
+      else if (score == Score::WAVES_KERNEL) diffKernel = diff;
 
       auto fillResoStack = [&](TH1D* sig, TH1D* mix, TH1D* bkg) {
         if      (purity > 0.75)  sig->Fill(diff);
@@ -732,9 +765,19 @@ namespace MyUtl {
     if (analyses.count(Score::TEST_MISAS) &&
         misasInDenominator && !passesMine) returnCode = 3;
 
+    // Oracle: truth-closest cluster in the main collection. Independent of every
+    // selection score (and of WAVES_DR_FLOOR), so it is a stable measure of whether
+    // an event is recoverable at all — the basis for curating "meaningful" displays.
+    double diffOracle = std::nan("");
+    for (const auto& c : clusters) {
+      double d = c.values.at(0) - branch->truthVtxTime[0];
+      if (std::isnan(diffOracle) || std::abs(d) < std::abs(diffOracle)) diffOracle = d;
+    }
+
     return {returnCode, returnVal, ev.nForwardTrackHS,
             passesMine, misasInDenominator, passesMisas,
-            trkptzClusQuality};
+            trkptzClusQuality,
+            diffWaves, diffLojo, diffJetcap, diffKernel, diffOracle};
   }
 }
 #endif // EVENT_PROCESSING_H

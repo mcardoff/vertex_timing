@@ -44,6 +44,18 @@ static constexpr int LOW_MULT_NHS = 5;
 // (Gated on PRINT_EVENT_DISPLAYS.)
 static constexpr int N_MISAS_PASS          =  5;  // clean HS timing, PASSES timing window
 
+// --- WAVeS fix study: curated event-display categories ----------------------
+// Each fix (LOJO / JETCAP / KERNEL) gets two lists: events it RESCUES (baseline
+// WAVeS is badly wrong, the fix lands on the truth) and events it BREAKS (the
+// reverse). Selection is on the timing residuals themselves, so the lists are
+// deterministic and reproducible — unlike the legacy random-subsample blocks
+// below, whose non-deterministic seed made two runs incomparable.
+// "Recoverable" additionally requires a good cluster to exist (oracle within
+// GOOD), so a rescue is a real selection win rather than luck.
+static constexpr int    N_FIX_DISPLAY = 15;    // commands printed per fix per direction
+static constexpr double FIX_GOOD_PS   =  60.0; // |residual| counted as "on the truth"
+static constexpr double FIX_BAD_PS    = 100.0; // |residual| counted as "badly wrong"
+
 // ---------------------------------------------------------------------------
 // Helper: add an event-display command string to a list if condition is met.
 // ---------------------------------------------------------------------------
@@ -140,6 +152,10 @@ auto main(int argc, char** argv) -> int {
   ROOT::TThreadedObject<std::vector<TString>> tsLowMultFail;
   ROOT::TThreadedObject<std::vector<TString>> tsMisasPassEvents;
   ROOT::TThreadedObject<std::vector<TString>> tsMisasFailEvents;
+  // WAVeS fix study: rescued / broken lists, one pair per fix (see N_FIX_DISPLAY).
+  ROOT::TThreadedObject<std::vector<TString>> tsLojoRescue,   tsLojoBreak;
+  ROOT::TThreadedObject<std::vector<TString>> tsJetcapRescue, tsJetcapBreak;
+  ROOT::TThreadedObject<std::vector<TString>> tsKernelRescue, tsKernelBreak;
 
   // --- Event-selection rejection-cause tally, keyed on EventResult::code (see
   //     its definition in event_processing.h). Plain atomics suffice here --
@@ -189,6 +205,9 @@ auto main(int argc, char** argv) -> int {
     auto lowMultFail     = tsLowMultFail.Get();
     auto misasPassEvents = tsMisasPassEvents.Get();
     auto misasFailEvents = tsMisasFailEvents.Get();
+    auto lojoRescue   = tsLojoRescue.Get(),   lojoBreak   = tsLojoBreak.Get();
+    auto jetcapRescue = tsJetcapRescue.Get(), jetcapBreak = tsJetcapBreak.Get();
+    auto kernelRescue = tsKernelRescue.Get(), kernelBreak = tsKernelBreak.Get();
 
     while (reader.Next()) {
       Long64_t n = ++progressCounter;
@@ -229,6 +248,30 @@ auto main(int argc, char** argv) -> int {
 
       // Collect events where TRKPTZ passes but TEST_MISAS does not (misassignment effect)
       collectEventDisplay(*evtDisplayHGTD, 3, resHGTD, filePath, EVENT_NUM);
+
+      // --- WAVeS fix study: curated per-fix rescue/break displays --------------
+      // An event is only informative here if it was RECOVERABLE in the first place
+      // (a cluster within FIX_GOOD_PS of truth exists), so a "rescue" means the fix
+      // picked the right cluster rather than got lucky. Both directions are kept:
+      // rescues show what the fix buys, breaks are the regression guard.
+      if (resHGTD.code >= 0 && !std::isnan(resHGTD.diffWaves) &&
+          !std::isnan(resHGTD.diffOracle) && std::abs(resHGTD.diffOracle) < FIX_GOOD_PS) {
+        const double aW = std::abs(resHGTD.diffWaves);
+        // extra_time is the fix's own time, so the display's "My Time" marker shows
+        // what that variant actually selected (truth + residual = selected time).
+        auto add = [&](std::vector<TString>& rescue, std::vector<TString>& brk, double dFix) {
+          if (std::isnan(dFix)) return;
+          const double aF = std::abs(dFix);
+          const double tFix = resHGTD.time - resHGTD.diffWaves + dFix;  // truth-anchored
+          if (aW > FIX_BAD_PS && aF < FIX_GOOD_PS)
+            rescue.push_back(TString::Format(EVTDISPLAY_FMT, filePath.Data(), EVENT_NUM, tFix));
+          else if (aF > FIX_BAD_PS && aW < FIX_GOOD_PS)
+            brk.push_back(TString::Format(EVTDISPLAY_FMT, filePath.Data(), EVENT_NUM, tFix));
+        };
+        add(*lojoRescue,   *lojoBreak,   resHGTD.diffLojo);
+        add(*jetcapRescue, *jetcapBreak, resHGTD.diffJetcap);
+        add(*kernelRescue, *kernelBreak, resHGTD.diffKernel);
+      }
 
       // Low-multiplicity event display collection (HGTD scenario, n=LOW_MULT_NHS HS tracks)
       if (resHGTD.code >= 0 && resHGTD.nFwdHS == LOW_MULT_NHS) {
@@ -274,6 +317,11 @@ auto main(int argc, char** argv) -> int {
   mergeVec(lowMultFail,     tsLowMultFail);
   mergeVec(misasPassEvents, tsMisasPassEvents);
   mergeVec(misasFailEvents, tsMisasFailEvents);
+  std::vector<TString> lojoRescue, lojoBreak, jetcapRescue, jetcapBreak,
+                       kernelRescue, kernelBreak;
+  mergeVec(lojoRescue,   tsLojoRescue);    mergeVec(lojoBreak,   tsLojoBreak);
+  mergeVec(jetcapRescue, tsJetcapRescue);  mergeVec(jetcapBreak, tsJetcapBreak);
+  mergeVec(kernelRescue, tsKernelRescue);  mergeVec(kernelBreak, tsKernelBreak);
 
   std::cout << "\nFINISHED PROCESSING\n";
 
@@ -311,6 +359,41 @@ auto main(int argc, char** argv) -> int {
 
   // --- Print event display commands (toggle PRINT_EVENT_DISPLAYS above) ---
   printEventDisplays("HGTD times: TRKPTZ passes, TEST_MISAS fails (misassignment)", evtDisplayHGTD    );
+
+  // --- WAVeS fix study: per-fix curated displays --------------------------------
+  // Counts are printed unconditionally (cheap, and they are the headline result:
+  // how many recoverable events each fix wins vs loses). The commands themselves
+  // stay behind PRINT_EVENT_DISPLAYS like every other group.
+  std::cout << "\n=== WAVeS FIX STUDY (recoverable events: oracle within "
+            << FIX_GOOD_PS << " ps) ===\n"
+            << "  rescued = WAVeS wrong by >" << FIX_BAD_PS
+            << " ps and the fix lands within " << FIX_GOOD_PS << " ps; broken = the reverse.\n";
+  auto fixSummary = [](const char* name, const std::vector<TString>& resc,
+                       const std::vector<TString>& brk) {
+    std::cout << "  " << std::left << std::setw(14) << name
+              << " rescued: " << std::setw(6) << resc.size()
+              << " broken: "  << std::setw(6) << brk.size()
+              << " net: "     << (long)resc.size() - (long)brk.size() << '\n';
+  };
+  fixSummary("WAVES_LOJO",   lojoRescue,   lojoBreak);
+  fixSummary("WAVES_JETCAP", jetcapRescue, jetcapBreak);
+  fixSummary("WAVES_KERNEL", kernelRescue, kernelBreak);
+
+  if (PRINT_EVENT_DISPLAYS) {
+    // Deterministic: take the first N in collection order (no RNG), so re-running
+    // the same sample reproduces the same list and floors/variants stay comparable.
+    auto printFix = [](const char* header, std::vector<TString> v) {
+      if ((int)v.size() > N_FIX_DISPLAY) v.resize(N_FIX_DISPLAY);
+      std::cout << "\n=== " << header << " (" << v.size() << " shown) ===\n";
+      for (const auto& c : v) std::cout << c << '\n';
+    };
+    printFix("WAVES_LOJO RESCUES (LOJO right, WAVeS wrong)",     lojoRescue);
+    printFix("WAVES_LOJO BREAKS (WAVeS right, LOJO wrong)",      lojoBreak);
+    printFix("WAVES_JETCAP RESCUES (JETCAP right, WAVeS wrong)", jetcapRescue);
+    printFix("WAVES_JETCAP BREAKS (WAVeS right, JETCAP wrong)",  jetcapBreak);
+    printFix("WAVES_KERNEL RESCUES (KERNEL right, WAVeS wrong)", kernelRescue);
+    printFix("WAVES_KERNEL BREAKS (WAVeS right, KERNEL wrong)",  kernelBreak);
+  }
 
   // Shared helpers for all random-subsample blocks below.
   // Each block is guarded by PRINT_EVENT_DISPLAYS and can be independently

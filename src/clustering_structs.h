@@ -642,8 +642,16 @@ namespace MyUtl {
       // Linear pT (not squared) so a couple of high-pT time-misassigned tracks can't
       // outvote a larger time-coherent cluster.
       // Falls back to TRKPTZ if no qualifying forward jets exist.
+      // Computed in ONE pass alongside three fix variants (WAVES_LOJO /
+      // WAVES_JETCAP / WAVES_KERNEL), which share this loop's nearest-jet search
+      // and differ only in how each track's contribution is formed — so their
+      // difference vs the baseline isolates exactly one change each. See the
+      // Score definitions in clustering_constants.h for the motivation.
       {
-        double wavesSum = 0.0;
+        double wavesSum = 0.0;   // baseline: pT · pT_jet / max(ΔR, floor)
+        double lojoSum  = 0.0;   // as baseline, but a jet may not vote via its own ghost tracks
+        double capSum   = 0.0;   // as baseline, but pT_jet capped at WAVES_JET_PT_CAP
+        double kernSum  = 0.0;   // pT · pT_jet · exp(−ΔR²/2σ²)  (bounded kernel, no 1/ΔR)
         for (int idx : this->trackIndices) {
           double trkEta  = branch->trackEta[idx];
           double trkPhi  = branch->trackPhi[idx];
@@ -651,6 +659,7 @@ namespace MyUtl {
 
           double minDR     = 1e6;
           double nearJetPt = 0.0;
+          int    nearJet   = -1;
           for (int j = 0; j < (int)branch->topoJetEta.GetSize(); ++j) {
             if (branch->isJetRemoved(j)) continue;  // lepton-overlap removed (Z+jets)
             double jEta = branch->topoJetEta[j];
@@ -660,17 +669,40 @@ namespace MyUtl {
             double deta = jEta - trkEta;
             double dphi = TVector2::Phi_mpi_pi(branch->topoJetPhi[j] - trkPhi);
             double dr   = std::hypot(deta, dphi);
-            if (dr < minDR) { minDR = dr; nearJetPt = jPt; }
+            if (dr < minDR) { minDR = dr; nearJetPt = jPt; nearJet = j; }
           }
           if (nearJetPt <= 0.0) continue;
-          wavesSum += trkPt * nearJetPt
-                      / std::max(minDR, WAVES_DR_FLOOR);
+
+          const double drTerm  = 1.0 / std::max(minDR, WAVES_DR_FLOOR);
+          wavesSum += trkPt * nearJetPt * drTerm;
+          capSum   += trkPt * std::min(nearJetPt, WAVES_JET_PT_CAP) * drTerm;
+          kernSum  += trkPt * nearJetPt
+                      * std::exp(-(minDR * minDR)
+                                 / (2.0 * WAVES_KERNEL_WIDTH * WAVES_KERNEL_WIDTH));
+
+          // LOJO: drop the contribution when this track is one of the nearest jet's
+          // own ghost-associated tracks — that pairing is the self-selection loop
+          // (the jet boosting the very cluster its tracks built), not evidence that
+          // the cluster is the hard-scatter vertex.
+          bool ownsTrack = false;
+          if (nearJet >= 0) {
+            const auto& ghost = branch->topoJetGhostTrackIdx[nearJet];
+            ownsTrack = std::find(ghost.begin(), ghost.end(), idx) != ghost.end();
+          }
+          if (!ownsTrack) lojoSum += trkPt * nearJetPt * drTerm;
         }
-        if (wavesSum > 0.0)
-          this->scores[Score::WAVES.id] =
-              wavesSum * std::exp(-1.5 * std::abs(rawDeltaZ));
-        else
-          this->scores[Score::WAVES.id] = this->scores.at(Score::TRKPTZ.id);
+        // Each variant falls back to TRKPTZ when its sum is empty (no qualifying
+        // forward jets, or — for LOJO — every contribution was self-referential),
+        // matching the baseline's fallback so the comparison stays like-for-like.
+        const double zTerm   = std::exp(-1.5 * std::abs(rawDeltaZ));
+        const double trkptzS = this->scores.at(Score::TRKPTZ.id);
+        auto setScore = [&](const Score& s, double sum) {
+          this->scores[s.id] = (sum > 0.0) ? sum * zTerm : trkptzS;
+        };
+        setScore(Score::WAVES,        wavesSum);
+        setScore(Score::WAVES_LOJO,   lojoSum);
+        setScore(Score::WAVES_JETCAP, capSum);
+        setScore(Score::WAVES_KERNEL, kernSum);
       }
 
       // JET_T_REFINED: dedicated collection (jet-filtered tracks at 2σ iterative);

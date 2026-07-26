@@ -50,6 +50,11 @@ inline auto buildAnalysisMap(
   m.emplace(Score::TEST_MISAS, AnalysisObj(label, Score::TEST_MISAS));
   m.emplace(Score::WAVES_MISCL, AnalysisObj(label, Score::WAVES_MISCL));
   m.emplace(Score::WAVES_MISAS, AnalysisObj(label, Score::WAVES_MISAS));
+  // WAVeS fix variants — each isolates one change vs Score::WAVES (see the Score
+  // definitions in clustering_constants.h). Compared in the waves_fixes_* group.
+  m.emplace(Score::WAVES_LOJO,   AnalysisObj(label, Score::WAVES_LOJO  ));
+  m.emplace(Score::WAVES_JETCAP, AnalysisObj(label, Score::WAVES_JETCAP));
+  m.emplace(Score::WAVES_KERNEL, AnalysisObj(label, Score::WAVES_KERNEL));
 
   // Scores active only in the real-HGTD scenario
   if (scenario == Scenario::HGTD) {
@@ -101,6 +106,34 @@ inline void makeComparisonPlots(
 	    },
 	    {C01, C02, C03});
 
+  // --- WAVeS fix comparison -------------------------------------------------
+  // The three self-selection fixes against the baseline they modify. Each variant
+  // differs from Score::WAVES by exactly one change (LOJO: a jet cannot vote via
+  // its own ghost tracks; JETCAP: nearJetPt capped; KERNEL: bounded ΔR kernel in
+  // place of 1/ΔR), and all share WAVES's in-jet time/purity, so any separation
+  // here is attributable to the selection change alone.
+  // TRKPTZ is kept as the common reference line.
+  moneyPlot(MyUtl::plotFilePath("comparisons", TString::Format("waves_fixes_%s.pdf", key).Data()).c_str(), key, canvas,
+	    {
+	      &mapHGTD.at(Score::TRKPTZ),
+	      &mapHGTD.at(Score::WAVES),
+	      &mapHGTD.at(Score::WAVES_LOJO),
+	      &mapHGTD.at(Score::WAVES_JETCAP),
+	      &mapHGTD.at(Score::WAVES_KERNEL),
+	    },
+	    {C02, C03, C05, C07, C08});
+
+  // Same fixes measured against the achievable ceiling (WAVES_MISAS oracle), so the
+  // plot answers "how much of the gap to perfect timing does each fix actually close?"
+  moneyPlot(MyUtl::plotFilePath("comparisons", TString::Format("waves_fixes_oracle_%s.pdf", key).Data()).c_str(), key, canvas,
+	    {
+	      &mapHGTD.at(Score::WAVES),
+	      &mapHGTD.at(Score::WAVES_LOJO),
+	      &mapHGTD.at(Score::WAVES_JETCAP),
+	      &mapHGTD.at(Score::WAVES_KERNEL),
+	      &mapHGTD.at(Score::WAVES_MISAS),
+	    },
+	    {C03, C05, C07, C08, C04});
 }
 
 #endif  // CLUSTERING_DT_COMMON_H
