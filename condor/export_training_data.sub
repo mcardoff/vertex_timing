@@ -1,0 +1,67 @@
+# ---------------------------------------------------------------------------
+# export_training_data.sub — condor submit template: one job per sample.
+#
+# Exports the per-cluster and per-track training data for the cluster-SELECTION
+# ML study. Each job writes <sample>/<sample>_training.root, containing two
+# TTrees:
+#   clusters : one row per cluster (95 cols) — GBDT ranking input
+#   tracks   : one row per track   (29 cols) — per-track P(HS) model input
+#
+# Setup (once):
+#   cd build && cmake .. && make export_training_data   # build BEFORE submitting
+#   chmod +x condor/run_analysis.sh
+#
+# Submit (from inside condor/, so the relative paths below resolve):
+#   cd condor && condor_submit export_training_data.sub
+#
+# After the jobs finish the files land in ../<sample>/<sample>_training.root.
+# Read them in the notebook with uproot (column-selective, no ROOT needed):
+#   uproot.open("zjets_training.root")["clusters"].arrays(library="pd")
+#
+# This queues 3 jobs, one per --sample value.
+# ---------------------------------------------------------------------------
+universe                 = vanilla
+executable               = run_analysis.sh
+
+# run_analysis.sh takes <executable> <sample> [<threads>] [<max-events>].
+# Threads is deliberately OMITTED: unlike clustering_hist/rpt_v5_hist this
+# executable is a plain sequential TTreeReader loop with no TTreeProcessorMT,
+# so there is nothing to parallelize and request_cpus stays at 1 below.
+arguments                = export_training_data $(sample)
+
+should_transfer_files    = YES
+when_to_transfer_output  = ON_EXIT
+transfer_input_files     = ../build/export_training_data
+transfer_output_files    = $(sample)/$(sample)_training.root
+
+# Same remap rationale as clustering_hist.sub: condor flattens a nested
+# transfer_output_files path to its basename when staging back, so the remap is
+# what makes the file land under $(sample)/ on the submit side (matching the
+# local --sample= convention). The LHS must be a BARE FILENAME — per
+# condor_submit(1), "You cannot specify directories to be remapped" — while
+# directories are allowed on the RHS and are created as needed.
+#
+# Note the executable calls histFilePath("training.root") with the UNPREFIXED
+# base name; histFilePath() adds the "<sample>_" prefix itself. Passing the
+# already-prefixed name would produce zjets/zjets_zjets_training.root and this
+# remap would silently match nothing.
+transfer_output_remaps   = "$(sample)_training.root=$(sample)/$(sample)_training.root"
+
+getenv                   = True
+
++JobFlavour              = "tomorrow"
+
+# Sequential job (see the arguments note above). Memory/disk are set above the
+# clustering_hist values because this writes two TTrees rather than histograms:
+# the per-track tree dominates at roughly 30 rows/event (~180 MB for a
+# zjets-sized sample, measured by extrapolating the local VBF run), and ROOT
+# buffers baskets for ~124 branches before flushing.
+request_cpus             = 1
+request_memory           = 4GB
+request_disk             = 8GB
+
+output                   = logs/export_training_data_$(sample).$(ClusterId).$(ProcId).out
+error                    = logs/export_training_data_$(sample).$(ClusterId).$(ProcId).err
+log                      = logs/export_training_data_$(sample).$(ClusterId).$(ProcId).log
+
+queue sample in (vbf, zjets, dijet)

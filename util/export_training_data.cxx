@@ -49,6 +49,8 @@
 #include <TTreeReader.h>
 #include <TVector2.h>
 
+#include <boost/filesystem.hpp>
+
 #include "clustering_constants.h"
 #include "clustering_structs.h"
 #include "clustering_functions.h"
@@ -187,9 +189,16 @@ auto main(int argc, char** argv) -> int {
   TTreeReader reader(&chain);
   BranchPointerWrapper branch(reader);
 
-  const std::string outName =
-      (cfg.sampleName.empty() ? std::string("local") : cfg.sampleName) + "_training.root";
-  const std::string outPath = MyUtl::histFilePath(outName);
+  // Output directory must be created before TFile::Open -- ROOT will not make it,
+  // and on condor the job's scratch dir starts empty (mirrors clustering_hist).
+  boost::filesystem::create_directories(MyUtl::OUTPUT_DIR);
+  if (MyUtl::SAMPLE_NAME.empty())
+    boost::filesystem::create_directories(MyUtl::OUTPUT_DIR + "/hists");
+
+  // Pass the UNPREFIXED base name: histFilePath() adds "<sample>_" itself when
+  // a --sample was given, so "<sample>_training.root" here would double-prefix
+  // into e.g. zjets/zjets_zjets_training.root and break the condor output remap.
+  const std::string outPath = MyUtl::histFilePath("training.root");
   std::unique_ptr<TFile> out(TFile::Open(outPath.c_str(), "RECREATE"));
   if (!out || out->IsZombie()) {
     std::cerr << "ERROR: cannot open " << outPath << " for writing\n";
