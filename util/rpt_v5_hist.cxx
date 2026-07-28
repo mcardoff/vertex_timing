@@ -99,7 +99,7 @@ static inline double dR(double j_eta, double j_phi, double t_eta, double t_phi) 
 // -----------------------------------------------------------------------------
 
 // Set to true to print event-display commands to stdout after the event loop.
-static constexpr bool PRINT_EVENT_DISPLAYS = false;
+static constexpr bool PRINT_EVENT_DISPLAYS = true;
 
 struct JetCompCase {
   std::string file_path;

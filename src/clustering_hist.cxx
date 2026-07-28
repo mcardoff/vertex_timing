@@ -33,7 +33,7 @@ static constexpr const char* EVTDISPLAY_FMT =
   "cd python && python3 event_display.py --file_path \"%s\" --event_num %lld --extra_time %.2f";
 
 // Set to true to print event display commands to stdout after the event loop.
-static constexpr bool PRINT_EVENT_DISPLAYS = false;
+static constexpr bool PRINT_EVENT_DISPLAYS = true;
 
 // Max event-display commands to print per low-multiplicity category.
 static constexpr int N_LOW_MULT_DISPLAY = 20;

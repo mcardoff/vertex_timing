@@ -26,7 +26,7 @@
 # ---------------------------------------------------------------------------
 universe                 = vanilla
 executable               = run_analysis.sh
-arguments                = clustering_hist $(sample) 4
+arguments                = clustering_hist $(sample) 4 
 
 should_transfer_files    = YES
 when_to_transfer_output  = ON_EXIT
@@ -80,4 +80,4 @@ output                   = logs/clustering_hist_$(sample).$(ClusterId).$(ProcId)
 error                    = logs/clustering_hist_$(sample).$(ClusterId).$(ProcId).err
 log                      = logs/clustering_hist_$(sample).$(ClusterId).$(ProcId).log
 
-queue sample in (vbf, zjets, dijet)
+queue sample in (zjets)
