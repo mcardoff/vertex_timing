@@ -121,6 +121,10 @@ struct ClusterRow {
   // --- Tier C: z compatibility with the reco PV --------------------------
   float z_chi2_ndf, max_abs_zpull, n_zpull_gt3, z_spread, median_z0_pull;
   // --- Tier D: HGTD detector quality -------------------------------------
+  // mean_nhgtd_primary is written under the TRUTH prefix: Track_nHGTDPrimaryHits
+  // is built in Athena from per-hit m_isprime ("keep which of the hits associated
+  // in reco were primary hits (truth info!)"), so it is MC-only and unavailable
+  // in data. Kept for diagnostics; the truth_ prefix keeps it out of the features.
   float mean_nhgtd, min_nhgtd, max_nhgtd, mean_nhgtd_primary;
   float frac_nhgtd_ge2, sumpt_w_nhgtd;
   // --- Tier E: track quality / kinematics --------------------------------
@@ -154,7 +158,7 @@ struct TrackRow {
   float pt, eta, phi, theta, z0, d0, qOverP;
   float sigma_z0, sigma_d0, sigma_qOverP;
   float time, timeRes, time_valid;
-  float quality, nhgtd_hits, nhgtd_primary;
+  float quality, nhgtd_hits, nhgtd_primary;  // nhgtd_primary -> truth_ branch (MC-only)
   float z0_pull_pv, t_pull_cluster;
   float dr_nearest_fwdjet, pt_nearest_fwdjet, is_ghost_of_nearest;
   float is_lepton;
@@ -233,7 +237,7 @@ auto main(int argc, char** argv) -> int {
   BC("n_zpull_gt3",&C.n_zpull_gt3); BC("z_spread",&C.z_spread);
   BC("median_z0_pull",&C.median_z0_pull);
   BC("mean_nhgtd",&C.mean_nhgtd); BC("min_nhgtd",&C.min_nhgtd);
-  BC("max_nhgtd",&C.max_nhgtd); BC("mean_nhgtd_primary",&C.mean_nhgtd_primary);
+  BC("max_nhgtd",&C.max_nhgtd); BC("truth_mean_nhgtd_primary",&C.mean_nhgtd_primary);
   BC("frac_nhgtd_ge2",&C.frac_nhgtd_ge2); BC("sumpt_w_nhgtd",&C.sumpt_w_nhgtd);
   BC("mean_quality",&C.mean_quality); BC("min_quality",&C.min_quality);
   BC("mean_abs_eta",&C.mean_abs_eta); BC("max_abs_eta",&C.max_abs_eta);
@@ -273,7 +277,7 @@ auto main(int argc, char** argv) -> int {
   BT("sigma_z0",&T.sigma_z0); BT("sigma_d0",&T.sigma_d0); BT("sigma_qOverP",&T.sigma_qOverP);
   BT("time",&T.time); BT("timeRes",&T.timeRes); BT("time_valid",&T.time_valid);
   BT("quality",&T.quality); BT("nhgtd_hits",&T.nhgtd_hits);
-  BT("nhgtd_primary",&T.nhgtd_primary);
+  BT("truth_nhgtd_primary",&T.nhgtd_primary);
   BT("z0_pull_pv",&T.z0_pull_pv); BT("t_pull_cluster",&T.t_pull_cluster);
   BT("dr_nearest_fwdjet",&T.dr_nearest_fwdjet);
   BT("pt_nearest_fwdjet",&T.pt_nearest_fwdjet);
