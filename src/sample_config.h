@@ -11,9 +11,14 @@
 
 #include <Rtypes.h>  // Long64_t
 
+#include "clustering_constants.h"  // VBS_JET_D_ETA (runtime-settable)
+
 #include <algorithm>
+#include <cmath>
+#include <iomanip>
 #include <iostream>
 #include <map>
+#include <sstream>
 #include <string>
 #include <thread>
 
@@ -56,6 +61,12 @@ namespace MyUtl {
   // decide whether output file names get a sample prefix.
   inline std::string SAMPLE_NAME  = "";
 
+  // Non-default selection marker, e.g. "deta0p0". Empty for the standard
+  // selection, so every existing output path is byte-identical to before.
+  // Set by resolveSelection() and woven into histFilePath()/plotFilePath() so a
+  // loosened run cannot silently overwrite the standard one's outputs.
+  inline std::string SELECTION_TAG = "";
+
   // Default (no --sample flag): local VBF ntuple, VBF label, ../figs output.
   inline SampleConfig resolveSample(int argc, char** argv) {
     static const std::map<std::string, SampleConfig> registry = {
@@ -82,6 +93,58 @@ namespace MyUtl {
     }
 
     return {"/Users/mcard/project/ntuple-hgtd/", "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv.", "../figs", "", false};
+  }
+
+  // ---------------------------------------------------------------------------
+  // resolveSelection
+  //   Optional selection override via --vbs-deta=<x>, which sets the VBS
+  //   candidate-pair |Deta| requirement (default VBS_JET_D_ETA_DEFAULT = 3.0;
+  //   pass 0 to disable the cut entirely while keeping the >=1 forward jet
+  //   requirement, i.e. "still a forward-jet event, but not forced into a VBS
+  //   topology"). See the comment on VBS_JET_D_ETA in clustering_constants.h for
+  //   why this needs to be measurable rather than assumed.
+  //
+  //   Also sets SELECTION_TAG whenever the value differs from the default, so
+  //   the loosened run writes <sample>_deta0p0_<name>.root instead of colliding
+  //   with the standard <sample>_<name>.root. Absent flag => no tag => every
+  //   existing path unchanged.
+  //
+  //   Call once in main() alongside resolveSample(). Executables that never see
+  //   the flag are unaffected.
+  // ---------------------------------------------------------------------------
+  inline void resolveSelection(int argc, char** argv) {
+    const std::string prefix = "--vbs-deta=";
+    for (int i = 1; i < argc; ++i) {
+      std::string arg = argv[i];
+      if (arg.rfind(prefix, 0) != 0) continue;
+
+      double v = 0.0;
+      try {
+        v = std::stod(arg.substr(prefix.size()));
+      } catch (const std::exception&) {
+        std::cerr << "Bad --vbs-deta value '" << arg.substr(prefix.size())
+                  << "'; expected a number (e.g. --vbs-deta=0).\n";
+        std::exit(1);
+      }
+      if (v < 0.0) {
+        std::cerr << "--vbs-deta must be >= 0 (got " << v << ").\n";
+        std::exit(1);
+      }
+
+      VBS_JET_D_ETA = v;
+      if (std::abs(v - VBS_JET_D_ETA_DEFAULT) > 1e-9) {
+        std::ostringstream os;
+        os << "deta" << std::fixed << std::setprecision(1) << v;
+        std::string tag = os.str();
+        std::replace(tag.begin(), tag.end(), '.', 'p');
+        SELECTION_TAG = tag;
+      }
+      break;
+    }
+    std::cout << "[selection] VBS |Deta| >= " << VBS_JET_D_ETA
+              << (SELECTION_TAG.empty() ? "  (default)"
+                                        : "  (tag: " + SELECTION_TAG + ")")
+              << '\n';
   }
 
   // ---------------------------------------------------------------------------
@@ -156,14 +219,23 @@ namespace MyUtl {
   //   SAMPLE_NAME == ""), both fall back to the original unprefixed
   //   conventions.
   // ---------------------------------------------------------------------------
+  //   SELECTION_TAG (non-empty only for a non-default selection) is inserted
+  //   ahead of the base name so a loosened run lands beside the standard one
+  //   rather than overwriting it.
+  inline std::string selectionTagged(const std::string& baseName) {
+    return SELECTION_TAG.empty() ? baseName : SELECTION_TAG + "_" + baseName;
+  }
+
   inline std::string histFilePath(const std::string& baseName) {
+    const std::string base = selectionTagged(baseName);
     if (!SAMPLE_NAME.empty())
-      return OUTPUT_DIR + "/" + SAMPLE_NAME + "_" + baseName;
-    return OUTPUT_DIR + "/hists/" + baseName;
+      return OUTPUT_DIR + "/" + SAMPLE_NAME + "_" + base;
+    return OUTPUT_DIR + "/hists/" + base;
   }
 
   inline std::string plotFilePath(const std::string& subdir, const std::string& baseName) {
-    const std::string name = SAMPLE_NAME.empty() ? baseName : SAMPLE_NAME + "_" + baseName;
+    const std::string base = selectionTagged(baseName);
+    const std::string name = SAMPLE_NAME.empty() ? base : SAMPLE_NAME + "_" + base;
     return OUTPUT_DIR + "/" + subdir + "/" + name;
   }
 

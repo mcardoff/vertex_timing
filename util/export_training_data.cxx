@@ -174,6 +174,7 @@ auto main(int argc, char** argv) -> int {
   gErrorIgnoreLevel = kWarning;
 
   const auto cfg = MyUtl::resolveSample(argc, argv);
+  MyUtl::resolveSelection(argc, argv);  // --vbs-deta=<x>; sets SELECTION_TAG
   MyUtl::SAMPLE_NAME  = cfg.sampleName;
   MyUtl::OUTPUT_DIR   = cfg.outputDir;
   MyUtl::ENERGY_LABEL = cfg.energyLabel;

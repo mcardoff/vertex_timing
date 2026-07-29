@@ -3,7 +3,7 @@
 # run_analysis.sh — condor job executable template for vertex_timing.
 #
 # Invoked by clustering_hist.sub as:
-#   run_analysis.sh <executable> <sample> [<threads>] [<max-events>]
+#   run_analysis.sh <executable> <sample> [<threads>] [<max-events>] [<extra args...>]
 #     <executable>  clustering_hist | rpt_v5_hist   (any --sample/--threads-aware target)
 #     <sample>      vbf | zjets | dijet | default   ("default" = no --sample flag,
 #                    i.e. the local ../../ntuple-hgtd/ + ../figs/ behavior --
@@ -18,7 +18,13 @@
 #     <max-events>  optional; forwarded as --max-events=<N> (see resolveMaxEvents
 #                    in src/sample_config.h). For a quick sanity-check job over
 #                    a small event prefix instead of the full sample -- omit
-#                    for a normal production run (unlimited).
+#                    for a normal production run (unlimited). Pass "" to skip it
+#                    while still supplying trailing extra args.
+#     <extra args>   optional; any remaining arguments are forwarded verbatim.
+#                    Used for --vbs-deta=<x> (loosened VBS topology selection,
+#                    see resolveSelection in src/sample_config.h), which also
+#                    tags the output file name so a loosened run cannot overwrite
+#                    the standard one.
 #
 # No shared filesystem between submit and execute hosts: <executable>
 # arrives in this job's scratch directory via transfer_input_files and is run
@@ -35,6 +41,8 @@ EXECUTABLE=$1
 SAMPLE=$2
 THREADS=${3:-}
 MAX_EVENTS=${4:-}
+shift $(( $# < 4 ? $# : 4 ))
+EXTRA_ARGS=("$@")   # anything further is forwarded verbatim (e.g. --vbs-deta=0)
 
 # ATLAS/LCG environment (provides ROOT + Boost via cvmfs). atlasLocalSetup.sh
 # / lsetup reference unset variables internally (e.g. ALRB_frontlineSite) and
@@ -59,4 +67,5 @@ if [ -n "${MAX_EVENTS}" ]; then
   MAX_EVENTS_ARG="--max-events=${MAX_EVENTS}"
 fi
 
-./"${EXECUTABLE}" ${SAMPLE_ARG} ${THREADS_ARG} ${MAX_EVENTS_ARG}
+echo "running: ./${EXECUTABLE} ${SAMPLE_ARG} ${THREADS_ARG} ${MAX_EVENTS_ARG} ${EXTRA_ARGS[*]:-}"
+./"${EXECUTABLE}" ${SAMPLE_ARG} ${THREADS_ARG} ${MAX_EVENTS_ARG} ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
