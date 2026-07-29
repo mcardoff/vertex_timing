@@ -26,10 +26,10 @@ universe                 = vanilla
 executable               = run_analysis.sh
 
 # run_analysis.sh takes <executable> <sample> [<threads>] [<max-events>] [extra...].
-# Threads is deliberately empty (this executable is a plain sequential
-# TTreeReader loop, so request_cpus stays 1), max-events is empty for a full
-# production run, and --vbs-deta=0 is forwarded verbatim as an extra arg.
-arguments                = export_training_data $(sample) "" "" --vbs-deta=0
+# Threads and max-events are simply omitted (this executable is a plain sequential
+# TTreeReader loop, so request_cpus stays 1); trailing --flags are classified by
+# shape by run_analysis.sh, so no empty positional placeholders are needed.
+arguments                = export_training_data $(sample) --vbs-deta=0
 
 should_transfer_files    = YES
 when_to_transfer_output  = ON_EXIT
