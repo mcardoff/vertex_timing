@@ -84,13 +84,20 @@ namespace MyUtl {
     TTreeReaderArray<float> truthHSJetEta;
     TTreeReaderArray<float> truthHSJetPhi;
 
-    TTreeReaderArray<float> truthITPUJetPt;
-    TTreeReaderArray<float> truthITPUJetEta;
-    TTreeReaderArray<float> truthITPUJetPhi;
-
-    TTreeReaderArray<float> truthOOTPUJetPt;
-    TTreeReaderArray<float> truthOOTPUJetEta;
-    TTreeReaderArray<float> truthOOTPUJetPhi;
+    // NOTE: TruthITPUJet_* / TruthOOTPUJet_* were bound here but never read by
+    // any active code path, so the bindings are gone. Binding is not free: a
+    // TTreeReaderArray on a branch the tree lacks is an error even if the value
+    // is never used, which would have broken EVERY executable (clustering_hist,
+    // rpt_v5_hist, export_training_data, ...) on the mu0/ttbar production where
+    // those collections are dropped -- not just the rpt programs.
+    //
+    // Nothing lost: rpt_v5's paperIsPU labels a jet PU by "dR > 0.6 from all
+    // truth HS jets with pT > 4 GeV", i.e. from truthHSJet* alone. The rpt_v2/3/4
+    // references are comments only, and generate_rpt.cxx / scratch's
+    // rpt_label_diag.cxx use the DIFFERENT per-jet
+    // AntiKt4EMTopoJets_truthITPUJet_idx branches (neither is in the current
+    // workflow). Re-add as std::unique_ptr members guarded on sample, the way
+    // trackLeptonID is, if a future study actually needs them.
 
     TTreeReaderArray<std::vector<int>> topoJetTruthHSIdx;
     TTreeReaderArray<std::vector<int>> topoJetGhostTrackIdx;
@@ -137,10 +144,6 @@ namespace MyUtl {
       topoJetPhi (r, "AntiKt4EMTopoJets_phi"),
       truthHSJetPt (r, "TruthHSJet_pt"), truthHSJetEta (r, "TruthHSJet_eta"),
       truthHSJetPhi (r, "TruthHSJet_phi"),
-      truthITPUJetPt (r, "TruthITPUJet_pt"), truthITPUJetEta (r, "TruthITPUJet_eta"),
-      truthITPUJetPhi (r, "TruthITPUJet_phi"),
-      truthOOTPUJetPt (r, "TruthOOTPUJet_pt"), truthOOTPUJetEta (r, "TruthOOTPUJet_eta"),
-      truthOOTPUJetPhi (r, "TruthOOTPUJet_phi"),
       topoJetTruthHSIdx (r, "AntiKt4EMTopoJets_truthHSJet_idx"),
       topoJetGhostTrackIdx (r, "AntiKt4EMTopoJets_ghostTrack_idx"),
       particleT (r, "TruthPart_prodVtx_time")
