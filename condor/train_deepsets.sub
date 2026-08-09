@@ -23,10 +23,13 @@ universe                = vanilla
 executable              = run_training.sh
 
 INPUT_DIR = /data/mcardiff/training
-TAG       = $(selection)_lam$(lambdas)
+TAG       = $(selection)
 
 # One row per configuration; add rows to the queue block to scan more.
-arguments = $(INPUT_DIR) runs/$(TAG) --selection $(selection) --lambdas $(lambdas) --epochs $(epochs)
+# NOTE the lambda list is a LITERAL here, not a queue variable: condor splits
+# `queue ... from (...)` rows on COMMAS, so a comma-containing value like
+# "0,0.1,0.3,1.0" would be torn into separate columns and silently mis-bound.
+arguments = $(INPUT_DIR) runs/$(TAG) --selection $(selection) --lambdas 0,0.1,0.3,1.0 --epochs 15
 
 should_transfer_files   = YES
 when_to_transfer_output = ON_EXIT
@@ -58,6 +61,7 @@ log    = logs/train_$(TAG).$(ClusterId).$(ProcId).log
 
 # The lambda scan is done INSIDE one job (it shares the expensive data prep),
 # so one row per selection is enough. Add (tight, ...) to compare selections.
-queue selection,lambdas,epochs from (
-  loose, 0,0.1,0.3,1.0, 15
-)
+# The lambda scan happens INSIDE one job (it shares the expensive data prep), so
+# one row per selection is enough. Add `loose` once the novbs re-export exists --
+# the current *_deta0p0_* file is the superseded attempt that only gained 4%.
+queue selection in (tight)
