@@ -57,7 +57,20 @@ namespace MyUtl {
   const int    MIN_CLUSTER_TRACKS = 0;     // min tracks required to select a cluster
   const int    MIN_NHS_TRACK      = 2;     // testing only
   const int    MAX_NHS_TRACK      = 6;     // testing only
-  const double VBS_JET_D_ETA      = 3.0;   // min eta separation for VBS Jets
+  // VBS candidate-pair |Deta| requirement. RUNTIME-SETTABLE (inline, not const)
+  // via --vbs-deta=<x>; see resolveSelection() in sample_config.h.
+  //
+  // Why it is a knob and not a constant: this is a VBS *topology* requirement, and
+  // Z+jets has no VBS topology. Applied to Z+jets it removes 87% of everything
+  // surviving the lepton selection (520,126 -> 67,184 out of 3M), and it keeps the
+  // events that happen to present two >30 GeV reco jets in opposite hemispheres at
+  // |Deta| >= 3 with NO truth-HS matching -- which at this pileup level
+  // preferentially selects events where that pair involves a PILEUP jet, since a
+  // genuine Z+jets event rarely supplies one. That is precisely the pathology the
+  // timing study is trying to measure, so it has to be possible to run with and
+  // without the cut rather than assume it is neutral.
+  const  double VBS_JET_D_ETA_DEFAULT = 3.0;
+  inline double VBS_JET_D_ETA         = VBS_JET_D_ETA_DEFAULT;
   const double MIN_JET_PT         = 30.0;  // self explanatory
   const double MAX_VTX_DZ         = 2.0;   // max error for reco HS vertex z
   const double MIN_HGTD_ETA       = 2.38;  // HGTD Min eta
