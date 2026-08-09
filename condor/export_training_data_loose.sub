@@ -1,0 +1,61 @@
+# ---------------------------------------------------------------------------
+# export_training_data_loose.sub — training export with the VBS topology cut OFF.
+#
+# Identical to export_training_data.sub except for `--vbs-deta=0`, which drops
+# the VBS candidate-pair |Deta| >= 3.0 requirement while KEEPING everything else,
+# including MIN_PASSETA_JETS = 1 (so it is still a forward-jet event, just not one
+# forced into a VBS topology).
+#
+# Why: on Z+jets that cut removed 87% of everything surviving the lepton
+# selection (520,126 -> 67,184 out of 3M). Worse, it has no truth-HS matching, so
+# at this pileup level it preferentially keeps events whose "VBS pair" involves a
+# PILEUP jet -- a genuine Z+jets event rarely supplies two >30 GeV jets in
+# opposite hemispheres at |Deta| >= 3 on its own. That is exactly the pathology
+# the timing study is trying to measure, so the cut may have been manufacturing
+# the effect rather than exposing it. Expect roughly 7.7x more Z+jets events.
+#
+# Output names are tagged by resolveSelection(), so these land as
+# <sample>/<sample>_deta0p0_training.root and CANNOT overwrite the standard
+# export. Both selections can be loaded side by side in training.ipynb.
+#
+# Submit (from inside condor/):
+#   cd build && cmake .. && make export_training_data   # build BEFORE submitting
+#   cd ../condor && condor_submit export_training_data_loose.sub
+# ---------------------------------------------------------------------------
+universe                 = vanilla
+executable               = run_analysis.sh
+
+# run_analysis.sh takes <executable> <sample> [<threads>] [<max-events>] [extra...].
+# Threads and max-events are simply omitted (this executable is a plain sequential
+# TTreeReader loop, so request_cpus stays 1); trailing --flags are classified by
+# shape by run_analysis.sh, so no empty positional placeholders are needed.
+arguments                = export_training_data $(sample) --vbs-deta=0
+
+should_transfer_files    = YES
+when_to_transfer_output  = ON_EXIT
+transfer_input_files     = ../build/export_training_data
+transfer_output_files    = $(sample)/$(sample)_deta0p0_training.root
+
+# Same remap rationale as the other .sub files: condor flattens a nested
+# transfer_output_files path to its basename when staging back, so the remap is
+# what makes the file land under $(sample)/ on the submit side. The LHS must be a
+# BARE FILENAME -- per condor_submit(1), "You cannot specify directories to be
+# remapped" -- while directories are allowed on the RHS and created as needed.
+transfer_output_remaps   = "$(sample)_deta0p0_training.root=$(sample)/$(sample)_deta0p0_training.root"
+
+getenv                   = True
+
++JobFlavour              = "tomorrow"
+
+# Sequential job. Memory/disk are raised above the standard export because the
+# loosened selection keeps several times more events, and the per-track tree
+# dominates the output size.
+request_cpus             = 1
+request_memory           = 6GB
+request_disk             = 24GB
+
+output                   = logs/export_loose_$(sample).$(ClusterId).$(ProcId).out
+error                    = logs/export_loose_$(sample).$(ClusterId).$(ProcId).err
+log                      = logs/export_loose_$(sample).$(ClusterId).$(ProcId).log
+
+queue sample in (zjets)
