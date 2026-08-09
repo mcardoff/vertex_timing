@@ -18,6 +18,16 @@
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
+# The AF login shell sources an ATLAS/LCG setup that exports PYTHONHOME and
+# PYTHONPATH pointing at LCG's Python 3.13 tree. Any OTHER interpreter launched
+# with those set looks for its stdlib in the wrong prefix and dies before it can
+# run a line of code:
+#   Fatal Python error: init_fs_encoding: failed to get the Python codec of the
+#   filesystem encoding / ModuleNotFoundError: No module named 'encodings'
+# The .sub files use `getenv = True`, so those variables reach the execute node
+# too. Clear them before touching any venv python.
+unset PYTHONHOME PYTHONPATH
+
 INPUT_DIR=$1
 OUT_DIR=$2
 shift 2
