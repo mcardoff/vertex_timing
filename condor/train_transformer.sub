@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# train_deepsets.sub — Deep Sets cluster-selection training as a condor job.
+# train_transformer.sub — NO-CLUSTERING vertex-time regression as a condor job.
 #
 # Torch comes from an LCG view on cvmfs (see run_training.sh) -- python 3.13.11,
 # torch 2.11.0, uproot 5.7.1 -- so nothing needs installing in $HOME and the job
@@ -16,7 +16,7 @@
 #   mkdir -p /data/mcardiff/training
 #   cp ~/project/vertex_timing/*/*_training.root /data/mcardiff/training/
 #
-#   cd condor && condor_submit train_deepsets.sub && condor_q
+#   cd condor && condor_submit train_transformer.sub && condor_q
 #   # results land back in runs/<tag>/ next to this file
 # ---------------------------------------------------------------------------
 universe                = vanilla
@@ -29,16 +29,16 @@ TAG       = $(selection)
 # NOTE the lambda list is a LITERAL here, not a queue variable: condor splits
 # `queue ... from (...)` rows on COMMAS, so a comma-containing value like
 # "0,0.1,0.3,1.0" would be torn into separate columns and silently mis-bound.
-arguments = train_deepsets.py $(INPUT_DIR) runs/$(TAG) --selection $(selection) --lambdas 0,0.1,0.3,1.0 --epochs 15
+arguments = train_transformer.py $(INPUT_DIR) runs/tf_$(TAG) --selection $(selection) --lambdas 0,0.1,0.3 --epochs 20
 
 should_transfer_files   = YES
 when_to_transfer_output = ON_EXIT
-transfer_input_files    = ../python/train_deepsets.py
-transfer_output_files   = runs/$(TAG)
+transfer_input_files    = ../python/train_transformer.py
+transfer_output_files   = runs/tf_$(TAG)
 # Condor flattens a nested transfer_output_files path to its basename on the way
 # back, and the LHS of a remap must be a BARE NAME -- condor_submit(1): "You
 # cannot specify directories to be remapped."
-transfer_output_remaps  = "$(TAG)=runs/$(TAG)"
+transfer_output_remaps  = "tf_$(TAG)=runs/tf_$(TAG)"
 
 getenv                  = True
 # Override the view (or bypass it) if ever needed:
@@ -46,18 +46,20 @@ getenv                  = True
 
 +JobFlavour             = "tomorrow"
 
-# The model is ~24k parameters; the cost is streaming ~23M track rows and holding
-# the per-sample tensors, not the maths. request_gpus=0 by default -- set it to 1
-# only if the probe found GPU slots, since a GPU request that cannot match will
-# sit idle forever.
+# ~340k parameters and attention over padded [events, <=101 tracks, features]
+# tensors, so this is heavier than the Deep Sets job in both memory and compute.
+# If it becomes the bottleneck, set request_gpus = 1 -- run_training.sh already
+# switches to the CUDA LCG view automatically when a GPU is present. Note a GPU
+# request that cannot match will sit idle forever, so check the probe first
+# (condor/probe_env.sub queues a GPU row for exactly this).
 request_cpus            = 4
-request_memory          = 16GB
+request_memory          = 24GB
 request_disk            = 8GB
 request_gpus            = 0
 
-output = logs/train_$(TAG).$(ClusterId).$(ProcId).out
-error  = logs/train_$(TAG).$(ClusterId).$(ProcId).err
-log    = logs/train_$(TAG).$(ClusterId).$(ProcId).log
+output = logs/traintf_$(TAG).$(ClusterId).$(ProcId).out
+error  = logs/traintf_$(TAG).$(ClusterId).$(ProcId).err
+log    = logs/traintf_$(TAG).$(ClusterId).$(ProcId).log
 
 # The lambda scan is done INSIDE one job (it shares the expensive data prep),
 # so one row per selection is enough. Add (tight, ...) to compare selections.

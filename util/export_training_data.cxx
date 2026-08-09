@@ -57,6 +57,36 @@
 #include "event_processing.h"
 #include "sample_config.h"
 
+// ---------------------------------------------------------------------------
+// TODO (for the no-clustering transformer, python/train_transformer.py)
+//
+// 1. PER-TRACK HS-JET LABEL.  Add a truth_ column giving the identity of the jet
+//    a track is associated with:
+//       truth_nearest_fwdjet_is_hs  : 1 if the nearest forward jet is matched to
+//                                     a truth HS jet, else 0.
+//    Derivable from branches that ALREADY survive the ntuple slim: a reco jet is
+//    HS when AntiKt4EMTopoJets_truthHSJet_idx (bound as topoJetTruthHSIdx) is
+//    non-empty, and PU otherwise -- the same definition rpt_v5's paperIsPU uses.
+//    Note this needs the truth_ prefix so the leakage guard holds it out of the
+//    feature set: it is supervision, never an input.
+//
+//    (TruthITPUJet_*/TruthOOTPUJet_* are NOT needed for this. Only the HS jets
+//    are labelled positively; everything unmatched is PU by construction.)
+//
+// 2. JETS AS TOKENS.  Add a third TTree, one row per forward jet:
+//       sample_id, event_num, jet_idx, pt, eta, phi, is_forward,
+//       n_ghost_tracks, sumpt_ghost, truth_is_hs
+//    Today jets reach the model only through per-track association
+//    (dr_nearest_fwdjet, pt_nearest_fwdjet, is_ghost_of_nearest) and event-level
+//    scalars (lead_jet_pt, n_forward_jets). A transformer can attend over jets
+//    directly if they are their own token sequence, which the per-track summary
+//    cannot express.
+//
+// Both are additive: existing consumers are unaffected, and train_transformer.py
+// picks them up automatically when present (it treats them as optional).
+// ---------------------------------------------------------------------------
+
+
 using namespace MyUtl;
 
 namespace {

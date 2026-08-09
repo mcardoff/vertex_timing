@@ -2,7 +2,10 @@
 # ---------------------------------------------------------------------------
 # run_training.sh — condor job executable for python/train_deepsets.py.
 #
-#   run_training.sh <input-dir> <out-dir> [extra args for train_deepsets.py...]
+#   run_training.sh <script.py> <input-dir> <out-dir> [extra args for the script...]
+#
+# <script.py> is transferred in by the .sub (train_deepsets.py or
+# train_transformer.py) and run from the job's scratch directory.
 #
 # TORCH COMES FROM AN LCG VIEW ON CVMFS, not from a venv in $HOME. The LCG views
 # already ship everything this needs, version-consistent with the ROOT the rest
@@ -26,11 +29,14 @@ set -euo pipefail
 # Clear them BEFORE sourcing the view, which then sets its own correctly.
 unset PYTHONHOME PYTHONPATH
 
-INPUT_DIR=$1
-OUT_DIR=$2
-shift 2
+SCRIPT=$1
+INPUT_DIR=$2
+OUT_DIR=$3
+shift 3
+[ -f "${SCRIPT}" ] || { echo "FATAL: ${SCRIPT} not transferred in"; exit 1; }
 
 echo "host: $(hostname)   date: $(date)"
+echo "script:    ${SCRIPT}"
 echo "input-dir: ${INPUT_DIR}"
 echo "out-dir:   ${OUT_DIR}"
 
@@ -67,5 +73,5 @@ print(f"  torch {torch.__version__} (cuda build {torch.version.cuda}, "
 PY
 
 mkdir -p "${OUT_DIR}"
-echo "running: ${PY} train_deepsets.py --input-dir ${INPUT_DIR} --out ${OUT_DIR} $*"
-"${PY}" train_deepsets.py --input-dir "${INPUT_DIR}" --out "${OUT_DIR}" "$@"
+echo "running: ${PY} ${SCRIPT} --input-dir ${INPUT_DIR} --out ${OUT_DIR} $*"
+"${PY}" "${SCRIPT}" --input-dir "${INPUT_DIR}" --out "${OUT_DIR}" "$@"
