@@ -383,12 +383,13 @@ def main():
     TST = make_tensors(TE_T, mu, sd, na_cols, labels, dev)
     sp = spans(FIT)
 
-    results, best_key, best_macro, best_net = {}, None, -1.0, None
+    results, nets, best_key, best_macro, best_net = {}, {}, None, -1.0, None
     for pool in args.pools.split(","):
         for lam in [float(x) for x in args.lambdas.split(",")]:
             net, vmacro, vep, hist = train_one(pool.strip(), lam, FIT, VAL, sp, args, dev)
             per, pooled, _ = evaluate(net, TST)
             key = f"{pool.strip()} lam={lam:g}"
+            nets[key] = net
             results[key] = {"val_macro": vmacro, "best_epoch": vep,
                             "test_per_sample": per, "test_pooled": pooled,
                             "history": hist}
@@ -403,15 +404,33 @@ def main():
             + "".join(f"{r['test_per_sample'].get(n, float('nan')):9.1f}%" for n in names))
     log(f"{'TRKPTZ (reference)':26s}" + "".join(f"{ref[n]['TRKPTZ']:9.1f}%" for n in names))
     log(f"{'oracle (ceiling)':26s}" + "".join(f"{ref[n]['oracle']:9.1f}%" for n in names))
-    # Chosen on VALIDATION, never on test.
-    log(f"\nselected on validation: {best_key}  (macro {best_macro:.2f})")
-    log("lambda scan (val macro):  "
-        + "   ".join(f"{k.split('lam=')[1]}: {r['val_macro']:.2f}" for k, r in results.items()))
-    if best_key.endswith("lam=0"):
-        log("  -> lam=0 won: the auxiliary target does not improve the representation, "
-            "consistent with its measured 80.2% ceiling")
-    else:
-        log("  -> the auxiliary head helped: truth_is_hs shapes phi usefully")
+    # Chosen on VALIDATION, never on test -- and only when the margin CLEARS THE
+    # RUN'S OWN NOISE. An earlier version declared victory for whichever lambda
+    # scored highest, and duly reported "the auxiliary head helped" on a margin of
+    # +0.006 macro points against an epoch-to-epoch sd of ~0.05 within a single
+    # run: a tenth of the noise. The noise floor is measured from the last 8
+    # epochs of each run rather than hardcoded, so it self-calibrates.
+    log("\nlambda scan (val macro):  "
+        + "   ".join(f"{k.split('lam=')[1]}: {r['val_macro']:.3f}" for k, r in results.items()))
+    import statistics as _st
+    noise = max(_st.pstdev([h["macro"] for h in r["history"]][-8:])
+                for r in results.values() if len(r["history"]) >= 3)
+    zero = next((k for k in results if k.endswith("lam=0")), None)
+    if zero is not None:
+        nz = {k: v for k, v in results.items() if k != zero}
+        if nz:
+            top = max(nz, key=lambda k: nz[k]["val_macro"])
+            margin = nz[top]["val_macro"] - results[zero]["val_macro"]
+            log(f"  epoch-to-epoch noise (sd of last 8): {noise:.3f}   "
+                f"best non-zero minus lam=0: {margin:+.3f}")
+            if margin < 2 * noise:
+                best_key, best_macro, best_net = zero, results[zero]["val_macro"], nets[zero]
+                log(f"  -> WITHIN NOISE (margin < 2 sd). Selecting {zero} on parsimony: the "
+                    f"auxiliary target does not improve the representation, consistent with "
+                    f"its measured 80.2% ceiling.")
+            else:
+                log(f"  -> {top} clears the noise floor: truth_is_hs shapes phi usefully")
+    log(f"\nselected: {best_key}  (val macro {best_macro:.3f})")
 
     with open(os.path.join(args.out, "results.json"), "w") as fh:
         json.dump({"args": vars(args), "reference": ref, "results": results,
