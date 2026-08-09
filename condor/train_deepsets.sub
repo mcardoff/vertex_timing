@@ -1,10 +1,14 @@
 # ---------------------------------------------------------------------------
 # train_deepsets.sub — Deep Sets cluster-selection training as a condor job.
 #
-# RUN condor/probe_env.sub FIRST. It reports whether an execute node can see
-# $HOME (hence ~/venvs/vtx and its torch) and whether GPU slots exist. This file
-# assumes $HOME IS mounted; if the probe says otherwise, set VTX_PYTHON in the
-# environment line below to a python that has torch, or add an apptainer image.
+# Torch comes from an LCG view on cvmfs (see run_training.sh) -- python 3.13.11,
+# torch 2.11.0, uproot 5.7.1 -- so nothing needs installing in $HOME and the job
+# does not depend on the Jupyter container's python. run_training.sh picks the
+# CUDA view automatically when the slot has a GPU.
+#
+# The probe (condor/probe_env.sub) confirmed: $HOME and /data are both mounted on
+# workers, and ~/venvs/vtx is NOT usable there (its python is a dangling symlink
+# into the Jupyter container).
 #
 # Input ROOT files are read from an absolute /data path rather than transferred:
 # they are GB-scale, and /data is already how the ntuples are read on workers.
@@ -34,8 +38,8 @@ transfer_output_files   = runs/$(TAG)
 transfer_output_remaps  = "$(TAG)=runs/$(TAG)"
 
 getenv                  = True
-# Uncomment if the probe shows $HOME is NOT mounted and you have another torch:
-# environment           = "VTX_PYTHON=/path/to/python-with-torch"
+# Override the view (or bypass it) if ever needed:
+# environment           = "LCG_VIEW=/cvmfs/sft.cern.ch/lcg/views/LCG_109/x86_64-el9-gcc15-opt"
 
 +JobFlavour             = "tomorrow"
 
