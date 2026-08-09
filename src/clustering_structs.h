@@ -315,8 +315,12 @@ namespace MyUtl {
     //   or manufactured by a pileup jet.
     //
     //   All fields keep their -1 sentinel when no opposite-hemisphere pair
-    //   exists; passJetPtCut relies on dEta staying -1 there so a no-pair event
-    //   fails even when the |Δη| requirement is disabled via --vbs-deta=0.
+    //   exists; passJetPtCut relies on dEta and mjj staying -1 there so a
+    //   no-pair event fails even when a threshold is lowered to 0. Lowering a
+    //   threshold therefore relaxes only that quantity's MAGNITUDE cut — the
+    //   pair requirement itself survives. To drop the pair requirement too,
+    //   pass a NEGATIVE --vbs-deta, which passJetPtCut treats as "no VBS pair
+    //   required" and which bypasses both comparisons.
     // -----------------------------------------------------------------------
     struct VbsPair {
       double mjj  = -1.0;
@@ -526,8 +530,27 @@ namespace MyUtl {
       bool passesPt   = passptcount   >= MIN_PASSPT_JETS;
       bool passesEta  = passptetacount >= MIN_PASSETA_JETS;
       VbsPair pair    = calcBestVbsPair(passPtIdx);
-      bool passesDEta = pair.dEta >= VBS_JET_D_ETA;
-      bool passesMjj  = pair.mjj  >= VBS_JET_MJJ;
+
+      // A NEGATIVE VBS_JET_D_ETA disables the VBS candidate-PAIR requirement
+      // outright, and must bypass BOTH tests below -- not just the |Deta| one.
+      //
+      // Every field of VbsPair keeps its -1 sentinel when no opposite-hemisphere
+      // pair exists, so `pair.dEta >= 0` and `pair.mjj >= 0` still REJECT a
+      // no-pair event. Lowering a threshold to 0 therefore only drops that
+      // quantity's MAGNITUDE cut and leaves the pair requirement standing --
+      // which is the thing that actually rejects Z+jets, since it rarely makes
+      // two >30 GeV jets in opposite hemispheres on its own. Measured when this
+      // was found: --vbs-deta=0 moved zjets from 67,074 to 69,745 accepted
+      // events, +4%, where removing the pair requirement was expected to be
+      // worth several-fold.
+      //
+      // Bypassing only passesDEta would reproduce that bug exactly, because the
+      // default m_jj >= 200 GeV would then reject every no-pair event on its
+      // own. There is deliberately no separate negative-mjj spelling: the pair
+      // either is required or is not, and one flag says which.
+      const bool vbsPairDisabled = VBS_JET_D_ETA < 0.0;
+      bool passesDEta = vbsPairDisabled || (pair.dEta >= VBS_JET_D_ETA);
+      bool passesMjj  = vbsPairDisabled || (pair.mjj  >= VBS_JET_MJJ);
       return passesPt && passesEta && passesDEta && passesMjj;
     }
 

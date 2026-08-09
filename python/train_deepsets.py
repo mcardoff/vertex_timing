@@ -74,18 +74,21 @@ def log(msg):
 # ------------------------------------------------------------------ data ----
 def find_files(input_dir, selection):
     """<s>_deta0p0_training.root when loose (falling back per sample), else <s>_training.root."""
-    tag, out = "deta0p0", {}
+    tags, out = ("novbs", "deta0p0"), {}
     for s in SAMPLES:
         cand = []
         if selection == "loose":
-            cand += [f"{s}_{tag}_training.root"]
+            # novbs is the current loose export; deta0p0 is the earlier attempt
+            # that only dropped the Deta magnitude and kept the pair requirement.
+            cand += [f"{s}_{t}_training.root" for t in tags]
         cand += [f"{s}_training.root"]
         for base in cand:
             hit = (glob.glob(os.path.join(input_dir, base))
                    or glob.glob(os.path.join(input_dir, s, base)))
             if hit:
                 out[s] = os.path.abspath(hit[0])
-                log(f"  {s:6s} [{'loose ' if tag in base else 'tight '}] -> {out[s]}")
+                which = next((t for t in tags if t in base), "tight")
+                log(f"  {s:6s} [{which:7s}] -> {out[s]}")
                 break
     if not out:
         hit = glob.glob(os.path.join(input_dir, "training.root"))
