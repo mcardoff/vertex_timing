@@ -302,14 +302,31 @@ namespace MyUtl {
     }
 
     // -----------------------------------------------------------------------
-    // calcBestVbsDeltaEta
-    //   Among the given pT-passing jet indices, finds the pair in opposite
-    //   η hemispheres (η_i · η_j < 0) with the largest invariant mass m_jj
-    //   — the standard VBS-candidate-jet definition — and returns their |Δη|.
-    //   Returns -1 if no opposite-hemisphere pair exists.
+    // VbsPair / calcBestVbsPair
+    //   The VBS candidate jet pair: among the given pT-passing jet indices, the
+    //   pair in opposite η hemispheres (η_i · η_j < 0) with the largest
+    //   invariant mass m_jj — the standard VBS-candidate-jet definition.
+    //
+    //   Returns m_jj alongside |Δη| (and the two reco jet indices) because the
+    //   pair search is identical either way: this used to return |Δη| only and
+    //   discard the m_jj it had just computed, which forced any m_jj study to
+    //   redo the whole search. The indices let callers ask whether each leg is
+    //   truth-HS-matched (isJetTruthHS) — i.e. whether the topology is genuine
+    //   or manufactured by a pileup jet.
+    //
+    //   All fields keep their -1 sentinel when no opposite-hemisphere pair
+    //   exists; passJetPtCut relies on dEta staying -1 there so a no-pair event
+    //   fails even when the |Δη| requirement is disabled via --vbs-deta=0.
     // -----------------------------------------------------------------------
-    double calcBestVbsDeltaEta(const std::vector<int>& passPtIdx) const {
-      double bestMjj = -1.0, bestDEta = -1.0;
+    struct VbsPair {
+      double mjj  = -1.0;
+      double dEta = -1.0;
+      int    idxI = -1, idxJ = -1;
+      bool valid() const { return idxI >= 0; }
+    };
+
+    VbsPair calcBestVbsPair(const std::vector<int>& passPtIdx) const {
+      VbsPair best;
       for (size_t a = 0; a < passPtIdx.size(); ++a) {
         for (size_t b = a + 1; b < passPtIdx.size(); ++b) {
           int i = passPtIdx[a], j = passPtIdx[b];
@@ -321,13 +338,52 @@ namespace MyUtl {
           jj.SetPtEtaPhiM(this->topoJetPt[j], etaJ, this->topoJetPhi[j], 0.0);
           double mjj = (ji + jj).M();
 
-          if (mjj > bestMjj) {
-            bestMjj  = mjj;
-            bestDEta = std::abs(etaI - etaJ);
-          }
+          if (mjj > best.mjj)
+            best = {mjj, std::abs((double)etaI - (double)etaJ), i, j};
         }
       }
-      return bestDEta;
+      return best;
+    }
+
+    // -----------------------------------------------------------------------
+    // isJetTruthHS
+    //   True if reco jet j is matched to at least one truth hard-scatter jet,
+    //   via the ntuple's own AntiKt4EMTopoJets_truthHSJet_idx association (a
+    //   non-empty index list means matched — the same idiom event_display.py
+    //   uses). Preferred over the ΔR-cone paperIsHS lambdas duplicated across
+    //   the rpt_v* diagnostics: it is the production's own matching, and the
+    //   branch was already bound here but read by nothing.
+    // -----------------------------------------------------------------------
+    bool isJetTruthHS(int j) const {
+      return j >= 0 && j < (int)this->topoJetTruthHSIdx.GetSize()
+             && !this->topoJetTruthHSIdx[j].empty();
+    }
+
+    // -----------------------------------------------------------------------
+    // collectPtPassingJets
+    //   Single jet loop behind passJetPtCut: fills passPtIdx with the indices
+    //   of reco jets above MIN_JET_PT (skipping lepton-overlap-removed ones)
+    //   and reports how many of those are also in the forward HGTD acceptance.
+    //   Split out so a diagnostic can reach the same jet counts and the same
+    //   VBS candidate pair *without* the |Δη| requirement bundled in — i.e.
+    //   see the m_jj/|Δη| distribution of everything the rest of the selection
+    //   admits, which is what a cut on either has to be chosen from.
+    // -----------------------------------------------------------------------
+    void collectPtPassingJets(std::vector<int>& passPtIdx,
+                              int& nPassPt, int& nPassPtEta) const {
+      passPtIdx.clear();
+      nPassPt = 0; nPassPtEta = 0;
+      for (int jetIdx = 0; jetIdx < (int)this->topoJetPt.GetSize(); ++jetIdx) {
+        if (this->isJetRemoved(jetIdx)) continue;  // lepton-overlap removed (Z+jets)
+        float eta = std::abs(this->topoJetEta[jetIdx]);
+        float pt  = this->topoJetPt[jetIdx];
+        if (DEBUG) std::cout << "reco jet pt, eta: " << pt << ", " << eta << '\n';
+        bool passpt    = pt > MIN_JET_PT;
+        bool passpteta = passpt && eta > MIN_ABS_ETA_JET && eta < MAX_ABS_ETA_JET;
+        nPassPt    += passpt    ? 1 : 0;
+        nPassPtEta += passpteta ? 1 : 0;
+        if (passpt) passPtIdx.push_back(jetIdx);
+      }
     }
 
     // -----------------------------------------------------------------------
@@ -341,22 +397,11 @@ namespace MyUtl {
     bool passJetPtCut() {
       int passptcount = 0, passptetacount = 0;
       std::vector<int> passPtIdx;  // indices of pT-passing jets
-
-      for (int jetIdx = 0; jetIdx < (int)this->topoJetPt.GetSize(); ++jetIdx) {
-        if (this->isJetRemoved(jetIdx)) continue;  // lepton-overlap removed (Z+jets)
-        float eta = std::abs(this->topoJetEta[jetIdx]);
-        float pt  = this->topoJetPt[jetIdx];
-        if (DEBUG) std::cout << "reco jet pt, eta: " << pt << ", " << eta << '\n';
-        bool passpt    = pt > MIN_JET_PT;
-        bool passpteta = passpt && eta > MIN_ABS_ETA_JET && eta < MAX_ABS_ETA_JET;
-        passptcount    += passpt    ? 1 : 0;
-        passptetacount += passpteta ? 1 : 0;
-        if (passpt) passPtIdx.push_back(jetIdx);
-      }
+      collectPtPassingJets(passPtIdx, passptcount, passptetacount);
 
       bool passesPt   = passptcount   >= MIN_PASSPT_JETS;
       bool passesEta  = passptetacount >= MIN_PASSETA_JETS;
-      double bestDEta = calcBestVbsDeltaEta(passPtIdx);
+      double bestDEta = calcBestVbsPair(passPtIdx).dEta;
       bool passesDEta = bestDEta >= VBS_JET_D_ETA;
       return passesPt && passesEta && passesDEta;
     }
