@@ -126,7 +126,7 @@ namespace {
     leg->Draw();
 
     ATLASLabel(0.18, 0.88, "Simulation Internal");
-    ATLASEnergyLabel(0.18, 0.82);
+    ATLASEnergyLabel(0.18, 0.82, MyUtl::ENERGY_LABEL.c_str());
     c->Print(plotFilePath("diagnostics", "vbs_mjj_diag.pdf").c_str());
   }
 
