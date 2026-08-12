@@ -71,6 +71,33 @@ namespace MyUtl {
   // without the cut rather than assume it is neutral.
   const  double VBS_JET_D_ETA_DEFAULT = 3.0;
   inline double VBS_JET_D_ETA         = VBS_JET_D_ETA_DEFAULT;
+  // VBS candidate-pair m_jj requirement. RUNTIME-SETTABLE (inline, not const)
+  // via --vbs-mjj=<x>; see resolveSelection() in sample_config.h.
+  //
+  // Off by default (0 -- any valid pair has mjj > 0, so this is a no-op):
+  // added alongside VBS_JET_D_ETA, not in place of it, after vbs_mjj_diag
+  // (util/vbs_mjj_diag.cxx) measured both variables against the same
+  // candidate-pair truth-HS-match denominator on all three samples. Findings
+  // that justify defaulting this off rather than baking in a value:
+  //   - |Deta| >= 3 (the current default) is purity-neutral on VBF (57.1% ->
+  //     57.2%) but purity-NEGATIVE on Z+jets (2.69% -> 2.51%) and dijet
+  //     (40.1% -> 35.0%) -- it preferentially admits pileup-legged pairs on
+  //     both, the pathology documented on VBS_JET_D_ETA above.
+  //   - m_jj is at-least-as-good at matched HS efficiency everywhere (VBF
+  //     +1.2pp, dijet +8.7pp) but does NOT fix Z+jets (+0.2pp vs the 2.69%
+  //     no-cut baseline) -- there is essentially no genuine forward VBS
+  //     topology in Z+jets for either kinematic variable to select for
+  //     (1,872 genuine pairs out of 2M events processed).
+  //   - Neither variable is monotonic in purity: m_jj peaks around 600-800
+  //     GeV in VBF/dijet and degrades above ~2 TeV (a far-forward pileup jet
+  //     manufactures a large mass); |Deta| degrades past ~4-5 similarly.
+  // In short: swapping in m_jj is a real but sample-dependent improvement,
+  // not a fix for the underlying issue that neither reco-jet kinematic
+  // variable enforces the candidate pair actually being hard-scatter. See
+  // isJetTruthHS (clustering_structs.h) for the one thing that does, at
+  // truth level.
+  const  double VBS_JET_MJJ_DEFAULT = 0.0;
+  inline double VBS_JET_MJJ          = VBS_JET_MJJ_DEFAULT;
   const double MIN_JET_PT         = 30.0;  // self explanatory
   const double MAX_VTX_DZ         = 2.0;   // max error for reco HS vertex z
   const double MIN_HGTD_ETA       = 2.38;  // HGTD Min eta

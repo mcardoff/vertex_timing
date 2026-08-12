@@ -392,7 +392,9 @@ namespace MyUtl {
     //   at least MIN_PASSETA_JETS of which are in the forward HGTD acceptance,
     //   and that the VBS candidate pair — the opposite-hemisphere,
     //   pT-passing jet pair with the largest m_jj — has an η separation ≥
-    //   VBS_JET_D_ETA. No truth-HS matching required.
+    //   VBS_JET_D_ETA, and m_jj >= VBS_JET_MJJ (0 by default -- a no-op, since
+    //   any valid pair has mjj > 0; see the comment on VBS_JET_MJJ). No
+    //   truth-HS matching required.
     // -----------------------------------------------------------------------
     bool passJetPtCut() {
       int passptcount = 0, passptetacount = 0;
@@ -401,9 +403,10 @@ namespace MyUtl {
 
       bool passesPt   = passptcount   >= MIN_PASSPT_JETS;
       bool passesEta  = passptetacount >= MIN_PASSETA_JETS;
-      double bestDEta = calcBestVbsPair(passPtIdx).dEta;
-      bool passesDEta = bestDEta >= VBS_JET_D_ETA;
-      return passesPt && passesEta && passesDEta;
+      VbsPair pair    = calcBestVbsPair(passPtIdx);
+      bool passesDEta = pair.dEta >= VBS_JET_D_ETA;
+      bool passesMjj  = pair.mjj  >= VBS_JET_MJJ;
+      return passesPt && passesEta && passesDEta && passesMjj;
     }
 
     // -----------------------------------------------------------------------
