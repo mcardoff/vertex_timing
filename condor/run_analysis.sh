@@ -65,6 +65,22 @@ for a in "$@"; do
   esac
 done
 
+# Clear the positional parameters now that they're captured in THREADS/
+# MAX_EVENTS/EXTRA_ARGS/EXECUTABLE/SAMPLE: `source file` with no explicit
+# trailing args leaves the CALLING script's "$@" unchanged, so without this,
+# atlasLocalSetup.sh below inherits this script's own leftover args (e.g.
+# "4 --vbs-deta=0 --vbs-mjj=200") as if they were its own CLI options. It
+# errors "unrecognized option '--vbs-deta=0'" on any "--" flag and returns
+# without defining `lsetup`, which then cascades into "lsetup: command not
+# found", no ROOT environment, and the transferred executable failing to
+# start with "error while loading shared libraries: libtbb.so.12" -- no
+# output file is ever written, so the job holds on output-transfer failure
+# with no indication the real cause was upstream. Silent for any job whose
+# leftover args happened to be flag-free (a bare "4"), which is why this went
+# unnoticed until the first job that combined a numeric <threads> AND a
+# --vbs-* flag in the same submission.
+set --
+
 # ATLAS/LCG environment (provides ROOT + Boost via cvmfs). atlasLocalSetup.sh
 # / lsetup reference unset variables internally (e.g. ALRB_frontlineSite) and
 # aren't `set -e`/`set -u` safe, so relax those flags around them.
