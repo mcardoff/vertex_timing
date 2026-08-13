@@ -60,6 +60,12 @@ using namespace MyUtl;
 static constexpr double JET_ETA_MIN = 2.4;
 static constexpr double JET_ETA_MAX = 3.8;
 
+// "Central" for the region-2 topology: inside HGTD's inner edge, i.e. a jet the
+// detector has no timing coverage for at all. Deliberately the complement of
+// JET_ETA_MIN rather than the reference study's tighter |eta| < 1.5 -- the
+// physically meaningful boundary here is "HGTD can/can't see it".
+static constexpr double CENTRAL_ETA_MAX = JET_ETA_MIN;
+
 // Event-level HS-timing-purity threshold for the "clean timing" WAVeS scenario:
 // a jet's RpT is filled only in events where ≥ this fraction of HS pT is timed
 // within |pull| < 3σ (calcHSTimingPurity).  Mirrors the Score::WAVES_MISAS
@@ -77,6 +83,70 @@ static inline double dR(double j_eta, double j_phi, double t_eta, double t_phi) 
   double dphi = TVector2::Phi_mpi_pi(j_phi - t_phi);
   return std::sqrt(deta * deta + dphi * dphi);
 }
+
+// -----------------------------------------------------------------------------
+// Track-to-vertex association, reference-study definition.
+//
+// Ported verbatim (coefficients and all) from a colleague's RpT study,
+// util/myJet_ana_fr.C::getNewDzpara. Returns the expected |z0 - z_vtx| scale in
+// mm for a track of given |eta| and pT: a 6th-order polynomial in |eta| whose
+// coefficients are selected from five pT bins.
+//
+// This REPLACES the z0-significance cut (|z0-z_vtx|/sqrt(var_z0) < N) that
+// rpt_v5 used previously. The two are not equivalent: the significance form
+// leans on the per-track covariance, which the z0_pull_diag study found
+// underestimates the true spread by ~15% (hence Z0_VAR_INFLATION elsewhere in
+// this codebase), while this is an empirical parameterization of the observed
+// resolution. Using it makes our RpT numerator directly comparable to the
+// reference study's.
+//
+// Note the pT bins are half-open on the low side and the <=1.5 bin catches
+// everything below, matching the original's if-chain exactly (no else-if, so a
+// value landing on a boundary takes the LAST matching branch -- preserved here
+// deliberately rather than "cleaned up", since changing it would silently shift
+// which coefficients boundary-pT tracks get).
+// -----------------------------------------------------------------------------
+static double getNewDzpara(double eta, double pt) {
+  eta = std::abs(eta);
+  double p[7] = {0, 0, 0, 0, 0, 0, 0};
+  auto set = [&p](const double (&src)[7]) { std::copy(src, src + 7, p); };
+
+  if (pt <= 1.5) {
+    static const double c[7] = { 0.0314036, 0.790955, -2.65987, 3.62073, -2.18228, 0.614866, -0.0634521 };
+    set(c);
+  }
+  if (pt > 1.5 && pt <= 2.5) {
+    static const double c[7] = { 0.0229273, 0.540101, -1.80727, 2.45187, -1.47382, 0.414345, -0.0426769 };
+    set(c);
+  }
+  if (pt > 2.5 && pt <= 5.0) {
+    static const double c[7] = { 0.0163773, 0.345112, -1.14474, 1.54382, -0.923523, 0.258617, -0.0265446 };
+    set(c);
+  }
+  if (pt > 5.0 && pt <= 10.0) {
+    static const double c[7] = { 0.010919, 0.179329, -0.581971, 0.773186, -0.45679, 0.126608, -0.012875 };
+    set(c);
+  }
+  if (pt > 10.0) {
+    static const double c[7] = { 0.00835945, 0.0957783, -0.299255, 0.38722, -0.22351, 0.0607521, -0.00606524 };
+    set(c);
+  }
+
+  double d = p[0];
+  double e = 1.0;
+  for (int k = 1; k < 7; ++k) { e *= eta; d += p[k] * e; }
+  return std::abs(d);
+}
+
+// Multiple of getNewDzpara a track's |z0 - z_vtx| must stay within. 1.4 is the
+// reference study's working point (its comment notes 0.8 discriminates better;
+// left at 1.4 to match what the study actually ran).
+static constexpr double DZ0_PARA_SCALE = 1.4;
+
+// dR(track, jet) cone for the RpT numerator. The reference study applies this
+// ON TOP of ghost association -- ghost-associated tracks outside the cone are
+// dropped -- so it is strictly tighter than ghost association alone.
+static constexpr double RPT_TRACK_JET_DR = 0.2;
 
 // -----------------------------------------------------------------------------
 // Event-display diagnostics: jet-level WAVeS ("mine") vs HGTD RpT comparison,
@@ -158,6 +228,11 @@ static void mergeCases(std::vector<JetCompCase>& dst, std::vector<JetCompCase>& 
 struct ThreadState {
   std::vector<Scenario> scen_lo = makeScenarios("_lo");  // 30–40 GeV
   std::vector<Scenario> scen_hi = makeScenarios("_hi");  // >40 GeV
+  // VBS-topology regions (see classifyRegion below). pT-inclusive (>MIN_JET_PT)
+  // rather than sliced: both are rare topologies and splitting them further
+  // would leave the ROCs statistics-limited.
+  std::vector<Scenario> scen_r1 = makeScenarios("_r1");  // both VBS legs forward
+  std::vector<Scenario> scen_r2 = makeScenarios("_r2");  // fwd PU leg + central HS leg
   long n_total = 0, n_pass_basic = 0, n_hgtd_valid = 0;
   // Z+jets-only breakdown (see event_processing.h EventResult::code doc for the
   // analogous clustering-side counters): n_pass_basic above is vertex-quality
@@ -180,15 +255,20 @@ struct ThreadState {
   std::vector<HurtJet>     hurt_events;
 };
 
-// RpT using ghost association (paper definition): sum pT of tracks that are
-// both ghost-associated to the jet AND in the caller's z₀-selected set.
+// RpT numerator: sum pT of tracks that are ghost-associated to the jet AND in
+// the caller's z₀-selected set AND within RPT_TRACK_JET_DR of the jet axis.
+// The dR term is why the jet direction has to be passed in -- it is per
+// (track, jet), so unlike the z₀ cut it cannot be folded into assoc_set.
 static double computeRpT(BranchPointerWrapper* b,
                          const std::vector<int>& ghost_indices,
-                         double j_pt,
+                         double j_pt, double j_eta, double j_phi,
                          const std::unordered_set<int>& assoc_set) {
   double sumpt = 0.0;
-  for (int idx : ghost_indices)
-    if (assoc_set.count(idx)) sumpt += b->trackPt[idx];
+  for (int idx : ghost_indices) {
+    if (!assoc_set.count(idx)) continue;
+    if (dR(j_eta, j_phi, b->trackEta[idx], b->trackPhi[idx]) > RPT_TRACK_JET_DR) continue;
+    sumpt += b->trackPt[idx];
+  }
   return sumpt / j_pt;
 }
 
@@ -326,15 +406,19 @@ int main(int argc, char** argv) {
       ++state.n_pass_lepton_sel;
       if (branch.vetoLeptonOverlap()) continue;
 
-      // ── Track selection: all tracks by z-significance (no eta cut) for the
-      //    z-only baseline, matching the paper's ITk-only scenario. ────────────
+      // ── Track selection: all tracks (no eta cut) associated to the primary
+      //    vertex by the reference study's parameterized |Δz₀| cut, for the
+      //    z-only baseline / ITk-only scenario. See getNewDzpara above for why
+      //    this replaced the previous z₀-significance cut. ──────────────────────
       std::vector<int> trk_all;
+      const double vtxZ = branch.recoVtxZ[0];
       for (size_t trk = 0; trk < branch.trackZ0.GetSize(); ++trk) {
         double trkPt = branch.trackPt[trk];
         if (trkPt < MIN_TRACK_PT || trkPt > MAX_TRACK_PT) continue;
         if (!branch.trackQuality[trk]) continue;
-        if (passTrackVertexAssociation((int)trk, 0, &branch, 2.5))
-          trk_all.push_back((int)trk);
+        double dz = std::abs(branch.trackZ0[trk] - vtxZ);
+        if (dz / getNewDzpara(branch.trackEta[trk], trkPt) > DZ0_PARA_SCALE) continue;
+        trk_all.push_back((int)trk);
       }
 
       // ── HGTD-acceptance tracks only (used for WAVeS clustering). ────────────
@@ -350,11 +434,21 @@ int main(int argc, char** argv) {
       // WAVeS selection: highest WAVeS-score cluster; time via in-jet refinement.
       double t_waves = 0.0, var_waves = 0.0;
       bool   waves_ok = false;
+      // TRKPTZ selection: the baseline Σ pT e^{-1.5|Δz|} score, over the SAME
+      // cluster collection -- so waves-vs-trkptz here isolates the choice of
+      // selection score, with clustering held fixed.
+      double t_trkptz = 0.0, var_trkptz = 0.0;
+      bool   trkptz_ok = false;
       if (!clusters.empty()) {
         auto best   = chooseCluster(clusters, Score::WAVES);
         t_waves     = best.calculateTime(Score::WAVES, &branch);  // in-jet refined
         var_waves   = best.sigmas[0] * best.sigmas[0];
         waves_ok    = true;
+
+        auto bestT  = chooseCluster(clusters, Score::TRKPTZ);
+        t_trkptz    = bestT.calculateTime(Score::TRKPTZ, &branch);
+        var_trkptz  = bestT.sigmas[0] * bestT.sigmas[0];
+        trkptz_ok   = true;
       }
 
       // ── HGTD ntuple vertex time. ─────────────────────────────────────────────
@@ -380,24 +474,15 @@ int main(int argc, char** argv) {
         return out;
       };
 
-      std::vector<int> trk_hgtd  = applyTimeGate(trk_all, t_hgtd,  var_hgtd,  hgtd_vtx_valid, GATE_SIGMA);
-      std::vector<int> trk_waves = applyTimeGate(trk_all, t_waves, var_waves, waves_ok,       GATE_SIGMA);
-
-      // ── Truth-vertex-t₀: gate the reco track times against the perfect HS
-      //    vertex time (var_vtx = 0). ──────────────────────────────────────────
-      double t_truth = branch.truthVtxTime[0];
-      std::vector<int> trk_truth = applyTimeGate(trk_all, t_truth, 0.0, true, GATE_SIGMA);
-
-      // ── "Clean timing" event filter: only fill the waves_misas scenario in
-      //    events whose HS timing purity clears MISAS_PURITY_CUT.  Same WAVeS time
-      //    gate otherwise. ───────────────────────────────────────────────────────
-      bool gate_misas = (calcHSTimingPurity(trk_z, &branch) >= MISAS_PURITY_CUT);
+      std::vector<int> trk_hgtd   = applyTimeGate(trk_all, t_hgtd,   var_hgtd,   hgtd_vtx_valid, GATE_SIGMA);
+      std::vector<int> trk_waves  = applyTimeGate(trk_all, t_waves,  var_waves,  waves_ok,       GATE_SIGMA);
+      std::vector<int> trk_trkptz = applyTimeGate(trk_all, t_trkptz, var_trkptz, trkptz_ok,      GATE_SIGMA);
 
       // Build per-scenario sets once per event for O(1) ghost-index lookup.
-      std::unordered_set<int> set_all  (trk_all.begin(),   trk_all.end());
-      std::unordered_set<int> set_hgtd (trk_hgtd.begin(),  trk_hgtd.end());
-      std::unordered_set<int> set_waves(trk_waves.begin(), trk_waves.end());
-      std::unordered_set<int> set_truth(trk_truth.begin(), trk_truth.end());
+      std::unordered_set<int> set_all   (trk_all.begin(),    trk_all.end());
+      std::unordered_set<int> set_hgtd  (trk_hgtd.begin(),   trk_hgtd.end());
+      std::unordered_set<int> set_trkptz(trk_trkptz.begin(), trk_trkptz.end());
+      std::unordered_set<int> set_waves (trk_waves.begin(),  trk_waves.end());
 
       // ── Fill jets into pT slices. ─────────────────────────────────────────────
       auto fillJets = [&](std::vector<Scenario>& sv, double pt_lo, double pt_hi) {
@@ -414,15 +499,14 @@ int main(int argc, char** argv) {
           const auto& ghost = branch.topoJetGhostTrackIdx[j];
           auto fill = [&](Scenario& s, const std::unordered_set<int>& s_set, bool ok = true) {
             if (!ok) return;
-            double r = computeRpT(&branch, ghost, j_pt, s_set);
+            double r = computeRpT(&branch, ghost, j_pt, j_eta, j_phi, s_set);
             if (isHS) s.h_hs->Fill(r);
             else      s.h_pu->Fill(r);
           };
           fill(sv[0], set_all);                       // ITk-only
-          fill(sv[1], set_hgtd);                      // HGTD t0
-          fill(sv[2], set_waves);                     // WAVeS t0
-          fill(sv[3], set_waves, gate_misas);         // WAVeS t0 + clean timing (event filter)
-          fill(sv[4], set_truth);                     // Truth t0
+          fill(sv[1], set_hgtd);                      // HGTD t0 (Athena)
+          fill(sv[2], set_trkptz);                    // TRKPTZ t0
+          fill(sv[3], set_waves);                     // WAVeS t0
 
           // Untimed floor accounting, per slice.
           for (int idx : ghost) {
@@ -442,6 +526,84 @@ int main(int argc, char** argv) {
 
       fillJets(state.scen_lo, 30.0, 40.0);
       fillJets(state.scen_hi, 40.0, 1e9);
+
+      // ── VBS-topology regions ────────────────────────────────────────────────
+      // Two topologies where forward timing is the deciding information, taken
+      // off the SAME VBS candidate pair the clustering-side selection uses
+      // (calcBestVbsPair: opposite-hemisphere, pT-passing, max m_jj):
+      //
+      //   R1  both legs forward, one truth-HS + one truth-PU.
+      //       Both are in HGTD acceptance, so timing has to say WHICH is the
+      //       hard-scatter jet. Fills h_hs from the HS leg, h_pu from the PU leg
+      //       -- a self-contained ROC.
+      //
+      //   R2  one leg forward + truth-PU, the other central + truth-HS.
+      //       Only the forward PU leg is filled (into h_pu): the HS leg is
+      //       central, outside HGTD acceptance entirely, so it carries no timing
+      //       information and would only dilute the signal side. R2's h_hs is
+      //       therefore left EMPTY by construction -- rpt_v5_plot pairs
+      //       r2.h_pu against r1.h_hs to build its ROC. Changing that here
+      //       (e.g. to also fill the central HS leg) would silently make the R2
+      //       ROC compare two different detector acceptances.
+      //
+      // Labels use paperIsHS/paperIsPU, matching the inclusive histograms above,
+      // rather than BranchPointerWrapper::isJetTruthHS -- mixing the two
+      // definitions across the same plot set would make the regions
+      // incomparable to the inclusive result.
+      {
+        std::vector<int> passPtIdx;
+        int nPt = 0, nPtEta = 0;
+        branch.collectPtPassingJets(passPtIdx, nPt, nPtEta);
+        auto pair = branch.calcBestVbsPair(passPtIdx);
+
+        if (pair.valid()) {
+          auto isFwd = [&](int j) {
+            double e = std::abs((double)branch.topoJetEta[j]);
+            return e > JET_ETA_MIN && e < JET_ETA_MAX;
+          };
+          auto isCentral = [&](int j) {
+            return std::abs((double)branch.topoJetEta[j]) < CENTRAL_ETA_MAX;
+          };
+          auto label = [&](int j, bool& hs, bool& pu) {
+            double e = branch.topoJetEta[j], p = branch.topoJetPhi[j];
+            hs = paperIsHS(e, p);
+            pu = paperIsPU(e, p);
+          };
+
+          const int a = pair.idxI, b = pair.idxJ;
+          bool aHS, aPU, bHS, bPU;
+          label(a, aHS, aPU);
+          label(b, bHS, bPU);
+
+          // Fill one jet into a region's scenario set, as HS or PU.
+          auto fillRegion = [&](std::vector<Scenario>& sv, int j, bool asHS) {
+            double j_pt  = branch.topoJetPt[j];
+            double j_eta = branch.topoJetEta[j];
+            double j_phi = branch.topoJetPhi[j];
+            const auto& ghost = branch.topoJetGhostTrackIdx[j];
+            auto put = [&](Scenario& s, const std::unordered_set<int>& s_set) {
+              double r = computeRpT(&branch, ghost, j_pt, j_eta, j_phi, s_set);
+              (asHS ? s.h_hs : s.h_pu)->Fill(r);
+            };
+            put(sv[0], set_all);
+            put(sv[1], set_hgtd);
+            put(sv[2], set_trkptz);
+            put(sv[3], set_waves);
+          };
+
+          // R1: both forward, exactly one HS and one PU leg.
+          if (isFwd(a) && isFwd(b)) {
+            if (aHS && bPU) { fillRegion(state.scen_r1, a, true);
+                              fillRegion(state.scen_r1, b, false); }
+            else if (bHS && aPU) { fillRegion(state.scen_r1, b, true);
+                                   fillRegion(state.scen_r1, a, false); }
+          }
+
+          // R2: forward PU leg + central HS leg. Forward PU leg only.
+          if (isFwd(a) && aPU && isCentral(b) && bHS) fillRegion(state.scen_r2, a, false);
+          if (isFwd(b) && bPU && isCentral(a) && aHS) fillRegion(state.scen_r2, b, false);
+        }
+      }
 
       // ── Event-display diagnostics (see JetCompCase/HurtJet doc comment
       //    near the top of this file). Full ntuple file path + local
@@ -470,8 +632,8 @@ int main(int argc, char** argv) {
           if (!isHS && !isPU) continue;
 
           const auto& ghost = branch.topoJetGhostTrackIdx[j];
-          double rpt_hgtd_j = computeRpT(&branch, ghost, j_pt, set_hgtd);
-          double rpt_mine_j = computeRpT(&branch, ghost, j_pt, set_waves);
+          double rpt_hgtd_j = computeRpT(&branch, ghost, j_pt, j_eta, j_phi, set_hgtd);
+          double rpt_mine_j = computeRpT(&branch, ghost, j_pt, j_eta, j_phi, set_waves);
           double delta = rpt_mine_j - rpt_hgtd_j;
           if (std::abs(delta) < 0.05) continue;  // skip trivial differences
 
@@ -525,8 +687,8 @@ int main(int argc, char** argv) {
             if (set_all.count(idx) && !set_waves.count(idx)) ++n_lost;
           if (n_lost == 0) continue;
 
-          double rpt_z    = computeRpT(&branch, ghost, j_pt, set_all);
-          double rpt_mine = computeRpT(&branch, ghost, j_pt, set_waves);
+          double rpt_z    = computeRpT(&branch, ghost, j_pt, j_eta, j_phi, set_all);
+          double rpt_mine = computeRpT(&branch, ghost, j_pt, j_eta, j_phi, set_waves);
           if (rpt_mine >= rpt_z) continue;  // shouldn't happen, but skip no-op cases
 
           state.hurt_events.push_back({filePath, localEntry, j_pt, j_eta, j_phi,
@@ -548,6 +710,14 @@ int main(int argc, char** argv) {
     for (size_t k = 0; k < merged.scen_lo.size(); ++k) {
       merged.scen_lo[k].h_hs->Add(other.scen_lo[k].h_hs);
       merged.scen_lo[k].h_pu->Add(other.scen_lo[k].h_pu);
+    }
+    for (size_t k = 0; k < merged.scen_r1.size(); ++k) {
+      merged.scen_r1[k].h_hs->Add(other.scen_r1[k].h_hs);
+      merged.scen_r1[k].h_pu->Add(other.scen_r1[k].h_pu);
+    }
+    for (size_t k = 0; k < merged.scen_r2.size(); ++k) {
+      merged.scen_r2[k].h_hs->Add(other.scen_r2[k].h_hs);
+      merged.scen_r2[k].h_pu->Add(other.scen_r2[k].h_pu);
     }
     for (size_t k = 0; k < merged.scen_hi.size(); ++k) {
       merged.scen_hi[k].h_hs->Add(other.scen_hi[k].h_hs);
@@ -590,6 +760,8 @@ int main(int argc, char** argv) {
   MyUtl::HistWriter writer(histPath);
   saveScenarios(writer, merged.scen_lo);
   saveScenarios(writer, merged.scen_hi);
+  saveScenarios(writer, merged.scen_r1);
+  saveScenarios(writer, merged.scen_r2);
   writer.WriteScalar("meta_n_total",      static_cast<Long64_t>(merged.n_total));
   writer.WriteScalar("meta_n_pass_basic", static_cast<Long64_t>(merged.n_pass_basic));
   writer.WriteScalar("meta_n_hgtd_valid", static_cast<Long64_t>(merged.n_hgtd_valid));
