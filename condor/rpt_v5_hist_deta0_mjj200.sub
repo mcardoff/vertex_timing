@@ -1,9 +1,8 @@
 # ---------------------------------------------------------------------------
 # rpt_v5_hist_deta0_mjj200.sub — rpt_v5_hist at the LOOSER m_jj working point:
-# |Deta| requirement OFF, m_jj >= 200 GeV. Z+jets only.
+# |Deta| requirement OFF, m_jj >= 200 GeV. All three samples.
 #
-# Identical to rpt_v5_hist_deta0_mjj500.sub except for `--vbs-mjj=200` and the
-# single queued sample.
+# Identical to rpt_v5_hist_deta0_mjj500.sub except for `--vbs-mjj=200`.
 #
 # Why: the m_jj >= 500 run left Z+jets' R1 region (both VBS candidate legs
 # forward, one truth-HS + one truth-PU) with only 749 forward legs. At that
@@ -61,4 +60,4 @@ output                   = logs/rpt_v5_deta0_mjj200_$(sample).$(ClusterId).$(Pro
 error                    = logs/rpt_v5_deta0_mjj200_$(sample).$(ClusterId).$(ProcId).err
 log                      = logs/rpt_v5_deta0_mjj200_$(sample).$(ClusterId).$(ProcId).log
 
-queue sample in (zjets)
+queue sample in (vbf, zjets, dijet)
