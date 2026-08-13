@@ -54,13 +54,20 @@ inline TH1D* makeHist(const char* name, const char* title) {
   return new TH1D(name, title, rpt_nbin, rpt_bins.data());
 }
 
+// Scenario set: the no-timing baseline plus the three timing algorithms under
+// comparison. zonly is kept (not one of the three) because a ROC has nothing to
+// improve *over* without it -- it is the reference every ratio panel divides by.
+//
+// The earlier waves_misas (event-level HS-timing-purity oracle) and truth
+// (perfect vertex t0 ceiling) scenarios were dropped to keep the region-split
+// histogram count manageable; both are a two-line re-add here plus their time
+// source in rpt_v5_hist.cxx if the ceiling/oracle context is wanted again.
 inline std::vector<Scenario> makeScenarios(const std::string& suffix) {
   std::vector<Scenario> s = {
     {"zonly",       "ITk-only",                    C05, nullptr, nullptr},
-    {"hgtd",        "HGTD t_{0}",                  C01, nullptr, nullptr},
+    {"hgtd",        "HGTD t_{0} (Athena)",         C01, nullptr, nullptr},
+    {"trkptz",      "TRKPTZ t_{0}",                C02, nullptr, nullptr},
     {"waves",       "WAVeS t_{0}",                 C03, nullptr, nullptr},
-    {"waves_misas", "WAVeS t_{0} + clean timing",  C04, nullptr, nullptr},
-    {"truth",       "Truth t_{0}",                 C06, nullptr, nullptr},
   };
   for (auto& sc : s) {
     sc.h_hs = makeHist(("HS_" + sc.name + suffix).c_str(),

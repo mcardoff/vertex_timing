@@ -92,6 +92,11 @@ int main(int argc, char** argv) {
 
   std::vector<Scenario> scen_lo = makeScenarios("_lo");
   std::vector<Scenario> scen_hi = makeScenarios("_hi");
+  // VBS-topology regions, see rpt_v5_hist.cxx's region block for definitions.
+  // scen_r2's h_hs is EMPTY by construction (region 2 has no forward HS jet);
+  // its ROC borrows scen_r1's HS side -- see SECTION 2b.
+  std::vector<Scenario> scen_r1 = makeScenarios("_r1");
+  std::vector<Scenario> scen_r2 = makeScenarios("_r2");
   long n_total, n_pass_basic, n_hgtd_valid;
   double pu_tot_pt, pu_floor_pt, hs_tot_pt, hs_floor_pt;
   double pu_tot_lo, pu_floor_lo, hs_tot_lo, hs_floor_lo;
@@ -99,6 +104,8 @@ int main(int argc, char** argv) {
     MyUtl::HistReader reader(histFile);
     loadScenarios(reader, scen_lo);
     loadScenarios(reader, scen_hi);
+    loadScenarios(reader, scen_r1);
+    loadScenarios(reader, scen_r2);
     n_total      = reader.ReadScalarLong("meta_n_total");
     n_pass_basic = reader.ReadScalarLong("meta_n_pass_basic");
     n_hgtd_valid = reader.ReadScalarLong("meta_n_hgtd_valid");
@@ -150,6 +157,23 @@ int main(int argc, char** argv) {
   const double roc_xmin_lo = roc_xmin_default, roc_xmax_lo = roc_xmax_default;
   const double roc_xmin_hi = roc_xmin_default, roc_xmax_hi = roc_xmax_default;
 
+  // ── SECTION 2b: VBS-topology region ROCs ──────────────────────────────────
+  // R1 is self-contained: its own forward HS leg vs its own forward PU leg.
+  //
+  // R2 is NOT. By construction its only forward jet is the PU leg (the HS leg
+  // is central, outside HGTD acceptance), so scen_r2[i].h_hs is empty and
+  // generate_roc against it would divide by zero. The physics question R2 asks
+  // is "how well can timing reject a forward PU jet", which needs a forward-HS
+  // reference to trade off against -- and R1's HS leg is exactly that: a
+  // genuine forward HS jet under the same track selection and timing gate. So
+  // R2's ROC pairs r2.h_pu against r1.h_hs. This is a cross-region ROC and is
+  // labelled as such on the plot; do not "fix" it to use r2.h_hs.
+  std::vector<TGraph*> rocs_r1, rocs_r2;
+  for (auto& s : scen_r1) rocs_r1.push_back(generate_roc(s.h_pu, s.h_hs));
+  for (size_t i = 0; i < scen_r2.size(); ++i)
+    rocs_r2.push_back(generate_roc(scen_r2[i].h_pu, scen_r1[i].h_hs));
+  // (styled below, once styleRoc is in scope)
+
   auto styleRoc = [&](TGraph* g, Color_t col, double xmin, double xmax) {
     g->SetTitle("R_{pT} Discriminant;Hard Scatter Efficiency;Pile-Up Rejection (1 / Mistag Rate)");
     g->SetLineColor(col);
@@ -162,6 +186,10 @@ int main(int argc, char** argv) {
   for (size_t i = 0; i < rocs_lo.size(); ++i) {
     styleRoc(rocs_lo[i], scen_lo[i].color, roc_xmin_lo, roc_xmax_lo);
     styleRoc(rocs_hi[i], scen_hi[i].color, roc_xmin_hi, roc_xmax_hi);
+  }
+  for (size_t i = 0; i < rocs_r1.size(); ++i) {
+    styleRoc(rocs_r1[i], scen_r1[i].color, roc_xmin_default, roc_xmax_default);
+    styleRoc(rocs_r2[i], scen_r2[i].color, roc_xmin_default, roc_xmax_default);
   }
 
   // ── Console summary ──────────────────────────────────────────────────────────
@@ -422,6 +450,57 @@ int main(int argc, char** argv) {
     L->Draw();
     canvas->Print(out_pdf);
   }
+
+  // ===========================================================================
+  // SECTION 5: VBS-topology regions.
+  //   R1  both VBS candidate legs forward, one truth-HS + one truth-PU --
+  //       timing has to pick which forward jet is the hard-scatter one.
+  //   R2  forward truth-PU leg + central truth-HS leg -- can timing reject the
+  //       forward PU jet? Its ROC's signal side is R1's forward HS leg (R2 has
+  //       no forward HS jet by construction); see SECTION 2b.
+  // ===========================================================================
+  const char* lbl_r1 = "VBS pair: both legs fwd (HS vs PU), p_{T}^{jet} > 30 GeV";
+  const char* lbl_r2 = "VBS pair: fwd PU leg + central HS leg  [signal side from R1]";
+
+  // drawRocWithRatio Print()s the canvas itself -- do not add another here.
+  drawRocWithRatio(rocs_r1, scen_r1, roc_ymax, 4.0,
+                   roc_xmin_default, roc_xmax_default, lbl_r1);
+  drawRocWithRatio(rocs_r2, scen_r2, roc_ymax, 4.0,
+                   roc_xmin_default, roc_xmax_default, lbl_r2);
+
+  // RpT distributions per region, all scenarios overlaid.
+  auto drawRegionShapes = [&](std::vector<Scenario>& sc, bool useHS,
+                              const char* title, const char* lbl) {
+    double ymax = 0.0;
+    for (auto& s : sc) ymax = std::max(ymax, (useHS ? s.h_hs : s.h_pu)->GetMaximum());
+    if (ymax <= 0.0) return;  // nothing filled (e.g. R2's empty HS side)
+    canvas->Clear();
+    canvas->SetLogy(true);
+    TLegend* L = new TLegend(0.55, 0.68, 0.92, 0.88);
+    StyleLegend(L);
+    for (size_t i = 0; i < sc.size(); ++i) {
+      TH1D* h = useHS ? sc[i].h_hs : sc[i].h_pu;
+      h->SetLineStyle(1);
+      if (i == 0) { h->SetMaximum(50.0 * ymax); h->SetTitle(title); }
+      h->Draw(i == 0 ? "HIST" : "HIST SAME");
+      L->AddEntry(h, sc[i].legend.c_str());
+    }
+    drawLabels(lbl);
+    L->Draw();
+    canvas->Print(out_pdf);
+  };
+  drawRegionShapes(scen_r1, true,  "R1 forward HS leg R_{pT};R_{pT};Entries", lbl_r1);
+  drawRegionShapes(scen_r1, false, "R1 forward PU leg R_{pT};R_{pT};Entries", lbl_r1);
+  drawRegionShapes(scen_r2, false, "R2 forward PU leg R_{pT};R_{pT};Entries", lbl_r2);
+
+  // Region yields -- these topologies are rare, so print the counts that the
+  // ROCs above are built from. A region with very few entries makes its ROC
+  // unreliable no matter how clean the curve looks.
+  std::printf("\n=== VBS-topology region yields (zonly scenario) ===\n");
+  std::printf("  R1 forward HS legs : %8.0f\n", scen_r1[0].h_hs->GetEntries());
+  std::printf("  R1 forward PU legs : %8.0f\n", scen_r1[0].h_pu->GetEntries());
+  std::printf("  R2 forward PU legs : %8.0f\n", scen_r2[0].h_pu->GetEntries());
+  std::printf("  (R2 HS side is empty by construction; its ROC uses R1's HS legs)\n");
 
   canvas->Print(out_pdf + "]");
 
