@@ -550,13 +550,33 @@ int main(int argc, char** argv) {
       // rather than BranchPointerWrapper::isJetTruthHS -- mixing the two
       // definitions across the same plot set would make the regions
       // incomparable to the inclusive result.
+      //
+      // The VBS topology knobs (--vbs-deta=, --vbs-mjj=) gate the REGIONS ONLY,
+      // not the inclusive _lo/_hi histograms above. That asymmetry is
+      // deliberate and load-bearing:
+      //   - rpt_v5's inclusive measurement is by design selection-free ("every
+      //     forward jet in the acceptance contributes an independent RpT
+      //     measurement", see the file header), so gating it would silently
+      //     redefine the primary result.
+      //   - the regions ARE a VBS topology selection, so the knobs that define
+      //     that topology have to apply here or they mean nothing.
+      // Note calcBestVbsPair only FINDS the max-m_jj opposite-hemisphere pair;
+      // it does not apply either cut. passJetPtCut is what normally applies
+      // them on the clustering side, and rpt_v5_hist deliberately never calls
+      // it -- so without the explicit test below the knobs would be inert here,
+      // changing only the output filename via SELECTION_TAG and making two
+      // different --vbs-mjj runs produce byte-identical physics.
       {
         std::vector<int> passPtIdx;
         int nPt = 0, nPtEta = 0;
         branch.collectPtPassingJets(passPtIdx, nPt, nPtEta);
         auto pair = branch.calcBestVbsPair(passPtIdx);
 
-        if (pair.valid()) {
+        const bool passVbsTopology = pair.valid()
+                                  && pair.mjj  >= VBS_JET_MJJ
+                                  && pair.dEta >= VBS_JET_D_ETA;
+
+        if (passVbsTopology) {
           auto isFwd = [&](int j) {
             double e = std::abs((double)branch.topoJetEta[j]);
             return e > JET_ETA_MIN && e < JET_ETA_MAX;

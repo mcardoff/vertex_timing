@@ -13,10 +13,13 @@
 # kept, dijet 43.4% at 75.2% kept), tighter than the 200 GeV working point used
 # for the clustering_hist run.
 #
-# NOTE this also drives the two VBS-topology REGIONS added to rpt_v5_hist (R1:
-# both candidate legs forward; R2: forward PU leg + central HS leg). Those are
-# built off the same calcBestVbsPair, so the selection knobs here change which
-# events populate them, not just the inclusive histograms. On Z+jets in
+# SCOPE: these knobs gate the two VBS-topology REGIONS ONLY (R1: both candidate
+# legs forward; R2: forward PU leg + central HS leg). They do NOT affect the
+# inclusive _lo/_hi histograms, which rpt_v5 keeps selection-free by design.
+# (An earlier version of this header claimed otherwise, and before the fix in
+# rpt_v5_hist.cxx the knobs were inert entirely -- calcBestVbsPair only finds
+# the pair, it does not cut on it -- so two different --vbs-mjj runs produced
+# identical physics under different filenames.) On Z+jets in
 # particular, expect R1 to be statistics-starved -- vbs_mjj_diag found only
 # 1,872 genuine (both-legs-truth-HS) pairs in 2M events even with NO topology
 # cut -- so check the region yields rpt_v5_plot prints before reading its ROC.
