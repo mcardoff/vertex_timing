@@ -136,6 +136,9 @@ int main(int argc, char** argv) {
   };
   const char* lbl_lo = "30 < p_{T}^{jet} < 40 GeV, 2.4 < |#eta| < 3.8";
   const char* lbl_hi = "p_{T}^{jet} > 40 GeV, 2.4 < |#eta| < 3.8";
+  // VBS-topology region labels (see rpt_v5_hist.cxx for the definitions).
+  const char* lbl_r1 = "VBS pair: both legs fwd (HS vs PU), p_{T}^{jet} > 30 GeV";
+  const char* lbl_r2 = "VBS pair: fwd PU leg + central HS leg  [signal side from R1]";
 
   // ===========================================================================
   // SECTION 2: Derive every Integral()/GetMean()-based number. styleScen is
@@ -266,7 +269,10 @@ int main(int argc, char** argv) {
       if (!s.h_hs || !s.h_pu) continue;
       for (auto* h : {s.h_hs, s.h_pu}) {
         h->GetXaxis()->SetRangeUser(0.0, 1.5);
-        h->GetXaxis()->SetNdivisions(515);
+        // 5 primary divisions, not 15: over the [0, 1.5] display window the
+        // latter puts a label every 0.1, which run together into an unreadable
+        // "0.10.20.30.4..." strip at this canvas width.
+        h->GetXaxis()->SetNdivisions(505);
         h->SetLineWidth(2);
       }
       s.h_hs->SetLineColor(s.color);
@@ -276,6 +282,15 @@ int main(int argc, char** argv) {
   };
   styleScen(scen_lo);
   styleScen(scen_hi);
+  // Regions too, so their R_pT distributions get the same [0, 1.5] display
+  // window. Without this they render against the full booked axis, whose last
+  // bin runs to 375 (rpt_bins' single wide overflow bin) -- squashing every
+  // real entry into the leftmost 0.4% of the frame. Safe here for the same
+  // reason as the two calls above: the region ROCs were built back in
+  // SECTION 2b via generate_roc, which uses explicit bin ranges and is immune
+  // to SetRangeUser, and the region yield printouts use GetEntries().
+  styleScen(scen_r1);
+  styleScen(scen_r2);
 
   // ===========================================================================
   // SECTION 4: PDF drawing.
@@ -397,6 +412,17 @@ int main(int argc, char** argv) {
   // (2) ROC — >40 GeV.
   drawRocWithRatio(rocs_hi, scen_hi, roc_ymax, 4.0, roc_xmin_hi, roc_xmax_hi, lbl_hi);
 
+  // (3) ROC — VBS region R1: both candidate legs forward, HS leg vs PU leg.
+  // (4) ROC — VBS region R2: forward PU leg, signal side borrowed from R1
+  //     (R2 has no forward HS jet by construction -- see SECTION 2b).
+  // Placed directly after the inclusive ROCs so the four discrimination plots
+  // sit together at the front of the PDF. drawRocWithRatio Print()s the canvas
+  // itself -- do not add another Print here.
+  drawRocWithRatio(rocs_r1, scen_r1, roc_ymax, 4.0,
+                   roc_xmin_default, roc_xmax_default, lbl_r1);
+  drawRocWithRatio(rocs_r2, scen_r2, roc_ymax, 4.0,
+                   roc_xmin_default, roc_xmax_default, lbl_r2);
+
   // (3+) Per-scenario HS vs PU, 30–40 GeV slice, log-y.
   canvas->Clear();
   canvas->SetLogy(true);
@@ -459,16 +485,8 @@ int main(int argc, char** argv) {
   //       forward PU jet? Its ROC's signal side is R1's forward HS leg (R2 has
   //       no forward HS jet by construction); see SECTION 2b.
   // ===========================================================================
-  const char* lbl_r1 = "VBS pair: both legs fwd (HS vs PU), p_{T}^{jet} > 30 GeV";
-  const char* lbl_r2 = "VBS pair: fwd PU leg + central HS leg  [signal side from R1]";
-
-  // drawRocWithRatio Print()s the canvas itself -- do not add another here.
-  drawRocWithRatio(rocs_r1, scen_r1, roc_ymax, 4.0,
-                   roc_xmin_default, roc_xmax_default, lbl_r1);
-  drawRocWithRatio(rocs_r2, scen_r2, roc_ymax, 4.0,
-                   roc_xmin_default, roc_xmax_default, lbl_r2);
-
-  // RpT distributions per region, all scenarios overlaid.
+  // (The two region ROCs are drawn earlier, as pages 3-4 alongside the
+  // inclusive ROCs.) What remains here is the per-region R_pT shapes.
   auto drawRegionShapes = [&](std::vector<Scenario>& sc, bool useHS,
                               const char* title, const char* lbl) {
     double ymax = 0.0;
@@ -476,7 +494,10 @@ int main(int argc, char** argv) {
     if (ymax <= 0.0) return;  // nothing filled (e.g. R2's empty HS side)
     canvas->Clear();
     canvas->SetLogy(true);
-    TLegend* L = new TLegend(0.55, 0.68, 0.92, 0.88);
+    // Bottom-right: the region labels are long enough to run under a top-right
+    // legend, and these distributions fall off well before the right edge, so
+    // that corner is empty.
+    TLegend* L = new TLegend(0.58, 0.16, 0.93, 0.40);
     StyleLegend(L);
     for (size_t i = 0; i < sc.size(); ++i) {
       TH1D* h = useHS ? sc[i].h_hs : sc[i].h_pu;
