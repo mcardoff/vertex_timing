@@ -2,7 +2,8 @@
 # export_new_samples.sub — training-data export for the mu=0 samples and the
 # channel-matched mu=200 control.
 #
-# Queues four jobs:
+# Queues seven jobs -- the four new samples plus the three existing ones,
+# which must be re-exported because the canonical selection changed:
 #   vbf_mu0      600026 r15697  pairs with vbf      -> the INTRINSIC TIMING FLOOR
 #   zeejets_mu0  601189 r15697  pairs with zeejets  -> forward-jet-is-pileup test
 #   zeejets      601189 r15700  the mu=200 control  -> without it the mu0 Zee
@@ -10,11 +11,15 @@
 #                                                      like-for-like to sit beside
 #   ttbar_mu0    601229 r15697  no mu=200 pair yet (ttbar still downloading)
 #
-# Standard (tight) selection deliberately: these have to be comparable to the
-# existing baselines. A loose (--vbs-deta=-1) pass is a separate submit once the
-# tight numbers are in -- it would tell us whether any mu0 shortfall is the VBS
-# pair requirement or the forward-jet requirement, and that is a different
-# question from the one this answers.
+# CANONICAL SELECTION: --vbs-deta=0.0 --vbs-mjj=500. The analysis definition moved
+# from the |Deta| >= 3 topology cut to an m_jj-based one, so every sample here is
+# exported against that and NOT against the old default. Output is tagged
+# deta0p0_mjj500p0, so these cannot collide with the earlier tight exports.
+#
+# The pre-existing vbf/zjets/dijet exports are on the OLD selection, which makes
+# them unusable as a basis alongside these -- any model mixing samples would be
+# training across two different fiducial regions. They are re-exported here for
+# that reason, not for completeness.
 #
 # EXPECT zeejets_mu0 and ttbar_mu0 TO PASS ALMOST NOTHING. passJetPtCut needs a
 # forward jet (2.38 < |eta| < 4.0, pT > 30 GeV) and neither process makes one on
@@ -28,15 +33,15 @@
 universe                 = vanilla
 executable               = run_analysis.sh
 
-arguments                = export_training_data $(sample)
+arguments                = export_training_data $(sample) --vbs-deta=0.0 --vbs-mjj=500
 
 should_transfer_files    = YES
 when_to_transfer_output  = ON_EXIT
 transfer_input_files     = ../build/export_training_data
-transfer_output_files    = $(sample)/$(sample)_training.root
+transfer_output_files    = $(sample)/$(sample)_deta0p0_mjj500p0_training.root
 # LHS must be a BARE FILENAME -- condor_submit(1): "You cannot specify
 # directories to be remapped". Directories are allowed on the RHS.
-transfer_output_remaps   = "$(sample)_training.root=$(sample)/$(sample)_training.root"
+transfer_output_remaps   = "$(sample)_deta0p0_mjj500p0_training.root=$(sample)/$(sample)_deta0p0_mjj500p0_training.root"
 
 getenv                   = True
 +JobFlavour              = "tomorrow"
@@ -53,4 +58,4 @@ output = logs/export_$(sample).$(ClusterId).$(ProcId).out
 error  = logs/export_$(sample).$(ClusterId).$(ProcId).err
 log    = logs/export_$(sample).$(ClusterId).$(ProcId).log
 
-queue sample in (vbf_mu0, zeejets_mu0, zeejets, ttbar_mu0)
+queue sample in (vbf_mu0, zeejets_mu0, zeejets, ttbar_mu0, vbf, zjets, dijet)
