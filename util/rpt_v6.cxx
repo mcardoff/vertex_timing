@@ -197,6 +197,15 @@ int main(int argc, char** argv) {
   // able to scan this separates "the window is wrong for our t0" from "the
   // method does not work".
   double T0_NSIGMA = 2.0;
+  // Vertex-time error inflation, the timing analogue of Z0_VAR_INFLATION.
+  // Measured on this sample: sigma_trk ~ 27.0 ps and sigma_vtx ~ 9.1 ps give a
+  // quoted uncertainty of 28.6 ps, but the CORE spread of (t_trk - t_vtx) is
+  // 50.8 ps -- the quoted error understates the truth by 1.78x, so a nominal
+  // 2 sigma behaves like ~1.1 sigma. Since sigma_trk matches the TDR's
+  // "Initial" scenario exactly, the excess sits in the vertex term: making the
+  // core pull unit-width needs sigma_vtx_eff = sqrt(50.8^2 - 27.0^2) = 43 ps,
+  // i.e. a factor ~4.7 on the quoted 9.1 ps.
+  double VTXT_INFL = 1.0;
   // Dominant levers on the ITk-only baseline: a tight z0 window or a tight
   // track-jet cone strips PU tracks and inflates rejection. The macro's values
   // are 1.4 and 0.2; the jet radius is 0.4.
@@ -243,6 +252,7 @@ int main(int argc, char** argv) {
     if (a.rfind("--ptmax=", 0) == 0) JPT_MAX  = std::stod(a.substr(8));
     if (a.rfind("--etamax=",0) == 0) JETA_MAX = std::stod(a.substr(9));
     if (a.rfind("--t0sigma=",0)== 0) T0_NSIGMA= std::stod(a.substr(10));
+    if (a.rfind("--vtxtinfl=",0)==0) VTXT_INFL= std::stod(a.substr(11));
     if (a.rfind("--dz0scale=",0)==0) DZ0_SCALE= std::stod(a.substr(11));
     if (a.rfind("--trkdr=",0)  == 0) TRK_DR   = std::stod(a.substr(8));
     if (a.rfind("--zcut=",0)   == 0) ZCUT     = a.substr(7);
@@ -272,6 +282,8 @@ int main(int argc, char** argv) {
       os << "_";
     }
     if (NBINS != 100) os << "nb" << NBINS << "_";
+    if (VTXT_INFL != 1.0) { std::ostringstream v; v << "vi" << VTXT_INFL;
+      std::string t=v.str(); std::replace(t.begin(),t.end(),'.','p'); os << t << "_"; }
     if (MAX_DZ != 0.5) { std::ostringstream d; d << "dz" << MAX_DZ; std::string t=d.str();
                          std::replace(t.begin(), t.end(), '.', 'p'); os << t << "_"; }
     pre += os.str();
@@ -367,7 +379,7 @@ int main(int argc, char** argv) {
     const bool vtx_time_ok = (recoVtx_valid.GetSize() > 0 && recoVtx_valid[0] == 1);
     if (vtx_time_ok) ++n_evt_vtx_timed;
     const double vtx_t   = vtx_time_ok ? recoVtx_time[0]    : 0.0;
-    const double vtx_res = vtx_time_ok ? recoVtx_timeRes[0] : 0.0;
+    const double vtx_res = vtx_time_ok ? recoVtx_timeRes[0] * VTXT_INFL : 0.0;
 
     // Paper HS/PU labels (NOTE 1), evaluated per jet below.
     auto isPaperHS = [&](double je, double jp) {
