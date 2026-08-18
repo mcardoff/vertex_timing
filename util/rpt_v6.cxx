@@ -28,21 +28,36 @@
 //   "(isHS==1 && isPU==0)" / "(isHS==0 && isPU==1)" tests map onto
 //   isPaperHS && !isPaperPU / !isPaperHS && isPaperPU respectively, preserving
 //   the original's exclusivity. Jets satisfying neither are dropped, as there.
-// NOTE 2 (track time). They read track_t30, a per-track time generated at a
-//   fixed 30 ps resolution, and form the pull by dividing by a literal 30.0.
-//   We have Track_time with a per-track Track_timeRes. The division by 30.0 is
-//   kept EXACTLY as in the original rather than switched to the per-track
-//   resolution -- changing it would be an analysis change, not a port.
+// NOTE 2 (track time). track_t30 is NOT a reconstructed time. Slide 2 of
+//   jet_pileup_studies_5th_October_2023.pdf states it outright:
+//     "Track time is retrieved from truth level information / Assign time to
+//      tracks from truth vertex info with a smearing: track -> particle_truth
+//      -> vertex_truth / Different smearings (gaussian) are considered:
+//      30, 60, 90ps."
+//   So t30 = Gaus(truth VERTEX time of the track's truth vertex, 30 ps), and
+//   the literal /30.0 in the pull is simply dividing by that same smearing
+//   width. Mapped here onto Track_truthVtx_idx -> TruthVtx_time (96.6% of
+//   tracks carry the link; the rest cannot be assigned a time and are skipped
+//   for the timed sums only).
+//   Our Track_time (the real HGTD reconstructed time) is NOT used and must not
+//   be: an earlier revision of this port mapped t30 onto it, which silently fed
+//   the ~59% of tracks with Track_hasValidTime == 0 -- all carrying
+//   Track_time == 0.0 exactly -- into the cut, and made the timed ROC come out
+//   WORSE than the untimed one. The whole reference study is a truth-smearing
+//   exercise; there is no reconstructed track time anywhere in it.
 // NOTE 3 (track pT). They recompute pT from qOverP/theta; we read Track_pt
 //   (already GeV). Same quantity, read instead of derived. Their second form
 //   pt2 = |1e-3/qOverP|*sin(theta) is likewise Track_pt, and is what the RpT
 //   numerator accumulates.
 //
 // ── Things that differ from rpt_v5 and are LIKELY the source of disagreement ─
-//   * Vertex time is a GAUSSIAN SMEAR OF THE TRUTH VERTEX TIME (sigma = 10 ps),
-//     not a reconstructed vertex time. rpt_v5 uses real HGTD / WAVeS / TRKPTZ
-//     vertex times. This alone makes the reference's "reco" scenario much
-//     closer to truth than anything rpt_v5 reports.
+//   * NEITHER time in this study is reconstructed. Track times are truth vertex
+//     times smeared by SMEAR_PS (30/60/90), and the "reco" vertex time is the
+//     truth vertex time smeared by 10 ps. rpt_v5 uses real HGTD track times
+//     (with their real ~41% validity and non-Gaussian tails) and real
+//     HGTD/WAVeS/TRKPTZ vertex times. The reference therefore measures an
+//     IDEALISED CEILING, not a competing reconstruction -- which is the single
+//     biggest reason its numbers sit above rpt_v5's.
 //   * Vertex-quality cut is |z_reco - z_truth| < 0.5 mm, not MAX_VTX_DZ = 2.0.
 //   * Jet window is 30 < pT < 50 GeV (a single slice), not 30-40 / >40.
 //   * Track pT window is 1 < pT < 45 GeV, not MIN/MAX_TRACK_PT = 1/30.
@@ -74,6 +89,7 @@
 #include <cmath>
 #include <cstdio>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -162,21 +178,26 @@ int main(int argc, char** argv) {
   MyUtl::SAMPLE_NAME  = sample.sampleName;
   const Long64_t maxEvents = MyUtl::resolveMaxEvents(argc, argv);
 
-  // Untimed-track handling; see the DATA-MODEL DIVERGENCE note in the track
-  // loop. Default false = literal port.
-  bool KEEP_UNTIMED = false;
-  for (int i = 1; i < argc; ++i)
-    if (std::string(argv[i]) == "--keep-untimed") KEEP_UNTIMED = true;
-  std::cout << "[rpt_v6] untimed tracks: "
-            << (KEEP_UNTIMED ? "kept (never rejected by timing)"
-                             : "passed through the cut literally (as in the macro)")
-            << '\n';
+  // Track-time smearing width in ps. The deck studies 30/60/90 (slide 2); the
+  // macro's active path is t30, with its t60/t90 variants sitting commented out
+  // beside it. The same value is used both to smear and to divide, exactly as
+  // the macro does (track_t30 with /30.0, track_t60 with /60.0, ...).
+  double SMEAR_PS = 30.0;
+  for (int i = 1; i < argc; ++i) {
+    std::string a(argv[i]);
+    if (a.rfind("--smear=", 0) == 0) SMEAR_PS = std::stod(a.substr(8));
+  }
+  std::cout << "[rpt_v6] track-time smearing: " << SMEAR_PS << " ps"
+            << "  (t30 = Gaus(truth vertex time, " << SMEAR_PS << "))\n";
 
   const std::string outDir = MyUtl::OUTPUT_DIR + "/rpt_v6";
   boost::filesystem::create_directories(outDir);
   std::string pre = outDir + "/" +
       (MyUtl::SAMPLE_NAME.empty() ? std::string("") : MyUtl::SAMPLE_NAME + "_");
-  if (KEEP_UNTIMED) pre += "keptuntimed_";   // never overwrite the literal-port output
+  if (SMEAR_PS != 30.0) {   // keep each smearing's output distinct
+    std::ostringstream os; os << "t" << (int)SMEAR_PS << "_";
+    pre += os.str();
+  }
 
   TChain chain("ntuple");
   MyUtl::setupChain(chain, sample.ntupleDir.c_str());
@@ -190,8 +211,7 @@ int main(int argc, char** argv) {
   TTreeReaderArray<float> track_eta(reader, "Track_eta");
   TTreeReaderArray<float> track_phi(reader, "Track_phi");
   TTreeReaderArray<float> track_z0 (reader, "Track_z0");
-  TTreeReaderArray<float> track_t30(reader, "Track_time");
-  TTreeReaderArray<int>   track_hasValidTime(reader, "Track_hasValidTime");
+  TTreeReaderArray<int>   track_truthVtx_idx(reader, "Track_truthVtx_idx");
   TTreeReaderArray<float> recovertex_z (reader, "RecoVtx_z");
   TTreeReaderArray<float> truthvertex_z(reader, "TruthVtx_z");
   TTreeReaderArray<float> truthvertex_t(reader, "TruthVtx_time");
@@ -265,8 +285,17 @@ int main(int argc, char** argv) {
         float vertex_time_truth = truthvertex_t[0];
         float vertex_time_reco  = r->Gaus(vertex_time_truth, 10.0);
 
-        float time_cut_reco  = (track_t30[idex] - vertex_time_reco) / 30.0;
-        float time_cut_truth = (track_t30[idex] - truthvertex_t[0]) / 30.0;
+        // t30: the track's OWN truth vertex time, smeared by SMEAR_PS. This is
+        // what carries the HS/PU separation -- a pileup track inherits its own
+        // vertex's time, ~175 ps away from the hard scatter's on average.
+        const int tvtx = track_truthVtx_idx[idex];
+        const bool has_truth_time = (tvtx >= 0 && tvtx < (int)truthvertex_t.GetSize());
+        float track_t30_val = 0.f;
+        if (has_truth_time)
+          track_t30_val = r->Gaus(truthvertex_t[tvtx], SMEAR_PS);
+
+        float time_cut_reco  = (track_t30_val - vertex_time_reco) / SMEAR_PS;
+        float time_cut_truth = (track_t30_val - truthvertex_t[0])  / SMEAR_PS;
 
         float Dz0para = getNewDzpara(eta, pt);
 
@@ -288,28 +317,12 @@ int main(int argc, char** argv) {
 
         trackPT_2 += pt2;
 
-        // DATA-MODEL DIVERGENCE (see --keep-untimed in the header notes).
-        // The original applies the time cut to every ghost track, because its
-        // ntuple supplies a track_t30 for all of them. In ours only ~41% of
-        // tracks have Track_hasValidTime == 1; the rest carry Track_time == 0.0
-        // exactly (with a sentinel timeRes of 14433). Fed to the cut literally,
-        // those 59% pass whenever the vertex time happens to lie within 90 ps
-        // of zero, which is most events -- diluting both the HS and PU sums and
-        // making the timed ROC WORSE than the untimed one.
-        //   literal (default) : cut everything, sentinel included -- faithful
-        //                       to the macro, meaningless on this ntuple.
-        //   --keep-untimed    : untimed tracks are always kept, never rejected
-        //                       by timing. Matches rpt_v5's applyTimeGate
-        //                       convention and the physical statement that the
-        //                       detector cannot reject what it never saw.
-        const bool timed = (track_hasValidTime[idex] == 1);
-        if (KEEP_UNTIMED && !timed) {
-          trackPT_3 += pt2;
-          trackPT_4 += pt2;
-        } else {
-          if (std::fabs(time_cut_reco)  < 3.0) trackPT_3 += pt2;   // cut 3 is better (theirs)
-          if (std::fabs(time_cut_truth) < 3.0) trackPT_4 += pt2;
-        }
+        // Tracks with no truth vertex link (~3.4%) cannot be assigned a t30
+        // at all, so they contribute to the untimed sums only. The original has
+        // no such case because its ntuple ships a t30 for every track.
+        if (!has_truth_time) continue;   // no truth vertex -> no t30 to cut on
+        if (std::fabs(time_cut_reco)  < 3.0) trackPT_3 += pt2;   // cut 3 is better (theirs)
+        if (std::fabs(time_cut_truth) < 3.0) trackPT_4 += pt2;
       }  // track_loop ends
 
       float Rpt2 = trackPT_2 / jet_pt[i];
