@@ -212,8 +212,23 @@ int main(int argc, char** argv) {
   //                      it, which is the honest way to test whether the tight
   //                      parameterized window is what inflates the ITk-only
   //                      baseline.
+  //   atlas            : |(z0 - PVz) * sin(theta)| < ZSINTH mm, the ACTUAL
+  //                      ATLAS association. Published in arXiv:1510.03823
+  //                      (the JVT/RpT paper, footnote 2): "Tracks are assigned
+  //                      to vertices by requiring |dz x sin(theta)| < 1 mm. In
+  //                      cases where more than one vertex satisfies this
+  //                      criterion, ambiguity is resolved by choosing the
+  //                      vertex with the largest summed pT^2 of tracks."
+  //                      The sin(theta) factor is the crux: it makes the
+  //                      window in z very LOOSE forward (10 mm at |eta| = 3,
+  //                      27 mm at 4) precisely where the other two forms are
+  //                      tightest (~0.4 mm), which is why they suppress
+  //                      pileup contamination the TDR expects to be present.
+  //                      The reference macro computes this quantity
+  //                      (delz_cut) but leaves its use commented out.
   std::string ZCUT = "para";
   double ZSIG = 3.0;
+  double ZSINTH = 1.0;   // mm
   double SMEAR_PS = 30.0;
   for (int i = 1; i < argc; ++i) {
     std::string a(argv[i]);
@@ -226,6 +241,7 @@ int main(int argc, char** argv) {
     if (a.rfind("--trkdr=",0)  == 0) TRK_DR   = std::stod(a.substr(8));
     if (a.rfind("--zcut=",0)   == 0) ZCUT     = a.substr(7);
     if (a.rfind("--zsig=",0)   == 0) ZSIG     = std::stod(a.substr(7));
+    if (a.rfind("--zsinth=",0) == 0) ZSINTH   = std::stod(a.substr(9));
   }
   std::cout << "[rpt_v6] track-time smearing: " << SMEAR_PS << " ps"
             << "  (t30 = Gaus(truth vertex time, " << SMEAR_PS << "))\n";
@@ -241,6 +257,7 @@ int main(int argc, char** argv) {
       os << "pt" << (int)JPT_MIN << (JPT_MAX > 1e8 ? "plus" : "") << "_";
     if (JETA_MAX != 3.8) os << "eta" << (int)(JETA_MAX*10) << "_";
     if (ZCUT == "signif") os << "zsig" << (int)ZSIG << "_";
+    if (ZCUT == "atlas")  os << "zatlas_";
     pre += os.str();
   }
 
@@ -398,7 +415,11 @@ int main(int argc, char** argv) {
 
         trackPT_0 += pt2;
 
-        if (ZCUT == "signif") {
+        if (ZCUT == "atlas") {
+          // sin(theta) = 1/cosh(eta) exactly, so no extra branch is needed.
+          const double sinth = 1.0 / std::cosh(eta);
+          if (std::fabs(z * sinth) > ZSINTH) continue;
+        } else if (ZCUT == "signif") {
           const double vz = track_var_z0[idex];
           if (!(vz > 0)) continue;
           if (std::fabs(z) / std::sqrt(vz) > ZSIG) continue;
