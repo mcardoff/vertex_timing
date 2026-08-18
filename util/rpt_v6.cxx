@@ -749,6 +749,51 @@ int main(int argc, char** argv) {
   }
   g4->SetLineWidth(4); g4->SetLineColor(kBlue+1); g4->SetFillColor(0);
 
+  // ── ROC sampled at fixed HS-efficiency working points ─────────────────────
+  // The TDR figure carries ~7 markers evenly spaced from 0.80 to ~0.98, not one
+  // per histogram bin. Scanning bins (makeRoc below) instead samples wherever
+  // the R_pT distribution happens to put thresholds, which on our data clusters
+  // points unevenly and leaves a hard break across the R_pT = 0 atom (85% of
+  // pileup jets sit there, so no threshold exists inside it).
+  //
+  // Sampling on efficiency instead fixes both: walk the cumulative
+  // distributions and linearly interpolate 1/B_eff at each target S_eff. The
+  // interpolation across the zero-atom is the physically right thing -- it is
+  // what breaking ties at random inside that bin would deliver -- and it makes
+  // every curve share identical x-points, so the ratio panel becomes exact
+  // instead of relying on TGraph::Eval.
+  auto makeRocGrid = [](TH1F* hs, TH1F* hp, const std::vector<double>& targets) {
+    TGraph* gr = new TGraph();
+    const int nb = hs->GetNbinsX();
+    const double Ns = hs->Integral(), Nb = hp->Integral();
+    if (Ns <= 0 || Nb <= 0) return gr;
+
+    std::vector<double> S(nb + 2), B(nb + 2);
+    for (int i = 0; i <= nb; ++i) {
+      S[i] = hs->Integral(i, nb) / Ns;
+      B[i] = hp->Integral(i, nb) / Nb;
+    }
+    int k = 0;
+    for (double e : targets) {
+      if (e > S[0] || e <= 0) continue;              // efficiency unreachable
+      int i = 0;
+      while (i <= nb && S[i] > e) ++i;               // first bin at/below target
+      if (i == 0 || i > nb) continue;
+      const double s_hi = S[i-1], s_lo = S[i];
+      const double b_hi = B[i-1], b_lo = B[i];
+      const double f = (s_hi > s_lo) ? (s_hi - e) / (s_hi - s_lo) : 0.0;
+      const double b = b_hi + f * (b_lo - b_hi);
+      if (b <= 0) continue;                          // no background left: stop
+      gr->SetPoint(k++, e, 1.0 / b);
+    }
+    return gr;
+  };
+
+  // Working points: 0.80 to 0.975 in steps of 0.025, matching the TDR's marker
+  // spacing. Curves terminate naturally wherever the background empties out.
+  std::vector<double> effGrid;
+  for (double e = 0.800; e <= 0.9751; e += 0.025) effGrid.push_back(e);
+
   auto makeRoc = [](TH1F* hs, TH1F* hp) {
     TGraph* gr = new TGraph();
     float Ns_ = hs->Integral(), Nb_ = hp->Integral();
@@ -866,45 +911,65 @@ int main(int argc, char** argv) {
     TCanvas* ct = new TCanvas("ct", "ct", 15, 34, 800, 700);
     TPad* tp1 = new TPad("tp1", "tp1", 0., 0.3, 1., 1.);
     tp1->SetBottomMargin(0.02); tp1->Draw(); tp1->cd();
-    TGraph* gi = (TGraph*)g->Clone();  gi->SetLineColor(kBlack); gi->SetLineStyle(2);
-    TGraph* gt = (TGraph*)g4->Clone(); gt->SetLineColor(kBlue);  gt->SetLineStyle(3);
-    h2->Draw(); gi->Draw("same"); g5->Draw("same"); gt->Draw("same"); g6->Draw("same");
+    TGraph* gi = makeRocGrid(h_Rpt,      h_Rpt_pu,      effGrid);
+    TGraph* gs = makeRocGrid(h_Rpt_self, h_Rpt_pu_self, effGrid);
+    TGraph* gt = makeRocGrid(h_Rpt_reco, h_Rpt_pu_reco, effGrid);
+    TGraph* gf = makeRocGrid(h_Rpt_full, h_Rpt_pu_full, effGrid);
+    gi->SetLineColor(kBlack);   gi->SetLineStyle(2); gi->SetLineWidth(4);
+    gs->SetLineColor(kGreen+2); gs->SetLineStyle(9); gs->SetLineWidth(4);
+    gt->SetLineColor(kBlue);    gt->SetLineStyle(3); gt->SetLineWidth(4);
+    gf->SetLineColor(kRed);     gf->SetLineStyle(1); gf->SetLineWidth(4);
+    for (auto* gg : {gi, gs, gt, gf}) { gg->SetMarkerStyle(20); gg->SetMarkerSize(0.7); }
+    h2->Draw(); gi->Draw("same"); gs->Draw("same"); gt->Draw("same"); gf->Draw("same");
     h2->GetXaxis()->SetLabelSize(0);   // x labels live on the ratio pad
     h2->GetXaxis()->SetTitleSize(0);
-    TLegend* L = new TLegend(0.20, 0.16, 0.62, 0.40, NULL, "brNDC");
-    L->SetFillColor(0); L->SetBorderSize(0);
+    TLegend* L = new TLegend(0.56, 0.58, 0.95, 0.86, NULL, "brNDC");
+    L->SetFillStyle(0);          // transparent: an opaque box here hid the
+    L->SetBorderSize(0);         // curves between eff 0.85 and 0.90
     L->SetTextFont(42); L->SetTextSize(0.036);
     L->AddEntry(gi, "ITk", "l");
-    L->AddEntry(g5, "ITk+HGTD (self-tagging only)", "l");
+    L->AddEntry(gs, "ITk+HGTD (self-tagging only)", "l");
     L->AddEntry(gt, "ITk+HGTD (t_{0} only)", "l");
-    L->AddEntry(g6, "ITk+HGTD", "l");
+    L->AddEntry(gf, "ITk+HGTD", "l");
     L->Draw();
-    drawLabels(0.62);
+    // Labels upper-LEFT, as in the TDR figure (legend now occupies upper-right).
+    // Kept left of x=0.55 so the upper-right legend never overlaps it.
+    { TLatex t; t.SetNDC(); t.SetTextFont(72); t.SetTextSize(0.045);
+      t.DrawLatex(0.20, 0.86, "ATLAS"); t.SetTextFont(42);
+      t.DrawLatex(0.325, 0.86, "Simulation Internal"); }
+    myText(0.20, 0.795, 1, "VBF H #rightarrow invisible, <#mu>=200");
+    myText(0.20, 0.735, 1, lbl_pt);
+    myText(0.20, 0.675, 1, lbl_eta);
 
     ct->cd();
     TPad* tp2 = new TPad("tp2", "tp2", 0, 0.05, 1, 0.3);
     tp2->SetTopMargin(0); tp2->SetBottomMargin(0.25); tp2->Draw(); tp2->cd();
-    TH2F* hr = new TH2F("hr", "", 125, 0.8, 1, 100, 0.9, 2.0);
+    TH2F* hr = new TH2F("hr", "", 125, 0.8, 1, 100, 0.9, 1.6);
     hr->GetXaxis()->SetTitle("HS efficiency");
     hr->GetYaxis()->SetTitle("ratio");
     hr->GetYaxis()->SetTitleSize(0.11); hr->GetXaxis()->SetTitleSize(0.11);
     hr->GetXaxis()->SetLabelSize(0.09);  hr->GetYaxis()->SetLabelSize(0.09);
     hr->GetYaxis()->SetTitleOffset(0.33); hr->SetStats(0);
     hr->Draw();
+    // Every curve shares gi's x-points by construction, so the ratio is exact
+    // (no TGraph::Eval interpolation) -- and it stops where either curve stops.
     auto ratioTo = [&](TGraph* num, Color_t col, Style_t sty) {
       TGraph* rg = new TGraph(); int n = 0;
-      for (int i = 0; i < g->GetN(); ++i) {
-        double x, y; g->GetPoint(i, x, y);
-        if (y <= 0 || x < 0.8 || x > 1.0) continue;
-        rg->SetPoint(n++, x, num->Eval(x) / y);
+      for (int i = 0; i < gi->GetN() && i < num->GetN(); ++i) {
+        double x, y, xn, yn;
+        gi ->GetPoint(i, x,  y);
+        num->GetPoint(i, xn, yn);
+        if (y <= 0 || std::fabs(x - xn) > 1e-9) continue;
+        rg->SetPoint(n++, x, yn / y);
       }
       rg->SetLineColor(col); rg->SetLineStyle(sty); rg->SetLineWidth(3);
+      rg->SetMarkerStyle(20); rg->SetMarkerSize(0.6); rg->SetMarkerColor(col);
       rg->Draw("same");
       return rg;
     };
-    ratioTo(g5, kGreen+2, 9);
-    ratioTo(g4, kBlue,    3);
-    ratioTo(g6, kRed,     1);
+    ratioTo(gs, kGreen+2, 9);
+    ratioTo(gt, kBlue,    3);
+    ratioTo(gf, kRed,     1);
     TLine* one = new TLine(0.8, 1.0, 1.0, 1.0);
     one->SetLineStyle(2); one->Draw("same");
     ct->Print((pre + "tdr_style.pdf").c_str());
@@ -1032,6 +1097,22 @@ int main(int argc, char** argv) {
                 n_trk_zonly_trk, tot ? 100.0*n_trk_zonly_trk/tot : 0.0);
     std::printf("    tracks on z-info only (no vtx time)  : %8ld (%.1f%%)\n",
                 n_trk_zonly_vtx, tot ? 100.0*n_trk_zonly_vtx/tot : 0.0);
+  }
+  {
+    // Dump the working-point grid actually realised, so a missing point is
+    // visible as a missing row rather than silently as a gap in the curve.
+    auto dump = [&](const char* name, TH1F* hs, TH1F* hp) {
+      TGraph* gg = makeRocGrid(hs, hp, effGrid);
+      std::printf("    %-18s", name);
+      for (int i = 0; i < gg->GetN(); ++i) { double x,y; gg->GetPoint(i,x,y);
+        std::printf(" %.3f:%.0f", x, y); }
+      std::printf("   (%d pts)\n", gg->GetN());
+    };
+    std::printf("\n  ROC working points (eff:rejection):\n");
+    dump("ITk",        h_Rpt,      h_Rpt_pu);
+    dump("self-tag",   h_Rpt_self, h_Rpt_pu_self);
+    dump("t0 only",    h_Rpt_reco, h_Rpt_pu_reco);
+    dump("full",       h_Rpt_full, h_Rpt_pu_full);
   }
   std::printf("\n  Wrote %s*.pdf\n", pre.c_str());
   std::printf("================================================================\n");
