@@ -58,4 +58,16 @@ output = logs/export_$(sample).$(ClusterId).$(ProcId).out
 error  = logs/export_$(sample).$(ClusterId).$(ProcId).err
 log    = logs/export_$(sample).$(ClusterId).$(ProcId).log
 
-queue sample in (vbf_mu0, zeejets_mu0, zeejets, ttbar_mu0, vbf, zjets, dijet)
+# CURRENTLY QUEUED: the mu=0 samples only.
+#
+# vbf and dijet already have canonical histograms, and zjets is running, so those
+# three are commented out rather than deleted -- re-enable them by moving them
+# back into the queue line when their jobs are done.
+#
+#   full list:  vbf, zjets, dijet, zeejets, vbf_mu0, zeejets_mu0, ttbar_mu0
+#
+# zeejets (mu=200, Zee ONLY) is also held back for now. It is the channel-matched
+# partner for zeejets_mu0 -- zjets is Zee+Zmumu combined, so without it the mu=0
+# Zee numbers have no like-for-like comparison. Worth running before drawing any
+# conclusion from zeejets_mu0.
+queue sample in (vbf_mu0, zeejets_mu0, ttbar_mu0)
