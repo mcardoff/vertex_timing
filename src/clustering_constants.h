@@ -179,6 +179,22 @@ namespace MyUtl {
   enum class TrackFilterType { ALL, JET, HS_ONLY };
 
   // ---------------------------------------------------------------------------
+  // 3d. VBS topology region
+  //   The two topologies where forward timing is the deciding information.
+  //   Classified from the VBS candidate pair by
+  //   BranchPointerWrapper::classifyVbsRegion (clustering_structs.h); lives
+  //   here rather than nested in that class so Score can carry one as a
+  //   denominator gate (see regionGate below).
+  //     R1  both candidate legs forward, one truth-HS + one truth-PU --
+  //         timing must say WHICH forward jet is the hard scatter.
+  //     R2  forward truth-PU leg + central truth-HS leg -- can timing reject
+  //         the forward fake?
+  //   Shared with rpt_v5's per-jet RpT regions so "R1" cannot come to mean two
+  //   different event sets in the two analyses.
+  // ---------------------------------------------------------------------------
+  enum class VbsRegion { NONE, R1, R2 };
+
+  // ---------------------------------------------------------------------------
   // 4. Histogram axis ranges and fold values
   //   xMin/xMax define the full histogram axis.  FOLD_* values mark the
   //   point at which overflow is collapsed into the last visible bin so that
@@ -271,15 +287,21 @@ namespace MyUtl {
     ClusteringMethod method            = ClusteringMethod::ITERATIVE;
     bool             useZ0             = false;
     TrackFilterType  filter            = TrackFilterType::ALL;
+    // Denominator gate on VBS topology region (VBF_R1 / VBF_R2). NONE = no
+    // region requirement. Orthogonal to requiresPurity: both defer the
+    // denominator fill to the gated block in processEventData's step H, they
+    // just test different things.
+    VbsRegion        regionGate        = VbsRegion::NONE;
 
     Score() = default;
     Score(int id_, std::string ln, const char* sn,
           bool own=false, bool pur=false, float thr=-1.f,
           double dc=-1.0, ClusteringMethod m=ClusteringMethod::ITERATIVE,
-          bool z0=false, TrackFilterType f=TrackFilterType::ALL)
+          bool z0=false, TrackFilterType f=TrackFilterType::ALL,
+          VbsRegion rg=VbsRegion::NONE)
       : id(id_), longName(std::move(ln)), shortName(sn),
         usesOwnCollection(own), requiresPurity(pur), threshold(thr),
-        distCut(dc), method(m), useZ0(z0), filter(f) {}
+        distCut(dc), method(m), useZ0(z0), filter(f), regionGate(rg) {}
 
     bool operator<(const Score& o)  const { return id < o.id; }
     bool operator==(const Score& o) const { return id == o.id; }
@@ -287,6 +309,9 @@ namespace MyUtl {
     const char* toString()      const { return longName.c_str(); }
     const char* toStringShort() const { return shortName; }
     bool hasThreshold()         const { return threshold >= 0.f; }
+    // True when this score restricts its denominator at fill time (step H)
+    // rather than counting every selected event.
+    bool gatesDenominator()     const { return requiresPurity || regionGate != VbsRegion::NONE; }
     // True when this score's collection is built via SCORE_REGISTRY in section E
     bool buildsCollection()     const { return usesOwnCollection && distCut >= 0.0; }
 
@@ -304,6 +329,8 @@ namespace MyUtl {
     static const Score JET_T_REFINED;
     static const Score WAVES_MISCL;
     static const Score WAVES_MISAS;
+    static const Score VBF_R1;
+    static const Score VBF_R2;
   };
 
   inline const std::string STR_TRKPTZ = "#Sigma p_{T}e^{-|#Delta z|}";
@@ -349,6 +376,21 @@ namespace MyUtl {
   // at fill time — cluster purity (MISCL-style) / HS timing purity (like TEST_MISAS)
   inline const Score Score::WAVES_MISCL  = { 20, "WAVeS [Events with Pure Clusters]" , "WAVES Pure Clust.", false, true, -1.f };
   inline const Score Score::WAVES_MISAS  = { 21, "WAVeS [Events with Perfect Timing]", "WAVES Perf. Time" , false, true, -1.f };
+  // VBS topology regions. Same construction as the WAVES_MISAS oracle -- WAVeS
+  // selection and WAVeS in-jet-refined time, denominator restricted at fill
+  // time -- except the gate is the event's VBS region rather than its timing
+  // purity. Reading them against the plain WAVES row isolates what the topology
+  // does to WAVeS performance, with the algorithm held fixed.
+  //
+  // WAVeS is the base (rather than the TRKPTZ baseline) to match WAVES_MISAS
+  // and because WAVeS is the algorithm under study; swapping the base is a
+  // one-line change in Cluster::updateScores plus calculateTime's score list.
+  inline const Score Score::VBF_R1 = { 22, "WAVeS [VBF R1: both tags fwd]"    , "VBF_R1", false, false, -1.f,
+                                       -1.0, ClusteringMethod::ITERATIVE, false,
+                                       TrackFilterType::ALL, VbsRegion::R1 };
+  inline const Score Score::VBF_R2 = { 23, "WAVeS [VBF R2: fwd PU + cen. HS]" , "VBF_R2", false, false, -1.f,
+                                       -1.0, ClusteringMethod::ITERATIVE, false,
+                                       TrackFilterType::ALL, VbsRegion::R2 };
 
   // Scores with a dedicated collection (distCut ≥ 0 → buildsCollection() = true)
   inline const Score Score::CONE       = {  7, "Cone"                       , "CONE",     true , false, -1.f, DIST_CUT_CONE, ClusteringMethod::CONE };
@@ -360,6 +402,7 @@ namespace MyUtl {
     Score::CONE    , Score::FILTJET   , Score::HGTD_SORT,
     Score::CONE_BDT, Score::TEST_MISAS, Score::TEST_HS,
     Score::WAVES,    Score::JET_T_REFINED, Score::WAVES_MISCL, Score::WAVES_MISAS,
+    Score::VBF_R1,   Score::VBF_R2,
   };
 
   // ---------------------------------------------------------------------------

@@ -94,7 +94,8 @@ namespace MyUtl {
     // purifies the time by dropping absorbed PU tracks, worth ~+1% efficiency.
     // WAVES_MISCL / WAVES_MISAS share this path so the oracle rows report the same
     // time as the WAVES row they gate.
-    if (score == Score::WAVES || score == Score::WAVES_MISCL || score == Score::WAVES_MISAS) {
+    if (score == Score::WAVES || score == Score::WAVES_MISCL || score == Score::WAVES_MISAS ||
+        score == Score::VBF_R1 || score == Score::VBF_R2) {
       // Collect (eta, phi) of qualifying forward reco jets — no truth matching
       std::vector<std::pair<double,double>> hsJets;
       const int nJets = (int)branch->topoJetPt.GetSize();
@@ -521,7 +522,7 @@ namespace MyUtl {
     // ── F. Fill denominator histograms ──────────────────────────────────────
     // Purity-gated scores' denominators are deferred to step H where cluster purity is known.
     for (auto& [score, analysis] : analyses)
-      if (!score.requiresPurity)
+      if (!score.gatesDenominator())
         analysis.fillTotals(ev);
 
     // ── G. Select best cluster for each score ───────────────────────────────
@@ -532,6 +533,16 @@ namespace MyUtl {
     float hsTimingPurity = 1.0f;
     if (analyses.count(Score::TEST_MISAS) || analyses.count(Score::WAVES_MISAS))
       hsTimingPurity = calcHSTimingPurity(tracks, branch);
+
+    // ── G¾. VBS topology region for the VBF_R1 / VBF_R2 gates ───────────────
+    // Computed once per event (it re-walks the jet list to find the candidate
+    // pair) and only when a region-gated score is actually active. The eta
+    // windows are the same ones rpt_v5_hist passes, so both analyses classify
+    // an event identically -- see classifyVbsRegion in clustering_structs.h.
+    VbsRegion eventRegion = VbsRegion::NONE;
+    if (analyses.count(Score::VBF_R1) || analyses.count(Score::VBF_R2))
+      eventRegion = branch->classifyVbsRegion(MIN_ABS_ETA_JET, MAX_ABS_ETA_JET,
+                                              MIN_ABS_ETA_JET);
 
     // ── H. Per-score histogram filling ──────────────────────────────────────
     int    returnCode = 0;
@@ -618,10 +629,16 @@ namespace MyUtl {
       // Purity-gated scores (TEST_MISAS, WAVES_MISCL, WAVES_MISAS): restrict both
       // denominator and numerator to pure clusters/events.  Purity cut comes from
       // score.threshold when set (≥ 0), otherwise falls back to 0.75.
-      bool inDenominator = !score.requiresPurity;
-      if (score.requiresPurity) {
+      bool inDenominator = !score.gatesDenominator();
+      if (score.gatesDenominator()) {
         bool passesGate;
-        if (score == Score::TEST_MISAS || score == Score::WAVES_MISAS) {
+        if (score.regionGate != VbsRegion::NONE) {
+          // VBF_R1 / VBF_R2: restrict to events of that VBS topology. Unlike
+          // the purity gates this says nothing about the cluster -- it is a
+          // pure event-topology restriction, so the row reads as "the same
+          // WAVeS algorithm, measured only in these events".
+          passesGate = (eventRegion == score.regionGate);
+        } else if (score == Score::TEST_MISAS || score == Score::WAVES_MISAS) {
           // Gate on event-level HS timing purity: 100% of HS pT must have |pull|<3σ
           passesGate = (hsTimingPurity >= 0.95f);
         } else {

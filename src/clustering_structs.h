@@ -360,6 +360,128 @@ namespace MyUtl {
     }
 
     // -----------------------------------------------------------------------
+    // isJetPaperHS / isJetPaperPU
+    //   Jet truth labels per ATL-HGTD-PUB-2022-001 Sec. 3, hoisted out of the
+    //   rpt_v* diagnostics (where they lived as event-loop-local lambdas,
+    //   copy-pasted across rpt_v2/v3/v4/v5) so the clustering side can share
+    //   them.
+    //
+    //   HS: dR < 0.3 from a truth HS jet with pT > 10 GeV.
+    //   PU: dR > 0.6 from EVERY truth HS jet with pT > 4 GeV.
+    //   Note PU is NOT !HS -- a jet in the 0.3-0.6 band, or near a 4-10 GeV
+    //   truth jet, is neither, and callers are expected to skip those.
+    //
+    //   Deliberately kept separate from isJetTruthHS (the ntuple's own
+    //   AntiKt4EMTopoJets_truthHSJet_idx association) rather than unified:
+    //   classifyVbsRegion below uses THESE, because the R1/R2 ROCs in rpt_v5
+    //   were measured with them, and switching definitions would silently
+    //   redefine which events land in each region.
+    // -----------------------------------------------------------------------
+    bool isJetPaperHS(double jEta, double jPhi) const {
+      for (int t = 0; t < (int)this->truthHSJetPt.GetSize(); ++t) {
+        if (this->truthHSJetPt[t] < 10.0) continue;
+        double deta = jEta - this->truthHSJetEta[t];
+        double dphi = TVector2::Phi_mpi_pi(jPhi - this->truthHSJetPhi[t]);
+        if (std::hypot(deta, dphi) < 0.3) return true;
+      }
+      return false;
+    }
+
+    bool isJetPaperPU(double jEta, double jPhi) const {
+      for (int t = 0; t < (int)this->truthHSJetPt.GetSize(); ++t) {
+        if (this->truthHSJetPt[t] < 4.0) continue;
+        double deta = jEta - this->truthHSJetEta[t];
+        double dphi = TVector2::Phi_mpi_pi(jPhi - this->truthHSJetPhi[t]);
+        if (std::hypot(deta, dphi) < 0.6) return false;
+      }
+      return true;
+    }
+
+    // -----------------------------------------------------------------------
+    // VbsRegion / classifyVbsRegion
+    //   The two VBS topologies where forward timing is the deciding
+    //   information, classified off the VBS candidate pair (calcBestVbsPair):
+    //
+    //     R1  both legs forward (HGTD acceptance), one paper-HS + one paper-PU.
+    //         Both jets are timeable, so timing must say WHICH is the
+    //         hard-scatter one.
+    //     R2  one leg forward + paper-PU, the other central + paper-HS.
+    //         Only the fake is timeable; the question is whether timing can
+    //         reject it.
+    //
+    //   Single source of truth shared by rpt_v5 (which fills per-jet RpT
+    //   histograms per region) and the clustering analysis (whose VBF_R1 /
+    //   VBF_R2 scores gate their denominator on the event's region). Both must
+    //   agree on membership or the two "R1"s silently mean different samples.
+    //
+    //   The pair must also clear the runtime VBS topology knobs
+    //   (VBS_JET_MJJ / VBS_JET_D_ETA) -- calcBestVbsPair only finds the
+    //   max-m_jj pair, it does not cut on it.
+    //
+    //   outFwdHS / outFwdPU return the reco jet indices of the forward
+    //   hard-scatter and forward pileup legs (-1 when the region has no such
+    //   leg -- R2 always has outFwdHS == -1 by construction), so callers can
+    //   fill or annotate the individual legs without redoing the pairing.
+    // -----------------------------------------------------------------------
+    VbsRegion classifyVbsRegion(double fwdEtaMin, double fwdEtaMax,
+                                double centralEtaMax,
+                                int* outFwdHS = nullptr,
+                                int* outFwdPU = nullptr) const {
+      if (outFwdHS) *outFwdHS = -1;
+      if (outFwdPU) *outFwdPU = -1;
+
+      std::vector<int> passPtIdx;
+      int nPt = 0, nPtEta = 0;
+      this->collectPtPassingJets(passPtIdx, nPt, nPtEta);
+      VbsPair pair = this->calcBestVbsPair(passPtIdx);
+      if (!pair.valid())              return VbsRegion::NONE;
+      if (pair.mjj  < VBS_JET_MJJ)    return VbsRegion::NONE;
+      if (pair.dEta < VBS_JET_D_ETA)  return VbsRegion::NONE;
+
+      auto isFwd = [&](int j) {
+        double e = std::abs((double)this->topoJetEta[j]);
+        return e > fwdEtaMin && e < fwdEtaMax;
+      };
+      auto isCentral = [&](int j) {
+        return std::abs((double)this->topoJetEta[j]) < centralEtaMax;
+      };
+      auto paperHS = [&](int j) {
+        return this->isJetPaperHS(this->topoJetEta[j], this->topoJetPhi[j]);
+      };
+      auto paperPU = [&](int j) {
+        return this->isJetPaperPU(this->topoJetEta[j], this->topoJetPhi[j]);
+      };
+
+      const int a = pair.idxI, b = pair.idxJ;
+
+      // R1: both legs forward, exactly one HS and one PU.
+      if (isFwd(a) && isFwd(b)) {
+        if (paperHS(a) && paperPU(b)) {
+          if (outFwdHS) *outFwdHS = a;
+          if (outFwdPU) *outFwdPU = b;
+          return VbsRegion::R1;
+        }
+        if (paperHS(b) && paperPU(a)) {
+          if (outFwdHS) *outFwdHS = b;
+          if (outFwdPU) *outFwdPU = a;
+          return VbsRegion::R1;
+        }
+        return VbsRegion::NONE;
+      }
+
+      // R2: forward PU leg + central HS leg.
+      if (isFwd(a) && paperPU(a) && isCentral(b) && paperHS(b)) {
+        if (outFwdPU) *outFwdPU = a;
+        return VbsRegion::R2;
+      }
+      if (isFwd(b) && paperPU(b) && isCentral(a) && paperHS(a)) {
+        if (outFwdPU) *outFwdPU = b;
+        return VbsRegion::R2;
+      }
+      return VbsRegion::NONE;
+    }
+
+    // -----------------------------------------------------------------------
     // collectPtPassingJets
     //   Single jet loop behind passJetPtCut: fills passPtIdx with the indices
     //   of reco jets above MIN_JET_PT (skipping lepton-overlap-removed ones)
@@ -732,6 +854,9 @@ namespace MyUtl {
       // (cluster purity / HS timing purity) applied at fill time in event_processing.h.
       this->scores[Score::WAVES_MISCL.id] = this->scores.at(Score::WAVES.id);
       this->scores[Score::WAVES_MISAS.id] = this->scores.at(Score::WAVES.id);
+      // VBS region rows: same WAVeS selection, region gate applied at fill time.
+      this->scores[Score::VBF_R1.id]      = this->scores.at(Score::WAVES.id);
+      this->scores[Score::VBF_R2.id]      = this->scores.at(Score::WAVES.id);
 
       // TEST_MISAS uses TRKPTZ as its selection score; the purity gate is applied
       // at efficiency-check time in event_processing.h (both pass and total fills).

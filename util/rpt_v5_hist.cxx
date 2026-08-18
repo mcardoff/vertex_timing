@@ -171,47 +171,55 @@ static constexpr double RPT_TRACK_JET_DR = 0.2;
 // Set to true to print event-display commands to stdout after the event loop.
 static constexpr bool PRINT_EVENT_DISPLAYS = true;
 
-struct JetCompCase {
+// How many event-display candidates to keep per region.
+static constexpr int N_REGION_DISPLAYS = 12;
+
+// -----------------------------------------------------------------------------
+// RegionCase — an R1/R2 event worth drawing.
+//
+// This REPLACED the older JetCompCase/HurtJet display collection (WAVeS-vs-HGTD
+// RpT disagreement, and HS jets "hurt" by the WAVeS time gate). Those ranked on
+// criteria unrelated to VBS topology, so none of their events were guaranteed to
+// be in a region at all -- and mixing them into the same stdout made it
+// impossible to tell which commands were which. The regions are the focus now,
+// so the display output is theirs exclusively.
+//
+// metric semantics differ by region, both signed so the printed line can say
+// which direction timing moved things:
+//   R1  margin(HS) - margin(PU), WAVeS minus no-timing. Positive => timing
+//       widened the correct gap; negative => timing eroded or inverted it.
+//   R2  forward-PU RpT, WAVeS minus no-timing. Negative => timing suppressed
+//       the fake (the desired direction).
+// -----------------------------------------------------------------------------
+struct RegionCase {
   std::string file_path;
   Long64_t    entry;
-  int    jet_idx;
-  double j_pt, j_eta;
-  double rpt_mine, rpt_hgtd;
-  double t_mine;    // WAVeS cluster time, used as the --extra_time annotation
-  double delta;     // rpt_mine - rpt_hgtd  (positive -> WAVeS better)
-  bool   isHS;
+  int    idx_hs, idx_pu;      // reco jet indices; idx_hs = -1 in R2
+  double hs_pt, hs_eta;
+  double pu_pt, pu_eta;
+  double val_zonly, val_waves, metric;
+  double t_waves;             // --extra_time annotation
 };
 
-struct HurtJet {
-  std::string file_path;
-  Long64_t    entry;
-  double      j_pt, j_eta, j_phi;
-  double      rpt_z, rpt_mine;
-  int         n_lost;
-  double      t_mine;  // WAVeS cluster time, for the --extra_time annotation.
-                        // Always meaningful whenever a HurtJet is recorded --
-                        // see the collection site's comment for why.
-};
-
-// Keep the top max_n cases by |delta|.
-static void insertCase(std::vector<JetCompCase>& v, JetCompCase c, int max_n = 5) {
+static void insertRegionCase(std::vector<RegionCase>& v, RegionCase c,
+                             int max_n = N_REGION_DISPLAYS) {
   v.push_back(std::move(c));
-  std::sort(v.begin(), v.end(),
-            [](const JetCompCase& a, const JetCompCase& b) {
-              return std::abs(a.delta) > std::abs(b.delta);
-            });
+  std::sort(v.begin(), v.end(), [](const RegionCase& a, const RegionCase& b) {
+    return std::abs(a.metric) > std::abs(b.metric);
+  });
   if ((int)v.size() > max_n) v.resize(max_n);
 }
 
-// Merge one thread's top-N candidates into the running merged top-N. Correct
-// because the true global top-N is always a subset of the union of each
-// thread's own (already-truncated) top-N lists.
-static void mergeCases(std::vector<JetCompCase>& dst, std::vector<JetCompCase>& src, int max_n = 5) {
+// Merge one thread's top-N into the running top-N. Correct for the same reason
+// as the old mergeCases: the global top-N is a subset of the union of each
+// thread's already-truncated list.
+static void mergeRegionCases(std::vector<RegionCase>& dst,
+                             std::vector<RegionCase>& src,
+                             int max_n = N_REGION_DISPLAYS) {
   for (auto& c : src) dst.push_back(std::move(c));
-  std::sort(dst.begin(), dst.end(),
-            [](const JetCompCase& a, const JetCompCase& b) {
-              return std::abs(a.delta) > std::abs(b.delta);
-            });
+  std::sort(dst.begin(), dst.end(), [](const RegionCase& a, const RegionCase& b) {
+    return std::abs(a.metric) > std::abs(b.metric);
+  });
   if ((int)dst.size() > max_n) dst.resize(max_n);
 }
 
@@ -247,12 +255,8 @@ struct ThreadState {
   double pu_tot_pt = 0, pu_floor_pt = 0, hs_tot_pt = 0, hs_floor_pt = 0;  // >40
   double pu_tot_lo = 0, pu_floor_lo = 0, hs_tot_lo = 0, hs_floor_lo = 0;  // 30-40
 
-  // Event-display diagnostic candidates (see JetCompCase/HurtJet doc comment above).
-  std::vector<JetCompCase> cases_mine_lo, cases_hgtd_lo;   // 30-40 GeV
-  std::vector<JetCompCase> cases_mine_hi, cases_hgtd_hi;   // >40 GeV
-  std::vector<JetCompCase> cases_pu_mine_corrects_lo, cases_pu_mine_corrects_hi;
-  std::vector<JetCompCase> cases_pu_mine_worse_lo, cases_pu_mine_worse_hi;
-  std::vector<HurtJet>     hurt_events;
+  // Event-display candidates, R1/R2 only (see RegionCase doc comment above).
+  std::vector<RegionCase> cases_r1, cases_r2;
 };
 
 // RpT numerator: sum pT of tracks that are ghost-associated to the jet AND in
@@ -527,6 +531,15 @@ int main(int argc, char** argv) {
       fillJets(state.scen_lo, 30.0, 40.0);
       fillJets(state.scen_hi, 40.0, 1e9);
 
+      // Full ntuple file path + local (per-file) entry number for the
+      // event-display commands printed after the loop. Same
+      // TTreeProcessorMT-safe pattern as src/clustering_hist.cxx: no outer
+      // TChain is available inside this lambda, and reader.GetTree() gives the
+      // currently-loaded per-file constituent tree directly (a TChain-bound
+      // sequential reader would return a chain-global entry number instead).
+      std::string filePath   = reader.GetTree()->GetCurrentFile()->GetName();
+      Long64_t    localEntry = reader.GetTree()->GetReadEntry();
+
       // ── VBS-topology regions ────────────────────────────────────────────────
       // Two topologies where forward timing is the deciding information, taken
       // off the SAME VBS candidate pair the clustering-side selection uses
@@ -566,35 +579,18 @@ int main(int argc, char** argv) {
       // it -- so without the explicit test below the knobs would be inert here,
       // changing only the output filename via SELECTION_TAG and making two
       // different --vbs-mjj runs produce byte-identical physics.
+      //
+      // Region membership itself comes from BranchPointerWrapper::
+      // classifyVbsRegion -- shared with the clustering side's VBF_R1/VBF_R2
+      // scores specifically so the two analyses cannot drift into meaning
+      // different event sets by the same name. It also owns the paper-HS/PU
+      // labelling that used to live in this file's local lambdas.
       {
-        std::vector<int> passPtIdx;
-        int nPt = 0, nPtEta = 0;
-        branch.collectPtPassingJets(passPtIdx, nPt, nPtEta);
-        auto pair = branch.calcBestVbsPair(passPtIdx);
+        int fwdHS = -1, fwdPU = -1;
+        auto region = branch.classifyVbsRegion(JET_ETA_MIN, JET_ETA_MAX,
+                                               CENTRAL_ETA_MAX, &fwdHS, &fwdPU);
 
-        const bool passVbsTopology = pair.valid()
-                                  && pair.mjj  >= VBS_JET_MJJ
-                                  && pair.dEta >= VBS_JET_D_ETA;
-
-        if (passVbsTopology) {
-          auto isFwd = [&](int j) {
-            double e = std::abs((double)branch.topoJetEta[j]);
-            return e > JET_ETA_MIN && e < JET_ETA_MAX;
-          };
-          auto isCentral = [&](int j) {
-            return std::abs((double)branch.topoJetEta[j]) < CENTRAL_ETA_MAX;
-          };
-          auto label = [&](int j, bool& hs, bool& pu) {
-            double e = branch.topoJetEta[j], p = branch.topoJetPhi[j];
-            hs = paperIsHS(e, p);
-            pu = paperIsPU(e, p);
-          };
-
-          const int a = pair.idxI, b = pair.idxJ;
-          bool aHS, aPU, bHS, bPU;
-          label(a, aHS, aPU);
-          label(b, bHS, bPU);
-
+        if (region != VbsRegion::NONE) {
           // Fill one jet into a region's scenario set, as HS or PU.
           auto fillRegion = [&](std::vector<Scenario>& sv, int j, bool asHS) {
             double j_pt  = branch.topoJetPt[j];
@@ -611,110 +607,47 @@ int main(int argc, char** argv) {
             put(sv[3], set_waves);
           };
 
-          // R1: both forward, exactly one HS and one PU leg.
-          if (isFwd(a) && isFwd(b)) {
-            if (aHS && bPU) { fillRegion(state.scen_r1, a, true);
-                              fillRegion(state.scen_r1, b, false); }
-            else if (bHS && aPU) { fillRegion(state.scen_r1, b, true);
-                                   fillRegion(state.scen_r1, a, false); }
-          }
+          // Per-jet RpT under the no-timing baseline and under WAVeS, used both
+          // to fill and to rank this event as an display candidate below.
+          auto rptOf = [&](int j, const std::unordered_set<int>& s_set) {
+            return computeRpT(&branch, branch.topoJetGhostTrackIdx[j],
+                              branch.topoJetPt[j], branch.topoJetEta[j],
+                              branch.topoJetPhi[j], s_set);
+          };
 
-          // R2: forward PU leg + central HS leg. Forward PU leg only.
-          if (isFwd(a) && aPU && isCentral(b) && bHS) fillRegion(state.scen_r2, a, false);
-          if (isFwd(b) && bPU && isCentral(a) && aHS) fillRegion(state.scen_r2, b, false);
-        }
-      }
+          if (region == VbsRegion::R1) {
+            fillRegion(state.scen_r1, fwdHS, true);
+            fillRegion(state.scen_r1, fwdPU, false);
 
-      // ── Event-display diagnostics (see JetCompCase/HurtJet doc comment
-      //    near the top of this file). Full ntuple file path + local
-      //    (per-file) entry number -- same TTreeProcessorMT-safe pattern as
-      //    src/clustering_hist.cxx (no outer TChain available inside this
-      //    lambda; reader.GetTree() gives the currently-loaded per-file
-      //    constituent tree directly). Collection always runs (cheap --
-      //    a handful of comparisons per event); only the final print is
-      //    gated behind PRINT_EVENT_DISPLAYS.
-      std::string filePath   = reader.GetTree()->GetCurrentFile()->GetName();
-      Long64_t    localEntry = reader.GetTree()->GetReadEntry();
+            // Rank by how much timing changes the HS-vs-PU RpT margin. The
+            // sign matters (positive = timing widened the correct gap,
+            // negative = timing eroded or inverted it), so rank on |delta| and
+            // let the printed line say which -- one list surfaces both the
+            // rescues and the regressions rather than needing two.
+            double mZ = rptOf(fwdHS, set_all)   - rptOf(fwdPU, set_all);
+            double mW = rptOf(fwdHS, set_waves) - rptOf(fwdPU, set_waves);
+            insertRegionCase(state.cases_r1,
+                             {filePath, localEntry, fwdHS, fwdPU,
+                              branch.topoJetPt[fwdHS], branch.topoJetEta[fwdHS],
+                              branch.topoJetPt[fwdPU], branch.topoJetEta[fwdPU],
+                              mZ, mW, mW - mZ, t_waves});
+          } else {  // R2 -- forward PU leg only; no forward HS leg exists.
+            fillRegion(state.scen_r2, fwdPU, false);
 
-      // WAVeS ("mine") vs HGTD jet-level comparison.
-      if (hgtd_vtx_valid && waves_ok) {
-        for (int j = 0; j < (int)branch.topoJetPt.GetSize(); ++j) {
-          if (branch.isJetRemoved(j)) continue;  // lepton-overlap removed (Z+jets)
-          double j_pt  = branch.topoJetPt[j];
-          double j_eta = branch.topoJetEta[j];
-          double j_phi = branch.topoJetPhi[j];
-          bool in_lo = (j_pt > 30.0 && j_pt < 40.0);
-          bool in_hi = (j_pt > 40.0);
-          if (!in_lo && !in_hi) continue;
-          if (std::abs(j_eta) < JET_ETA_MIN || std::abs(j_eta) > JET_ETA_MAX) continue;
-          bool isHS = paperIsHS(j_eta, j_phi);
-          bool isPU = paperIsPU(j_eta, j_phi);
-          if (!isHS && !isPU) continue;
-
-          const auto& ghost = branch.topoJetGhostTrackIdx[j];
-          double rpt_hgtd_j = computeRpT(&branch, ghost, j_pt, j_eta, j_phi, set_hgtd);
-          double rpt_mine_j = computeRpT(&branch, ghost, j_pt, j_eta, j_phi, set_waves);
-          double delta = rpt_mine_j - rpt_hgtd_j;
-          if (std::abs(delta) < 0.05) continue;  // skip trivial differences
-
-          JetCompCase c{filePath, localEntry, j, j_pt, j_eta,
-                        rpt_mine_j, rpt_hgtd_j, t_waves, delta, isHS};
-          if (in_lo) {
-            if (delta > 0) insertCase(state.cases_mine_lo, c);
-            else           insertCase(state.cases_hgtd_lo, c);
-          } else {
-            if (delta > 0) insertCase(state.cases_mine_hi, c);
-            else           insertCase(state.cases_hgtd_hi, c);
-          }
-          // PU jets where HGTD assigns significant RpT (mistag) but WAVeS suppresses.
-          if (isPU && delta < 0 && rpt_hgtd_j > 0.1) {
-            if (in_lo) insertCase(state.cases_pu_mine_corrects_lo, c);
-            else       insertCase(state.cases_pu_mine_corrects_hi, c);
-          }
-          // PU jets where WAVeS gives higher RpT than HGTD (makes PU look more HS-like).
-          if (isPU && delta > 0 && rpt_mine_j > 0.1) {
-            if (in_lo) insertCase(state.cases_pu_mine_worse_lo, c);
-            else       insertCase(state.cases_pu_mine_worse_hi, c);
+            // Rank by how far timing pushes the fake's RpT down: a forward PU
+            // jet with high no-timing RpT is precisely the one that fakes a
+            // tagging jet, and the drop is the rejection actually delivered.
+            double rZ = rptOf(fwdPU, set_all);
+            double rW = rptOf(fwdPU, set_waves);
+            insertRegionCase(state.cases_r2,
+                             {filePath, localEntry, -1, fwdPU,
+                              0.0, 0.0,
+                              branch.topoJetPt[fwdPU], branch.topoJetEta[fwdPU],
+                              rZ, rW, rW - rZ, t_waves});
           }
         }
       }
 
-      // Hurt-HS diagnostic: HS jets (30-40 GeV) where the WAVeS time gate
-      // removed ghost-associated tracks relative to the z-only baseline,
-      // lowering RpT. Not gated on waves_ok explicitly -- when it's false,
-      // set_waves falls back to set_all (applyTimeGate's no-op path), so
-      // rpt_mine>=rpt_z always holds and the n_lost/rpt_mine<rpt_z checks
-      // below naturally skip these events, matching v4's original structure.
-      // (This also means t_waves below is always meaningful whenever a
-      // HurtJet is actually recorded -- waves_ok must have been true, or the
-      // event would already have been skipped.)
-      // Capped per-thread (not globally, since each worker races
-      // independently); merged lists are concatenated, not re-sorted,
-      // matching v4's original first-come-first-served collection order.
-      if (state.hurt_events.size() < 25) {
-        for (int j = 0; j < (int)branch.topoJetPt.GetSize(); ++j) {
-          if (branch.isJetRemoved(j)) continue;
-          double j_pt  = branch.topoJetPt[j];
-          double j_eta = branch.topoJetEta[j];
-          double j_phi = branch.topoJetPhi[j];
-          if (j_pt <= 30.0 || j_pt >= 40.0) continue;
-          if (std::abs(j_eta) < JET_ETA_MIN || std::abs(j_eta) > JET_ETA_MAX) continue;
-          if (!paperIsHS(j_eta, j_phi)) continue;
-
-          const auto& ghost = branch.topoJetGhostTrackIdx[j];
-          int n_lost = 0;
-          for (int idx : ghost)
-            if (set_all.count(idx) && !set_waves.count(idx)) ++n_lost;
-          if (n_lost == 0) continue;
-
-          double rpt_z    = computeRpT(&branch, ghost, j_pt, j_eta, j_phi, set_all);
-          double rpt_mine = computeRpT(&branch, ghost, j_pt, j_eta, j_phi, set_waves);
-          if (rpt_mine >= rpt_z) continue;  // shouldn't happen, but skip no-op cases
-
-          state.hurt_events.push_back({filePath, localEntry, j_pt, j_eta, j_phi,
-                                        rpt_z, rpt_mine, n_lost, t_waves});
-        }
-      }
     }
   });
   std::cout << "\n";
@@ -761,16 +694,8 @@ int main(int argc, char** argv) {
 
     // Event-display diagnostic candidates: merge each category's top-N
     // (see mergeCases doc comment near the top of this file).
-    mergeCases(merged.cases_mine_lo, other.cases_mine_lo);
-    mergeCases(merged.cases_hgtd_lo, other.cases_hgtd_lo);
-    mergeCases(merged.cases_mine_hi, other.cases_mine_hi);
-    mergeCases(merged.cases_hgtd_hi, other.cases_hgtd_hi);
-    mergeCases(merged.cases_pu_mine_corrects_lo, other.cases_pu_mine_corrects_lo);
-    mergeCases(merged.cases_pu_mine_corrects_hi, other.cases_pu_mine_corrects_hi);
-    mergeCases(merged.cases_pu_mine_worse_lo, other.cases_pu_mine_worse_lo);
-    mergeCases(merged.cases_pu_mine_worse_hi, other.cases_pu_mine_worse_hi);
-    for (auto& h : other.hurt_events)
-      if (merged.hurt_events.size() < 25) merged.hurt_events.push_back(h);
+    mergeRegionCases(merged.cases_r1, other.cases_r1);
+    mergeRegionCases(merged.cases_r2, other.cases_r2);
   }
 
   std::cout << "\nFINISHED PROCESSING\n";
@@ -817,52 +742,48 @@ int main(int argc, char** argv) {
   std::cout << "    Rejected, 1 good lepton   : " << merged.n_rej_one_lepton   << '\n';
   std::cout << "    Rejected, no OS-SF pair   : " << merged.n_rej_no_ossf_pair << '\n';
 
-  // --- Event-display diagnostics: WAVeS ("mine") vs HGTD jet-level
-  //     comparison, restored from rpt_v4.cxx (see doc comment near the top
-  //     of this file). Gated behind PRINT_EVENT_DISPLAYS -- flip that flag
-  //     to true and rerun to print ready-to-run event_display.py commands. ---
+  // --- Event displays, R1/R2 ONLY -------------------------------------------
+  //     The older WAVeS-vs-HGTD jet comparison and "timing-hurt HS jets"
+  //     listings were removed rather than kept alongside these: they ranked on
+  //     criteria unrelated to VBS topology, so their events were not
+  //     necessarily in any region, and interleaving both sets on stdout made
+  //     it impossible to tell which commands belonged to which study. The
+  //     regions are the focus, so the display output is theirs alone.
   if (PRINT_EVENT_DISPLAYS) {
-    std::cout << "\n=== TIMING-HURT HS JETS (30-40 GeV, WAVeS scenario) ===\n";
-    std::cout << "  HS jets where the WAVeS time gate removed >=1 ghost-associated track, lowering RpT.\n\n";
-    for (auto& h : merged.hurt_events) {
-      std::printf("  jet pT=%.1f  eta=%.2f  phi=%.2f  RpT: %.3f->%.3f  tracks_lost=%d\n",
-                  h.j_pt, h.j_eta, h.j_phi, h.rpt_z, h.rpt_mine, h.n_lost);
-      std::printf("  cd python && python3 event_display.py --file_path \"%s\" --event_num %lld --extra_time %.2f\n\n",
-                  h.file_path.c_str(), h.entry, h.t_mine);
-    }
-    if (merged.hurt_events.empty())
-      std::cout << "  (none found)\n";
-
-    auto printCases = [](const char* title, const std::vector<JetCompCase>& cases) {
-      std::cout << "\n" << title << ":\n";
+    auto printRegion = [](const char* title, const char* metric_desc,
+                          const std::vector<RegionCase>& cases, bool isR1) {
+      std::cout << "\n=== " << title << " ===\n";
+      std::cout << "  " << metric_desc << "\n\n";
       if (cases.empty()) { std::cout << "  (none found)\n"; return; }
       for (const auto& c : cases) {
-        std::printf("  jet pT=%.1f GeV  eta=%.2f  %s  RpT: mine=%.3f  hgtd=%.3f  delta=%.3f\n",
-                    c.j_pt, c.j_eta, c.isHS ? "HS" : "PU",
-                    c.rpt_mine, c.rpt_hgtd, c.delta);
-        std::printf("  cd python && python3 event_display.py --file_path \"%s\" --event_num %lld"
-                    " --extra_time %.2f --jet_idx %d --jet_label %s"
-                    " --rpt_hgtd %.3f --rpt_mine %.3f\n\n",
-                    c.file_path.c_str(), c.entry, c.t_mine, c.jet_idx,
-                    c.isHS ? "HS" : "PU", c.rpt_hgtd, c.rpt_mine);
+        if (isR1) {
+          std::printf("  HS leg pT=%.1f eta=%+.2f | PU leg pT=%.1f eta=%+.2f"
+                      "  margin: %.3f -> %.3f  (%+.3f, timing %s)\n",
+                      c.hs_pt, c.hs_eta, c.pu_pt, c.pu_eta,
+                      c.val_zonly, c.val_waves, c.metric,
+                      c.metric > 0 ? "HELPED" : "HURT");
+        } else {
+          std::printf("  fwd PU leg pT=%.1f eta=%+.2f  RpT: %.3f -> %.3f"
+                      "  (%+.3f, timing %s)\n",
+                      c.pu_pt, c.pu_eta, c.val_zonly, c.val_waves, c.metric,
+                      c.metric < 0 ? "SUPPRESSED the fake" : "raised it");
+        }
+        // --jet_idx highlights the leg the region is about: the HS leg in R1
+        // (which one is the hard scatter?), the fake in R2 (can we kill it?).
+        int    hi_idx   = isR1 ? c.idx_hs : c.idx_pu;
+        const char* lbl = isR1 ? "HS" : "PU";
+        std::printf("  cd python && python3 event_display.py --file_path \"%s\""
+                    " --event_num %lld --extra_time %.2f --jet_idx %d --jet_label %s\n\n",
+                    c.file_path.c_str(), c.entry, c.t_waves, hi_idx, lbl);
       }
     };
 
-    std::cout << "\n=== WAVeS vs HGTD: JET-LEVEL COMPARISON ===\n";
-    printCases("CASE 1 - WAVeS improves (30-40 GeV, WAVeS RpT > HGTD RpT)", merged.cases_mine_lo);
-    printCases("CASE 2 - WAVeS improves (>40 GeV, WAVeS RpT > HGTD RpT)",   merged.cases_mine_hi);
-    printCases("CASE 3 - HGTD better  (30-40 GeV, HGTD RpT > WAVeS RpT)",   merged.cases_hgtd_lo);
-    printCases("CASE 4 - HGTD better  (>40 GeV, HGTD RpT > WAVeS RpT)",     merged.cases_hgtd_hi);
-
-    std::cout << "\n=== PU MISTAG CORRECTION: HGTD mistags PU as HS, WAVeS corrects ===\n";
-    std::cout << "  (PU jets with rpt_hgtd > 0.1 where WAVeS gives lower RpT)\n";
-    printCases("CASE 5 - WAVeS corrects PU mistag (30-40 GeV)", merged.cases_pu_mine_corrects_lo);
-    printCases("CASE 6 - WAVeS corrects PU mistag (>40 GeV)",   merged.cases_pu_mine_corrects_hi);
-
-    std::cout << "\n=== PU MISTAG WORSENING: WAVeS pushes PU jet closer to HS ===\n";
-    std::cout << "  (PU jets with rpt_mine > 0.1 where WAVeS gives higher RpT than HGTD)\n";
-    printCases("CASE 7 - WAVeS worsens PU mistag (30-40 GeV)", merged.cases_pu_mine_worse_lo);
-    printCases("CASE 8 - WAVeS worsens PU mistag (>40 GeV)",   merged.cases_pu_mine_worse_hi);
+    printRegion("VBS REGION R1 - both candidate legs forward (HS vs PU)",
+                "Ranked by |change in HS-minus-PU RpT margin| between ITk-only and WAVeS.",
+                merged.cases_r1, true);
+    printRegion("VBS REGION R2 - forward PU leg + central HS leg",
+                "Ranked by |change in forward-PU RpT| between ITk-only and WAVeS.",
+                merged.cases_r2, false);
   }
 
   return 0;
