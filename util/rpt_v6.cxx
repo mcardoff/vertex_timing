@@ -197,6 +197,11 @@ int main(int argc, char** argv) {
   // able to scan this separates "the window is wrong for our t0" from "the
   // method does not work".
   double T0_NSIGMA = 2.0;
+  // Dominant levers on the ITk-only baseline: a tight z0 window or a tight
+  // track-jet cone strips PU tracks and inflates rejection. The macro's values
+  // are 1.4 and 0.2; the jet radius is 0.4.
+  double DZ0_SCALE = 1.4;
+  double TRK_DR    = 0.2;
   double SMEAR_PS = 30.0;
   for (int i = 1; i < argc; ++i) {
     std::string a(argv[i]);
@@ -205,6 +210,8 @@ int main(int argc, char** argv) {
     if (a.rfind("--ptmax=", 0) == 0) JPT_MAX  = std::stod(a.substr(8));
     if (a.rfind("--etamax=",0) == 0) JETA_MAX = std::stod(a.substr(9));
     if (a.rfind("--t0sigma=",0)== 0) T0_NSIGMA= std::stod(a.substr(10));
+    if (a.rfind("--dz0scale=",0)==0) DZ0_SCALE= std::stod(a.substr(11));
+    if (a.rfind("--trkdr=",0)  == 0) TRK_DR   = std::stod(a.substr(8));
   }
   std::cout << "[rpt_v6] track-time smearing: " << SMEAR_PS << " ps"
             << "  (t30 = Gaus(truth vertex time, " << SMEAR_PS << "))\n";
@@ -271,6 +278,10 @@ int main(int argc, char** argv) {
   long n_evt_vtx_timed = 0;
   // Self-tagging applicability, the TDR's stated limitation made measurable.
   long n_selftag_applied = 0, n_selftag_toofew = 0, n_selftag_split = 0;
+  // How often the COMBINED method actually differs from t0-only: it does so
+  // exactly on the jets whose event has no vertex time, since elsewhere the two
+  // are identical by construction.
+  long n_jets_total = 0, n_jets_fallback = 0, n_jets_fallback_active = 0;
 
   TRandom* r = new TRandom();
 
@@ -367,11 +378,11 @@ int main(int argc, char** argv) {
 
         trackPT_0 += pt2;
 
-        if ((std::fabs(z)/Dz0para) > 1.4) continue;   // 0.8 is better (theirs)
+        if ((std::fabs(z)/Dz0para) > DZ0_SCALE) continue;   // 0.8 is better (theirs)
 
         trackPT_1 += pt2;
 
-        if (Dr > 0.2) continue;
+        if (Dr > TRK_DR) continue;
 
         trackPT_2 += pt2;
 
@@ -498,6 +509,13 @@ int main(int argc, char** argv) {
       // AND of the two cuts, which over-rejected and pushed the combined curve
       // BELOW t0-only, the opposite of the TDR's figure.
       trackPT_7 = vtx_time_ok ? trackPT_5 : trackPT_6;
+      ++n_jets_total;
+      if (!vtx_time_ok) {
+        ++n_jets_fallback;
+        // ...and the fallback only CHANGES anything when self-tagging actually
+        // removed something, i.e. when the jet had >=2 timed tracks to split.
+        if (trackPT_6 < trackPT_2 - 1e-6) ++n_jets_fallback_active;
+      }
 
       float Rpt2 = trackPT_2 / jet_pt[i];
       float Rpt3 = trackPT_3 / jet_pt[i];
@@ -854,6 +872,14 @@ int main(int argc, char** argv) {
   std::printf("  Events passing |dz|<0.5mm: %8d\n", num_DZ);
   std::printf("  HS jets filled           : %8ld\n", n_jets_filled_hs);
   std::printf("  PU jets filled           : %8ld\n", n_jets_filled_pu);
+  std::printf("\n  R_pT (no timing) shape -- what sets the ITk-only baseline:\n");
+  std::printf("    HS jets: <R_pT> = %.3f   frac in R_pT~0 bin = %.3f\n",
+              h_Rpt->GetMean(),
+              h_Rpt->GetEntries() ? h_Rpt->GetBinContent(h_Rpt->FindBin(0.0))/h_Rpt->GetEntries() : 0.0);
+  std::printf("    PU jets: <R_pT> = %.3f   frac in R_pT~0 bin = %.3f\n",
+              h_Rpt_pu->GetMean(),
+              h_Rpt_pu->GetEntries() ? h_Rpt_pu->GetBinContent(h_Rpt_pu->FindBin(0.0))/h_Rpt_pu->GetEntries() : 0.0);
+  std::printf("    (dz0scale=%.2f, trk-jet dR<%.2f)\n", DZ0_SCALE, TRK_DR);
   std::printf("\n  PU rejection (1/mistag) at fixed HS efficiency:\n");
   std::printf("    %-22s %8s %8s %8s %8s\n", "scenario", "0.85", "0.90", "0.93", "0.95");
   std::printf("    %-22s %8.1f %8.1f %8.1f %8.1f\n", "R_pT (no time)",
@@ -878,6 +904,13 @@ int main(int argc, char** argv) {
     std::printf("    jets actually split in time: %8ld (%.1f%% of applicable)\n",
                 n_selftag_split,
                 n_selftag_applied ? 100.0*n_selftag_split/n_selftag_applied : 0.0);
+    std::printf("\n  Combined-vs-t0only reach (fallback fires only without a vertex t0):\n");
+    std::printf("    jets in events with NO vertex t0 : %8ld / %-8ld (%.1f%%)\n",
+                n_jets_fallback, n_jets_total,
+                n_jets_total ? 100.0*n_jets_fallback/n_jets_total : 0.0);
+    std::printf("    ...where self-tagging changed RpT: %8ld (%.1f%% of all jets)\n",
+                n_jets_fallback_active,
+                n_jets_total ? 100.0*n_jets_fallback_active/n_jets_total : 0.0);
   }
   {
     const long tot = n_trk_timed + n_trk_zonly_trk + n_trk_zonly_vtx;
