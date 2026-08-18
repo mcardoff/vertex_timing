@@ -154,7 +154,41 @@ for idx, jet_pt in enumerate(branch.AntiKt4EMTopoJets_pt):
     x_jet = (jet_pt / 40) * np.cos(theta) * signX
     y_jet = (jet_pt / 40) * np.sin(theta) * signY
     jet_info.append({'pt':jet_pt, 'eta':jet_eta, 'phi':jet_phi, 'isHS':isHS,
-                     'x':x_jet, 'y':y_jet, 'idx':idx})
+                     'x':x_jet, 'y':y_jet, 'idx':idx, 'isVBS':False})
+
+# --- VBS candidate pair -------------------------------------------------------
+# Mirrors BranchPointerWrapper::calcBestVbsPair: among the pT-passing jets (the
+# >30 GeV filter above is already MIN_JET_PT), the pair in OPPOSITE eta
+# hemispheres with the largest invariant mass. Flagged on every display, not
+# only region events, so the tagging pair is always identifiable at a glance.
+#
+# Encoded as a HATCH rather than a colour: fill colour is already fully spoken
+# for (green = truth-HS, grey = PU, orange = --jet_idx target) and VBS-ness is
+# orthogonal to all three. The combination is the point -- a grey wedge carrying
+# a VBS hatch is a pileup jet faking a tagging jet, which is the whole R2 story
+# in one glance.
+#
+# Caveat: this does NOT model the Z+jets lepton-jet overlap removal that
+# collectPtPassingJets applies, so on Z+jets a jet the analysis dropped could
+# still be picked here. No-op for vbf/dijet.
+vbs_mjj, vbs_deta = -1.0, -1.0
+vbs_pair = (None, None)
+for _a in range(len(jet_info)):
+    for _b in range(_a + 1, len(jet_info)):
+        _ja, _jb = jet_info[_a], jet_info[_b]
+        if _ja['eta'] * _jb['eta'] >= 0:      # require opposite hemispheres
+            continue
+        # massless jets: m_jj^2 = 2 pT1 pT2 (cosh(deta) - cos(dphi))
+        _deta = _ja['eta'] - _jb['eta']
+        _dphi = np.arctan2(np.sin(_ja['phi'] - _jb['phi']),
+                           np.cos(_ja['phi'] - _jb['phi']))
+        _m2 = 2.0 * _ja['pt'] * _jb['pt'] * (np.cosh(_deta) - np.cos(_dphi))
+        _mjj = np.sqrt(max(_m2, 0.0))
+        if _mjj > vbs_mjj:
+            vbs_mjj, vbs_deta, vbs_pair = _mjj, abs(_deta), (_a, _b)
+if vbs_pair[0] is not None:
+    jet_info[vbs_pair[0]]['isVBS'] = True
+    jet_info[vbs_pair[1]]['isVBS'] = True
 
 
 # --- ROOT Macro Execution and Clustering ---
@@ -305,11 +339,22 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
         jet_color = 'orange' if highlighted else ('green' if jet_tup['isHS'] >= 1 else 'grey')
         x_off1, y_off1 = jet_tup['x']-0.15*jet_tup['y'], jet_tup['y']+0.15*jet_tup['x']
         x_off2, y_off2 = jet_tup['x']+0.15*jet_tup['y'], jet_tup['y']-0.15*jet_tup['x']
-        ax.fill([reco_hs_z, reco_hs_z + x_off1, reco_hs_z + x_off2], [0, y_off1, y_off2],
+        wedge_x = [reco_hs_z, reco_hs_z + x_off1, reco_hs_z + x_off2]
+        wedge_y = [0, y_off1, y_off2]
+        ax.fill(wedge_x, wedge_y,
                 color=jet_color, alpha=0.7 if highlighted else 0.5)
+
+        # VBS candidate leg: cyan cross-hatch laid OVER the fill, so the wedge
+        # keeps showing its truth identity underneath. facecolor='none' is what
+        # makes this an overlay rather than a repaint.
+        if jet_tup.get('isVBS'):
+            ax.fill(wedge_x, wedge_y, facecolor='none', edgecolor='deepskyblue',
+                    hatch='xxx', linewidth=1.8, zorder=3)
 
         txt_color = 'orange' if highlighted else ('green' if jet_tup['isHS'] >= 1 else 'black')
         label = f"Jet {jet_i+1}: $p_T$={jet_tup['pt']:.0f} GeV, $\eta$={jet_tup['eta']:.1f}"
+        if jet_tup.get('isVBS'):
+            label += "  [VBS]"
         if highlighted:
             label += "  ← target"
         ax.text(reco_hs_z - 6.8, 0.9 - (1.2 + jet_i*0.1),
@@ -374,6 +419,13 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
     if args.jet_idx is not None:
         legend_handles.append(mpatches.Rectangle((0, 0), 1, 1, color='orange', alpha=0.7))
         legend_labels.append('Target jet')
+    if vbs_pair[0] is not None:
+        # Hatch-only swatch (no facecolor) -- it overlays the identity colours
+        # rather than replacing them, and the legend should say so.
+        legend_handles.append(mpatches.Rectangle((0, 0), 1, 1, facecolor='none',
+                                                 edgecolor='deepskyblue', hatch='xxx'))
+        legend_labels.append(f'VBS pair ($m_{{jj}}$={vbs_mjj:.0f} GeV, '
+                             f'$|\\Delta\\eta|$={vbs_deta:.1f})')
     ax.legend(legend_handles, legend_labels,
               loc='upper left', title='Tracks (colour = cluster) and Jets',
               bbox_to_anchor=(0.0, 0.9))
