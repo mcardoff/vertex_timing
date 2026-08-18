@@ -54,6 +54,7 @@ add_executable(rpt_v4 util/rpt_v4.cxx)
 add_executable(rpt_v5 util/rpt_v5.cxx)
 add_executable(rpt_v5_hist util/rpt_v5_hist.cxx)
 add_executable(rpt_v5_plot util/rpt_v5_plot.cxx)
+add_executable(rpt_v6 util/rpt_v6.cxx)
 add_executable(export_training_data util/export_training_data.cxx)
 add_executable(failure_decomposition util/failure_decomposition.cxx)
 add_executable(maxpt_jet_test util/maxpt_jet_test.cxx)
@@ -73,6 +74,7 @@ foreach(_tgt
     rpt_v5
     rpt_v5_hist
     rpt_v5_plot
+    rpt_v6
     export_training_data
     failure_decomposition
     maxpt_jet_test
