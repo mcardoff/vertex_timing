@@ -60,4 +60,16 @@ output                   = logs/clustering_hist_deta0_mjj200_$(sample).$(Cluster
 error                    = logs/clustering_hist_deta0_mjj200_$(sample).$(ClusterId).$(ProcId).err
 log                      = logs/clustering_hist_deta0_mjj200_$(sample).$(ClusterId).$(ProcId).log
 
-queue sample in (vbf, zjets, dijet)
+# Seven samples: the three originals re-run at the canonical selection so the
+# baseline is on one fiducial region, plus the mu=0 set and the channel-matched
+# zeejets control.
+#
+# For zeejets_mu0 and ttbar_mu0 the SELECTION BREAKDOWN is the deliverable, not
+# the timing plots -- passJetPtCut needs a forward jet and neither process makes
+# one without pileup, so a collapse in "Accepted" is the measurement of how much
+# of our forward-jet population is pileup.
+#
+# NOTE rpt_v5_hist is deliberately NOT extended to the mu=0 samples: it measures
+# HS-vs-PU jet discrimination, and at mu=0 the PU class is empty, so its ROC is
+# undefined rather than merely uninteresting.
+queue sample in (vbf, zjets, dijet, zeejets, vbf_mu0, zeejets_mu0, ttbar_mu0)
