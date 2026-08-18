@@ -56,9 +56,9 @@ request_cpus             = 4
 request_memory           = 4GB
 request_disk             = 4GB
 
-output                   = logs/clustering_hist_deta0_mjj200_$(sample).$(ClusterId).$(ProcId).out
-error                    = logs/clustering_hist_deta0_mjj200_$(sample).$(ClusterId).$(ProcId).err
-log                      = logs/clustering_hist_deta0_mjj200_$(sample).$(ClusterId).$(ProcId).log
+output                   = logs/clustering_hist_deta0_mjj500_$(sample).$(ClusterId).$(ProcId).out
+error                    = logs/clustering_hist_deta0_mjj500_$(sample).$(ClusterId).$(ProcId).err
+log                      = logs/clustering_hist_deta0_mjj500_$(sample).$(ClusterId).$(ProcId).log
 
 # Seven samples: the three originals re-run at the canonical selection so the
 # baseline is on one fiducial region, plus the mu=0 set and the channel-matched
