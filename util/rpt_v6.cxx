@@ -234,6 +234,7 @@ int main(int argc, char** argv) {
   // A tight value keeps only events whose PV0 position is essentially exact,
   // which flatters any z-based association.
   double MAX_DZ = 0.5;   // mm
+  int    NBINS  = 100;   // R_pT histogram bins (macro value); --nbins to refine
   double SMEAR_PS = 30.0;
   for (int i = 1; i < argc; ++i) {
     std::string a(argv[i]);
@@ -248,6 +249,7 @@ int main(int argc, char** argv) {
     if (a.rfind("--zsig=",0)   == 0) ZSIG     = std::stod(a.substr(7));
     if (a.rfind("--zsinth=",0) == 0) ZSINTH   = std::stod(a.substr(9));
     if (a.rfind("--maxdz=",0)  == 0) MAX_DZ   = std::stod(a.substr(8));
+    if (a.rfind("--nbins=",0)  == 0) NBINS    = std::stoi(a.substr(8));
   }
   std::cout << "[rpt_v6] track-time smearing: " << SMEAR_PS << " ps"
             << "  (t30 = Gaus(truth vertex time, " << SMEAR_PS << "))\n";
@@ -269,6 +271,7 @@ int main(int argc, char** argv) {
                            std::replace(t.begin(), t.end(), '.', 'p'); os << t; }
       os << "_";
     }
+    if (NBINS != 100) os << "nb" << NBINS << "_";
     if (MAX_DZ != 0.5) { std::ostringstream d; d << "dz" << MAX_DZ; std::string t=d.str();
                          std::replace(t.begin(), t.end(), '.', 'p'); os << t << "_"; }
     pre += os.str();
@@ -302,7 +305,12 @@ int main(int argc, char** argv) {
   TTreeReaderArray<float> truthHSJet_eta(reader, "TruthHSJet_eta");
   TTreeReaderArray<float> truthHSJet_phi(reader, "TruthHSJet_phi");
 
-  const int nbins_histo = 100;
+  // R_pT histogram binning. The macro uses 100 bins over [-0.02, 2.0], which
+  // samples the ROC too coarsely to resolve the high-efficiency end -- the
+  // 0.90-0.95 region comes out as a few long straight segments rather than the
+  // plateau-then-fall the TDR shows. The ROC construction reads GetNbinsX(), so
+  // raising this refines the curve without touching any logic.
+  const int nbins_histo = NBINS;
   TH1F* h_Rpt          = new TH1F("h_Rpt",         "", nbins_histo, -0.02, 2.0);
   TH1F* h_Rpt_pu       = new TH1F("h_Rpt_pu",      "", nbins_histo, -0.02, 2.0);
   TH1F* h_Rpt_t        = new TH1F("h_Rpt_t",       "", nbins_histo, -0.02, 2.0);
