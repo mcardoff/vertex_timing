@@ -68,6 +68,20 @@ namespace MyUtl {
   inline std::string SELECTION_TAG = "";
 
   // Default (no --sample flag): local VBF ntuple, VBF label, ../figs output.
+  //
+  // WARNING -- the mu=0 samples do NOT all pair with a mu=200 counterpart:
+  //   vbf_mu0     600026 r15697  pairs cleanly with vbf (600026 r15700).
+  //   zeejets_mu0 601189 Zee     does NOT pair with zjets, which is 601190
+  //                              ZMUMU. Same process, different decay channel,
+  //                              so a mu0-vs-mu200 comparison there confounds
+  //                              pileup with lepton flavour -- the jet and track
+  //                              physics are essentially channel-independent,
+  //                              but the LEPTON selection efficiency is not, and
+  //                              that efficiency is one of the things under
+  //                              study. Get 601190 at r15697 (or 601189 at
+  //                              r15700) for a clean pair.
+  //   ttbar_mu0   601229 r15697  has no mu=200 counterpart yet; the ttbar
+  //                              directory is currently empty.
   inline SampleConfig resolveSample(int argc, char** argv) {
     static const std::map<std::string, SampleConfig> registry = {
       {"vbf",   {"/data/mcardiff/exotic_superntuples/highstats_vbf/",
@@ -76,6 +90,36 @@ namespace MyUtl {
                  "#sqrt{s} = 14 TeV, HL-LHC, Z+jets",               "zjets", "zjets", true}},
       {"dijet", {"/data/mcardiff/exotic_superntuples/dijet/",
                  "#sqrt{s} = 14 TeV, HL-LHC, Dijet",                "dijet", "dijet", false}},
+
+      // ---- mu = 0 (PhaseIINoPileUp, r15697) --------------------------------
+      // These exist to measure the INTRINSIC timing floor: with no pileup, the
+      // core fraction a sample can reach is set by per-track time resolution
+      // alone. That is the number which turns "the residual needs new detector
+      // information" from an elimination argument into a measurement.
+      //
+      // Expect the SELECTION EFFICIENCY to collapse on zeejets_mu0 and
+      // ttbar_mu0, and that collapse is itself the result: passJetPtCut needs a
+      // forward jet (2.38 < |eta| < 4.0, pT > 30 GeV), and neither Z+jets nor
+      // ttbar produces one on its own -- at mu=200 that requirement is largely
+      // satisfied by PILEUP jets. vbf_mu0 should pass normally, since forward
+      // tagging jets are the VBF signature, which is why it is the one that can
+      // support a timing measurement.
+      {"vbf_mu0",     {"/data/mcardiff/exotic_superntuples/vbf_mu0/",
+                       "#sqrt{s} = 14 TeV, #mu = 0, VBF H#rightarrowinv.",
+                       "vbf_mu0", "vbf_mu0", false}},
+      // Z->ee, so the OS-SF pair in passLeptonSelection is found among electrons.
+      // NOTE this is DSID 601189 (Zee) whereas the mu=200 "zjets" above is DSID
+      // 601190 (Zmumu) -- see the warning in the header comment.
+      {"zeejets_mu0", {"/data/mcardiff/exotic_superntuples/zeejets_mu0/",
+                       "#sqrt{s} = 14 TeV, #mu = 0, Z(ee)+jets",
+                       "zeejets_mu0", "zeejets_mu0", true}},
+      // ttbar SingleLep has exactly ONE lepton, so overlapRemoval is left false:
+      // it currently also switches on passLeptonSelection, whose OS-SF PAIR
+      // requirement would reject every event. Separating those two behaviours is
+      // a prerequisite for ever running ttbar with lepton-jet overlap removal.
+      {"ttbar_mu0",   {"/data/mcardiff/exotic_superntuples/ttbar_mu0/",
+                       "#sqrt{s} = 14 TeV, #mu = 0, t#bar{t} (1 lep)",
+                       "ttbar_mu0", "ttbar_mu0", false}},
     };
 
     const std::string prefix = "--sample=";
@@ -86,7 +130,7 @@ namespace MyUtl {
       auto it = registry.find(name);
       if (it == registry.end()) {
         std::cerr << "Unknown --sample value '" << name
-                  << "'. Valid options: vbf, zjets, dijet.\n";
+                  << "'. Valid options: vbf, zjets, dijet, vbf_mu0, zeejets_mu0, ttbar_mu0.\n";
         std::exit(1);
       }
       return it->second;
