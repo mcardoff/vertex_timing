@@ -72,4 +72,16 @@ log                      = logs/clustering_hist_deta0_mjj200_$(sample).$(Cluster
 # NOTE rpt_v5_hist is deliberately NOT extended to the mu=0 samples: it measures
 # HS-vs-PU jet discrimination, and at mu=0 the PU class is empty, so its ROC is
 # undefined rather than merely uninteresting.
-queue sample in (vbf, zjets, dijet, zeejets, vbf_mu0, zeejets_mu0, ttbar_mu0)
+# CURRENTLY QUEUED: the mu=0 samples only.
+#
+# vbf and dijet already have canonical histograms, and zjets is running, so those
+# three are commented out rather than deleted -- re-enable them by moving them
+# back into the queue line when their jobs are done.
+#
+#   full list:  vbf, zjets, dijet, zeejets, vbf_mu0, zeejets_mu0, ttbar_mu0
+#
+# zeejets (mu=200, Zee ONLY) is also held back for now. It is the channel-matched
+# partner for zeejets_mu0 -- zjets is Zee+Zmumu combined, so without it the mu=0
+# Zee numbers have no like-for-like comparison. Worth running before drawing any
+# conclusion from zeejets_mu0.
+queue sample in (vbf_mu0, zeejets_mu0, ttbar_mu0)
