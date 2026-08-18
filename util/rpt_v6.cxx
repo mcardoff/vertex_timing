@@ -229,6 +229,11 @@ int main(int argc, char** argv) {
   std::string ZCUT = "para";
   double ZSIG = 3.0;
   double ZSINTH = 1.0;   // mm
+  // Event-level vertex-quality cut |z_reco - z_truth|. The macro uses 0.5 mm;
+  // MAX_VTX_DZ elsewhere in this codebase (and the usual ATLAS value) is 2.0.
+  // A tight value keeps only events whose PV0 position is essentially exact,
+  // which flatters any z-based association.
+  double MAX_DZ = 0.5;   // mm
   double SMEAR_PS = 30.0;
   for (int i = 1; i < argc; ++i) {
     std::string a(argv[i]);
@@ -242,6 +247,7 @@ int main(int argc, char** argv) {
     if (a.rfind("--zcut=",0)   == 0) ZCUT     = a.substr(7);
     if (a.rfind("--zsig=",0)   == 0) ZSIG     = std::stod(a.substr(7));
     if (a.rfind("--zsinth=",0) == 0) ZSINTH   = std::stod(a.substr(9));
+    if (a.rfind("--maxdz=",0)  == 0) MAX_DZ   = std::stod(a.substr(8));
   }
   std::cout << "[rpt_v6] track-time smearing: " << SMEAR_PS << " ps"
             << "  (t30 = Gaus(truth vertex time, " << SMEAR_PS << "))\n";
@@ -258,6 +264,8 @@ int main(int argc, char** argv) {
     if (JETA_MAX != 3.8) os << "eta" << (int)(JETA_MAX*10) << "_";
     if (ZCUT == "signif") os << "zsig" << (int)ZSIG << "_";
     if (ZCUT == "atlas")  os << "zatlas_";
+    if (MAX_DZ != 0.5) { std::ostringstream d; d << "dz" << MAX_DZ; std::string t=d.str();
+                         std::replace(t.begin(), t.end(), '.', 'p'); os << t << "_"; }
     pre += os.str();
   }
 
@@ -334,7 +342,7 @@ int main(int argc, char** argv) {
 
     if (recovertex_z.GetSize() < 1 || truthvertex_z.GetSize() < 1) continue;
     float DZ = std::fabs(truthvertex_z[0] - recovertex_z[0]);
-    if (DZ > 0.5) continue;
+    if (DZ > MAX_DZ) continue;
 
     num_DZ = num_DZ + 1;
 
@@ -926,7 +934,7 @@ int main(int argc, char** argv) {
   std::printf("  rpt_v6 — direct port of myJet_ana_fr.C\n");
   std::printf("================================================================\n");
   std::printf("  Events read              : %8lld\n", (long long)seen);
-  std::printf("  Events passing |dz|<0.5mm: %8d\n", num_DZ);
+  std::printf("  Events passing |dz|<%.1fmm: %8d\n", MAX_DZ, num_DZ);
   std::printf("  HS jets filled           : %8ld\n", n_jets_filled_hs);
   std::printf("  PU jets filled           : %8ld\n", n_jets_filled_pu);
   std::printf("\n  Stage decomposition of <R_pT> (mean over jets):\n");
