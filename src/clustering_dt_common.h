@@ -50,6 +50,11 @@ inline auto buildAnalysisMap(
   m.emplace(Score::TEST_MISAS, AnalysisObj(label, Score::TEST_MISAS));
   m.emplace(Score::WAVES_MISCL, AnalysisObj(label, Score::WAVES_MISCL));
   m.emplace(Score::WAVES_MISAS, AnalysisObj(label, Score::WAVES_MISAS));
+  // VBS topology regions: WAVeS selection restricted to R1 / R2 events. Read
+  // against the plain WAVES row above to see what the topology costs or buys,
+  // with the algorithm held fixed.
+  m.emplace(Score::VBF_R1,      AnalysisObj(label, Score::VBF_R1));
+  m.emplace(Score::VBF_R2,      AnalysisObj(label, Score::VBF_R2));
 
   // Scores active only in the real-HGTD scenario
   if (scenario == Scenario::HGTD) {
