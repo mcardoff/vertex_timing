@@ -188,6 +188,15 @@ int main(int argc, char** argv) {
   // Jet window / acceptance. Defaults are the macro's; the TDR figure needs
   // --ptmin=50 --ptmax=1e9 for its second panel and --etamax=4.0 for both.
   double JPT_MIN = 30.0, JPT_MAX = 50.0, JETA_MIN = 2.4, JETA_MAX = 3.8;
+  // Global-t0 window. ATLAS-TDR-031 Sec. 3.3.3: "RpT can be recomputed after
+  // removing tracks outside a 2*sigma_t window around the reconstructed time of
+  // the hard-scatter vertex." Two sigma, not the reference macro's three.
+  // Overridable via --t0sigma=<n>: our reconstructed vertex time cannot
+  // actually support 2 sigma (the HS-track pull against it has a core width of
+  // 1.76, so a nominal 2 sigma keeps only ~58% of genuine HS tracks), and being
+  // able to scan this separates "the window is wrong for our t0" from "the
+  // method does not work".
+  double T0_NSIGMA = 2.0;
   double SMEAR_PS = 30.0;
   for (int i = 1; i < argc; ++i) {
     std::string a(argv[i]);
@@ -195,6 +204,7 @@ int main(int argc, char** argv) {
     if (a.rfind("--ptmin=", 0) == 0) JPT_MIN  = std::stod(a.substr(8));
     if (a.rfind("--ptmax=", 0) == 0) JPT_MAX  = std::stod(a.substr(8));
     if (a.rfind("--etamax=",0) == 0) JETA_MAX = std::stod(a.substr(9));
+    if (a.rfind("--t0sigma=",0)== 0) T0_NSIGMA= std::stod(a.substr(10));
   }
   std::cout << "[rpt_v6] track-time smearing: " << SMEAR_PS << " ps"
             << "  (t30 = Gaus(truth vertex time, " << SMEAR_PS << "))\n";
@@ -373,7 +383,7 @@ int main(int argc, char** argv) {
             const double dtv = track_time[idex] - vtx_t;
             const double sgv = std::sqrt(track_timeRes[idex]*track_timeRes[idex]
                                          + vtx_res*vtx_res);
-            passT0 = (sgv > 0 && std::fabs(dtv / sgv) < 3.0);
+            passT0 = (sgv > 0 && std::fabs(dtv / sgv) < T0_NSIGMA);
           }
           jtrks.push_back({trk_ok ? (double)track_time[idex] : 0.0,
                            trk_ok ? (double)track_timeRes[idex] : 0.0,
@@ -406,7 +416,7 @@ int main(int argc, char** argv) {
           const double dt   = track_time[idex] - vtx_t;
           const double sig  = std::sqrt(track_timeRes[idex]*track_timeRes[idex]
                                         + vtx_res*vtx_res);
-          if (sig > 0 && std::fabs(dt / sig) < 3.0) trackPT_5 += pt2;
+          if (sig > 0 && std::fabs(dt / sig) < T0_NSIGMA) trackPT_5 += pt2;
         }
 
         if (!has_truth_time) continue;   // no truth vertex -> no t30 to cut on
@@ -445,10 +455,7 @@ int main(int argc, char** argv) {
         if (timed.size() < 2) {
           // No self-tagging possible: keep everything.
           ++n_selftag_toofew;
-          for (const auto& jt : jtrks) {
-            trackPT_6 += jt.pt;
-            if (jt.passT0) trackPT_7 += jt.pt;
-          }
+          for (const auto& jt : jtrks) trackPT_6 += jt.pt;
         } else {
           ++n_selftag_applied;
           std::sort(timed.begin(), timed.end(),
@@ -475,14 +482,22 @@ int main(int argc, char** argv) {
           }
           if (subjets.size() > 1) ++n_selftag_split;
 
+          // TDR: "The RpT variable is then recomputed for each in-time cluster
+          // plus the additional tracks that have no time assigned. Then, the jet
+          // RpT is defined as the maximum RpT of all sub-jets." Every sub-jet
+          // shares the same untimed term and the same denominator, so the
+          // maximum-RpT sub-jet is exactly the maximum-sum-pT one selected above.
           trackPT_6 += untimed_pt;      // untimed tracks always survive
-          trackPT_7 += untimed_pt_t0;
-          for (auto* jt : subjets[best]) {
-            trackPT_6 += jt->pt;
-            if (jt->passT0) trackPT_7 += jt->pt;   // full = t0 AND self-tag
-          }
+          for (auto* jt : subjets[best]) trackPT_6 += jt->pt;
         }
       }
+
+      // COMBINED (ATLAS-TDR-031): "It is also possible to combine both
+      // approaches such that when no t0 is found, the self-tagging method is
+      // used." A fallback, NOT an intersection -- an earlier revision took the
+      // AND of the two cuts, which over-rejected and pushed the combined curve
+      // BELOW t0-only, the opposite of the TDR's figure.
+      trackPT_7 = vtx_time_ok ? trackPT_5 : trackPT_6;
 
       float Rpt2 = trackPT_2 / jet_pt[i];
       float Rpt3 = trackPT_3 / jet_pt[i];
@@ -647,7 +662,7 @@ int main(int argc, char** argv) {
     ratioGraph2->SetPoint(i, x2, y2/y1);
   }
 
-  TH2F* h2 = new TH2F("h2", "", 125, 0.8, 1, 100, 0.0, 600);
+  TH2F* h2 = new TH2F("h2", "", 125, 0.8, 1, 100, 0.0, 170);
   h2->GetXaxis()->SetTitle("Efficiency for hard-scatter jets");
   h2->GetYaxis()->SetTitle("Pile-up jet rejection");
   h2->GetXaxis()->SetTitleOffset(1.25);
