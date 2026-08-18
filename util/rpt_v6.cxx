@@ -263,7 +263,12 @@ int main(int argc, char** argv) {
       os << "pt" << (int)JPT_MIN << (JPT_MAX > 1e8 ? "plus" : "") << "_";
     if (JETA_MAX != 3.8) os << "eta" << (int)(JETA_MAX*10) << "_";
     if (ZCUT == "signif") os << "zsig" << (int)ZSIG << "_";
-    if (ZCUT == "atlas")  os << "zatlas_";
+    if (ZCUT == "atlas") {
+      os << "zatlas";
+      if (ZSINTH != 1.0) { std::ostringstream z; z << ZSINTH; std::string t=z.str();
+                           std::replace(t.begin(), t.end(), '.', 'p'); os << t; }
+      os << "_";
+    }
     if (MAX_DZ != 0.5) { std::ostringstream d; d << "dz" << MAX_DZ; std::string t=d.str();
                          std::replace(t.begin(), t.end(), '.', 'p'); os << t << "_"; }
     pre += os.str();
