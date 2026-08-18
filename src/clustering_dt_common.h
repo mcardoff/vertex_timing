@@ -106,6 +106,19 @@ inline void makeComparisonPlots(
 	    },
 	    {C01, C02, C03});
 
+  // VBS topology regions: the same WAVeS algorithm measured inclusively, in R1
+  // (both candidate legs forward), and in R2 (forward PU leg + central HS leg).
+  // WAVES is included as the reference the two regions are read against -- the
+  // algorithm is identical across all three curves, so any separation is the
+  // topology talking, not the selector.
+  moneyPlot(MyUtl::plotFilePath("comparisons", TString::Format("vbf_regions_%s.pdf", key).Data()).c_str(), key, canvas,
+	    {
+	      &mapHGTD.at(Score::WAVES),
+	      &mapHGTD.at(Score::VBF_R1),
+	      &mapHGTD.at(Score::VBF_R2),
+	    },
+	    {C03, C08, C02});
+
 }
 
 #endif  // CLUSTERING_DT_COMMON_H
