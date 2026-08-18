@@ -212,6 +212,13 @@ int main(int argc, char** argv) {
   TTreeReaderArray<float> track_phi(reader, "Track_phi");
   TTreeReaderArray<float> track_z0 (reader, "Track_z0");
   TTreeReaderArray<int>   track_truthVtx_idx(reader, "Track_truthVtx_idx");
+  // Real HGTD quantities, for the "realistic" scenario (see REALISTIC below).
+  TTreeReaderArray<float> track_time    (reader, "Track_time");
+  TTreeReaderArray<float> track_timeRes (reader, "Track_timeRes");
+  TTreeReaderArray<int>   track_timeValid(reader, "Track_hasValidTime");
+  TTreeReaderArray<float> recoVtx_time   (reader, "RecoVtx_time");
+  TTreeReaderArray<float> recoVtx_timeRes(reader, "RecoVtx_timeRes");
+  TTreeReaderArray<int>   recoVtx_valid  (reader, "RecoVtx_hasValidTime");
   TTreeReaderArray<float> recovertex_z (reader, "RecoVtx_z");
   TTreeReaderArray<float> truthvertex_z(reader, "TruthVtx_z");
   TTreeReaderArray<float> truthvertex_t(reader, "TruthVtx_time");
@@ -226,9 +233,15 @@ int main(int argc, char** argv) {
   TH1F* h_Rpt_pu_t     = new TH1F("h_Rpt_pu_t",    "", nbins_histo, -0.02, 2.0);
   TH1F* h_Rpt_t_truth  = new TH1F("h_Rpt_t_truth", "", nbins_histo, -0.02, 2.0);
   TH1F* h_Rpt_pu_t_truth = new TH1F("h_Rpt_pu_t_truth", "", nbins_histo, -0.02, 2.0);
+  TH1F* h_Rpt_reco     = new TH1F("h_Rpt_reco",    "", nbins_histo, -0.02, 2.0);
+  TH1F* h_Rpt_pu_reco  = new TH1F("h_Rpt_pu_reco", "", nbins_histo, -0.02, 2.0);
 
   int num_DZ = 0;
   long n_jets_filled_hs = 0, n_jets_filled_pu = 0;
+  // Realistic-scenario bookkeeping: how often the HGTD actually supplies a
+  // usable time, i.e. how often the timing cut does any work at all.
+  long n_trk_timed = 0, n_trk_zonly_trk = 0, n_trk_zonly_vtx = 0;
+  long n_evt_vtx_timed = 0;
 
   TRandom* r = new TRandom();
 
@@ -247,6 +260,14 @@ int main(int argc, char** argv) {
     if (DZ > 0.5) continue;
 
     num_DZ = num_DZ + 1;
+
+    // REALISTIC scenario inputs: the actual HGTD vertex time. When the vertex
+    // has no valid time the timing cut cannot run at all, and every track in
+    // the event falls back to z-information only (kept, never discarded).
+    const bool vtx_time_ok = (recoVtx_valid.GetSize() > 0 && recoVtx_valid[0] == 1);
+    if (vtx_time_ok) ++n_evt_vtx_timed;
+    const double vtx_t   = vtx_time_ok ? recoVtx_time[0]    : 0.0;
+    const double vtx_res = vtx_time_ok ? recoVtx_timeRes[0] : 0.0;
 
     // Paper HS/PU labels (NOTE 1), evaluated per jet below.
     auto isPaperHS = [&](double je, double jp) {
@@ -270,6 +291,7 @@ int main(int argc, char** argv) {
       if ((std::fabs(jet_eta[i]) < 2.4) || (std::fabs(jet_eta[i]) > 3.8)) continue;
 
       float trackPT_0 = 0, trackPT_1 = 0, trackPT_2 = 0, trackPT_3 = 0, trackPT_4 = 0;
+      float trackPT_5 = 0;   // REALISTIC: real HGTD vertex + track times
 
       // ######|| Tracks selections ||######
       for (int j = 0; j < (int)jet_tracks_idx[i].size(); ++j) {
@@ -320,6 +342,32 @@ int main(int argc, char** argv) {
         // Tracks with no truth vertex link (~3.4%) cannot be assigned a t30
         // at all, so they contribute to the untimed sums only. The original has
         // no such case because its ntuple ships a t30 for every track.
+        // ── REALISTIC: real HGTD vertex time + real HGTD track time ───────
+        // Not part of the reference macro. Same |pull| < 3 structure as the
+        // idealised cut, but the pull is formed from the ACTUAL per-track and
+        // per-vertex resolutions rather than a flat smearing width.
+        //
+        // Fallback rule (as specified): if EITHER the vertex time or this
+        // track's time is unavailable, the track is judged on z-information
+        // alone and KEPT -- never discarded. That is the physically honest
+        // statement (the detector cannot reject what it did not measure) and
+        // it matches rpt_v5's applyTimeGate convention, which is what makes
+        // this scenario the like-for-like comparison against rpt_v5.
+        const bool trk_time_ok = (track_timeValid[idex] == 1);
+        if (!vtx_time_ok) {
+          ++n_trk_zonly_vtx;
+          trackPT_5 += pt2;                       // z-info only
+        } else if (!trk_time_ok) {
+          ++n_trk_zonly_trk;
+          trackPT_5 += pt2;                       // z-info only
+        } else {
+          ++n_trk_timed;
+          const double dt   = track_time[idex] - vtx_t;
+          const double sig  = std::sqrt(track_timeRes[idex]*track_timeRes[idex]
+                                        + vtx_res*vtx_res);
+          if (sig > 0 && std::fabs(dt / sig) < 3.0) trackPT_5 += pt2;
+        }
+
         if (!has_truth_time) continue;   // no truth vertex -> no t30 to cut on
         if (std::fabs(time_cut_reco)  < 3.0) trackPT_3 += pt2;   // cut 3 is better (theirs)
         if (std::fabs(time_cut_truth) < 3.0) trackPT_4 += pt2;
@@ -328,6 +376,7 @@ int main(int argc, char** argv) {
       float Rpt2 = trackPT_2 / jet_pt[i];
       float Rpt3 = trackPT_3 / jet_pt[i];
       float Rpt4 = trackPT_4 / jet_pt[i];
+      float Rpt5 = trackPT_5 / jet_pt[i];
 
       bool hs = isPaperHS(jet_eta[i], jet_phi[i]);
       bool pu = isPaperPU(jet_eta[i], jet_phi[i]);
@@ -336,12 +385,14 @@ int main(int argc, char** argv) {
         h_Rpt->Fill(Rpt2);
         h_Rpt_t->Fill(Rpt3);
         h_Rpt_t_truth->Fill(Rpt4);
+        h_Rpt_reco->Fill(Rpt5);
         ++n_jets_filled_hs;
       }
       if (!hs && pu) {
         h_Rpt_pu->Fill(Rpt2);
         h_Rpt_pu_t->Fill(Rpt3);
         h_Rpt_pu_t_truth->Fill(Rpt4);
+        h_Rpt_pu_reco->Fill(Rpt5);
         ++n_jets_filled_pu;
       }
     }  // Jet_loop ends
@@ -435,6 +486,20 @@ int main(int argc, char** argv) {
   }
   g3->SetLineWidth(4); g3->SetLineColor(1); g3->SetLineStyle(2); g3->SetFillColor(0);
 
+  std::cout << "----------------" << std::endl << "With REAL HGTD times" << std::endl;
+  TGraph* g4 = new TGraph();
+  float Ns4 = h_Rpt_reco->Integral(), Nb4 = h_Rpt_pu_reco->Integral();
+  int nbins4 = h_Rpt_reco->GetNbinsX();
+  int k4 = 0;
+  for (int i = 0; i <= nbins4; i++) {
+    float S_eff_r = h_Rpt_reco->Integral(i, nbins4) / Ns4;
+    float B_eff_r = h_Rpt_pu_reco->Integral(i, nbins4) / Nb4;
+    if (B_eff_r == 0) continue;
+    g4->SetPoint(k4, S_eff_r, 1./B_eff_r);
+    k4++;
+  }
+  g4->SetLineWidth(4); g4->SetLineColor(kBlue+1); g4->SetFillColor(0);
+
   // Ratio graphs (reco/no-time and truth/no-time), as in the original.
   TGraph* ratioGraph  = new TGraph();
   TGraph* ratioGraph2 = new TGraph();
@@ -496,6 +561,30 @@ int main(int argc, char** argv) {
     L->Draw();
     drawLabels();
     c2->Print((pre + "truth_reco_t30.pdf").c_str());
+  }
+
+  // ── ROC: IDEALISED vs REALISTIC ───────────────────────────────────────────
+  // The comparison that sets the baseline: idealised (truth times smeared at
+  // SMEAR_PS, vertex smeared at 10 ps, ~97% of tracks timed) against realistic
+  // (real HGTD track + vertex times, ~41% of tracks timed, the rest kept on
+  // z-information alone). The gap between them is the cost of real
+  // reconstruction, and is the number rpt_v5 should be judged against.
+  TCanvas* c4 = new TCanvas("c4", "c4", 15, 34, 800, 600);
+  SetCanvasAttr(c4);
+  h2->Draw();
+  g->Draw("same");
+  g3->Draw("same");
+  g4->Draw("same");
+  {
+    TLegend* L = new TLegend(0.22, 0.68, 0.62, 0.85, NULL, "brNDC");
+    L->SetFillColor(kWhite); L->SetBorderSize(0);
+    L->SetTextFont(42); L->SetTextSize(0.035); L->SetFillColor(0);
+    L->AddEntry(g,  "ITk only (no time)");
+    L->AddEntry(g3, "Idealised (smeared truth t)");
+    L->AddEntry(g4, "Realistic (real HGTD t)");
+    L->Draw();
+    drawLabels();
+    c4->Print((pre + "idealised_vs_realistic.pdf").c_str());
   }
 
   // ── ROC + ratio panel ─────────────────────────────────────────────────────
@@ -566,6 +655,20 @@ int main(int argc, char** argv) {
               rejAt(g3,0.85), rejAt(g3,0.90), rejAt(g3,0.93), rejAt(g3,0.95));
   std::printf("    %-22s %8.1f %8.1f %8.1f %8.1f\n", "R_pT 30ps (truth)",
               rejAt(g2,0.85), rejAt(g2,0.90), rejAt(g2,0.93), rejAt(g2,0.95));
+  std::printf("    %-22s %8.1f %8.1f %8.1f %8.1f\n", "REALISTIC (real HGTD)",
+              rejAt(g4,0.85), rejAt(g4,0.90), rejAt(g4,0.93), rejAt(g4,0.95));
+  {
+    const long tot = n_trk_timed + n_trk_zonly_trk + n_trk_zonly_vtx;
+    std::printf("\n  Realistic-scenario timing availability:\n");
+    std::printf("    events with a valid HGTD vertex time : %8ld / %-8d (%.1f%%)\n",
+                n_evt_vtx_timed, num_DZ, num_DZ ? 100.0*n_evt_vtx_timed/num_DZ : 0.0);
+    std::printf("    tracks actually time-gated           : %8ld / %-8ld (%.1f%%)\n",
+                n_trk_timed, tot, tot ? 100.0*n_trk_timed/tot : 0.0);
+    std::printf("    tracks on z-info only (no track time): %8ld (%.1f%%)\n",
+                n_trk_zonly_trk, tot ? 100.0*n_trk_zonly_trk/tot : 0.0);
+    std::printf("    tracks on z-info only (no vtx time)  : %8ld (%.1f%%)\n",
+                n_trk_zonly_vtx, tot ? 100.0*n_trk_zonly_vtx/tot : 0.0);
+  }
   std::printf("\n  Wrote %s*.pdf\n", pre.c_str());
   std::printf("================================================================\n");
   return 0;
