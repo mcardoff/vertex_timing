@@ -202,6 +202,18 @@ int main(int argc, char** argv) {
   // are 1.4 and 0.2; the jet radius is 0.4.
   double DZ0_SCALE = 1.4;
   double TRK_DR    = 0.2;
+  // Track-to-vertex association mode.
+  //   para   (default) : |z0 - PVz| / getNewDzpara(eta,pT) < DZ0_SCALE, the
+  //                      reference macro's active path.
+  //   signif           : |z0 - PVz| / sqrt(var_z0) < ZSIG, the standard
+  //                      significance cut. The macro computes this quantity
+  //                      (signi_cut) and the slide deck defines it, but its
+  //                      use is commented out there; --zcut=signif switches to
+  //                      it, which is the honest way to test whether the tight
+  //                      parameterized window is what inflates the ITk-only
+  //                      baseline.
+  std::string ZCUT = "para";
+  double ZSIG = 3.0;
   double SMEAR_PS = 30.0;
   for (int i = 1; i < argc; ++i) {
     std::string a(argv[i]);
@@ -212,6 +224,8 @@ int main(int argc, char** argv) {
     if (a.rfind("--t0sigma=",0)== 0) T0_NSIGMA= std::stod(a.substr(10));
     if (a.rfind("--dz0scale=",0)==0) DZ0_SCALE= std::stod(a.substr(11));
     if (a.rfind("--trkdr=",0)  == 0) TRK_DR   = std::stod(a.substr(8));
+    if (a.rfind("--zcut=",0)   == 0) ZCUT     = a.substr(7);
+    if (a.rfind("--zsig=",0)   == 0) ZSIG     = std::stod(a.substr(7));
   }
   std::cout << "[rpt_v6] track-time smearing: " << SMEAR_PS << " ps"
             << "  (t30 = Gaus(truth vertex time, " << SMEAR_PS << "))\n";
@@ -226,6 +240,7 @@ int main(int argc, char** argv) {
     if (JPT_MIN != 30.0 || JPT_MAX != 50.0)
       os << "pt" << (int)JPT_MIN << (JPT_MAX > 1e8 ? "plus" : "") << "_";
     if (JETA_MAX != 3.8) os << "eta" << (int)(JETA_MAX*10) << "_";
+    if (ZCUT == "signif") os << "zsig" << (int)ZSIG << "_";
     pre += os.str();
   }
 
@@ -241,6 +256,7 @@ int main(int argc, char** argv) {
   TTreeReaderArray<float> track_eta(reader, "Track_eta");
   TTreeReaderArray<float> track_phi(reader, "Track_phi");
   TTreeReaderArray<float> track_z0 (reader, "Track_z0");
+  TTreeReaderArray<float> track_var_z0(reader, "Track_var_z0");
   TTreeReaderArray<int>   track_truthVtx_idx(reader, "Track_truthVtx_idx");
   // Real HGTD quantities, for the "realistic" scenario (see REALISTIC below).
   TTreeReaderArray<float> track_time    (reader, "Track_time");
@@ -282,6 +298,10 @@ int main(int argc, char** argv) {
   // exactly on the jets whose event has no vertex time, since elsewhere the two
   // are identical by construction.
   long n_jets_total = 0, n_jets_fallback = 0, n_jets_fallback_active = 0;
+  // Stage-by-stage RpT decomposition: where do the tracks actually go?
+  //   0 = pT/eta only, 1 = + z-association, 2 = + track-jet cone
+  double sHS0=0,sHS1=0,sHS2=0, sPU0=0,sPU1=0,sPU2=0;
+  long   cHS=0, cPU=0, nghost_hs=0, nghost_pu=0, njet_hs=0, njet_pu=0;
 
   TRandom* r = new TRandom();
 
@@ -378,7 +398,13 @@ int main(int argc, char** argv) {
 
         trackPT_0 += pt2;
 
-        if ((std::fabs(z)/Dz0para) > DZ0_SCALE) continue;   // 0.8 is better (theirs)
+        if (ZCUT == "signif") {
+          const double vz = track_var_z0[idex];
+          if (!(vz > 0)) continue;
+          if (std::fabs(z) / std::sqrt(vz) > ZSIG) continue;
+        } else {
+          if ((std::fabs(z)/Dz0para) > DZ0_SCALE) continue;   // 0.8 is better (theirs)
+        }
 
         trackPT_1 += pt2;
 
@@ -526,6 +552,16 @@ int main(int argc, char** argv) {
 
       bool hs = isPaperHS(jet_eta[i], jet_phi[i]);
       bool pu = isPaperPU(jet_eta[i], jet_phi[i]);
+      if (hs && !pu) {
+        sHS0 += trackPT_0/jet_pt[i]; sHS1 += trackPT_1/jet_pt[i];
+        sHS2 += trackPT_2/jet_pt[i]; ++cHS;
+        nghost_hs += (long)jet_tracks_idx[i].size(); ++njet_hs;
+      }
+      if (!hs && pu) {
+        sPU0 += trackPT_0/jet_pt[i]; sPU1 += trackPT_1/jet_pt[i];
+        sPU2 += trackPT_2/jet_pt[i]; ++cPU;
+        nghost_pu += (long)jet_tracks_idx[i].size(); ++njet_pu;
+      }
 
       if (hs && !pu) {
         h_Rpt->Fill(Rpt2);
@@ -872,6 +908,13 @@ int main(int argc, char** argv) {
   std::printf("  Events passing |dz|<0.5mm: %8d\n", num_DZ);
   std::printf("  HS jets filled           : %8ld\n", n_jets_filled_hs);
   std::printf("  PU jets filled           : %8ld\n", n_jets_filled_pu);
+  std::printf("\n  Stage decomposition of <R_pT> (mean over jets):\n");
+  std::printf("    %-10s %10s %10s %10s %12s\n", "", "pT/eta", "+z assoc", "+dR cone", "<ghost trk>");
+  if (cHS) std::printf("    %-10s %10.3f %10.3f %10.3f %12.1f\n", "HS jets",
+                       sHS0/cHS, sHS1/cHS, sHS2/cHS, njet_hs ? (double)nghost_hs/njet_hs : 0.0);
+  if (cPU) std::printf("    %-10s %10.3f %10.3f %10.3f %12.1f\n", "PU jets",
+                       sPU0/cPU, sPU1/cPU, sPU2/cPU, njet_pu ? (double)nghost_pu/njet_pu : 0.0);
+
   std::printf("\n  R_pT (no timing) shape -- what sets the ITk-only baseline:\n");
   std::printf("    HS jets: <R_pT> = %.3f   frac in R_pT~0 bin = %.3f\n",
               h_Rpt->GetMean(),
