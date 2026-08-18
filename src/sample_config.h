@@ -69,19 +69,20 @@ namespace MyUtl {
 
   // Default (no --sample flag): local VBF ntuple, VBF label, ../figs output.
   //
-  // WARNING -- the mu=0 samples do NOT all pair with a mu=200 counterpart:
-  //   vbf_mu0     600026 r15697  pairs cleanly with vbf (600026 r15700).
-  //   zeejets_mu0 601189 Zee     does NOT pair with zjets, which is 601190
-  //                              ZMUMU. Same process, different decay channel,
-  //                              so a mu0-vs-mu200 comparison there confounds
-  //                              pileup with lepton flavour -- the jet and track
-  //                              physics are essentially channel-independent,
-  //                              but the LEPTON selection efficiency is not, and
-  //                              that efficiency is one of the things under
-  //                              study. Get 601190 at r15697 (or 601189 at
-  //                              r15700) for a clean pair.
+  // PAIRING the mu=0 samples with a mu=200 counterpart:
+  //   vbf_mu0     600026 r15697  pairs cleanly with "vbf" (600026 r15700).
+  //   zeejets_mu0 601189 Zee     pairs with "zeejets", NOT with "zjets".
+  //                              The zjets directory holds TWO DSIDs side by
+  //                              side -- 601189 (Zee) and 601190 (Zmumu) -- and
+  //                              setupChain descends one level, so --sample=zjets
+  //                              reads BOTH channels. Every earlier zjets number
+  //                              in this study is therefore Zee+Zmumu combined.
+  //                              Since only Zee exists at mu=0, comparing it
+  //                              against the combined sample would confound
+  //                              pileup with channel mix, so "zeejets" below
+  //                              points at the 601189 subdirectory alone.
   //   ttbar_mu0   601229 r15697  has no mu=200 counterpart yet; the ttbar
-  //                              directory is currently empty.
+  //                              directory exists but is empty.
   inline SampleConfig resolveSample(int argc, char** argv) {
     static const std::map<std::string, SampleConfig> registry = {
       {"vbf",   {"/data/mcardiff/exotic_superntuples/highstats_vbf/",
@@ -90,6 +91,15 @@ namespace MyUtl {
                  "#sqrt{s} = 14 TeV, HL-LHC, Z+jets",               "zjets", "zjets", true}},
       {"dijet", {"/data/mcardiff/exotic_superntuples/dijet/",
                  "#sqrt{s} = 14 TeV, HL-LHC, Dijet",                "dijet", "dijet", false}},
+
+      // Zee ONLY at mu=200, i.e. the channel-matched partner for zeejets_mu0.
+      // "zjets" above deliberately keeps reading both DSIDs, so every previously
+      // published zjets number stays reproducible; this entry exists purely so
+      // the mu0-vs-mu200 comparison is like-for-like.
+      {"zeejets", {"/data/mcardiff/exotic_superntuples/zjets/"
+                   "user.mcardiff.mc21_14TeV.601189.PhPy8EG_AZNLO_Zee.SuperNtuple."
+                   "e8481_s4290_r15700.20260712_Output/",
+                   "#sqrt{s} = 14 TeV, HL-LHC, Z(ee)+jets", "zeejets", "zeejets", true}},
 
       // ---- mu = 0 (PhaseIINoPileUp, r15697) --------------------------------
       // These exist to measure the INTRINSIC timing floor: with no pileup, the
@@ -108,8 +118,8 @@ namespace MyUtl {
                        "#sqrt{s} = 14 TeV, #mu = 0, VBF H#rightarrowinv.",
                        "vbf_mu0", "vbf_mu0", false}},
       // Z->ee, so the OS-SF pair in passLeptonSelection is found among electrons.
-      // NOTE this is DSID 601189 (Zee) whereas the mu=200 "zjets" above is DSID
-      // 601190 (Zmumu) -- see the warning in the header comment.
+      // Compare against "zeejets" (same DSID at mu=200), NOT "zjets", which is
+      // Zee+Zmumu combined -- see the pairing note in the header comment.
       {"zeejets_mu0", {"/data/mcardiff/exotic_superntuples/zeejets_mu0/",
                        "#sqrt{s} = 14 TeV, #mu = 0, Z(ee)+jets",
                        "zeejets_mu0", "zeejets_mu0", true}},
@@ -130,7 +140,7 @@ namespace MyUtl {
       auto it = registry.find(name);
       if (it == registry.end()) {
         std::cerr << "Unknown --sample value '" << name
-                  << "'. Valid options: vbf, zjets, dijet, vbf_mu0, zeejets_mu0, ttbar_mu0.\n";
+                  << "'. Valid options: vbf, zjets, zeejets, dijet, vbf_mu0, zeejets_mu0, ttbar_mu0.\n";
         std::exit(1);
       }
       return it->second;
