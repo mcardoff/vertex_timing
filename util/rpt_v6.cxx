@@ -89,6 +89,7 @@
 #include <cmath>
 #include <cstdio>
 #include <iostream>
+#include <algorithm>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -182,10 +183,18 @@ int main(int argc, char** argv) {
   // macro's active path is t30, with its t60/t90 variants sitting commented out
   // beside it. The same value is used both to smear and to divide, exactly as
   // the macro does (track_t30 with /30.0, track_t60 with /60.0, ...).
+  // Time-pull threshold at which the self-tagging clustering splits a jet.
+  const double SELFTAG_NSIGMA = 3.0;
+  // Jet window / acceptance. Defaults are the macro's; the TDR figure needs
+  // --ptmin=50 --ptmax=1e9 for its second panel and --etamax=4.0 for both.
+  double JPT_MIN = 30.0, JPT_MAX = 50.0, JETA_MIN = 2.4, JETA_MAX = 3.8;
   double SMEAR_PS = 30.0;
   for (int i = 1; i < argc; ++i) {
     std::string a(argv[i]);
     if (a.rfind("--smear=", 0) == 0) SMEAR_PS = std::stod(a.substr(8));
+    if (a.rfind("--ptmin=", 0) == 0) JPT_MIN  = std::stod(a.substr(8));
+    if (a.rfind("--ptmax=", 0) == 0) JPT_MAX  = std::stod(a.substr(8));
+    if (a.rfind("--etamax=",0) == 0) JETA_MAX = std::stod(a.substr(9));
   }
   std::cout << "[rpt_v6] track-time smearing: " << SMEAR_PS << " ps"
             << "  (t30 = Gaus(truth vertex time, " << SMEAR_PS << "))\n";
@@ -194,8 +203,12 @@ int main(int argc, char** argv) {
   boost::filesystem::create_directories(outDir);
   std::string pre = outDir + "/" +
       (MyUtl::SAMPLE_NAME.empty() ? std::string("") : MyUtl::SAMPLE_NAME + "_");
-  if (SMEAR_PS != 30.0) {   // keep each smearing's output distinct
-    std::ostringstream os; os << "t" << (int)SMEAR_PS << "_";
+  {   // keep each configuration's output distinct
+    std::ostringstream os;
+    if (SMEAR_PS != 30.0) os << "t" << (int)SMEAR_PS << "_";
+    if (JPT_MIN != 30.0 || JPT_MAX != 50.0)
+      os << "pt" << (int)JPT_MIN << (JPT_MAX > 1e8 ? "plus" : "") << "_";
+    if (JETA_MAX != 3.8) os << "eta" << (int)(JETA_MAX*10) << "_";
     pre += os.str();
   }
 
@@ -235,6 +248,10 @@ int main(int argc, char** argv) {
   TH1F* h_Rpt_pu_t_truth = new TH1F("h_Rpt_pu_t_truth", "", nbins_histo, -0.02, 2.0);
   TH1F* h_Rpt_reco     = new TH1F("h_Rpt_reco",    "", nbins_histo, -0.02, 2.0);
   TH1F* h_Rpt_pu_reco  = new TH1F("h_Rpt_pu_reco", "", nbins_histo, -0.02, 2.0);
+  TH1F* h_Rpt_self     = new TH1F("h_Rpt_self",    "", nbins_histo, -0.02, 2.0);
+  TH1F* h_Rpt_pu_self  = new TH1F("h_Rpt_pu_self", "", nbins_histo, -0.02, 2.0);
+  TH1F* h_Rpt_full     = new TH1F("h_Rpt_full",    "", nbins_histo, -0.02, 2.0);
+  TH1F* h_Rpt_pu_full  = new TH1F("h_Rpt_pu_full", "", nbins_histo, -0.02, 2.0);
 
   int num_DZ = 0;
   long n_jets_filled_hs = 0, n_jets_filled_pu = 0;
@@ -242,6 +259,8 @@ int main(int argc, char** argv) {
   // usable time, i.e. how often the timing cut does any work at all.
   long n_trk_timed = 0, n_trk_zonly_trk = 0, n_trk_zonly_vtx = 0;
   long n_evt_vtx_timed = 0;
+  // Self-tagging applicability, the TDR's stated limitation made measurable.
+  long n_selftag_applied = 0, n_selftag_toofew = 0, n_selftag_split = 0;
 
   TRandom* r = new TRandom();
 
@@ -287,11 +306,18 @@ int main(int argc, char** argv) {
 
     // ######|| Jets selections ||######
     for (int i = 0; i < (int)jet_tracks_idx.GetSize(); ++i) {
-      if (jet_pt[i] < 30.0 || jet_pt[i] > 50.0) continue;
-      if ((std::fabs(jet_eta[i]) < 2.4) || (std::fabs(jet_eta[i]) > 3.8)) continue;
+      if (jet_pt[i] < JPT_MIN || jet_pt[i] > JPT_MAX) continue;
+      if ((std::fabs(jet_eta[i]) < JETA_MIN) || (std::fabs(jet_eta[i]) > JETA_MAX)) continue;
 
       float trackPT_0 = 0, trackPT_1 = 0, trackPT_2 = 0, trackPT_3 = 0, trackPT_4 = 0;
-      float trackPT_5 = 0;   // REALISTIC: real HGTD vertex + track times
+      float trackPT_5 = 0;   // REALISTIC / t0-only: real HGTD vertex + track times
+      float trackPT_6 = 0;   // SELF-TAGGING only
+      float trackPT_7 = 0;   // t0 + self-tagging (full ITk+HGTD)
+      // Per-jet record of the tracks surviving z0 + dR, for the self-tagging
+      // pass below. Untimed tracks are recorded with timed=false: they can
+      // never be assigned to a time sub-jet, and are kept unconditionally.
+      struct JTrk { double t, res, pt; bool timed, passT0; };
+      std::vector<JTrk> jtrks;
 
       // ######|| Tracks selections ||######
       for (int j = 0; j < (int)jet_tracks_idx[i].size(); ++j) {
@@ -339,6 +365,21 @@ int main(int argc, char** argv) {
 
         trackPT_2 += pt2;
 
+        // Record for the self-tagging pass (runs after this track loop).
+        {
+          const bool trk_ok = (track_timeValid[idex] == 1);
+          bool passT0 = true;   // untimed / no vertex time -> kept on z-info
+          if (vtx_time_ok && trk_ok) {
+            const double dtv = track_time[idex] - vtx_t;
+            const double sgv = std::sqrt(track_timeRes[idex]*track_timeRes[idex]
+                                         + vtx_res*vtx_res);
+            passT0 = (sgv > 0 && std::fabs(dtv / sgv) < 3.0);
+          }
+          jtrks.push_back({trk_ok ? (double)track_time[idex] : 0.0,
+                           trk_ok ? (double)track_timeRes[idex] : 0.0,
+                           (double)pt2, trk_ok, passT0});
+        }
+
         // Tracks with no truth vertex link (~3.4%) cannot be assigned a t30
         // at all, so they contribute to the untimed sums only. The original has
         // no such case because its ntuple ships a t30 for every track.
@@ -373,10 +414,82 @@ int main(int argc, char** argv) {
         if (std::fabs(time_cut_truth) < 3.0) trackPT_4 += pt2;
       }  // track_loop ends
 
+      // ── SELF-TAGGING (ATLAS-TDR-031) ──────────────────────────────────────
+      // "does not require the knowledge of the hard-scatter time. The key idea
+      //  is to check the consistency of the measured production time for all
+      //  tracks associated to the same physics object among themselves ...
+      //  finding clusters of tracks within a jet that have compatible times,
+      //  and splitting the jet into smaller sub-jets with consistent times."
+      //
+      // Implemented as single-linkage clustering of the jet's TIMED tracks
+      // along the time axis: sort by time, start a new sub-jet whenever the
+      // pull to the previous track exceeds SELFTAG_NSIGMA. The surviving
+      // sub-jet is the one carrying the most pT -- the jet's own time core --
+      // and the out-of-time stragglers are dropped.
+      //
+      // The TDR's stated limitation is respected: self-tagging "requires
+      // physics objects to have at least two tracks with time assigned". With
+      // fewer than two, no consistency statement is possible and every track is
+      // kept (z-information only), never discarded. The TDR predicts this
+      // blunts the method against pileup jets specifically, since most of them
+      // have only one track in HGTD acceptance -- n_selftag_* below measures
+      // exactly that.
+      {
+        std::vector<const JTrk*> timed;
+        for (const auto& jt : jtrks) if (jt.timed) timed.push_back(&jt);
+
+        double untimed_pt = 0.0, untimed_pt_t0 = 0.0;
+        for (const auto& jt : jtrks)
+          if (!jt.timed) { untimed_pt += jt.pt; untimed_pt_t0 += jt.pt; }
+
+        if (timed.size() < 2) {
+          // No self-tagging possible: keep everything.
+          ++n_selftag_toofew;
+          for (const auto& jt : jtrks) {
+            trackPT_6 += jt.pt;
+            if (jt.passT0) trackPT_7 += jt.pt;
+          }
+        } else {
+          ++n_selftag_applied;
+          std::sort(timed.begin(), timed.end(),
+                    [](const JTrk* a, const JTrk* b) { return a->t < b->t; });
+
+          // Single-linkage split on the time pull between adjacent tracks.
+          std::vector<std::vector<const JTrk*>> subjets;
+          subjets.emplace_back();
+          subjets.back().push_back(timed[0]);
+          for (size_t q = 1; q < timed.size(); ++q) {
+            const double sg = std::sqrt(timed[q]->res*timed[q]->res
+                                        + timed[q-1]->res*timed[q-1]->res);
+            const double pull = (sg > 0) ? (timed[q]->t - timed[q-1]->t) / sg : 0.0;
+            if (std::fabs(pull) > SELFTAG_NSIGMA) subjets.emplace_back();
+            subjets.back().push_back(timed[q]);
+          }
+
+          // Keep the highest-sum-pT sub-jet.
+          size_t best = 0; double bestpt = -1.0;
+          for (size_t q = 0; q < subjets.size(); ++q) {
+            double sp = 0.0;
+            for (auto* jt : subjets[q]) sp += jt->pt;
+            if (sp > bestpt) { bestpt = sp; best = q; }
+          }
+          if (subjets.size() > 1) ++n_selftag_split;
+
+          trackPT_6 += untimed_pt;      // untimed tracks always survive
+          trackPT_7 += untimed_pt_t0;
+          for (auto* jt : subjets[best]) {
+            trackPT_6 += jt->pt;
+            if (jt->passT0) trackPT_7 += jt->pt;   // full = t0 AND self-tag
+          }
+        }
+      }
+
       float Rpt2 = trackPT_2 / jet_pt[i];
       float Rpt3 = trackPT_3 / jet_pt[i];
       float Rpt4 = trackPT_4 / jet_pt[i];
       float Rpt5 = trackPT_5 / jet_pt[i];
+      float Rpt6 = trackPT_6 / jet_pt[i];
+      float Rpt7 = trackPT_7 / jet_pt[i];
 
       bool hs = isPaperHS(jet_eta[i], jet_phi[i]);
       bool pu = isPaperPU(jet_eta[i], jet_phi[i]);
@@ -386,6 +499,8 @@ int main(int argc, char** argv) {
         h_Rpt_t->Fill(Rpt3);
         h_Rpt_t_truth->Fill(Rpt4);
         h_Rpt_reco->Fill(Rpt5);
+        h_Rpt_self->Fill(Rpt6);
+        h_Rpt_full->Fill(Rpt7);
         ++n_jets_filled_hs;
       }
       if (!hs && pu) {
@@ -393,6 +508,8 @@ int main(int argc, char** argv) {
         h_Rpt_pu_t->Fill(Rpt3);
         h_Rpt_pu_t_truth->Fill(Rpt4);
         h_Rpt_pu_reco->Fill(Rpt5);
+        h_Rpt_pu_self->Fill(Rpt6);
+        h_Rpt_pu_full->Fill(Rpt7);
         ++n_jets_filled_pu;
       }
     }  // Jet_loop ends
@@ -500,6 +617,23 @@ int main(int argc, char** argv) {
   }
   g4->SetLineWidth(4); g4->SetLineColor(kBlue+1); g4->SetFillColor(0);
 
+  auto makeRoc = [](TH1F* hs, TH1F* hp) {
+    TGraph* gr = new TGraph();
+    float Ns_ = hs->Integral(), Nb_ = hp->Integral();
+    int nb_ = hs->GetNbinsX(), kk = 0;
+    for (int i = 0; i <= nb_; i++) {
+      float se = hs->Integral(i, nb_) / Ns_;
+      float be = hp->Integral(i, nb_) / Nb_;
+      if (be == 0) continue;
+      gr->SetPoint(kk++, se, 1./be);
+    }
+    return gr;
+  };
+  TGraph* g5 = makeRoc(h_Rpt_self, h_Rpt_pu_self);   // self-tagging only
+  TGraph* g6 = makeRoc(h_Rpt_full, h_Rpt_pu_full);   // t0 + self-tagging
+  g5->SetLineWidth(4); g5->SetLineColor(kGreen+2); g5->SetLineStyle(9); g5->SetFillColor(0);
+  g6->SetLineWidth(4); g6->SetLineColor(kRed);     g6->SetFillColor(0);
+
   // Ratio graphs (reco/no-time and truth/no-time), as in the original.
   TGraph* ratioGraph  = new TGraph();
   TGraph* ratioGraph2 = new TGraph();
@@ -519,12 +653,19 @@ int main(int argc, char** argv) {
   h2->GetXaxis()->SetTitleOffset(1.25);
   h2->SetStats(0);
 
-  auto drawLabels = [&]() {
+  // Labels track the ACTUAL configuration -- these were hardcoded to the
+  // macro's 2.4-3.8 / 30-50, which silently mislabels any --etamax/--ptmin run.
+  char lbl_eta[64], lbl_pt[64];
+  std::snprintf(lbl_eta, sizeof(lbl_eta), "%.1f <|#eta|< %.1f", JETA_MIN, JETA_MAX);
+  if (JPT_MAX > 1e8) std::snprintf(lbl_pt, sizeof(lbl_pt), "p_{T}> %.0f GeV", JPT_MIN);
+  else               std::snprintf(lbl_pt, sizeof(lbl_pt), "%.0f <p_{T}< %.0f GeV", JPT_MIN, JPT_MAX);
+
+  auto drawLabels = [&](double x = 0.60) {
     ATLAS_LABEL(0.18, 0.85, 1);
-    myText(0.69, 0.80, 1, "#sqrt{s}=14 TeV, <#mu>=200");
-    myText(0.69, 0.75, 1, "VBF H #rightarrow invisible");
-    myText(0.69, 0.70, 1, "2.4 <|#eta|< 3.8");
-    myText(0.69, 0.65, 1, "30 <p_{T}< 50 GeV");
+    myText(x, 0.80, 1, "#sqrt{s}=14 TeV, <#mu>=200");
+    myText(x, 0.75, 1, "VBF H #rightarrow invisible");
+    myText(x, 0.70, 1, lbl_eta);
+    myText(x, 0.65, 1, lbl_pt);
   };
 
   // ── ROC: no-time vs reco-time ─────────────────────────────────────────────
@@ -585,6 +726,57 @@ int main(int argc, char** argv) {
     L->Draw();
     drawLabels();
     c4->Print((pre + "idealised_vs_realistic.pdf").c_str());
+  }
+
+  // ── TDR-style figure: the four ATLAS-TDR-031 p.45 curves + ratio panel ────
+  {
+    TCanvas* ct = new TCanvas("ct", "ct", 15, 34, 800, 700);
+    TPad* tp1 = new TPad("tp1", "tp1", 0., 0.3, 1., 1.);
+    tp1->SetBottomMargin(0.02); tp1->Draw(); tp1->cd();
+    TGraph* gi = (TGraph*)g->Clone();  gi->SetLineColor(kBlack); gi->SetLineStyle(2);
+    TGraph* gt = (TGraph*)g4->Clone(); gt->SetLineColor(kBlue);  gt->SetLineStyle(3);
+    h2->Draw(); gi->Draw("same"); g5->Draw("same"); gt->Draw("same"); g6->Draw("same");
+    h2->GetXaxis()->SetLabelSize(0);   // x labels live on the ratio pad
+    h2->GetXaxis()->SetTitleSize(0);
+    TLegend* L = new TLegend(0.20, 0.16, 0.62, 0.40, NULL, "brNDC");
+    L->SetFillColor(0); L->SetBorderSize(0);
+    L->SetTextFont(42); L->SetTextSize(0.036);
+    L->AddEntry(gi, "ITk", "l");
+    L->AddEntry(g5, "ITk+HGTD (self-tagging only)", "l");
+    L->AddEntry(gt, "ITk+HGTD (t_{0} only)", "l");
+    L->AddEntry(g6, "ITk+HGTD", "l");
+    L->Draw();
+    drawLabels(0.62);
+
+    ct->cd();
+    TPad* tp2 = new TPad("tp2", "tp2", 0, 0.05, 1, 0.3);
+    tp2->SetTopMargin(0); tp2->SetBottomMargin(0.25); tp2->Draw(); tp2->cd();
+    TH2F* hr = new TH2F("hr", "", 125, 0.8, 1, 100, 0.9, 2.0);
+    hr->GetXaxis()->SetTitle("HS efficiency");
+    hr->GetYaxis()->SetTitle("ratio");
+    hr->GetYaxis()->SetTitleSize(0.11); hr->GetXaxis()->SetTitleSize(0.11);
+    hr->GetXaxis()->SetLabelSize(0.09);  hr->GetYaxis()->SetLabelSize(0.09);
+    hr->GetYaxis()->SetTitleOffset(0.33); hr->SetStats(0);
+    hr->Draw();
+    auto ratioTo = [&](TGraph* num, Color_t col, Style_t sty) {
+      TGraph* rg = new TGraph(); int n = 0;
+      for (int i = 0; i < g->GetN(); ++i) {
+        double x, y; g->GetPoint(i, x, y);
+        if (y <= 0 || x < 0.8 || x > 1.0) continue;
+        rg->SetPoint(n++, x, num->Eval(x) / y);
+      }
+      rg->SetLineColor(col); rg->SetLineStyle(sty); rg->SetLineWidth(3);
+      rg->Draw("same");
+      return rg;
+    };
+    ratioTo(g5, kGreen+2, 9);
+    ratioTo(g4, kBlue,    3);
+    ratioTo(g6, kRed,     1);
+    TLine* one = new TLine(0.8, 1.0, 1.0, 1.0);
+    one->SetLineStyle(2); one->Draw("same");
+    ct->Print((pre + "tdr_style.pdf").c_str());
+    h2->GetXaxis()->SetLabelSize(0.04);   // restore for the canvases below
+    h2->GetXaxis()->SetTitleSize(0.04);
   }
 
   // ── ROC + ratio panel ─────────────────────────────────────────────────────
@@ -655,8 +847,23 @@ int main(int argc, char** argv) {
               rejAt(g3,0.85), rejAt(g3,0.90), rejAt(g3,0.93), rejAt(g3,0.95));
   std::printf("    %-22s %8.1f %8.1f %8.1f %8.1f\n", "R_pT 30ps (truth)",
               rejAt(g2,0.85), rejAt(g2,0.90), rejAt(g2,0.93), rejAt(g2,0.95));
-  std::printf("    %-22s %8.1f %8.1f %8.1f %8.1f\n", "REALISTIC (real HGTD)",
+  std::printf("    %-22s %8.1f %8.1f %8.1f %8.1f\n", "ITk+HGTD (t0 only)",
               rejAt(g4,0.85), rejAt(g4,0.90), rejAt(g4,0.93), rejAt(g4,0.95));
+  std::printf("    %-22s %8.1f %8.1f %8.1f %8.1f\n", "ITk+HGTD (self-tag)",
+              rejAt(g5,0.85), rejAt(g5,0.90), rejAt(g5,0.93), rejAt(g5,0.95));
+  std::printf("    %-22s %8.1f %8.1f %8.1f %8.1f\n", "ITk+HGTD (full)",
+              rejAt(g6,0.85), rejAt(g6,0.90), rejAt(g6,0.93), rejAt(g6,0.95));
+  {
+    const long st = n_selftag_applied + n_selftag_toofew;
+    std::printf("\n  Self-tagging applicability (TDR: needs >=2 timed tracks):\n");
+    std::printf("    jets with >=2 timed tracks : %8ld / %-8ld (%.1f%%)\n",
+                n_selftag_applied, st, st ? 100.0*n_selftag_applied/st : 0.0);
+    std::printf("    jets with <2  (no self-tag): %8ld (%.1f%%)\n",
+                n_selftag_toofew, st ? 100.0*n_selftag_toofew/st : 0.0);
+    std::printf("    jets actually split in time: %8ld (%.1f%% of applicable)\n",
+                n_selftag_split,
+                n_selftag_applied ? 100.0*n_selftag_split/n_selftag_applied : 0.0);
+  }
   {
     const long tot = n_trk_timed + n_trk_zonly_trk + n_trk_zonly_vtx;
     std::printf("\n  Realistic-scenario timing availability:\n");
