@@ -323,6 +323,8 @@ int main(int argc, char** argv) {
   TH1F* h_Rpt_pu_self  = new TH1F("h_Rpt_pu_self", "", nbins_histo, -0.02, 2.0);
   TH1F* h_Rpt_full     = new TH1F("h_Rpt_full",    "", nbins_histo, -0.02, 2.0);
   TH1F* h_Rpt_pu_full  = new TH1F("h_Rpt_pu_full", "", nbins_histo, -0.02, 2.0);
+  TH1F* h_Rpt_perft0    = new TH1F("h_Rpt_perft0",    "", nbins_histo, -0.02, 2.0);
+  TH1F* h_Rpt_pu_perft0 = new TH1F("h_Rpt_pu_perft0", "", nbins_histo, -0.02, 2.0);
 
   int num_DZ = 0;
   long n_jets_filled_hs = 0, n_jets_filled_pu = 0;
@@ -392,6 +394,13 @@ int main(int argc, char** argv) {
       float trackPT_5 = 0;   // REALISTIC / t0-only: real HGTD vertex + track times
       float trackPT_6 = 0;   // SELF-TAGGING only
       float trackPT_7 = 0;   // t0 + self-tagging (full ITk+HGTD)
+      // DIAGNOSTIC: real HGTD track times gated against a PERFECT vertex time
+      // (the truth vertex t0, zero error). Isolates how much of the gap to the
+      // TDR is our reconstructed t0 rather than the track timing -- our
+      // per-track resolutions already match the TDR's "Initial" scenario
+      // (35/25/21 ps for 1/2/3 hits), so if this recovers the TDR's improvement
+      // factor, the vertex time is the entire remaining deficit.
+      float trackPT_8 = 0;
       // Per-jet record of the tracks surviving z0 + dR, for the self-tagging
       // pass below. Untimed tracks are recorded with timed=false: they can
       // never be assigned to a time sub-jet, and are kept unconditionally.
@@ -484,6 +493,15 @@ int main(int argc, char** argv) {
         // it matches rpt_v5's applyTimeGate convention, which is what makes
         // this scenario the like-for-like comparison against rpt_v5.
         const bool trk_time_ok = (track_timeValid[idex] == 1);
+        // Perfect-t0 variant: same track times and same fallback rule, but the
+        // reference is the truth vertex time with no error of its own.
+        if (!trk_time_ok) {
+          trackPT_8 += pt2;
+        } else {
+          const double dt8 = track_time[idex] - truthvertex_t[0];
+          const double sg8 = track_timeRes[idex];
+          if (sg8 > 0 && std::fabs(dt8 / sg8) < T0_NSIGMA) trackPT_8 += pt2;
+        }
         if (!vtx_time_ok) {
           ++n_trk_zonly_vtx;
           trackPT_5 += pt2;                       // z-info only
@@ -591,6 +609,7 @@ int main(int argc, char** argv) {
       float Rpt5 = trackPT_5 / jet_pt[i];
       float Rpt6 = trackPT_6 / jet_pt[i];
       float Rpt7 = trackPT_7 / jet_pt[i];
+      float Rpt8 = trackPT_8 / jet_pt[i];
 
       bool hs = isPaperHS(jet_eta[i], jet_phi[i]);
       bool pu = isPaperPU(jet_eta[i], jet_phi[i]);
@@ -612,6 +631,7 @@ int main(int argc, char** argv) {
         h_Rpt_reco->Fill(Rpt5);
         h_Rpt_self->Fill(Rpt6);
         h_Rpt_full->Fill(Rpt7);
+        h_Rpt_perft0->Fill(Rpt8);
         ++n_jets_filled_hs;
       }
       if (!hs && pu) {
@@ -621,6 +641,7 @@ int main(int argc, char** argv) {
         h_Rpt_pu_reco->Fill(Rpt5);
         h_Rpt_pu_self->Fill(Rpt6);
         h_Rpt_pu_full->Fill(Rpt7);
+        h_Rpt_pu_perft0->Fill(Rpt8);
         ++n_jets_filled_pu;
       }
     }  // Jet_loop ends
@@ -742,6 +763,7 @@ int main(int argc, char** argv) {
   };
   TGraph* g5 = makeRoc(h_Rpt_self, h_Rpt_pu_self);   // self-tagging only
   TGraph* g6 = makeRoc(h_Rpt_full, h_Rpt_pu_full);   // t0 + self-tagging
+  TGraph* g7 = makeRoc(h_Rpt_perft0, h_Rpt_pu_perft0);  // real trk t, perfect t0
   g5->SetLineWidth(4); g5->SetLineColor(kGreen+2); g5->SetLineStyle(9); g5->SetFillColor(0);
   g6->SetLineWidth(4); g6->SetLineColor(kRed);     g6->SetFillColor(0);
 
@@ -979,6 +1001,8 @@ int main(int argc, char** argv) {
               rejAt(g5,0.85), rejAt(g5,0.90), rejAt(g5,0.93), rejAt(g5,0.95));
   std::printf("    %-22s %8.1f %8.1f %8.1f %8.1f\n", "ITk+HGTD (full)",
               rejAt(g6,0.85), rejAt(g6,0.90), rejAt(g6,0.93), rejAt(g6,0.95));
+  std::printf("    %-22s %8.1f %8.1f %8.1f %8.1f\n", "  [diag] perfect t0",
+              rejAt(g7,0.85), rejAt(g7,0.90), rejAt(g7,0.93), rejAt(g7,0.95));
   {
     const long st = n_selftag_applied + n_selftag_toofew;
     std::printf("\n  Self-tagging applicability (TDR: needs >=2 timed tracks):\n");
