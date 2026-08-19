@@ -570,6 +570,48 @@ int main(int argc, char** argv) {
     canvas->Print(out_pdf);
   }
 
+  // R_pT distributions for the CENTRAL baseline, same treatment as the forward
+  // slices above: per-scenario HS-vs-PU, then the all-scenario HS and PU
+  // overlays. The four central scenarios are expected to sit on top of one
+  // another (|eta| < 2.4 is outside HGTD acceptance, so the time gate is a
+  // no-op there) -- the overlays are where that is easiest to see, which is
+  // why they are worth drawing even though they carry no timing gain.
+  auto drawShapes = [&](std::vector<Scenario>& sv, const char* lbl) {
+    for (auto& s : sv) {
+      TLegend* L = new TLegend(0.60, 0.75, 0.92, 0.88);
+      StyleLegend(L);
+      L->AddEntry(s.h_hs, "Hard Scatter");
+      L->AddEntry(s.h_pu, "Pile-Up");
+      s.h_pu->SetMaximum(50.0 * std::max(s.h_hs->GetMaximum(), s.h_pu->GetMaximum()));
+      s.h_pu->SetTitle((std::string("R_{pT}: ") + s.legend).c_str());
+      s.h_pu->Draw("HIST");
+      s.h_hs->Draw("HIST SAME");
+      drawLabels(lbl);
+      L->Draw();
+      canvas->Print(out_pdf);
+    }
+    for (int pass = 0; pass < 2; ++pass) {          // 0 = HS overlay, 1 = PU overlay
+      TLegend* L = new TLegend(0.55, 0.68, 0.92, 0.88);
+      StyleLegend(L);
+      auto pick = [&](Scenario& s) { return pass == 0 ? s.h_hs : s.h_pu; };
+      double ymax = 0;
+      for (auto& s : sv) ymax = std::max(ymax, pick(s)->GetMaximum());
+      pick(sv[0])->SetMaximum(50.0 * ymax);
+      pick(sv[0])->SetTitle(pass == 0 ? "Hard Scatter R_{pT} — all scenarios"
+                                      : "Pile-Up R_{pT} — all scenarios");
+      for (size_t i = 0; i < sv.size(); ++i) {
+        pick(sv[i])->SetLineStyle(1);
+        pick(sv[i])->Draw(i == 0 ? "HIST" : "HIST SAME");
+        L->AddEntry(pick(sv[i]), sv[i].legend.c_str());
+      }
+      drawLabels(lbl);
+      L->Draw();
+      canvas->Print(out_pdf);
+    }
+  };
+  drawShapes(scen_lo_cen, lbl_lo_cen);
+  drawShapes(scen_hi_cen, lbl_hi_cen);
+
   // ===========================================================================
   // SECTION 5: VBS-topology regions.
   //   R1  both VBS candidate legs forward, one truth-HS + one truth-PU --
