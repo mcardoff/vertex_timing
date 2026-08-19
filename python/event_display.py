@@ -103,6 +103,9 @@ for _name in _FLAT_BRANCHES:
 branch.AntiKt4EMTopoJets_truthHSJet_idx = [
     list(inner) for inner in tree.AntiKt4EMTopoJets_truthHSJet_idx
 ]
+branch.AntiKt4EMTopoJets_ghostTrack_idx = [
+    list(inner) for inner in tree.AntiKt4EMTopoJets_ghostTrack_idx
+]
 
 reco_hs_z = branch.RecoVtx_z[0]
 reco_hs_t = branch.RecoVtx_time[0]
@@ -189,6 +192,75 @@ for _a in range(len(jet_info)):
 if vbs_pair[0] is not None:
     jet_info[vbs_pair[0]]['isVBS'] = True
     jet_info[vbs_pair[1]]['isVBS'] = True
+
+# --- R_pT per jet -------------------------------------------------------------
+# Ported from util/rpt_v5_hist.cxx so the number shown here is the same one the
+# analysis histograms: R_pT = sum pT(ghost tracks associated to PV0, within
+# dR < 0.2 of the jet axis) / pT(jet).
+#
+# The track-to-vertex association is eta-dependent, matching rpt_v5 exactly:
+# forward jets use the getNewDzpara parameterization (from the forward-region
+# reference study), central jets a z0-significance cut, because that
+# parameterization does not extrapolate below |eta| = 2.4 -- it returns
+# sigma_z0 = 31 um at eta = 0, several times tighter than ITk resolution.
+# Getting this split wrong would print a number that disagrees with the ROC
+# plots for exactly the central R2 legs the displays exist to explain.
+MIN_TRACK_PT, MAX_TRACK_PT = 1.0, 30.0
+DZ0_PARA_SCALE, CENTRAL_Z_SIGNIF, RPT_TRACK_JET_DR = 1.4, 5.0, 0.2
+JET_ETA_MIN = 2.4
+
+_DZ_COEFF = [
+    (1.5,   [0.0314036, 0.790955, -2.65987, 3.62073, -2.18228, 0.614866, -0.0634521]),
+    (2.5,   [0.0229273, 0.540101, -1.80727, 2.45187, -1.47382, 0.414345, -0.0426769]),
+    (5.0,   [0.0163773, 0.345112, -1.14474, 1.54382, -0.923523, 0.258617, -0.0265446]),
+    (10.0,  [0.010919, 0.179329, -0.581971, 0.773186, -0.45679, 0.126608, -0.012875]),
+    (1e18,  [0.00835945, 0.0957783, -0.299255, 0.38722, -0.22351, 0.0607521, -0.00606524]),
+]
+
+def _get_new_dzpara(eta, pt):
+    """Expected |z0 - z_vtx| scale in mm; mirrors rpt_v5_hist.cxx::getNewDzpara."""
+    eta = abs(eta)
+    coeff = next(c for hi, c in _DZ_COEFF if pt <= hi)
+    d, e = coeff[0], 1.0
+    for k in range(1, 7):
+        e *= eta
+        d += coeff[k] * e
+    return abs(d)
+
+def _assoc_tracks(central):
+    """Indices of tracks associated to PV0, by the rule the given region uses."""
+    out = set()
+    for _i in range(len(branch.Track_pt)):
+        _pt = branch.Track_pt[_i]
+        if _pt < MIN_TRACK_PT or _pt > MAX_TRACK_PT:
+            continue
+        if not branch.Track_quality[_i]:
+            continue
+        _dz = abs(branch.Track_z0[_i] - reco_hs_z)
+        if central:
+            _vz = branch.Track_var_z0[_i]
+            if not _vz > 0 or _dz / np.sqrt(_vz) > CENTRAL_Z_SIGNIF:
+                continue
+        elif _dz / _get_new_dzpara(branch.Track_eta[_i], _pt) > DZ0_PARA_SCALE:
+            continue
+        out.add(_i)
+    return out
+
+_assoc = {False: _assoc_tracks(False), True: _assoc_tracks(True)}
+
+for _j in jet_info:
+    _set = _assoc[abs(_j['eta']) < JET_ETA_MIN]
+    _sumpt = 0.0
+    for _t in branch.AntiKt4EMTopoJets_ghostTrack_idx[_j['idx']]:
+        if _t not in _set:
+            continue
+        _de = _j['eta'] - branch.Track_eta[_t]
+        _dp = np.arctan2(np.sin(_j['phi'] - branch.Track_phi[_t]),
+                         np.cos(_j['phi'] - branch.Track_phi[_t]))
+        if np.sqrt(_de * _de + _dp * _dp) > RPT_TRACK_JET_DR:
+            continue
+        _sumpt += branch.Track_pt[_t]
+    _j['rpt'] = _sumpt / _j['pt']
 
 
 # --- ROOT Macro Execution and Clustering ---
@@ -354,7 +426,7 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
         txt_color = 'orange' if highlighted else ('green' if jet_tup['isHS'] >= 1 else 'black')
         label = f"Jet {jet_i+1}: $p_T$={jet_tup['pt']:.0f} GeV, $\eta$={jet_tup['eta']:.1f}"
         if jet_tup.get('isVBS'):
-            label += "  [VBS]"
+            label += f"  [VBS, $R_{{p_T}}$={jet_tup.get('rpt', float('nan')):.2f}]"
         if highlighted:
             label += "  ← target"
         ax.text(reco_hs_z - 6.8, 0.9 - (1.2 + jet_i*0.1),
