@@ -50,6 +50,63 @@ using namespace MyUtl;
 // -----------------------------------------------------------------------------
 // ROC: HS efficiency vs PU rejection (1 / mistag).
 // -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
+// generate_roc_grid — ROC sampled at fixed HS-efficiency working points.
+//
+// Same construction rpt_v6 uses to match the TDR figure. generate_roc below
+// emits one point per histogram bin, which samples wherever the R_pT
+// distribution happens to put thresholds: points bunch unevenly, and wherever
+// the distribution has an atom (a large spike of jets sharing one R_pT value,
+// e.g. jets with no associated tracks at all) no threshold exists inside it, so
+// the curve shows a hard break.
+//
+// Sampling on efficiency instead walks the cumulative distributions and
+// linearly interpolates 1/mistag at each target efficiency. Interpolating
+// across an atom is the physically right thing -- it is what breaking ties at
+// random inside that bin would deliver -- and because every scenario then
+// shares identical x-points, ratio panels become exact rather than relying on
+// TGraph::Eval.
+//
+// Same explicit-bin-range discipline as generate_roc: Integral(i, bin+1)
+// throughout, never the no-arg form, so a prior SetRangeUser cannot silently
+// truncate the denominators.
+// -----------------------------------------------------------------------------
+TGraph* generate_roc_grid(TH1D* PU_hist, TH1D* HS_hist,
+                          const std::vector<double>& targets) {
+  const int bin = PU_hist->GetNbinsX();
+  const double HS_tot = HS_hist->Integral(1, bin + 1);
+  const double PU_tot = PU_hist->Integral(1, bin + 1);
+  std::vector<double> vx, vy;
+  if (HS_tot <= 0 || PU_tot <= 0) return new TGraph();
+
+  std::vector<double> S(bin + 2), B(bin + 2);
+  for (int i = 1; i <= bin + 1; ++i) {
+    S[i] = HS_hist->Integral(i, bin + 1) / HS_tot;
+    B[i] = PU_hist->Integral(i, bin + 1) / PU_tot;
+  }
+  for (double e : targets) {
+    if (e <= 0 || e > S[1]) continue;              // efficiency unreachable
+    int i = 1;
+    while (i <= bin + 1 && S[i] > e) ++i;
+    if (i <= 1 || i > bin + 1) continue;
+    const double s_hi = S[i - 1], s_lo = S[i];
+    const double b_hi = B[i - 1], b_lo = B[i];
+    const double f = (s_hi > s_lo) ? (s_hi - e) / (s_hi - s_lo) : 0.0;
+    const double b = b_hi + f * (b_lo - b_hi);
+    if (b <= 1e-9) continue;                       // background exhausted
+    vx.push_back(e);
+    vy.push_back(1.0 / b);
+  }
+  return new TGraph((int)vx.size(), vx.data(), vy.data());
+}
+
+// Working points matching the TDR figure's marker spacing.
+inline std::vector<double> rocEffGrid() {
+  std::vector<double> g;
+  for (double e = 0.800; e <= 0.9751; e += 0.025) g.push_back(e);
+  return g;
+}
+
 TGraph* generate_roc(TH1D* PU_hist, TH1D* HS_hist) {
   int bin = PU_hist->GetNbinsX();
   // Explicit bin range: Integral() with no arguments silently respects any
@@ -154,8 +211,12 @@ int main(int argc, char** argv) {
   // reach now extends to ~0.96).
   const double roc_xmin_default = 0.85, roc_xmax_default = 1.0;
   std::vector<TGraph*> rocs_lo, rocs_hi;
-  for (auto& s : scen_lo) rocs_lo.push_back(generate_roc(s.h_pu, s.h_hs));
-  for (auto& s : scen_hi) rocs_hi.push_back(generate_roc(s.h_pu, s.h_hs));
+  // Fixed-efficiency working points (see generate_roc_grid): evenly spaced,
+  // no breaks across R_pT atoms, and identical x-points across scenarios so
+  // the ratio panels are exact.
+  const std::vector<double> effGrid = rocEffGrid();
+  for (auto& s : scen_lo) rocs_lo.push_back(generate_roc_grid(s.h_pu, s.h_hs, effGrid));
+  for (auto& s : scen_hi) rocs_hi.push_back(generate_roc_grid(s.h_pu, s.h_hs, effGrid));
 
   const double roc_xmin_lo = roc_xmin_default, roc_xmax_lo = roc_xmax_default;
   const double roc_xmin_hi = roc_xmin_default, roc_xmax_hi = roc_xmax_default;
@@ -172,9 +233,9 @@ int main(int argc, char** argv) {
   // R2's ROC pairs r2.h_pu against r1.h_hs. This is a cross-region ROC and is
   // labelled as such on the plot; do not "fix" it to use r2.h_hs.
   std::vector<TGraph*> rocs_r1, rocs_r2;
-  for (auto& s : scen_r1) rocs_r1.push_back(generate_roc(s.h_pu, s.h_hs));
+  for (auto& s : scen_r1) rocs_r1.push_back(generate_roc_grid(s.h_pu, s.h_hs, effGrid));
   for (size_t i = 0; i < scen_r2.size(); ++i)
-    rocs_r2.push_back(generate_roc(scen_r2[i].h_pu, scen_r1[i].h_hs));
+    rocs_r2.push_back(generate_roc_grid(scen_r2[i].h_pu, scen_r1[i].h_hs, effGrid));
   // (styled below, once styleRoc is in scope)
 
   auto styleRoc = [&](TGraph* g, Color_t col, double xmin, double xmax) {
