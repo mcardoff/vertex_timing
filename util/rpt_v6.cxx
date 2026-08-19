@@ -251,6 +251,7 @@ int main(int argc, char** argv) {
     if (a.rfind("--ptmin=", 0) == 0) JPT_MIN  = std::stod(a.substr(8));
     if (a.rfind("--ptmax=", 0) == 0) JPT_MAX  = std::stod(a.substr(8));
     if (a.rfind("--etamax=",0) == 0) JETA_MAX = std::stod(a.substr(9));
+    if (a.rfind("--etamin=",0) == 0) JETA_MIN = std::stod(a.substr(9));
     if (a.rfind("--t0sigma=",0)== 0) T0_NSIGMA= std::stod(a.substr(10));
     if (a.rfind("--vtxtinfl=",0)==0) VTXT_INFL= std::stod(a.substr(11));
     if (a.rfind("--dz0scale=",0)==0) DZ0_SCALE= std::stod(a.substr(11));
@@ -274,6 +275,7 @@ int main(int argc, char** argv) {
     if (JPT_MIN != 30.0 || JPT_MAX != 50.0)
       os << "pt" << (int)JPT_MIN << (JPT_MAX > 1e8 ? "plus" : "") << "_";
     if (JETA_MAX != 3.8) os << "eta" << (int)(JETA_MAX*10) << "_";
+    if (JETA_MIN != 2.4) os << "etamin" << (int)(JETA_MIN*10) << "_";
     if (ZCUT == "signif") os << "zsig" << (int)ZSIG << "_";
     if (ZCUT == "atlas") {
       os << "zatlas";
