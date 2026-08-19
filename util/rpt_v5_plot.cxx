@@ -212,12 +212,14 @@ int main(int argc, char** argv) {
 
   // Harmonized "high-efficiency working point" window: fixed for every sample
   // and pT-slice (rather than a per-sample adaptive range) so plots are
-  // directly comparable across samples. Zoomed to [0.85, 1.0] -- the
-  // high-efficiency region that is actually the working point of interest;
-  // the wider [0.6, 1.0] view was only needed while Z+jets curves fell short
-  // of this window, which the lepton overlap removal fixed (its HS-efficiency
-  // reach now extends to ~0.96).
-  const double roc_xmin_default = 0.85, roc_xmax_default = 1.0;
+  // directly comparable across samples. [0.80, 1.0] matches the x-range the
+  // reference study's ROCs use, so our panels can be read side by side with
+  // theirs; it also starts exactly where rocEffGrid()'s first sampled working
+  // point sits, so no computed point falls outside the drawn window.
+  // (An earlier [0.85, 1.0] zoom cropped the first grid point; the still
+  // wider [0.6, 1.0] view was only needed while Z+jets curves fell short of
+  // the window, which the lepton overlap removal fixed.)
+  const double roc_xmin_default = 0.80, roc_xmax_default = 1.0;
   std::vector<TGraph*> rocs_lo, rocs_hi;
   // Fixed-efficiency working points (see generate_roc_grid): evenly spaced,
   // no breaks across R_pT atoms, and identical x-points across scenarios so
