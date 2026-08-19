@@ -103,6 +103,18 @@
 // chain (a value landing exactly on a bin boundary takes the LAST matching
 // branch; preserved deliberately).
 // ---------------------------------------------------------------------------
+// Track cutflow diagnostic. rpt_v6 runs single-threaded (no TTreeProcessorMT),
+// so plain counters are safe. Counts tracks surviving each stage of the per-jet
+// selection so a track deficit can be pinned on a specific cut rather than
+// inferred from the RpT distribution.
+struct TrkCutflow {
+  long long jets = 0, ghost = 0, idx_ok = 0, pt_eta = 0, zcut = 0, dr = 0;
+};
+// Split by jet truth-type: the aggregate is dominated by pile-up jets, whose
+// tracks legitimately fail a PV0 association, so a low overall pass rate says
+// nothing on its own. The HS row is the one that carries information.
+static TrkCutflow CF_HS, CF_PU;
+
 static double getNewDzpara(double ETA, double PT) {
   ETA = std::fabs(ETA);
   double p_v[7] = {0, 0, 0, 0, 0, 0, 0};
@@ -404,6 +416,11 @@ int main(int argc, char** argv) {
       if (jet_pt[i] < JPT_MIN || jet_pt[i] > JPT_MAX) continue;
       if ((std::fabs(jet_eta[i]) < JETA_MIN) || (std::fabs(jet_eta[i]) > JETA_MAX)) continue;
 
+      const bool cf_isHS = isPaperHS(jet_eta[i], jet_phi[i]);
+      const bool cf_isPU = isPaperPU(jet_eta[i], jet_phi[i]);
+      TrkCutflow* CF = cf_isHS ? &CF_HS : (cf_isPU ? &CF_PU : nullptr);
+      if (CF) { CF->jets++; CF->ghost += (long long)jet_tracks_idx[i].size(); }
+
       float trackPT_0 = 0, trackPT_1 = 0, trackPT_2 = 0, trackPT_3 = 0, trackPT_4 = 0;
       float trackPT_5 = 0;   // REALISTIC / t0-only: real HGTD vertex + track times
       float trackPT_6 = 0;   // SELF-TAGGING only
@@ -425,6 +442,7 @@ int main(int argc, char** argv) {
       for (int j = 0; j < (int)jet_tracks_idx[i].size(); ++j) {
         int idex = jet_tracks_idx[i][j];
         if (idex < 0 || idex >= (int)track_pt.GetSize()) continue;
+        if (CF) CF->idx_ok++;
 
         float eta = track_eta[idex];
         float pt  = track_pt[idex];      // GeV (NOTE 3)
@@ -457,6 +475,7 @@ int main(int argc, char** argv) {
         if (pt < 1.0 || pt > 45.) continue;
         if (std::fabs(eta) > 4.0) continue;
 
+        if (CF) CF->pt_eta++;
         trackPT_0 += pt2;
 
         if (ZCUT == "atlas") {
@@ -471,10 +490,12 @@ int main(int argc, char** argv) {
           if ((std::fabs(z)/Dz0para) > DZ0_SCALE) continue;   // 0.8 is better (theirs)
         }
 
+        if (CF) CF->zcut++;
         trackPT_1 += pt2;
 
         if (Dr > TRK_DR) continue;
 
+        if (CF) CF->dr++;
         trackPT_2 += pt2;
 
         // Record for the self-tagging pass (runs after this track loop).
@@ -1122,7 +1143,21 @@ int main(int argc, char** argv) {
         std::printf(" %.3f:%.0f", x, y); }
       std::printf("   (%d pts)\n", gg->GetN());
     };
-    std::printf("\n  ROC working points (eff:rejection):\n");
+    {
+    auto pct = [](long long a, long long b) { return b > 0 ? 100.0 * a / b : 0.0; };
+    auto cfRow = [&](const char* nm, const TrkCutflow& C) {
+      std::printf("    %-3s jets %8lld | ghost %6.2f/jet | pT,eta %5.1f%% | z-assoc %5.1f%%"
+                  " | dR %5.1f%%  ->  %.2f trk/jet\n",
+                  nm, C.jets, C.jets ? double(C.ghost) / C.jets : 0.0,
+                  pct(C.pt_eta, C.idx_ok), pct(C.zcut, C.pt_eta), pct(C.dr, C.zcut),
+                  C.jets ? double(C.dr) / C.jets : 0.0);
+    };
+    std::printf("\n  Track cutflow by jet truth-type (zcut=%s):\n", ZCUT.c_str());
+    cfRow("HS", CF_HS);
+    cfRow("PU", CF_PU);
+  }
+
+  std::printf("\n  ROC working points (eff:rejection):\n");
     dump("ITk",        h_Rpt,      h_Rpt_pu);
     dump("self-tag",   h_Rpt_self, h_Rpt_pu_self);
     dump("t0 only",    h_Rpt_reco, h_Rpt_pu_reco);
