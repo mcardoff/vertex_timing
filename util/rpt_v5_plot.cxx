@@ -191,8 +191,8 @@ int main(int argc, char** argv) {
       t.DrawLatex(0.18, 0.76, extra);
     }
   };
-  const char* lbl_lo = "30 < p_{T}^{jet} < 40 GeV, 2.4 < |#eta| < 3.8";
-  const char* lbl_hi = "p_{T}^{jet} > 40 GeV, 2.4 < |#eta| < 3.8";
+  const char* lbl_lo = "30 < p_{T}^{jet} < 50 GeV, 2.4 < |#eta| < 3.8";
+  const char* lbl_hi = "p_{T}^{jet} > 50 GeV, 2.4 < |#eta| < 3.8";
   // VBS-topology region labels (see rpt_v5_hist.cxx for the definitions).
   const char* lbl_r1 = "VBS pair: both legs fwd (HS vs PU), p_{T}^{jet} > 30 GeV";
   const char* lbl_r2 = "VBS pair: fwd PU leg + central HS leg  [signal side from R1]";
@@ -266,7 +266,7 @@ int main(int argc, char** argv) {
             << " (" << std::fixed << std::setprecision(1)
             << (100.0 * n_hgtd_valid / n_pass_basic) << "%)\n";
 
-  std::cout << "\n=== ENTRIES / MEAN RpT PER SCENARIO (30-40 GeV) ===\n";
+  std::cout << "\n=== ENTRIES / MEAN RpT PER SCENARIO (30-50 GeV) ===\n";
   for (auto& s : scen_lo)
     std::cout << "  " << std::setw(12) << std::left << s.name
               << "  HS: " << (long)s.h_hs->Integral()
@@ -274,13 +274,13 @@ int main(int argc, char** argv) {
               << "   PU: " << (long)s.h_pu->Integral()
               << " <RpT>=" << s.h_pu->GetMean() << '\n';
 
-  std::cout << "\n=== ENTRIES PER SCENARIO (>40 GeV) ===\n";
+  std::cout << "\n=== ENTRIES PER SCENARIO (>50 GeV) ===\n";
   for (auto& s : scen_hi)
     std::cout << "  " << std::setw(12) << std::left << s.name
               << "  HS: " << (long)s.h_hs->Integral()
               << "  PU: " << (long)s.h_pu->Integral() << '\n';
 
-  // ── PU rejection at fixed HS-efficiency working points (>40 GeV slice) ──────
+  // ── PU rejection at fixed HS-efficiency working points (>50 GeV slice) ──────
   auto rejAtEff = [](TH1D* PU, TH1D* HS, double targetEff) -> double {
     int bin = HS->GetNbinsX();
     // Explicit bin range — see the note in generate_roc() above.
@@ -303,14 +303,14 @@ int main(int argc, char** argv) {
                   rejAtEff(s.h_pu, s.h_hs, 0.93), rejAtEff(s.h_pu, s.h_hs, 0.95),
                   rejAtEff(s.h_pu, s.h_hs, 0.97));
   };
-  printRejTable("(30-40 GeV)", scen_lo);
-  printRejTable("(>40 GeV)",   scen_hi);
+  printRejTable("(30-50 GeV)", scen_lo);
+  printRejTable("(>50 GeV)",   scen_hi);
 
   std::cout << "\n=== UNTIMED-TRACK FLOOR (ghost & z-selected) ===\n";
-  std::printf("  30-40 GeV  PU untimed: %.1f%%   HS untimed: %.1f%%\n",
+  std::printf("  30-50 GeV  PU untimed: %.1f%%   HS untimed: %.1f%%\n",
               pu_tot_lo > 0 ? 100.0 * pu_floor_lo / pu_tot_lo : 0.0,
               hs_tot_lo > 0 ? 100.0 * hs_floor_lo / hs_tot_lo : 0.0);
-  std::printf("  >40 GeV    PU untimed: %.1f%%   HS untimed: %.1f%%\n",
+  std::printf("  >50 GeV    PU untimed: %.1f%%   HS untimed: %.1f%%\n",
               pu_tot_pt > 0 ? 100.0 * pu_floor_pt / pu_tot_pt : 0.0,
               hs_tot_pt > 0 ? 100.0 * hs_floor_pt / hs_tot_pt : 0.0);
 
@@ -467,10 +467,10 @@ int main(int argc, char** argv) {
                                    rocYMaxIn(rocs_hi, roc_xmin_hi, roc_xmax_hi));
   if (!(roc_ymax > 0.0)) roc_ymax = 300.0;  // fallback: no points in window
 
-  // (1) ROC — 30–40 GeV.  Linear, shared y maxima across slices; ratio ymax = 4.
+  // (1) ROC — 30–50 GeV.  Linear, shared y maxima across slices; ratio ymax = 4.
   drawRocWithRatio(rocs_lo, scen_lo, roc_ymax, 4.0, roc_xmin_lo, roc_xmax_lo, lbl_lo);
 
-  // (2) ROC — >40 GeV.
+  // (2) ROC — >50 GeV.
   drawRocWithRatio(rocs_hi, scen_hi, roc_ymax, 4.0, roc_xmin_hi, roc_xmax_hi, lbl_hi);
 
   // (3) ROC — VBS region R1: both candidate legs forward, HS leg vs PU leg.
@@ -484,7 +484,7 @@ int main(int argc, char** argv) {
   drawRocWithRatio(rocs_r2, scen_r2, roc_ymax, 4.0,
                    roc_xmin_default, roc_xmax_default, lbl_r2);
 
-  // (3+) Per-scenario HS vs PU, 30–40 GeV slice, log-y.
+  // (3+) Per-scenario HS vs PU, 30–50 GeV slice, log-y.
   canvas->Clear();
   canvas->SetLogy(true);
   for (auto& s : scen_lo) {
@@ -502,7 +502,7 @@ int main(int argc, char** argv) {
     canvas->Print(out_pdf);
   }
 
-  // All-scenario HS overlay — 30–40 GeV.
+  // All-scenario HS overlay — 30–50 GeV.
   {
     TLegend* L = new TLegend(0.55, 0.68, 0.92, 0.88);
     StyleLegend(L);
@@ -520,7 +520,7 @@ int main(int argc, char** argv) {
     canvas->Print(out_pdf);
   }
 
-  // All-scenario PU overlay — 30–40 GeV.
+  // All-scenario PU overlay — 30–50 GeV.
   {
     TLegend* L = new TLegend(0.55, 0.68, 0.92, 0.88);
     StyleLegend(L);
