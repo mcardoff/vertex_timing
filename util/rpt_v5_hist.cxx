@@ -78,6 +78,38 @@ static constexpr float MISAS_PURITY_CUT = 0.75f;
 // recovers that region at a small low-efficiency cost.
 static constexpr double GATE_SIGMA = 2.5;
 
+// ── Vertex-time error inflation, per scenario ────────────────────────────────
+// The quoted vertex-time uncertainty understates the true spread, so a nominal
+// N-sigma gate behaves like a much tighter one and discards genuine HS tracks.
+// rpt_v6 measured this on the Athena vertex time (sigma_trk 27.0 ps, sigma_vtx
+// 9.1 ps quoted vs a 50.8 ps observed core: a 1.78x understatement) and showed
+// that correcting it turns a ratio that fell BELOW 1 at 0.875 efficiency into a
+// sustained ~1.3-1.45.
+//
+// The factor is NOT shared: each scenario derives its vertex time differently,
+// so each has its own calibration. Values below are measured by the
+// PRINT_PULL_DIAG block at the end of this file -- run it, read the "sigma
+// ratio" column, and set these to it. Applied as sigma_vtx *= f, i.e. var_vtx
+// *= f^2, replacing the previous blanket 2.25 (= 1.5^2) applied to every
+// scenario alike.
+//
+// MEASURED (local VBF, truth-HS tracks, |dt| < 150 ps core):
+//   hgtd   obs 41.7 ps vs quoted 28.2 ps -> 1.48
+//   trkptz obs 38.6 ps vs quoted 27.8 ps -> 1.39
+//   waves  obs 38.5 ps vs quoted 27.8 ps -> 1.38
+// So the old blanket 1.5 was ALREADY close and this refinement is small --
+// unlike rpt_v6, which applied no inflation at all and needed 1.78. Part of
+// that difference is population, not calibration: rpt_v6 measured over every
+// timed HS track, while these are measured after the z-association, which
+// already removes the worst outliers. The Athena vertex time is the least well
+// calibrated of the three, as expected.
+static constexpr double INFL_HGTD   = 1.48;  // Athena RecoVtx_time
+static constexpr double INFL_TRKPTZ = 1.39;  // TRKPTZ-selected cluster time
+static constexpr double INFL_WAVES  = 1.38;  // WAVeS-selected cluster time
+
+// Set true to print the measured per-scenario pull widths after the event loop.
+static constexpr bool PRINT_PULL_DIAG = true;
+
 static inline double dR(double j_eta, double j_phi, double t_eta, double t_phi) {
   double deta = j_eta - t_eta;
   double dphi = TVector2::Phi_mpi_pi(j_phi - t_phi);
@@ -257,6 +289,11 @@ struct ThreadState {
 
   // Event-display candidates, R1/R2 only (see RegionCase doc comment above).
   std::vector<RegionCase> cases_r1, cases_r2;
+  // Per-scenario pull-width accumulators (see PRINT_PULL_DIAG).
+  double pull_dt2_hgtd = 0, pull_var_hgtd = 0;
+  double pull_dt2_trkptz = 0, pull_var_trkptz = 0;
+  double pull_dt2_waves = 0, pull_var_waves = 0;
+  long   pull_n_hgtd = 0, pull_n_trkptz = 0, pull_n_waves = 0;
 };
 
 // RpT numerator: sum pT of tracks that are ghost-associated to the jet AND in
@@ -464,7 +501,7 @@ int main(int argc, char** argv) {
       // ── Per-track time gate.  pull width ~1.5 → var_vtx ×2.25. ──────────────
       auto applyTimeGate = [&](const std::vector<int>& base,
                                 double t_vtx, double var_vtx, bool vtx_valid,
-                                double sigma = 2.0) {
+                                double sigma = 2.0, double infl = 1.5) {
         std::vector<int> out;
         out.reserve(base.size());
         for (int idx : base) {
@@ -472,15 +509,40 @@ int main(int argc, char** argv) {
           if (!apply) { out.push_back(idx); continue; }
           double dt    = branch.trackTime[idx] - t_vtx;
           double var_t = branch.trackTimeRes[idx] * branch.trackTimeRes[idx];
-          double pull  = std::abs(dt) / std::sqrt(2.25 * var_vtx + var_t);
+          double pull  = std::abs(dt) / std::sqrt(infl * infl * var_vtx + var_t);
           if (pull < sigma) out.push_back(idx);
         }
         return out;
       };
 
-      std::vector<int> trk_hgtd   = applyTimeGate(trk_all, t_hgtd,   var_hgtd,   hgtd_vtx_valid, GATE_SIGMA);
-      std::vector<int> trk_waves  = applyTimeGate(trk_all, t_waves,  var_waves,  waves_ok,       GATE_SIGMA);
-      std::vector<int> trk_trkptz = applyTimeGate(trk_all, t_trkptz, var_trkptz, trkptz_ok,      GATE_SIGMA);
+      std::vector<int> trk_hgtd   = applyTimeGate(trk_all, t_hgtd,   var_hgtd,   hgtd_vtx_valid, GATE_SIGMA, INFL_HGTD);
+      std::vector<int> trk_waves  = applyTimeGate(trk_all, t_waves,  var_waves,  waves_ok,       GATE_SIGMA, INFL_WAVES);
+      std::vector<int> trk_trkptz = applyTimeGate(trk_all, t_trkptz, var_trkptz, trkptz_ok,      GATE_SIGMA, INFL_TRKPTZ);
+
+      // ── Pull-width measurement, one accumulator set per scenario ───────────
+      // Truth-HS tracks only (trackToTruthvtx == 0) with a valid time, in
+      // events where that scenario produced a vertex time. Accumulates the
+      // observed dt spread inside a generous core window against the QUOTED
+      // uncertainty; the ratio of the two is the inflation factor to set above.
+      if (PRINT_PULL_DIAG) {
+        auto accum = [&](double t_vtx, double var_vtx, bool ok,
+                         double& sum_dt2, double& sum_var, long& n) {
+          if (!ok) return;
+          for (int idx : trk_all) {
+            if (branch.trackTimeValid[idx] != 1) continue;
+            if (branch.trackToTruthvtx[idx] != 0) continue;   // truth-HS only
+            double dt = branch.trackTime[idx] - t_vtx;
+            if (std::abs(dt) > 150.0) continue;               // core window
+            double var_t = branch.trackTimeRes[idx] * branch.trackTimeRes[idx];
+            sum_dt2 += dt * dt;
+            sum_var += var_vtx + var_t;
+            ++n;
+          }
+        };
+        accum(t_hgtd,   var_hgtd,   hgtd_vtx_valid, state.pull_dt2_hgtd,   state.pull_var_hgtd,   state.pull_n_hgtd);
+        accum(t_trkptz, var_trkptz, trkptz_ok,      state.pull_dt2_trkptz, state.pull_var_trkptz, state.pull_n_trkptz);
+        accum(t_waves,  var_waves,  waves_ok,       state.pull_dt2_waves,  state.pull_var_waves,  state.pull_n_waves);
+      }
 
       // Build per-scenario sets once per event for O(1) ghost-index lookup.
       std::unordered_set<int> set_all   (trk_all.begin(),    trk_all.end());
@@ -694,6 +756,9 @@ int main(int argc, char** argv) {
 
     // Event-display diagnostic candidates: merge each category's top-N
     // (see mergeCases doc comment near the top of this file).
+    merged.pull_dt2_hgtd   += other.pull_dt2_hgtd;   merged.pull_var_hgtd   += other.pull_var_hgtd;   merged.pull_n_hgtd   += other.pull_n_hgtd;
+    merged.pull_dt2_trkptz += other.pull_dt2_trkptz; merged.pull_var_trkptz += other.pull_var_trkptz; merged.pull_n_trkptz += other.pull_n_trkptz;
+    merged.pull_dt2_waves  += other.pull_dt2_waves;  merged.pull_var_waves  += other.pull_var_waves;  merged.pull_n_waves  += other.pull_n_waves;
     mergeRegionCases(merged.cases_r1, other.cases_r1);
     mergeRegionCases(merged.cases_r2, other.cases_r2);
   }
@@ -741,6 +806,27 @@ int main(int argc, char** argv) {
   std::cout << "    Rejected, 0 good leptons  : " << merged.n_rej_no_lepton    << '\n';
   std::cout << "    Rejected, 1 good lepton   : " << merged.n_rej_one_lepton   << '\n';
   std::cout << "    Rejected, no OS-SF pair   : " << merged.n_rej_no_ossf_pair << '\n';
+
+  // --- Per-scenario vertex-time calibration -----------------------------------
+  //     sigma ratio = observed core spread of (t_trk - t_vtx) for truth-HS
+  //     tracks, divided by the QUOTED sqrt(var_vtx + var_trk). A value above 1
+  //     means the quoted error is understated by that factor, so a nominal
+  //     GATE_SIGMA cut behaves like GATE_SIGMA/ratio. Set INFL_* to the ratio.
+  if (PRINT_PULL_DIAG) {
+    std::printf("\n=== VERTEX-TIME CALIBRATION (truth-HS tracks, |dt| < 150 ps core) ===\n");
+    std::printf("  %-10s %10s %12s %12s %10s %10s\n",
+                "scenario", "n tracks", "obs sigma", "quoted sigma", "ratio", "in use");
+    auto row = [](const char* nm, double dt2, double var, long n, double inuse) {
+      if (n < 100) { std::printf("  %-10s %10ld   (too few)\n", nm, n); return; }
+      double obs = std::sqrt(dt2 / n), quo = std::sqrt(var / n);
+      std::printf("  %-10s %10ld %10.1f ps %10.1f ps %10.2f %10.2f\n",
+                  nm, n, obs, quo, quo > 0 ? obs / quo : 0.0, inuse);
+    };
+    row("hgtd",   merged.pull_dt2_hgtd,   merged.pull_var_hgtd,   merged.pull_n_hgtd,   INFL_HGTD);
+    row("trkptz", merged.pull_dt2_trkptz, merged.pull_var_trkptz, merged.pull_n_trkptz, INFL_TRKPTZ);
+    row("waves",  merged.pull_dt2_waves,  merged.pull_var_waves,  merged.pull_n_waves,  INFL_WAVES);
+    std::printf("  (set INFL_* at the top of this file to the ratio column, then rebuild)\n");
+  }
 
   // --- Event displays, R1/R2 ONLY -------------------------------------------
   //     The older WAVeS-vs-HGTD jet comparison and "timing-hurt HS jets"
