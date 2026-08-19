@@ -20,8 +20,10 @@
 // jet in the acceptance contributes an independent RpT measurement.
 //
 // Two jet pT windows:
-//   Slice A: 30 < pT < 40 GeV
-//   Slice B: pT > 40 GeV
+//   Slice A: 30 < pT < 50 GeV
+//   Slice B: pT > 50 GeV
+//   (matching ATLAS-TDR-031 Fig. 3.20's two panels and the reference macro's
+//    30-50 window, rather than the earlier 30-40 / >40 split)
 // Jet eta acceptance: 2.4 < |eta| < 3.8.
 //
 // Output: <OUTPUT_DIR>/hists/rpt_v5_hist.root
@@ -74,7 +76,7 @@ static constexpr float MISAS_PURITY_CUT = 0.75f;
 
 // Per-track time-gate half-width in σ.  A 2σ cut over-trims genuine HS tracks
 // when the vertex time is slightly mis-estimated, dragging the high-efficiency
-// end of the ROC below ITk-only (worst in the >40 GeV slice).  Loosening it
+// end of the ROC below ITk-only (worst in the high-pT slice).  Loosening it
 // recovers that region at a small low-efficiency cost.
 static constexpr double GATE_SIGMA = 2.5;
 
@@ -266,8 +268,8 @@ static void mergeRegionCases(std::vector<RegionCase>& dst,
 //   event loop.
 // -----------------------------------------------------------------------------
 struct ThreadState {
-  std::vector<Scenario> scen_lo = makeScenarios("_lo");  // 30–40 GeV
-  std::vector<Scenario> scen_hi = makeScenarios("_hi");  // >40 GeV
+  std::vector<Scenario> scen_lo = makeScenarios("_lo");  // 30–50 GeV
+  std::vector<Scenario> scen_hi = makeScenarios("_hi");  // >50 GeV
   // VBS-topology regions (see classifyRegion below). pT-inclusive (>MIN_JET_PT)
   // rather than sliced: both are rare topologies and splitting them further
   // would leave the ROCs statistics-limited.
@@ -284,8 +286,8 @@ struct ThreadState {
   // passLeptonSelection, how many had 0 / exactly 1 / >=2 qualifying
   // (isGoodLepton) leptons but no OS-SF pair.
   long n_rej_no_lepton = 0, n_rej_one_lepton = 0, n_rej_no_ossf_pair = 0;
-  double pu_tot_pt = 0, pu_floor_pt = 0, hs_tot_pt = 0, hs_floor_pt = 0;  // >40
-  double pu_tot_lo = 0, pu_floor_lo = 0, hs_tot_lo = 0, hs_floor_lo = 0;  // 30-40
+  double pu_tot_pt = 0, pu_floor_pt = 0, hs_tot_pt = 0, hs_floor_pt = 0;  // >50
+  double pu_tot_lo = 0, pu_floor_lo = 0, hs_tot_lo = 0, hs_floor_lo = 0;  // 30-50
 
   // Event-display candidates, R1/R2 only (see RegionCase doc comment above).
   std::vector<RegionCase> cases_r1, cases_r2;
@@ -579,7 +581,7 @@ int main(int argc, char** argv) {
             if (!set_all.count(idx)) continue;
             double pt = branch.trackPt[idx];
             bool untimed = (branch.trackTimeValid[idx] != 1);
-            if (pt_lo >= 40.0) {
+            if (pt_lo >= 50.0) {
               if (isHS) { state.hs_tot_pt += pt; if (untimed) state.hs_floor_pt += pt; }
               else      { state.pu_tot_pt += pt; if (untimed) state.pu_floor_pt += pt; }
             } else {
@@ -590,8 +592,8 @@ int main(int argc, char** argv) {
         }
       };
 
-      fillJets(state.scen_lo, 30.0, 40.0);
-      fillJets(state.scen_hi, 40.0, 1e9);
+      fillJets(state.scen_lo, 30.0, 50.0);
+      fillJets(state.scen_hi, 50.0, 1e9);
 
       // Full ntuple file path + local (per-file) entry number for the
       // event-display commands printed after the loop. Same
