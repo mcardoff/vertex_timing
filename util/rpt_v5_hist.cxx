@@ -22,7 +22,8 @@
 // Two jet pT windows:
 //   Slice A: 30 < pT < 40 GeV
 //   Slice B: pT > 40 GeV
-// Jet eta acceptance: 2.4 < |eta| < 3.8.
+// Jet eta acceptance: 2.4 < |eta| < 3.8 (forward, HGTD-covered), plus a
+// |eta| < 2.4 central baseline filled in the same run and pT slices.
 //
 // Output: <OUTPUT_DIR>/hists/rpt_v5_hist.root
 
@@ -295,8 +296,15 @@ static void mergeRegionCases(std::vector<RegionCase>& dst,
 //   event loop.
 // -----------------------------------------------------------------------------
 struct ThreadState {
-  std::vector<Scenario> scen_lo = makeScenarios("_lo");  // 30–40 GeV
-  std::vector<Scenario> scen_hi = makeScenarios("_hi");  // >40 GeV
+  std::vector<Scenario> scen_lo = makeScenarios("_lo");  // 30–40 GeV, forward
+  std::vector<Scenario> scen_hi = makeScenarios("_hi");  // >40 GeV,   forward
+  // Same two pT slices at CENTRAL eta, as an ITk-only baseline: |eta| < 2.4 is
+  // outside HGTD acceptance, so its tracks have no valid time, the gate is a
+  // no-op there and all four scenarios should land on top of each other. That
+  // makes these both the reference the forward gain is measured against AND a
+  // standing check that the timing machinery stays inert where it has no data.
+  std::vector<Scenario> scen_lo_cen = makeScenarios("_lo_cen");  // 30–40 GeV, |eta|<2.4
+  std::vector<Scenario> scen_hi_cen = makeScenarios("_hi_cen");  // >40 GeV,   |eta|<2.4
   // VBS-topology regions (see classifyRegion below). pT-inclusive (>MIN_JET_PT)
   // rather than sliced: both are rare topologies and splitting them further
   // would leave the ROCs statistics-limited.
@@ -598,14 +606,18 @@ int main(int argc, char** argv) {
       std::unordered_set<int> set_waves (trk_waves.begin(),  trk_waves.end());
 
       // ── Fill jets into pT slices. ─────────────────────────────────────────────
-      auto fillJets = [&](std::vector<Scenario>& sv, double pt_lo, double pt_hi) {
+      // eta_min/eta_max select the acceptance; do_floor is false for the central
+      // baseline so its jets cannot contaminate the forward untimed-floor
+      // counters, which are reported as a forward quantity.
+      auto fillJets = [&](std::vector<Scenario>& sv, double pt_lo, double pt_hi,
+                          double eta_min, double eta_max, bool do_floor) {
         for (int j = 0; j < (int)branch.topoJetPt.GetSize(); ++j) {
           if (branch.isJetRemoved(j)) continue;  // lepton-overlap removed (Z+jets)
           double j_pt  = branch.topoJetPt[j];
           double j_eta = branch.topoJetEta[j];
           double j_phi = branch.topoJetPhi[j];
           if (j_pt <= pt_lo || j_pt >= pt_hi) continue;
-          if (std::abs(j_eta) < JET_ETA_MIN || std::abs(j_eta) > JET_ETA_MAX) continue;
+          if (std::abs(j_eta) < eta_min || std::abs(j_eta) > eta_max) continue;
           bool isHS = paperIsHS(j_eta, j_phi);
           bool isPU = paperIsPU(j_eta, j_phi);
           if (!isHS && !isPU) continue;
@@ -621,7 +633,8 @@ int main(int argc, char** argv) {
           fill(sv[2], set_trkptz);                    // TRKPTZ t0
           fill(sv[3], set_waves);                     // WAVeS t0
 
-          // Untimed floor accounting, per slice.
+          // Untimed floor accounting, per slice (forward only).
+          if (!do_floor) continue;
           for (int idx : ghost) {
             if (!set_all.count(idx)) continue;
             double pt = branch.trackPt[idx];
@@ -637,8 +650,10 @@ int main(int argc, char** argv) {
         }
       };
 
-      fillJets(state.scen_lo, 30.0, 40.0);
-      fillJets(state.scen_hi, 40.0, 1e9);
+      fillJets(state.scen_lo, 30.0, 40.0, JET_ETA_MIN, JET_ETA_MAX, true);
+      fillJets(state.scen_hi, 40.0, 1e9,  JET_ETA_MIN, JET_ETA_MAX, true);
+      fillJets(state.scen_lo_cen, 30.0, 40.0, 0.0, CENTRAL_ETA_MAX, false);
+      fillJets(state.scen_hi_cen, 40.0, 1e9,  0.0, CENTRAL_ETA_MAX, false);
 
       // Full ntuple file path + local (per-file) entry number for the
       // event-display commands printed after the loop. Same
@@ -785,6 +800,14 @@ int main(int argc, char** argv) {
       merged.scen_hi[k].h_hs->Add(other.scen_hi[k].h_hs);
       merged.scen_hi[k].h_pu->Add(other.scen_hi[k].h_pu);
     }
+    for (size_t k = 0; k < merged.scen_lo_cen.size(); ++k) {
+      merged.scen_lo_cen[k].h_hs->Add(other.scen_lo_cen[k].h_hs);
+      merged.scen_lo_cen[k].h_pu->Add(other.scen_lo_cen[k].h_pu);
+    }
+    for (size_t k = 0; k < merged.scen_hi_cen.size(); ++k) {
+      merged.scen_hi_cen[k].h_hs->Add(other.scen_hi_cen[k].h_hs);
+      merged.scen_hi_cen[k].h_pu->Add(other.scen_hi_cen[k].h_pu);
+    }
     merged.n_total      += other.n_total;
     merged.n_pass_basic += other.n_pass_basic;
     merged.n_hgtd_valid += other.n_hgtd_valid;
@@ -819,6 +842,8 @@ int main(int argc, char** argv) {
   saveScenarios(writer, merged.scen_hi);
   saveScenarios(writer, merged.scen_r1);
   saveScenarios(writer, merged.scen_r2);
+  saveScenarios(writer, merged.scen_lo_cen);
+  saveScenarios(writer, merged.scen_hi_cen);
   writer.WriteScalar("meta_n_total",      static_cast<Long64_t>(merged.n_total));
   writer.WriteScalar("meta_n_pass_basic", static_cast<Long64_t>(merged.n_pass_basic));
   writer.WriteScalar("meta_n_hgtd_valid", static_cast<Long64_t>(merged.n_hgtd_valid));
