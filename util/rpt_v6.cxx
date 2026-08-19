@@ -1168,6 +1168,12 @@ int main(int argc, char** argv) {
 
   std::printf("\n  ROC working points (eff:rejection):\n");
     dump("ITk",        h_Rpt,      h_Rpt_pu);
+    // The reference macro's own timed curve: t30 = Gaus(track truth vtx time,
+    // 30 ps) against a vertex time of Gaus(truth, 10 ps), cut at a FLAT
+    // |dt|/30 < 3 -- not a quadrature-sum pull and not inflated. This is the
+    // dotted "R_pT 30 ps" on the slides, so it is the only one of these curves
+    // directly comparable to them.
+    dump("R_pT 30ps",  h_Rpt_t,    h_Rpt_pu_t);
     dump("self-tag",   h_Rpt_self, h_Rpt_pu_self);
     dump("t0 only",    h_Rpt_reco, h_Rpt_pu_reco);
     dump("full",       h_Rpt_full, h_Rpt_pu_full);
