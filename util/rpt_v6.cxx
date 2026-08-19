@@ -247,6 +247,12 @@ int main(int argc, char** argv) {
   //                      pileup contamination the TDR expects to be present.
   //                      The reference macro computes this quantity
   //                      (delz_cut) but leaves its use commented out.
+  // Jet collection. The reference macro reads generic jet_pt/eta/phi, so which
+  // collection it used is not recoverable from the source -- and it matters for
+  // R_pT, whose DENOMINATOR is the reco jet pT. PFlow improves central jet pT
+  // resolution substantially while being near-equivalent forward, which is the
+  // shape of our discrepancy (forward reproduces the TDR, central does not).
+  std::string JETCOLL = "topo";   // topo | pflow
   std::string ZCUT = "para";
   double ZSIG = 3.0;
   double ZSINTH = 1.0;   // mm
@@ -264,6 +270,7 @@ int main(int argc, char** argv) {
     if (a.rfind("--ptmax=", 0) == 0) JPT_MAX  = std::stod(a.substr(8));
     if (a.rfind("--etamax=",0) == 0) JETA_MAX = std::stod(a.substr(9));
     if (a.rfind("--etamin=",0) == 0) JETA_MIN = std::stod(a.substr(9));
+    if (a.rfind("--jets=",0)   == 0) JETCOLL  = a.substr(7);
     if (a.rfind("--t0sigma=",0)== 0) T0_NSIGMA= std::stod(a.substr(10));
     if (a.rfind("--vtxtinfl=",0)==0) VTXT_INFL= std::stod(a.substr(11));
     if (a.rfind("--dz0scale=",0)==0) DZ0_SCALE= std::stod(a.substr(11));
@@ -288,6 +295,7 @@ int main(int argc, char** argv) {
       os << "pt" << (int)JPT_MIN << (JPT_MAX > 1e8 ? "plus" : "") << "_";
     if (JETA_MAX != 3.8) os << "eta" << (int)(JETA_MAX*10) << "_";
     if (JETA_MIN != 2.4) os << "etamin" << (int)(JETA_MIN*10) << "_";
+    if (JETCOLL != "topo") os << JETCOLL << "_";
     if (ZCUT == "signif") os << "zsig" << (int)ZSIG << "_";
     if (ZCUT == "atlas") {
       os << "zatlas";
@@ -307,10 +315,11 @@ int main(int argc, char** argv) {
   MyUtl::setupChain(chain, sample.ntupleDir.c_str());
   TTreeReader reader(&chain);
 
-  TTreeReaderArray<float> jet_pt   (reader, "AntiKt4EMTopoJets_pt");
-  TTreeReaderArray<float> jet_eta  (reader, "AntiKt4EMTopoJets_eta");
-  TTreeReaderArray<float> jet_phi  (reader, "AntiKt4EMTopoJets_phi");
-  TTreeReaderArray<std::vector<int>> jet_tracks_idx(reader, "AntiKt4EMTopoJets_ghostTrack_idx");
+  const std::string JC = (JETCOLL == "pflow") ? "AntiKt4EMPFlowJets" : "AntiKt4EMTopoJets";
+  TTreeReaderArray<float> jet_pt   (reader, (JC + "_pt").c_str());
+  TTreeReaderArray<float> jet_eta  (reader, (JC + "_eta").c_str());
+  TTreeReaderArray<float> jet_phi  (reader, (JC + "_phi").c_str());
+  TTreeReaderArray<std::vector<int>> jet_tracks_idx(reader, (JC + "_ghostTrack_idx").c_str());
   TTreeReaderArray<float> track_pt (reader, "Track_pt");
   TTreeReaderArray<float> track_eta(reader, "Track_eta");
   TTreeReaderArray<float> track_phi(reader, "Track_phi");
