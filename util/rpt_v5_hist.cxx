@@ -351,6 +351,12 @@ struct ThreadState {
   // report how much of each scenario's distribution the core window discards.
   double pull_dt_hgtd = 0, pull_dt_trkptz = 0, pull_dt_waves = 0;
   long   pull_ntail_hgtd = 0, pull_ntail_trkptz = 0, pull_ntail_waves = 0;
+  // Per-jet effect of the WAVeS time gate vs ITk-only, forward slices.
+  // 'up' must stay 0: applyTimeGate returns a SUBSET of its input, so R_pT can
+  // only fall. It is counted anyway as a standing assertion on that property.
+  long rpt_n[2] = {0, 0}, rpt_up[2] = {0, 0}, rpt_same[2] = {0, 0};
+  long rpt_down[2] = {0, 0}, rpt_zeroed[2] = {0, 0};
+  double rpt_relloss[2] = {0.0, 0.0};
 };
 
 // RpT numerator: sum pT of tracks that are ghost-associated to the jet AND in
@@ -680,6 +686,24 @@ int main(int argc, char** argv) {
           fill(sv[2], S.trkptz);                      // TRKPTZ t0
           fill(sv[3], S.waves);                       // WAVeS t0
 
+          // How the WAVeS gate moved this jet's R_pT relative to ITk-only.
+          // Forward only (do_floor marks the forward calls): central is outside
+          // HGTD acceptance, so its gate is a no-op and would only dilute this
+          // with a wall of "unchanged".
+          if (do_floor) {
+            double r_z = computeRpT(&branch, ghost, j_pt, j_eta, j_phi, S.all);
+            double r_w = computeRpT(&branch, ghost, j_pt, j_eta, j_phi, S.waves);
+            int k = isHS ? 0 : 1;
+            state.rpt_n[k]++;
+            if      (r_w > r_z + 1e-9) state.rpt_up[k]++;
+            else if (r_w > r_z - 1e-9) state.rpt_same[k]++;
+            else {
+              state.rpt_down[k]++;
+              if (r_w <= 0.0) state.rpt_zeroed[k]++;
+              if (r_z > 0.0)  state.rpt_relloss[k] += (r_z - r_w) / r_z;
+            }
+          }
+
           // Untimed floor accounting, per slice (forward only).
           if (!do_floor) continue;
           for (int idx : ghost) {
@@ -847,6 +871,14 @@ int main(int argc, char** argv) {
       merged.scen_hi[k].h_hs->Add(other.scen_hi[k].h_hs);
       merged.scen_hi[k].h_pu->Add(other.scen_hi[k].h_pu);
     }
+    for (int k = 0; k < 2; ++k) {
+      merged.rpt_n[k]      += other.rpt_n[k];
+      merged.rpt_up[k]     += other.rpt_up[k];
+      merged.rpt_same[k]   += other.rpt_same[k];
+      merged.rpt_down[k]   += other.rpt_down[k];
+      merged.rpt_zeroed[k] += other.rpt_zeroed[k];
+      merged.rpt_relloss[k]+= other.rpt_relloss[k];
+    }
     for (size_t k = 0; k < merged.scen_lo_cen.size(); ++k) {
       merged.scen_lo_cen[k].h_hs->Add(other.scen_lo_cen[k].h_hs);
       merged.scen_lo_cen[k].h_pu->Add(other.scen_lo_cen[k].h_pu);
@@ -958,6 +990,25 @@ int main(int argc, char** argv) {
     std::printf("  tail    : fraction outside the core window, i.e. how much\n");
     std::printf("            structure the core-width calibration does not see.\n");
     std::printf("  (ratio != in use -> update this sample's row in inflationFor() and rebuild)\n");
+  }
+
+  {
+    std::printf("\n=== PER-JET EFFECT OF THE WAVeS TIME GATE (forward, vs ITk-only) ===\n");
+    std::printf("  %-4s %9s %7s %9s %9s %9s %12s\n",
+                "jet", "n", "raised", "unchanged", "lowered", "->zero", "mean loss*");
+    const char* nm[2] = {"HS", "PU"};
+    for (int k = 0; k < 2; ++k) {
+      long n = merged.rpt_n[k];
+      if (n == 0) continue;
+      std::printf("  %-4s %9ld %7ld %8.1f%% %8.1f%% %8.1f%% %11.1f%%\n",
+                  nm[k], n, merged.rpt_up[k],
+                  100.0 * merged.rpt_same[k]   / n,
+                  100.0 * merged.rpt_down[k]   / n,
+                  100.0 * merged.rpt_zeroed[k] / n,
+                  merged.rpt_down[k] ? 100.0 * merged.rpt_relloss[k] / merged.rpt_down[k] : 0.0);
+    }
+    std::printf("  *mean fractional R_pT loss, averaged over the LOWERED jets only.\n");
+    std::printf("  'raised' must be 0 by construction (the gate returns a subset).\n");
   }
 
   // --- Event displays, R1/R2 ONLY -------------------------------------------
