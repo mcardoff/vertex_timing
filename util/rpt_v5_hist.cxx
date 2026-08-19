@@ -323,6 +323,11 @@ struct ThreadState {
   double pull_dt2_trkptz = 0, pull_var_trkptz = 0;
   double pull_dt2_waves = 0, pull_var_waves = 0;
   long   pull_n_hgtd = 0, pull_n_trkptz = 0, pull_n_waves = 0;
+  // First moment and out-of-core counts, so the diagnostic can separate a
+  // systematic OFFSET (which an inflation cannot fix) from genuine spread, and
+  // report how much of each scenario's distribution the core window discards.
+  double pull_dt_hgtd = 0, pull_dt_trkptz = 0, pull_dt_waves = 0;
+  long   pull_ntail_hgtd = 0, pull_ntail_trkptz = 0, pull_ntail_waves = 0;
 };
 
 // RpT numerator: sum pT of tracks that are ghost-associated to the jet AND in
@@ -566,22 +571,24 @@ int main(int argc, char** argv) {
       // uncertainty; the ratio of the two is the inflation factor to set above.
       if (PRINT_PULL_DIAG) {
         auto accum = [&](double t_vtx, double var_vtx, bool ok,
-                         double& sum_dt2, double& sum_var, long& n) {
+                         double& sum_dt2, double& sum_var, long& n,
+                         double& sum_dt, long& n_tail) {
           if (!ok) return;
           for (int idx : trk_all) {
             if (branch.trackTimeValid[idx] != 1) continue;
             if (branch.trackToTruthvtx[idx] != 0) continue;   // truth-HS only
             double dt = branch.trackTime[idx] - t_vtx;
-            if (std::abs(dt) > 150.0) continue;               // core window
+            if (std::abs(dt) > 150.0) { ++n_tail; continue; } // core window
             double var_t = branch.trackTimeRes[idx] * branch.trackTimeRes[idx];
             sum_dt2 += dt * dt;
+            sum_dt  += dt;
             sum_var += var_vtx + var_t;
             ++n;
           }
         };
-        accum(t_hgtd,   var_hgtd,   hgtd_vtx_valid, state.pull_dt2_hgtd,   state.pull_var_hgtd,   state.pull_n_hgtd);
-        accum(t_trkptz, var_trkptz, trkptz_ok,      state.pull_dt2_trkptz, state.pull_var_trkptz, state.pull_n_trkptz);
-        accum(t_waves,  var_waves,  waves_ok,       state.pull_dt2_waves,  state.pull_var_waves,  state.pull_n_waves);
+        accum(t_hgtd,   var_hgtd,   hgtd_vtx_valid, state.pull_dt2_hgtd,   state.pull_var_hgtd,   state.pull_n_hgtd, state.pull_dt_hgtd, state.pull_ntail_hgtd);
+        accum(t_trkptz, var_trkptz, trkptz_ok,      state.pull_dt2_trkptz, state.pull_var_trkptz, state.pull_n_trkptz, state.pull_dt_trkptz, state.pull_ntail_trkptz);
+        accum(t_waves,  var_waves,  waves_ok,       state.pull_dt2_waves,  state.pull_var_waves,  state.pull_n_waves, state.pull_dt_waves, state.pull_ntail_waves);
       }
 
       // Build per-scenario sets once per event for O(1) ghost-index lookup.
@@ -796,9 +803,9 @@ int main(int argc, char** argv) {
 
     // Event-display diagnostic candidates: merge each category's top-N
     // (see mergeCases doc comment near the top of this file).
-    merged.pull_dt2_hgtd   += other.pull_dt2_hgtd;   merged.pull_var_hgtd   += other.pull_var_hgtd;   merged.pull_n_hgtd   += other.pull_n_hgtd;
-    merged.pull_dt2_trkptz += other.pull_dt2_trkptz; merged.pull_var_trkptz += other.pull_var_trkptz; merged.pull_n_trkptz += other.pull_n_trkptz;
-    merged.pull_dt2_waves  += other.pull_dt2_waves;  merged.pull_var_waves  += other.pull_var_waves;  merged.pull_n_waves  += other.pull_n_waves;
+    merged.pull_dt2_hgtd   += other.pull_dt2_hgtd;   merged.pull_var_hgtd   += other.pull_var_hgtd;   merged.pull_n_hgtd   += other.pull_n_hgtd;  merged.pull_dt_hgtd += other.pull_dt_hgtd;  merged.pull_ntail_hgtd += other.pull_ntail_hgtd;
+    merged.pull_dt2_trkptz += other.pull_dt2_trkptz; merged.pull_var_trkptz += other.pull_var_trkptz; merged.pull_n_trkptz += other.pull_n_trkptz;  merged.pull_dt_trkptz += other.pull_dt_trkptz;  merged.pull_ntail_trkptz += other.pull_ntail_trkptz;
+    merged.pull_dt2_waves  += other.pull_dt2_waves;  merged.pull_var_waves  += other.pull_var_waves;  merged.pull_n_waves  += other.pull_n_waves;  merged.pull_dt_waves += other.pull_dt_waves;  merged.pull_ntail_waves += other.pull_ntail_waves;
     mergeRegionCases(merged.cases_r1, other.cases_r1);
     mergeRegionCases(merged.cases_r2, other.cases_r2);
   }
@@ -854,17 +861,30 @@ int main(int argc, char** argv) {
   //     GATE_SIGMA cut behaves like GATE_SIGMA/ratio. Set INFL_* to the ratio.
   if (PRINT_PULL_DIAG) {
     std::printf("\n=== VERTEX-TIME CALIBRATION (truth-HS tracks, |dt| < 150 ps core) ===\n");
-    std::printf("  %-10s %10s %12s %12s %10s %10s\n",
-                "scenario", "n tracks", "obs sigma", "quoted sigma", "ratio", "in use");
-    auto row = [](const char* nm, double dt2, double var, long n, double inuse) {
-      if (n < 100) { std::printf("  %-10s %10ld   (too few)\n", nm, n); return; }
-      double obs = std::sqrt(dt2 / n), quo = std::sqrt(var / n);
-      std::printf("  %-10s %10ld %10.1f ps %10.1f ps %10.2f %10.2f\n",
-                  nm, n, obs, quo, quo > 0 ? obs / quo : 0.0, inuse);
+    std::printf("  %-8s %9s %9s %10s %10s %8s %8s %7s\n",
+                "scenario", "n core", "mean dt", "core sig", "quoted", "ratio", "tail>150", "in use");
+    auto row = [](const char* nm, double dt2, double dt1, double var, long n,
+                  long ntail, double inuse) {
+      if (n < 100) { std::printf("  %-8s %9ld   (too few)\n", nm, n); return; }
+      double mean = dt1 / n;
+      // Width ABOUT THE MEAN: a systematic offset is a bias, not resolution, and
+      // scaling sigma_vtx cannot correct it -- so it must not be folded into the
+      // inflation the way an RMS about zero would fold it.
+      double sig  = std::sqrt(std::max(0.0, dt2 / n - mean * mean));
+      double quo  = std::sqrt(var / n);
+      double tail = 100.0 * ntail / double(n + ntail);
+      std::printf("  %-8s %9ld %7.1fps %8.1fps %8.1fps %8.2f %7.1f%% %7.2f\n",
+                  nm, n, mean, sig, quo, quo > 0 ? sig / quo : 0.0, tail, inuse);
     };
-    row("hgtd",   merged.pull_dt2_hgtd,   merged.pull_var_hgtd,   merged.pull_n_hgtd,   INFL.hgtd);
-    row("trkptz", merged.pull_dt2_trkptz, merged.pull_var_trkptz, merged.pull_n_trkptz, INFL.trkptz);
-    row("waves",  merged.pull_dt2_waves,  merged.pull_var_waves,  merged.pull_n_waves,  INFL.waves);
+    row("hgtd",   merged.pull_dt2_hgtd,   merged.pull_dt_hgtd,   merged.pull_var_hgtd,
+        merged.pull_n_hgtd,   merged.pull_ntail_hgtd,   INFL.hgtd);
+    row("trkptz", merged.pull_dt2_trkptz, merged.pull_dt_trkptz, merged.pull_var_trkptz,
+        merged.pull_n_trkptz, merged.pull_ntail_trkptz, INFL.trkptz);
+    row("waves",  merged.pull_dt2_waves,  merged.pull_dt_waves,  merged.pull_var_waves,
+        merged.pull_n_waves,  merged.pull_ntail_waves,  INFL.waves);
+    std::printf("  mean dt : systematic offset -- an inflation CANNOT correct this.\n");
+    std::printf("  tail    : fraction outside the core window, i.e. how much\n");
+    std::printf("            structure the core-width calibration does not see.\n");
     std::printf("  (ratio != in use -> update this sample's row in inflationFor() and rebuild)\n");
   }
 
