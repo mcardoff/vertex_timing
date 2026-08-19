@@ -178,6 +178,17 @@ for idx, jet_pt in enumerate(branch.AntiKt4EMTopoJets_pt):
 # Caveat: this does NOT model the Z+jets lepton-jet overlap removal that
 # collectPtPassingJets applies, so on Z+jets a jet the analysis dropped could
 # still be picked here. No-op for vbf/dijet.
+# VBS hatch styling, shared by the wedge overlay and its legend swatch.
+# Muted steel blue rather than cyan, semi-transparent, and drawn UNDERNEATH the
+# jet wedges: at full saturation on top it read as the loudest thing on the
+# plot, which inverted the visual hierarchy -- truth identity (the fill colour)
+# is the primary information, VBS-ness is a qualifier on it.
+VBS_HATCH_COLOR = '#3B6EA5'
+VBS_HATCH_ALPHA = 0.55
+VBS_HATCH = 'xx'
+VBS_HATCH_LW = 1.2
+JET_FILL_Z, VBS_HATCH_Z = 2, 1     # fill above hatch
+
 vbs_mjj, vbs_deta = -1.0, -1.0
 vbs_pair = (None, None)
 for _a in range(len(jet_info)):
@@ -470,14 +481,16 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
         wedge_x = [reco_hs_z, reco_hs_z + x_off1, reco_hs_z + x_off2]
         wedge_y = [0, y_off1, y_off2]
         ax.fill(wedge_x, wedge_y,
-                color=jet_color, alpha=0.7 if highlighted else 0.5)
+                color=jet_color, alpha=0.7 if highlighted else 0.5,
+                zorder=JET_FILL_Z)
 
-        # VBS candidate leg: cyan cross-hatch laid OVER the fill, so the wedge
-        # keeps showing its truth identity underneath. facecolor='none' is what
-        # makes this an overlay rather than a repaint.
+        # VBS candidate leg: cross-hatch drawn UNDER the wedge, showing through
+        # the fill's own transparency. facecolor='none' keeps it an overlay on
+        # the truth-identity colour rather than a repaint of it.
         if jet_tup.get('isVBS'):
-            ax.fill(wedge_x, wedge_y, facecolor='none', edgecolor='deepskyblue',
-                    hatch='xxx', linewidth=1.8, zorder=3)
+            ax.fill(wedge_x, wedge_y, facecolor='none',
+                    edgecolor=VBS_HATCH_COLOR, alpha=VBS_HATCH_ALPHA,
+                    hatch=VBS_HATCH, linewidth=VBS_HATCH_LW, zorder=VBS_HATCH_Z)
 
         txt_color = 'orange' if highlighted else ('green' if jet_tup['isHS'] >= 1 else 'black')
         label = f"Jet {jet_i+1}: $p_T$={jet_tup['pt']:.0f} GeV, $\eta$={jet_tup['eta']:.1f}"
@@ -557,7 +570,9 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
         # Hatch-only swatch (no facecolor) -- it overlays the identity colours
         # rather than replacing them, and the legend should say so.
         legend_handles.append(mpatches.Rectangle((0, 0), 1, 1, facecolor='none',
-                                                 edgecolor='deepskyblue', hatch='xxx'))
+                                                 edgecolor=VBS_HATCH_COLOR,
+                                                 alpha=VBS_HATCH_ALPHA,
+                                                 hatch=VBS_HATCH))
         legend_labels.append(f'VBS pair ($m_{{jj}}$={vbs_mjj:.0f} GeV, '
                              f'$|\\Delta\\eta|$={vbs_deta:.1f})')
     ax.legend(legend_handles, legend_labels,
