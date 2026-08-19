@@ -26,6 +26,10 @@ parser.add_argument('--file_path', type=str, required=True,
                          'which only worked for the local default VBF ntuple\'s '
                          'fixed naming convention.')
 parser.add_argument('--extra_time', type=float, required=False)
+parser.add_argument('--infl', type=float, required=False, default=1.38,
+                    help='Vertex-time error inflation for the timed R_pT gate. '
+                         'Per-sample WAVeS values from rpt_v5_hist.cxx '
+                         'inflationFor(): vbf 1.38, zjets 1.65, dijet 1.46.')
 parser.add_argument('--jet_idx', type=int, required=False, default=None,
                     help='Index of jet to highlight (orange) in R-Z and eta-phi displays')
 parser.add_argument('--jet_label', type=str, required=False, default=None,
@@ -323,6 +327,58 @@ except subprocess.CalledProcessError as e:
     track_clusters = []
     cluster_times = []
 
+# --- Timed R_pT ----------------------------------------------------------------
+# Second R_pT per jet, with rpt_v5's per-track time gate applied on top of the
+# same z-association: a track carrying a valid time is dropped when
+#   |t_trk - t_vtx| / sqrt(infl^2 * sigma_vtx^2 + sigma_trk^2) > GATE_SIGMA.
+# Untimed tracks are kept unconditionally, exactly as applyTimeGate does -- the
+# gate can only ever remove pT, so timed R_pT <= z-only R_pT by construction.
+#
+# t_vtx is the selected cluster, identified as the one whose time matches
+# --extra_time (that is the WAVeS-selected cluster time rpt_v5_hist prints with
+# each region candidate). sigma_vtx is rebuilt from that cluster's constituent
+# tracks as 1/sqrt(sum 1/sigma_i^2) -- the same inverse-variance combination
+# clustering_functions.h uses when merging, so it reproduces Cluster::sigmas[0]
+# rather than approximating it.
+GATE_SIGMA = 2.5
+_sel = None
+if args.extra_time is not None and cluster_times:
+    _sel = min(range(len(cluster_times)),
+               key=lambda i: abs(cluster_times[i] - args.extra_time))
+
+_t_vtx = _sig_vtx = None
+if _sel is not None and _sel < len(track_clusters):
+    _inv = 0.0
+    for _idx in track_clusters[_sel]:
+        _r = branch.Track_timeRes[_idx]
+        if _r > 0:
+            _inv += 1.0 / (_r * _r)
+    if _inv > 0:
+        _t_vtx, _sig_vtx = cluster_times[_sel], np.sqrt(1.0 / _inv)
+
+for _j in jet_info:
+    if _t_vtx is None:
+        _j['rpt_t'] = None
+        continue
+    _set = _assoc[abs(_j['eta']) < JET_ETA_MIN]
+    _sumpt = 0.0
+    for _t in branch.AntiKt4EMTopoJets_ghostTrack_idx[_j['idx']]:
+        if _t not in _set:
+            continue
+        _de = _j['eta'] - branch.Track_eta[_t]
+        _dp = np.arctan2(np.sin(_j['phi'] - branch.Track_phi[_t]),
+                         np.cos(_j['phi'] - branch.Track_phi[_t]))
+        if np.sqrt(_de * _de + _dp * _dp) > RPT_TRACK_JET_DR:
+            continue
+        if branch.Track_hasValidTime[_t] == 1:
+            _st = branch.Track_timeRes[_t]
+            _den = np.sqrt(args.infl * args.infl * _sig_vtx * _sig_vtx + _st * _st)
+            if _den > 0 and abs(branch.Track_time[_t] - _t_vtx) / _den > GATE_SIGMA:
+                continue
+        _sumpt += branch.Track_pt[_t]
+    _j['rpt_t'] = _sumpt / _j['pt']
+
+
 # --- Data for Histograms and Plotting ---
 hist_times, time_errors = [], []
 hs_times  , hs_zs       = [], []
@@ -426,7 +482,13 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
         txt_color = 'orange' if highlighted else ('green' if jet_tup['isHS'] >= 1 else 'black')
         label = f"Jet {jet_i+1}: $p_T$={jet_tup['pt']:.0f} GeV, $\eta$={jet_tup['eta']:.1f}"
         if jet_tup.get('isVBS'):
-            label += f"  [VBS, $R_{{p_T}}$={jet_tup.get('rpt', float('nan')):.2f}]"
+            _rz = jet_tup.get('rpt', float('nan'))
+            _rt = jet_tup.get('rpt_t')
+            if _rt is None:
+                label += f"  [VBS, $R_{{p_T}}$={_rz:.2f}]"
+            else:
+                label += (f"  [VBS, $R_{{p_T}}$={_rz:.2f}"
+                          f"$\\rightarrow${_rt:.2f}]")
         if highlighted:
             label += "  ← target"
         ax.text(reco_hs_z - 6.8, 0.9 - (1.2 + jet_i*0.1),
