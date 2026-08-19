@@ -149,6 +149,10 @@ int main(int argc, char** argv) {
 
   std::vector<Scenario> scen_lo = makeScenarios("_lo");
   std::vector<Scenario> scen_hi = makeScenarios("_hi");
+  // Central (|eta| < 2.4) counterparts of the same two pT slices -- the
+  // ITk-only baseline the forward numbers are quoted against.
+  std::vector<Scenario> scen_lo_cen = makeScenarios("_lo_cen");
+  std::vector<Scenario> scen_hi_cen = makeScenarios("_hi_cen");
   // VBS-topology regions, see rpt_v5_hist.cxx's region block for definitions.
   // scen_r2's h_hs is EMPTY by construction (region 2 has no forward HS jet);
   // its ROC borrows scen_r1's HS side -- see SECTION 2b.
@@ -163,6 +167,8 @@ int main(int argc, char** argv) {
     loadScenarios(reader, scen_hi);
     loadScenarios(reader, scen_r1);
     loadScenarios(reader, scen_r2);
+    loadScenarios(reader, scen_lo_cen);
+    loadScenarios(reader, scen_hi_cen);
     n_total      = reader.ReadScalarLong("meta_n_total");
     n_pass_basic = reader.ReadScalarLong("meta_n_pass_basic");
     n_hgtd_valid = reader.ReadScalarLong("meta_n_hgtd_valid");
@@ -194,6 +200,8 @@ int main(int argc, char** argv) {
   const char* lbl_lo = "30 < p_{T}^{jet} < 40 GeV, 2.4 < |#eta| < 3.8";
   const char* lbl_hi = "p_{T}^{jet} > 40 GeV, 2.4 < |#eta| < 3.8";
   // VBS-topology region labels (see rpt_v5_hist.cxx for the definitions).
+  const char* lbl_lo_cen = "30 < p_{T}^{jet} < 40 GeV, |#eta| < 2.4  [central baseline]";
+  const char* lbl_hi_cen = "p_{T}^{jet} > 40 GeV, |#eta| < 2.4  [central baseline]";
   const char* lbl_r1 = "VBS pair: both legs fwd (HS vs PU), p_{T}^{jet} > 30 GeV";
   const char* lbl_r2 = "VBS pair: fwd PU leg + central HS leg  [signal side from R1]";
 
@@ -217,6 +225,9 @@ int main(int argc, char** argv) {
   const std::vector<double> effGrid = rocEffGrid();
   for (auto& s : scen_lo) rocs_lo.push_back(generate_roc_grid(s.h_pu, s.h_hs, effGrid));
   for (auto& s : scen_hi) rocs_hi.push_back(generate_roc_grid(s.h_pu, s.h_hs, effGrid));
+  std::vector<TGraph*> rocs_lo_cen, rocs_hi_cen;
+  for (auto& s : scen_lo_cen) rocs_lo_cen.push_back(generate_roc_grid(s.h_pu, s.h_hs, effGrid));
+  for (auto& s : scen_hi_cen) rocs_hi_cen.push_back(generate_roc_grid(s.h_pu, s.h_hs, effGrid));
 
   const double roc_xmin_lo = roc_xmin_default, roc_xmax_lo = roc_xmax_default;
   const double roc_xmin_hi = roc_xmin_default, roc_xmax_hi = roc_xmax_default;
@@ -250,6 +261,10 @@ int main(int argc, char** argv) {
   for (size_t i = 0; i < rocs_lo.size(); ++i) {
     styleRoc(rocs_lo[i], scen_lo[i].color, roc_xmin_lo, roc_xmax_lo);
     styleRoc(rocs_hi[i], scen_hi[i].color, roc_xmin_hi, roc_xmax_hi);
+  }
+  for (size_t i = 0; i < rocs_lo_cen.size(); ++i) {
+    styleRoc(rocs_lo_cen[i], scen_lo_cen[i].color, roc_xmin_default, roc_xmax_default);
+    styleRoc(rocs_hi_cen[i], scen_hi_cen[i].color, roc_xmin_default, roc_xmax_default);
   }
   for (size_t i = 0; i < rocs_r1.size(); ++i) {
     styleRoc(rocs_r1[i], scen_r1[i].color, roc_xmin_default, roc_xmax_default);
@@ -303,8 +318,13 @@ int main(int argc, char** argv) {
                   rejAtEff(s.h_pu, s.h_hs, 0.93), rejAtEff(s.h_pu, s.h_hs, 0.95),
                   rejAtEff(s.h_pu, s.h_hs, 0.97));
   };
-  printRejTable("(30-40 GeV)", scen_lo);
-  printRejTable("(>40 GeV)",   scen_hi);
+  printRejTable("(30-40 GeV, 2.4<|eta|<3.8)", scen_lo);
+  printRejTable("(>40 GeV, 2.4<|eta|<3.8)",   scen_hi);
+  printRejTable("(30-40 GeV, |eta|<2.4 CENTRAL BASELINE)", scen_lo_cen);
+  printRejTable("(>40 GeV, |eta|<2.4 CENTRAL BASELINE)",   scen_hi_cen);
+  std::cout << "\n  Central is outside HGTD acceptance, so its four scenarios are\n"
+               "  expected to agree to within the few jets whose tracks reach\n"
+               "  |eta| > 2.4; divergence there indicates a leak, not a gain.\n";
 
   std::cout << "\n=== UNTIMED-TRACK FLOOR (ghost & z-selected) ===\n";
   std::printf("  30-40 GeV  PU untimed: %.1f%%   HS untimed: %.1f%%\n",
@@ -350,6 +370,8 @@ int main(int argc, char** argv) {
   // reason as the two calls above: the region ROCs were built back in
   // SECTION 2b via generate_roc, which uses explicit bin ranges and is immune
   // to SetRangeUser, and the region yield printouts use GetEntries().
+  styleScen(scen_lo_cen);
+  styleScen(scen_hi_cen);
   styleScen(scen_r1);
   styleScen(scen_r2);
 
@@ -479,6 +501,16 @@ int main(int argc, char** argv) {
   // Placed directly after the inclusive ROCs so the four discrimination plots
   // sit together at the front of the PDF. drawRocWithRatio Print()s the canvas
   // itself -- do not add another Print here.
+  // (2b) ROC — central baseline, both pT slices. Own y-scale: central rejection
+  //      sits well below forward, so sharing the forward maximum would squash
+  //      these into the axis.
+  double roc_ymax_cen = 1.5 * std::max(rocYMaxIn(rocs_lo_cen, roc_xmin_default, roc_xmax_default),
+                                       rocYMaxIn(rocs_hi_cen, roc_xmin_default, roc_xmax_default));
+  drawRocWithRatio(rocs_lo_cen, scen_lo_cen, roc_ymax_cen, 4.0,
+                   roc_xmin_default, roc_xmax_default, lbl_lo_cen);
+  drawRocWithRatio(rocs_hi_cen, scen_hi_cen, roc_ymax_cen, 4.0,
+                   roc_xmin_default, roc_xmax_default, lbl_hi_cen);
+
   drawRocWithRatio(rocs_r1, scen_r1, roc_ymax, 4.0,
                    roc_xmin_default, roc_xmax_default, lbl_r1);
   drawRocWithRatio(rocs_r2, scen_r2, roc_ymax, 4.0,
