@@ -205,6 +205,21 @@ static double getNewDzpara(double eta, double pt) {
 // left at 1.4 to match what the study actually ran).
 static constexpr double DZ0_PARA_SCALE = 1.4;
 
+// Central (|eta| < 2.4) track-to-vertex association: |z0 - z_vtx| / sigma_z0.
+//
+// getNewDzpara comes from myJet_ana_fr.C -- a FORWARD-region study -- and does
+// not extrapolate inward: it returns sigma_z0 = 31 um at eta = 0 rising to
+// 4.4 mm at eta = 3.8, and the central end is several times tighter than ITk
+// z0 resolution at 1 GeV. The reference study does not use it centrally either;
+// its central plots scan a track significance cut instead.
+//
+// 5.0 is that scan's best working point, and an independent scan of our own
+// (rpt_v6 --etamin=0 --etamax=1.5 --zcut=signif, ITk-only rejection at 0.800
+// HS efficiency) reproduces it: para 77, then 90 / 124 / 145 / 156 / 163 for
+// s = 2.0 / 2.5 / 3.0 / 4.0 / 5.0 -- monotonic, and every significance value
+// beats the parameterization.
+static constexpr double CENTRAL_Z_SIGNIF = 5.0;
+
 // dR(track, jet) cone for the RpT numerator. The reference study applies this
 // ON TOP of ghost association -- ghost-associated tracks outside the cone are
 // dropped -- so it is strictly tighter than ghost association alone.
@@ -515,6 +530,24 @@ int main(int argc, char** argv) {
         trk_all.push_back((int)trk);
       }
 
+      // Central counterpart of the list above, on a z0-significance cut rather
+      // than the forward parameterization (see CENTRAL_Z_SIGNIF). Kept as a
+      // separate list rather than switching per track inside one loop: a
+      // forward jet's dR < 0.2 cone can reach below |eta| = 2.4, and mixing
+      // the two associations inside a single list would silently change the
+      // forward numbers this baseline is meant to be compared against.
+      std::vector<int> trk_all_cen;
+      for (size_t trk = 0; trk < branch.trackZ0.GetSize(); ++trk) {
+        double trkPt = branch.trackPt[trk];
+        if (trkPt < MIN_TRACK_PT || trkPt > MAX_TRACK_PT) continue;
+        if (!branch.trackQuality[trk]) continue;
+        double vz = branch.trackVarZ0[trk];
+        if (!(vz > 0)) continue;
+        double dz = std::abs(branch.trackZ0[trk] - vtxZ);
+        if (dz / std::sqrt(vz) > CENTRAL_Z_SIGNIF) continue;
+        trk_all_cen.push_back((int)trk);
+      }
+
       // ── HGTD-acceptance tracks only (used for WAVeS clustering). ────────────
       std::vector<int> trk_z = getAssociatedTracks(&branch, MIN_TRACK_PT, MAX_TRACK_PT, 2.5);
 
@@ -571,6 +604,14 @@ int main(int argc, char** argv) {
       std::vector<int> trk_hgtd   = applyTimeGate(trk_all, t_hgtd,   var_hgtd,   hgtd_vtx_valid, GATE_SIGMA, INFL.hgtd);
       std::vector<int> trk_waves  = applyTimeGate(trk_all, t_waves,  var_waves,  waves_ok,       GATE_SIGMA, INFL.waves);
       std::vector<int> trk_trkptz = applyTimeGate(trk_all, t_trkptz, var_trkptz, trkptz_ok,      GATE_SIGMA, INFL.trkptz);
+      // Central list gets the identical gate. It is a no-op there in practice
+      // (no HGTD coverage below |eta| 2.4, so no track carries a valid time),
+      // but applying it keeps all four central scenarios defined exactly as
+      // their forward counterparts -- which is what makes their agreement a
+      // meaningful check rather than a tautology.
+      std::vector<int> trk_hgtd_cen   = applyTimeGate(trk_all_cen, t_hgtd,   var_hgtd,   hgtd_vtx_valid, GATE_SIGMA, INFL.hgtd);
+      std::vector<int> trk_waves_cen  = applyTimeGate(trk_all_cen, t_waves,  var_waves,  waves_ok,       GATE_SIGMA, INFL.waves);
+      std::vector<int> trk_trkptz_cen = applyTimeGate(trk_all_cen, t_trkptz, var_trkptz, trkptz_ok,      GATE_SIGMA, INFL.trkptz);
 
       // ── Pull-width measurement, one accumulator set per scenario ───────────
       // Truth-HS tracks only (trackToTruthvtx == 0) with a valid time, in
@@ -600,17 +641,23 @@ int main(int argc, char** argv) {
       }
 
       // Build per-scenario sets once per event for O(1) ghost-index lookup.
-      std::unordered_set<int> set_all   (trk_all.begin(),    trk_all.end());
-      std::unordered_set<int> set_hgtd  (trk_hgtd.begin(),   trk_hgtd.end());
-      std::unordered_set<int> set_trkptz(trk_trkptz.begin(), trk_trkptz.end());
-      std::unordered_set<int> set_waves (trk_waves.begin(),  trk_waves.end());
+      struct TrackSets { std::unordered_set<int> all, hgtd, trkptz, waves; };
+      TrackSets fwd{ {trk_all.begin(),    trk_all.end()},
+                     {trk_hgtd.begin(),   trk_hgtd.end()},
+                     {trk_trkptz.begin(), trk_trkptz.end()},
+                     {trk_waves.begin(),  trk_waves.end()} };
+      TrackSets cen{ {trk_all_cen.begin(),    trk_all_cen.end()},
+                     {trk_hgtd_cen.begin(),   trk_hgtd_cen.end()},
+                     {trk_trkptz_cen.begin(), trk_trkptz_cen.end()},
+                     {trk_waves_cen.begin(),  trk_waves_cen.end()} };
 
       // ── Fill jets into pT slices. ─────────────────────────────────────────────
       // eta_min/eta_max select the acceptance; do_floor is false for the central
       // baseline so its jets cannot contaminate the forward untimed-floor
       // counters, which are reported as a forward quantity.
       auto fillJets = [&](std::vector<Scenario>& sv, double pt_lo, double pt_hi,
-                          double eta_min, double eta_max, bool do_floor) {
+                          double eta_min, double eta_max, bool do_floor,
+                          const TrackSets& S) {
         for (int j = 0; j < (int)branch.topoJetPt.GetSize(); ++j) {
           if (branch.isJetRemoved(j)) continue;  // lepton-overlap removed (Z+jets)
           double j_pt  = branch.topoJetPt[j];
@@ -628,15 +675,15 @@ int main(int argc, char** argv) {
             if (isHS) s.h_hs->Fill(r);
             else      s.h_pu->Fill(r);
           };
-          fill(sv[0], set_all);                       // ITk-only
-          fill(sv[1], set_hgtd);                      // HGTD t0 (Athena)
-          fill(sv[2], set_trkptz);                    // TRKPTZ t0
-          fill(sv[3], set_waves);                     // WAVeS t0
+          fill(sv[0], S.all);                         // ITk-only
+          fill(sv[1], S.hgtd);                        // HGTD t0 (Athena)
+          fill(sv[2], S.trkptz);                      // TRKPTZ t0
+          fill(sv[3], S.waves);                       // WAVeS t0
 
           // Untimed floor accounting, per slice (forward only).
           if (!do_floor) continue;
           for (int idx : ghost) {
-            if (!set_all.count(idx)) continue;
+            if (!S.all.count(idx)) continue;
             double pt = branch.trackPt[idx];
             bool untimed = (branch.trackTimeValid[idx] != 1);
             if (pt_lo >= 40.0) {
@@ -650,10 +697,10 @@ int main(int argc, char** argv) {
         }
       };
 
-      fillJets(state.scen_lo, 30.0, 40.0, JET_ETA_MIN, JET_ETA_MAX, true);
-      fillJets(state.scen_hi, 40.0, 1e9,  JET_ETA_MIN, JET_ETA_MAX, true);
-      fillJets(state.scen_lo_cen, 30.0, 40.0, 0.0, CENTRAL_ETA_MAX, false);
-      fillJets(state.scen_hi_cen, 40.0, 1e9,  0.0, CENTRAL_ETA_MAX, false);
+      fillJets(state.scen_lo, 30.0, 40.0, JET_ETA_MIN, JET_ETA_MAX, true,  fwd);
+      fillJets(state.scen_hi, 40.0, 1e9,  JET_ETA_MIN, JET_ETA_MAX, true,  fwd);
+      fillJets(state.scen_lo_cen, 30.0, 40.0, 0.0, CENTRAL_ETA_MAX, false, cen);
+      fillJets(state.scen_hi_cen, 40.0, 1e9,  0.0, CENTRAL_ETA_MAX, false, cen);
 
       // Full ntuple file path + local (per-file) entry number for the
       // event-display commands printed after the loop. Same
@@ -725,10 +772,10 @@ int main(int argc, char** argv) {
               double r = computeRpT(&branch, ghost, j_pt, j_eta, j_phi, s_set);
               (asHS ? s.h_hs : s.h_pu)->Fill(r);
             };
-            put(sv[0], set_all);
-            put(sv[1], set_hgtd);
-            put(sv[2], set_trkptz);
-            put(sv[3], set_waves);
+            put(sv[0], fwd.all);
+            put(sv[1], fwd.hgtd);
+            put(sv[2], fwd.trkptz);
+            put(sv[3], fwd.waves);
           };
 
           // Per-jet RpT under the no-timing baseline and under WAVeS, used both
@@ -748,8 +795,8 @@ int main(int argc, char** argv) {
             // negative = timing eroded or inverted it), so rank on |delta| and
             // let the printed line say which -- one list surfaces both the
             // rescues and the regressions rather than needing two.
-            double mZ = rptOf(fwdHS, set_all)   - rptOf(fwdPU, set_all);
-            double mW = rptOf(fwdHS, set_waves) - rptOf(fwdPU, set_waves);
+            double mZ = rptOf(fwdHS, fwd.all)   - rptOf(fwdPU, fwd.all);
+            double mW = rptOf(fwdHS, fwd.waves) - rptOf(fwdPU, fwd.waves);
             insertRegionCase(state.cases_r1,
                              {filePath, localEntry, fwdHS, fwdPU,
                               branch.topoJetPt[fwdHS], branch.topoJetEta[fwdHS],
@@ -761,8 +808,8 @@ int main(int argc, char** argv) {
             // Rank by how far timing pushes the fake's RpT down: a forward PU
             // jet with high no-timing RpT is precisely the one that fakes a
             // tagging jet, and the drop is the rejection actually delivered.
-            double rZ = rptOf(fwdPU, set_all);
-            double rW = rptOf(fwdPU, set_waves);
+            double rZ = rptOf(fwdPU, fwd.all);
+            double rW = rptOf(fwdPU, fwd.waves);
             insertRegionCase(state.cases_r2,
                              {filePath, localEntry, -1, fwdPU,
                               0.0, 0.0,
