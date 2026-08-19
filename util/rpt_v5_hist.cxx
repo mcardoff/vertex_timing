@@ -93,19 +93,48 @@ static constexpr double GATE_SIGMA = 2.5;
 // *= f^2, replacing the previous blanket 2.25 (= 1.5^2) applied to every
 // scenario alike.
 //
-// MEASURED (local VBF, truth-HS tracks, |dt| < 150 ps core):
-//   hgtd   obs 41.7 ps vs quoted 28.2 ps -> 1.48
-//   trkptz obs 38.6 ps vs quoted 27.8 ps -> 1.39
-//   waves  obs 38.5 ps vs quoted 27.8 ps -> 1.38
-// So the old blanket 1.5 was ALREADY close and this refinement is small --
-// unlike rpt_v6, which applied no inflation at all and needed 1.78. Part of
-// that difference is population, not calibration: rpt_v6 measured over every
-// timed HS track, while these are measured after the z-association, which
-// already removes the worst outliers. The Athena vertex time is the least well
-// calibrated of the three, as expected.
-static constexpr double INFL_HGTD   = 1.48;  // Athena RecoVtx_time
-static constexpr double INFL_TRKPTZ = 1.39;  // TRKPTZ-selected cluster time
-static constexpr double INFL_WAVES  = 1.38;  // WAVeS-selected cluster time
+// The factor is also PER SAMPLE, not just per scenario: how badly the quoted
+// vertex-time error understates the truth depends on how often a usable vertex
+// time exists at all, which varies enormously between samples (VBF 80.1% valid,
+// dijet 73.6%, Z+jets only 16.5%). Z+jets needs ~1.6 where VBF needs ~1.4, so
+// letting it inherit VBF's numbers ran its gate ~18% tighter than nominal,
+// over-trimming genuine HS tracks -- which shows up downstream as a depressed
+// maximum reachable HS efficiency (its RpT==0 spike, and so its ROC endpoint,
+// is the worst of the three).
+//
+// MEASURED by the PRINT_PULL_DIAG block below (truth-HS tracks, |dt| < 150 ps
+// core), read straight off its "ratio" column, one full-statistics grid run per
+// sample:
+//
+//   scenario      vbf     zjets     dijet
+//   hgtd         1.48      1.61      1.53
+//   trkptz       1.39      1.63      1.45
+//   waves        1.38      1.65      1.46
+//
+// The measurement is NOT circular: the accumulator uses the RAW quoted var_vtx
+// and the ungated track list, and the vertex times themselves (cluster
+// selection) do not depend on the gate -- so a single pass measures the ratio
+// that the next run should apply, with no need to iterate to a fixed point.
+//
+// The Athena vertex time is the least well calibrated of the three on VBF, as
+// expected; on Z+jets all three are comparably bad. Compared to rpt_v6's 1.78
+// on the same Athena time, part of the difference is population rather than
+// calibration: rpt_v6 measured over every timed HS track, while these are
+// measured after the z-association, which already removes the worst outliers.
+struct Inflation { double hgtd, trkptz, waves; };
+
+// Keyed on MyUtl::SAMPLE_NAME. The local default run (no --sample, so an empty
+// SAMPLE_NAME) reads the VBF ntuples, so it correctly falls through to the VBF
+// row rather than needing an entry of its own.
+static Inflation inflationFor(const std::string& sample) {
+  if (sample == "zjets") return {1.61, 1.63, 1.65};
+  if (sample == "dijet") return {1.53, 1.45, 1.46};
+  return {1.48, 1.39, 1.38};  // vbf, and the local default run
+}
+
+// Resolved once in main() before the event loop starts, then only read by the
+// worker threads -- write-once-before-fork, so no synchronisation is needed.
+static Inflation INFL = {1.48, 1.39, 1.38};
 
 // Set true to print the measured per-scenario pull widths after the event loop.
 static constexpr bool PRINT_PULL_DIAG = true;
@@ -334,6 +363,17 @@ int main(int argc, char** argv) {
     boost::filesystem::create_directories(MyUtl::OUTPUT_DIR + "/hists");
   unsigned nThreads = MyUtl::resolveThreads(argc, argv);
 
+  // Per-sample vertex-time calibration. Resolved here, before any worker thread
+  // exists, so the event loop only ever reads it. Echoed so a run's stdout
+  // records which calibration produced its histograms -- the PRINT_PULL_DIAG
+  // table at the end then prints the freshly measured ratio beside these in its
+  // "in use" column, making a stale entry visible in the same log.
+  INFL = inflationFor(MyUtl::SAMPLE_NAME);
+  std::printf("[calibration] vertex-time inflation for '%s': "
+              "hgtd %.2f  trkptz %.2f  waves %.2f\n",
+              MyUtl::SAMPLE_NAME.empty() ? "local (vbf)" : MyUtl::SAMPLE_NAME.c_str(),
+              INFL.hgtd, INFL.trkptz, INFL.waves);
+
   TChain chain("ntuple");
   setupChain(chain, sample.ntupleDir.c_str());
   if (chain.GetEntries() == 0) {
@@ -515,9 +555,9 @@ int main(int argc, char** argv) {
         return out;
       };
 
-      std::vector<int> trk_hgtd   = applyTimeGate(trk_all, t_hgtd,   var_hgtd,   hgtd_vtx_valid, GATE_SIGMA, INFL_HGTD);
-      std::vector<int> trk_waves  = applyTimeGate(trk_all, t_waves,  var_waves,  waves_ok,       GATE_SIGMA, INFL_WAVES);
-      std::vector<int> trk_trkptz = applyTimeGate(trk_all, t_trkptz, var_trkptz, trkptz_ok,      GATE_SIGMA, INFL_TRKPTZ);
+      std::vector<int> trk_hgtd   = applyTimeGate(trk_all, t_hgtd,   var_hgtd,   hgtd_vtx_valid, GATE_SIGMA, INFL.hgtd);
+      std::vector<int> trk_waves  = applyTimeGate(trk_all, t_waves,  var_waves,  waves_ok,       GATE_SIGMA, INFL.waves);
+      std::vector<int> trk_trkptz = applyTimeGate(trk_all, t_trkptz, var_trkptz, trkptz_ok,      GATE_SIGMA, INFL.trkptz);
 
       // ── Pull-width measurement, one accumulator set per scenario ───────────
       // Truth-HS tracks only (trackToTruthvtx == 0) with a valid time, in
@@ -822,10 +862,10 @@ int main(int argc, char** argv) {
       std::printf("  %-10s %10ld %10.1f ps %10.1f ps %10.2f %10.2f\n",
                   nm, n, obs, quo, quo > 0 ? obs / quo : 0.0, inuse);
     };
-    row("hgtd",   merged.pull_dt2_hgtd,   merged.pull_var_hgtd,   merged.pull_n_hgtd,   INFL_HGTD);
-    row("trkptz", merged.pull_dt2_trkptz, merged.pull_var_trkptz, merged.pull_n_trkptz, INFL_TRKPTZ);
-    row("waves",  merged.pull_dt2_waves,  merged.pull_var_waves,  merged.pull_n_waves,  INFL_WAVES);
-    std::printf("  (set INFL_* at the top of this file to the ratio column, then rebuild)\n");
+    row("hgtd",   merged.pull_dt2_hgtd,   merged.pull_var_hgtd,   merged.pull_n_hgtd,   INFL.hgtd);
+    row("trkptz", merged.pull_dt2_trkptz, merged.pull_var_trkptz, merged.pull_n_trkptz, INFL.trkptz);
+    row("waves",  merged.pull_dt2_waves,  merged.pull_var_waves,  merged.pull_n_waves,  INFL.waves);
+    std::printf("  (ratio != in use -> update this sample's row in inflationFor() and rebuild)\n");
   }
 
   // --- Event displays, R1/R2 ONLY -------------------------------------------
