@@ -365,7 +365,12 @@ if _sel is not None and _sel < len(track_clusters):
         if _r > 0:
             _inv += 1.0 / (_r * _r)
     if _inv > 0:
-        _t_vtx, _sig_vtx = cluster_times[_sel], np.sqrt(1.0 / _inv)
+        # t0 is --extra_time itself, NOT the matched cluster's plain time.
+        # rpt_v5 gates with WAVeS's in-jet REFINED time (calculateTime), which
+        # is what --extra_time carries; the cluster's own weighted mean differs
+        # from it, so using the latter made the displayed R_pT disagree with the
+        # analysis for the same event. The cluster is still needed for sigma_vtx.
+        _t_vtx, _sig_vtx = args.extra_time, np.sqrt(1.0 / _inv)
 
 for _j in jet_info:
     if _t_vtx is None:
