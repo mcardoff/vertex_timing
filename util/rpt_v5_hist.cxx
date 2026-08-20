@@ -875,20 +875,38 @@ int main(int argc, char** argv) {
       // ── Display candidates: track-time misassociation, and WAVeS-vs-TRKPTZ.
       if (PRINT_EVENT_DISPLAYS) {
         const double tTruth = branch.truthVtxTime[0];
-        int nTimedHS = 0;
-        for (int idx : trk_z)
-          if (branch.trackToTruthvtx[idx] == 0 && branch.trackTimeValid[idx] == 1) ++nTimedHS;
+        // Count forward HS tracks that are timed, and how many of those carry a
+        // time inconsistent with truth -- the same |pull| >= TRUTH_PULL_CUT
+        // test calcHSTimingPurity uses, but counting TRACKS rather than
+        // pT-weighting, since what makes a display legible is how many wrong
+        // bars are visible.
+        int nTimedHS = 0, nMisTimed = 0;
+        for (int idx : trk_z) {
+          if (branch.trackToTruthvtx[idx] != 0 || branch.trackTimeValid[idx] != 1) continue;
+          ++nTimedHS;
+          const int    pi = branch.trackToParticle[idx];
+          const double tTrue = (pi != -1) ? branch.particleT[pi]
+                                          : branch.truthVtxTime[branch.trackToTruthvtx[idx]];
+          if (std::abs(branch.trackTime[idx] - tTrue) / branch.trackTimeRes[idx] >= TRUTH_PULL_CUT)
+            ++nMisTimed;
+        }
         const float pur = calcHSTimingPurity(trk_z, &branch);
 
-        // Misassociation: forward HS tracks whose HGTD times disagree with
-        // truth. Requires a decently populated event, else "low purity" is one
-        // bad track; weighted by multiplicity so the picks are visually busy
-        // enough to read on a slide.
-        if (nTimedHS >= 5 && pur < 0.5f && waves_ok)
+        // Misassociation: ranked by the NUMBER of mis-timed forward HS tracks.
+        // Ranking on purity alone pinned every pick at the 8-track floor (a
+        // sparse event reaches a low fraction easily); ranking on
+        // (1 - purity) x multiplicity favoured busy events and never went below
+        // ~0.2 purity. The count is the quantity that is actually low-purity
+        // AND populated, which is what makes the wrong times visible on a slide.
+        // The two criteria pull against each other: a low purity FRACTION is
+        // easiest to reach in a sparse event, while a high mis-timed COUNT
+        // favours busy ones with middling purity. So gate on genuinely low
+        // purity, then rank by count within that -- the busiest of the
+        // genuinely bad events, rather than the extreme of either alone.
+        if (pur < 0.25f && waves_ok)
           insertEventCase(state.cases_mis,
-                          {filePath, localEntry, t_waves,
-                           (1.0 - pur) * std::min(nTimedHS, 20),
-                           pur, (double)nTimedHS, t_waves - tTruth});
+                          {filePath, localEntry, t_waves, (double)nMisTimed,
+                           pur, (double)nMisTimed, (double)nTimedHS});
 
         // WAVeS lands on truth where the TRKPTZ baseline does not -- the case
         // the score change exists for.
@@ -1203,8 +1221,7 @@ int main(int argc, char** argv) {
                 "Forward HS tracks whose HGTD times disagree with truth: the "
                 "times themselves are wrong, not merely imprecise.",
                 merged.cases_mis,
-                "  HS timing purity=%.2f  (%.0f timed HS tracks)  "
-                "t_waves - t_truth = %+.1f ps\n");
+                "  HS timing purity=%.2f  --  %.0f of %.0f timed HS tracks mis-timed\n");
     printEvents("WAVeS BEATS TRKPTZ",
                 "WAVeS lands on the truth time while the TRKPTZ baseline does not.",
                 merged.cases_wwin,
