@@ -903,10 +903,16 @@ int main(int argc, char** argv) {
         // favours busy ones with middling purity. So gate on genuinely low
         // purity, then rank by count within that -- the busiest of the
         // genuinely bad events, rather than the extreme of either alone.
-        if (pur < 0.25f && waves_ok)
+        // The event must also FAIL. Gating on low purity alone selected events
+        // where the tracks are badly mis-timed and the algorithm recovers the
+        // right vertex time anyway -- which illustrates the opposite of the
+        // point. failure_decomposition's timing-misassignment category requires
+        // both the mis-timed tracks AND the resulting time being wrong, so the
+        // delivered time must miss truth by more than the efficiency window.
+        if (pur < 0.25f && waves_ok && std::abs(t_waves - tTruth) > PASS_SIGMA)
           insertEventCase(state.cases_mis,
                           {filePath, localEntry, t_waves, (double)nMisTimed,
-                           pur, (double)nMisTimed, (double)nTimedHS});
+                           pur, (double)nMisTimed, t_waves - tTruth});
 
         // WAVeS lands on truth where the TRKPTZ baseline does not -- the case
         // the score change exists for.
@@ -1221,7 +1227,7 @@ int main(int argc, char** argv) {
                 "Forward HS tracks whose HGTD times disagree with truth: the "
                 "times themselves are wrong, not merely imprecise.",
                 merged.cases_mis,
-                "  HS timing purity=%.2f  --  %.0f of %.0f timed HS tracks mis-timed\n");
+                "  HS timing purity=%.2f  --  %.0f mis-timed HS tracks  --  delivered time off truth by %+.1f ps\n");
     printEvents("WAVeS BEATS TRKPTZ",
                 "WAVeS lands on the truth time while the TRKPTZ baseline does not.",
                 merged.cases_wwin,
