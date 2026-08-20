@@ -378,7 +378,7 @@ struct ThreadState {
   double pu_tot_lo = 0, pu_floor_lo = 0, hs_tot_lo = 0, hs_floor_lo = 0;  // 30-40
 
   // Event-display candidates, R1/R2 only (see RegionCase doc comment above).
-  std::vector<RegionCase> cases_r1, cases_r2;
+  std::vector<RegionCase> cases_r1, cases_r2, cases_r2_fail;
   std::vector<EventCase>  cases_mis, cases_wwin;
   // Per-scenario pull-width accumulators (see PRINT_PULL_DIAG).
   double pull_dt2_hgtd = 0, pull_var_hgtd = 0;
@@ -1030,6 +1030,17 @@ int main(int argc, char** argv) {
                               0.0, 0.0,
                               branch.topoJetPt[fwdPU], branch.topoJetEta[fwdPU],
                               rZ, rW, rW - rZ, t_waves});
+            // R2's SUCCESS list above is one-sided by construction:
+            // applyTimeGate returns a subset, so rW <= rZ always and every
+            // entry is "suppressed". It therefore cannot show a failure.
+            // R2 fails when a fake SURVIVES -- high RpT still standing after
+            // the gate -- which has |rW - rZ| ~ 0 and sits at the bottom of
+            // that ranking. Rank those by the surviving RpT instead.
+            insertRegionCase(state.cases_r2_fail,
+                             {filePath, localEntry, -1, fwdPU,
+                              0.0, 0.0,
+                              branch.topoJetPt[fwdPU], branch.topoJetEta[fwdPU],
+                              rZ, rW, rW, t_waves});
           }
         }
       }
@@ -1101,6 +1112,7 @@ int main(int argc, char** argv) {
     merged.pull_dt2_waves  += other.pull_dt2_waves;  merged.pull_var_waves  += other.pull_var_waves;  merged.pull_n_waves  += other.pull_n_waves;  merged.pull_dt_waves += other.pull_dt_waves;  merged.pull_ntail_waves += other.pull_ntail_waves;
     mergeRegionCases(merged.cases_r1, other.cases_r1);
     mergeRegionCases(merged.cases_r2, other.cases_r2);
+    mergeRegionCases(merged.cases_r2_fail, other.cases_r2_fail);
     mergeEventCases (merged.cases_mis,  other.cases_mis);
     mergeEventCases (merged.cases_wwin, other.cases_wwin);
   }
@@ -1249,7 +1261,7 @@ int main(int argc, char** argv) {
           std::printf("  fwd PU leg pT=%.1f eta=%+.2f  RpT: %.3f -> %.3f"
                       "  (%+.3f, timing %s)\n",
                       c.pu_pt, c.pu_eta, c.val_zonly, c.val_waves, c.metric,
-                      c.metric < 0 ? "SUPPRESSED the fake" : "raised it");
+                      c.metric < 0 ? "SUPPRESSED the fake" : "left it untouched");
         }
         // --jet_idx highlights the leg the region is about: the HS leg in R1
         // (which one is the hard scatter?), the fake in R2 (can we kill it?).
@@ -1264,6 +1276,12 @@ int main(int argc, char** argv) {
     printRegion("VBS REGION R1 - both candidate legs forward (HS vs PU)",
                 "Ranked by |change in HS-minus-PU RpT margin| between ITk-only and WAVeS.",
                 merged.cases_r1, true);
+    printRegion("VBS REGION R2 FAILURES - fakes that SURVIVED the gate",
+                "Ranked by the forward-PU RpT still standing after WAVeS. "
+                "The success list below cannot show these: rW <= rZ always, so "
+                "every entry there is 'suppressed' and failures rank last.",
+                merged.cases_r2_fail, false);
+
     printRegion("VBS REGION R2 - forward PU leg + central HS leg",
                 "Ranked by |change in forward-PU RpT| between ITk-only and WAVeS.",
                 merged.cases_r2, false);
