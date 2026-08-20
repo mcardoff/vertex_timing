@@ -711,6 +711,34 @@ int main(int argc, char** argv) {
         }
       }
 
+      // Selection oracle: same collection, same REAL track times, but pick the
+      // cluster whose TIME is closest to the truth hard-scatter vertex. This is
+      // the ceiling any selector could reach on the current clustering, and the
+      // gap from the WAVeS row is what a perfect selector would buy.
+      //
+      // NOT ranked by purity, which was tried first and fails badly (HS jets
+      // driven to R_pT = 0 rise 3.0% -> 11.8%). Purity measures where a track
+      // CAME FROM, not whether its time is right: a lone HS track carrying a
+      // mis-assigned HGTD hit forms a cluster that is 100% pure by truth-vertex
+      // label while sitting at a badly wrong time, and max-purity selects
+      // exactly those. It optimises for the dominant failure mode instead of
+      // against it.
+      double t_pure = 0.0, var_pure = 0.0;
+      bool   pure_ok = false;
+      if (!clusters.empty()) {
+        size_t bi = 0; double bestDt = 1e50;
+        for (size_t i = 0; i < clusters.size(); ++i) {
+          const double dt = std::abs(clusters[i].values[0] - branch.truthVtxTime[0]);
+          if (dt < bestDt) { bestDt = dt; bi = i; }
+        }
+        const auto& bestP = clusters[bi];
+        t_pure   = bestP.values[0];
+        var_pure = bestP.sigmas[0] * bestP.sigmas[0];
+        pure_ok  = true;
+      }
+      std::vector<int> trk_pure     = applyTimeGate(trk_all,     t_pure, var_pure, pure_ok, GATE_SIGMA, INFL.waves);
+      std::vector<int> trk_pure_cen = applyTimeGate(trk_all_cen, t_pure, var_pure, pure_ok, GATE_SIGMA, INFL.waves);
+
       const double t_truth_vtx = state.rng.Gaus(branch.truthVtxTime[0], TRUTH_VTX_SMEAR);
 
       // Shared gate: idealised track times against whichever vertex time.
@@ -738,18 +766,20 @@ int main(int argc, char** argv) {
       std::vector<int> trk_wsm_cen = smearedGate(trk_all_cen, t_wsm, var_wsm, wsm_ok, INFL.waves);
 
       // Build per-scenario sets once per event for O(1) ghost-index lookup.
-      struct TrackSets { std::unordered_set<int> all, hgtd, trkptz, waves, waves_smear, truth; };
+      struct TrackSets { std::unordered_set<int> all, hgtd, trkptz, waves, waves_smear, waves_pure, truth; };
       TrackSets fwd{ {trk_all.begin(),    trk_all.end()},
                      {trk_hgtd.begin(),   trk_hgtd.end()},
                      {trk_trkptz.begin(), trk_trkptz.end()},
                      {trk_waves.begin(),  trk_waves.end()},
                      {trk_wsm.begin(),    trk_wsm.end()},
+                     {trk_pure.begin(),   trk_pure.end()},
                      {trk_truth.begin(),  trk_truth.end()} };
       TrackSets cen{ {trk_all_cen.begin(),    trk_all_cen.end()},
                      {trk_hgtd_cen.begin(),   trk_hgtd_cen.end()},
                      {trk_trkptz_cen.begin(), trk_trkptz_cen.end()},
                      {trk_waves_cen.begin(),  trk_waves_cen.end()},
                      {trk_wsm_cen.begin(),    trk_wsm_cen.end()},
+                     {trk_pure_cen.begin(),   trk_pure_cen.end()},
                      {trk_truth_cen.begin(),  trk_truth_cen.end()} };
 
       // ── Fill jets into pT slices. ─────────────────────────────────────────────
@@ -781,7 +811,8 @@ int main(int argc, char** argv) {
           fill(sv[2], S.trkptz);                      // TRKPTZ t0
           fill(sv[3], S.waves);                       // WAVeS t0
           fill(sv[4], S.waves_smear);                 // WAVeS t0, idealised 30 ps tracks
-          fill(sv[5], S.truth);                       // truth t0, 10 (+) 30 ps
+          fill(sv[5], S.waves_pure);                  // ORACLE: purest cluster selected
+          fill(sv[6], S.truth);                       // truth t0, 10 (+) 30 ps
 
           // How the WAVeS gate moved this jet's R_pT relative to ITk-only.
           // Forward only (do_floor marks the forward calls): central is outside
@@ -898,7 +929,8 @@ int main(int argc, char** argv) {
             put(sv[2], fwd.trkptz);
             put(sv[3], fwd.waves);
             put(sv[4], fwd.waves_smear);
-            put(sv[5], fwd.truth);
+            put(sv[5], fwd.waves_pure);
+            put(sv[6], fwd.truth);
           };
 
           // Per-jet RpT under the no-timing baseline and under WAVeS, used both
