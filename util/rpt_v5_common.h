@@ -79,6 +79,13 @@ inline std::vector<Scenario> makeScenarios(const std::string& suffix) {
     // track time = Gaus(the track's OWN truth vertex, 30 ps) -- the 30 ps is
     // what carries HS/PU separation, since a pileup track inherits its own
     // vertex's time ~175 ps away. Gated with the same pull as everything else.
+    // ORACLE: same clusters, same real track times, but the cluster whose TIME
+    // is closest to the truth HS vertex is selected. Needs truth, so it is not
+    // deployable -- it is the ceiling any selector could reach on the current
+    // clustering, and the gap from the WAVeS row is what a perfect selector
+    // would buy. It cannot repair a cluster whose HS energy was SPLIT, since
+    // choosing among existing clusters cannot merge them.
+    {"waves_pure",  "Best-time cluster [oracle]",  C08, nullptr, nullptr},
     {"truth",       "Truth t_{0} (10#oplus30 ps)",  C06, nullptr, nullptr},
   };
   for (auto& sc : s) {
