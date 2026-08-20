@@ -68,6 +68,18 @@ inline std::vector<Scenario> makeScenarios(const std::string& suffix) {
     {"hgtd",        "HGTD t_{0} (Athena)",         C01, nullptr, nullptr},
     {"trkptz",      "TRKPTZ t_{0}",                C02, nullptr, nullptr},
     {"waves",       "WAVeS t_{0}",                 C03, nullptr, nullptr},
+    // WAVeS restricted to events whose HS timing was already essentially
+    // right (event-level purity >= 0.95). NOT "WAVeS with a perfect clock":
+    // the gate drops events from the denominator rather than improving them,
+    // so this is not a strict upper envelope of the curves above it. Same
+    // threshold as Score::WAVES_MISAS in event_processing.h, so the purple
+    // here means what the purple in the clustering plots means.
+    {"waves_clean", "WAVeS t_{0} + clean timing",  C04, nullptr, nullptr},
+    // Reference-study truth t0: vertex time = Gaus(truth HS vertex, 10 ps),
+    // track time = Gaus(the track's OWN truth vertex, 30 ps) -- the 30 ps is
+    // what carries HS/PU separation, since a pileup track inherits its own
+    // vertex's time ~175 ps away. Gated with the same pull as everything else.
+    {"truth",       "Truth t_{0} (10#oplus30 ps)",  C06, nullptr, nullptr},
   };
   for (auto& sc : s) {
     sc.h_hs = makeHist(("HS_" + sc.name + suffix).c_str(),
