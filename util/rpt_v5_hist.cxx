@@ -32,6 +32,7 @@
 #include <TStyle.h>
 #include <TTreeReader.h>
 #include <TTreeReaderArray.h>
+#include <TRandom3.h>
 #include <TVector2.h>
 #include <ROOT/TTreeProcessorMT.hxx>
 
@@ -72,6 +73,15 @@ static constexpr double CENTRAL_ETA_MAX = JET_ETA_MIN;
 // within |pull| < 3σ (calcHSTimingPurity).  Mirrors the Score::WAVES_MISAS
 // oracle.
 static constexpr float MISAS_PURITY_CUT = 0.75f;
+
+// Event-level HS timing purity above which an event counts as "clean timing".
+// Matches the Score::WAVES_MISAS gate in event_processing.h so the purple curve
+// means the same thing here as in the clustering plots.
+static constexpr float CLEAN_TIMING_PURITY = 0.95f;
+
+// Reference-study truth-t0 smearing (util/myJet_ana_fr.C).
+static constexpr double TRUTH_VTX_SMEAR = 10.0;  // ps, on the HS vertex time
+static constexpr double TRUTH_TRK_SMEAR = 30.0;  // ps, on each track's own vertex time
 
 // Per-track time-gate half-width in σ.  A 2σ cut over-trims genuine HS tracks
 // when the vertex time is slightly mis-estimated, dragging the high-efficiency
@@ -311,6 +321,10 @@ static void mergeRegionCases(std::vector<RegionCase>& dst,
 //   event loop.
 // -----------------------------------------------------------------------------
 struct ThreadState {
+  // Re-seeded per event from event-stable quantities, so the truth-t0 smearing
+  // does not depend on how TTreeProcessorMT distributes entries across threads.
+  TRandom3 rng{1};
+
   std::vector<Scenario> scen_lo = makeScenarios("_lo");  // 30–40 GeV, forward
   std::vector<Scenario> scen_hi = makeScenarios("_hi");  // >40 GeV,   forward
   // Same two pT slices at CENTRAL eta, as an ITk-only baseline: |eta| < 2.4 is
@@ -646,16 +660,57 @@ int main(int argc, char** argv) {
         accum(t_waves,  var_waves,  waves_ok,       state.pull_dt2_waves,  state.pull_var_waves,  state.pull_n_waves, state.pull_dt_waves, state.pull_ntail_waves);
       }
 
+      // ── Truth-t0 reference scenario ────────────────────────────────────────
+      // Smear once per TRACK (not per list), so a track appearing in both the
+      // forward and central association lists carries the same time in each.
+      {
+        UInt_t sd = (UInt_t)std::llround(std::abs(branch.truthVtxZ[0])    * 1e4)
+                  ^ ((UInt_t)std::llround(std::abs(branch.truthVtxTime[0]) * 1e3) << 11)
+                  ^ ((UInt_t)branch.trackZ0.GetSize() << 23);
+        state.rng.SetSeed(sd ? sd : 1u);
+      }
+      const double t_truth_vtx = state.rng.Gaus(branch.truthVtxTime[0], TRUTH_VTX_SMEAR);
+      const size_t nTrkAll = branch.trackZ0.GetSize();
+      std::vector<float> t_truth_trk(nTrkAll, 0.f);
+      std::vector<char>  t_truth_ok (nTrkAll, 0);
+      for (size_t i = 0; i < nTrkAll; ++i) {
+        int tv = branch.trackToTruthvtx[i];
+        if (tv < 0 || tv >= (int)branch.truthVtxTime.GetSize()) continue;
+        t_truth_trk[i] = (float)state.rng.Gaus(branch.truthVtxTime[tv], TRUTH_TRK_SMEAR);
+        t_truth_ok[i]  = 1;
+      }
+      // Same pull form as applyTimeGate, with infl = 1: these sigmas are exact
+      // by construction, so there is nothing to inflate. A track with no truth
+      // vertex link is kept unconditionally, as an untimed track would be.
+      auto truthGate = [&](const std::vector<int>& base) {
+        std::vector<int> out; out.reserve(base.size());
+        const double den = std::sqrt(TRUTH_VTX_SMEAR * TRUTH_VTX_SMEAR
+                                   + TRUTH_TRK_SMEAR * TRUTH_TRK_SMEAR);
+        for (int idx : base) {
+          if (!t_truth_ok[idx]) { out.push_back(idx); continue; }
+          if (std::abs(t_truth_trk[idx] - t_truth_vtx) / den < GATE_SIGMA) out.push_back(idx);
+        }
+        return out;
+      };
+      std::vector<int> trk_truth     = truthGate(trk_all);
+      std::vector<int> trk_truth_cen = truthGate(trk_all_cen);
+
+      // Event-level "clean timing" gate for the WAVeS oracle row.
+      const bool clean_ok =
+        (calcHSTimingPurity(trk_z, &branch) >= CLEAN_TIMING_PURITY);
+
       // Build per-scenario sets once per event for O(1) ghost-index lookup.
-      struct TrackSets { std::unordered_set<int> all, hgtd, trkptz, waves; };
+      struct TrackSets { std::unordered_set<int> all, hgtd, trkptz, waves, truth; };
       TrackSets fwd{ {trk_all.begin(),    trk_all.end()},
                      {trk_hgtd.begin(),   trk_hgtd.end()},
                      {trk_trkptz.begin(), trk_trkptz.end()},
-                     {trk_waves.begin(),  trk_waves.end()} };
+                     {trk_waves.begin(),  trk_waves.end()},
+                     {trk_truth.begin(),  trk_truth.end()} };
       TrackSets cen{ {trk_all_cen.begin(),    trk_all_cen.end()},
                      {trk_hgtd_cen.begin(),   trk_hgtd_cen.end()},
                      {trk_trkptz_cen.begin(), trk_trkptz_cen.end()},
-                     {trk_waves_cen.begin(),  trk_waves_cen.end()} };
+                     {trk_waves_cen.begin(),  trk_waves_cen.end()},
+                     {trk_truth_cen.begin(),  trk_truth_cen.end()} };
 
       // ── Fill jets into pT slices. ─────────────────────────────────────────────
       // eta_min/eta_max select the acceptance; do_floor is false for the central
@@ -685,6 +740,8 @@ int main(int argc, char** argv) {
           fill(sv[1], S.hgtd);                        // HGTD t0 (Athena)
           fill(sv[2], S.trkptz);                      // TRKPTZ t0
           fill(sv[3], S.waves);                       // WAVeS t0
+          fill(sv[4], S.waves, clean_ok);             // WAVeS, clean-timing events only
+          fill(sv[5], S.truth);                       // truth t0, 10 (+) 30 ps
 
           // How the WAVeS gate moved this jet's R_pT relative to ITk-only.
           // Forward only (do_floor marks the forward calls): central is outside
@@ -800,6 +857,8 @@ int main(int argc, char** argv) {
             put(sv[1], fwd.hgtd);
             put(sv[2], fwd.trkptz);
             put(sv[3], fwd.waves);
+            if (clean_ok) put(sv[4], fwd.waves);
+            put(sv[5], fwd.truth);
           };
 
           // Per-jet RpT under the no-timing baseline and under WAVeS, used both
