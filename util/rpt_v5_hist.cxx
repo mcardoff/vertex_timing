@@ -655,69 +655,87 @@ int main(int argc, char** argv) {
         accum(t_waves,  var_waves,  waves_ok,       state.pull_dt2_waves,  state.pull_var_waves,  state.pull_n_waves, state.pull_dt_waves, state.pull_ntail_waves);
       }
 
-      // ── Truth-t0 reference scenario ────────────────────────────────────────
-      // Smear once per TRACK (not per list), so a track appearing in both the
-      // forward and central association lists carries the same time in each.
+      // ── Idealised-timing reference scenarios ──────────────────────────────
+      // Smeared times are generated ONCE per track here and then used for both
+      // the re-clustering below and the gates, so the vertex time and the track
+      // times a row is gated against always come from the same world. Building
+      // them separately would mean clustering on one draw and gating on
+      // another, which is what made the earlier version incoherent.
+      //
+      // Only tracks HGTD actually timed are smeared -- idealising the time of a
+      // track the detector never measured would invent coverage it does not
+      // have, which the central baseline catches immediately.
+      //
+      // Mirrors getSmearedTrackTime's priority (particle production time, then
+      // truth vertex time, then a pileup draw) but uses this thread's RNG:
+      // that helper draws from the GLOBAL gRandom, which is a data race under
+      // TTreeProcessorMT -- the same class of bug as the TColor race.
       {
         UInt_t sd = (UInt_t)std::llround(std::abs(branch.truthVtxZ[0])    * 1e4)
                   ^ ((UInt_t)std::llround(std::abs(branch.truthVtxTime[0]) * 1e3) << 11)
                   ^ ((UInt_t)branch.trackZ0.GetSize() << 23);
         state.rng.SetSeed(sd ? sd : 1u);
       }
-      const double t_truth_vtx = state.rng.Gaus(branch.truthVtxTime[0], TRUTH_VTX_SMEAR);
-      const size_t nTrkAll = branch.trackZ0.GetSize();
-      std::vector<float> t_truth_trk(nTrkAll, 0.f);
-      std::vector<char>  t_truth_ok (nTrkAll, 0);
-      for (size_t i = 0; i < nTrkAll; ++i) {
-        int tv = branch.trackToTruthvtx[i];
-        if (tv < 0 || tv >= (int)branch.truthVtxTime.GetSize()) continue;
-        t_truth_trk[i] = (float)state.rng.Gaus(branch.truthVtxTime[tv], TRUTH_TRK_SMEAR);
-        t_truth_ok[i]  = 1;
+      std::unordered_map<int, double> smTimes, smRes;
+      for (size_t i = 0; i < branch.trackZ0.GetSize(); ++i) {
+        if (branch.trackTimeValid[i] != 1) continue;
+        const int pi = branch.trackToParticle[i];
+        const int vi = branch.trackToTruthvtx[i];
+        double tPart;
+        if (pi != -1)      tPart = branch.particleT[pi];
+        else if (vi != -1) tPart = branch.truthVtxTime[vi];
+        else               tPart = state.rng.Gaus(branch.truthVtxTime[0], PILEUP_SMEAR);
+        smTimes.emplace((int)i, state.rng.Gaus(tPart, TRUTH_TRK_SMEAR));
+        smRes.emplace((int)i, TRUTH_TRK_SMEAR);
       }
-      // Same pull form as applyTimeGate, with infl = 1: these sigmas are exact
-      // by construction, so there is nothing to inflate. A track with no truth
-      // vertex link is kept unconditionally, as an untimed track would be.
-      auto truthGate = [&](const std::vector<int>& base) {
-        std::vector<int> out; out.reserve(base.size());
-        const double den = std::sqrt(TRUTH_VTX_SMEAR * TRUTH_VTX_SMEAR
-                                   + TRUTH_TRK_SMEAR * TRUTH_TRK_SMEAR);
-        for (int idx : base) {
-          // Only where HGTD actually measured. Idealising the TIME of a track
-          // the detector never timed would invent coverage it does not have --
-          // which shows up immediately in the central baseline, where |eta| <
-          // 2.4 is outside acceptance and every timing row must therefore lie
-          // exactly on ITk-only. The reference macro omits this check because
-          // it only ever looks at forward jets, where the distinction is moot.
-          if (branch.trackTimeValid[idx] != 1) { out.push_back(idx); continue; }
-          if (!t_truth_ok[idx]) { out.push_back(idx); continue; }
-          if (std::abs(t_truth_trk[idx] - t_truth_vtx) / den < GATE_SIGMA) out.push_back(idx);
-        }
-        return out;
-      };
-      std::vector<int> trk_truth     = truthGate(trk_all);
-      std::vector<int> trk_truth_cen = truthGate(trk_all_cen);
 
-      // Same idealised track times, gated against the REAL WAVeS vertex time
-      // instead of the smeared truth one, so this row and the truth row differ
-      // in exactly one variable: where the vertex time comes from. Both respect
-      // HGTD coverage (see truthGate), so an untimed track is untouched here
-      // just as it is in every real scenario. The vertex sigma is still the
-      // real cluster's and carries its inflation; the track sigma is exactly
-      // 30 ps by construction.
-      auto smearGate = [&](const std::vector<int>& base, double t_vtx,
-                           double var_vtx, bool vtx_ok, double infl) {
+      // Re-cluster in the idealised world and re-select with the WAVeS score.
+      // The cluster structure depends on the track times, so reusing the t0
+      // built from the real times would evaluate good tracks against a vertex
+      // time derived from noisy ones. values[0] is the cluster's own weighted
+      // mean of the smeared times -- calculateTime() would recompute it from
+      // the REAL branch times and reintroduce exactly that mismatch.
+      double t_wsm = 0.0, var_wsm = 0.0;
+      bool   wsm_ok = false;
+      {
+        auto cl_sm = makeSimpleClusters(trk_z, &branch, /*useSmearedTimes=*/true,
+                                        smTimes, smRes, /*checkTimeValid=*/true,
+                                        /*usez0=*/false);
+        doIterativeClustering(&cl_sm, DIST_CUT_CONE);
+        for (Cluster& c : cl_sm) c.updateScores(&branch);
+        if (!cl_sm.empty()) {
+          auto best_sm = chooseCluster(cl_sm, Score::WAVES);
+          t_wsm   = best_sm.values[0];
+          var_wsm = best_sm.sigmas[0] * best_sm.sigmas[0];
+          wsm_ok  = true;
+        }
+      }
+
+      const double t_truth_vtx = state.rng.Gaus(branch.truthVtxTime[0], TRUTH_VTX_SMEAR);
+
+      // Shared gate: idealised track times against whichever vertex time.
+      auto smearedGate = [&](const std::vector<int>& base, double t_vtx,
+                             double var_vtx, bool vtx_ok, double infl) {
         std::vector<int> out; out.reserve(base.size());
         const double den = std::sqrt(infl * infl * var_vtx
                                    + TRUTH_TRK_SMEAR * TRUTH_TRK_SMEAR);
         for (int idx : base) {
-          if (branch.trackTimeValid[idx] != 1) { out.push_back(idx); continue; }
-          if (!vtx_ok || !t_truth_ok[idx] || den <= 0) { out.push_back(idx); continue; }
-          if (std::abs(t_truth_trk[idx] - t_vtx) / den < GATE_SIGMA) out.push_back(idx);
+          auto it = smTimes.find(idx);
+          if (!vtx_ok || it == smTimes.end() || den <= 0) { out.push_back(idx); continue; }
+          if (std::abs(it->second - t_vtx) / den < GATE_SIGMA) out.push_back(idx);
         }
         return out;
       };
-      std::vector<int> trk_wsm     = smearGate(trk_all,     t_waves, var_waves, waves_ok, INFL.waves);
-      std::vector<int> trk_wsm_cen = smearGate(trk_all_cen, t_waves, var_waves, waves_ok, INFL.waves);
+
+      // Truth row: ideal vertex time (10 ps) + the same ideal track times, so
+      // it differs from the WAVeS-smeared row in exactly one variable.
+      std::vector<int> trk_truth     = smearedGate(trk_all,     t_truth_vtx,
+                                                   TRUTH_VTX_SMEAR * TRUTH_VTX_SMEAR, true, 1.0);
+      std::vector<int> trk_truth_cen = smearedGate(trk_all_cen, t_truth_vtx,
+                                                   TRUTH_VTX_SMEAR * TRUTH_VTX_SMEAR, true, 1.0);
+
+      std::vector<int> trk_wsm     = smearedGate(trk_all,     t_wsm, var_wsm, wsm_ok, INFL.waves);
+      std::vector<int> trk_wsm_cen = smearedGate(trk_all_cen, t_wsm, var_wsm, wsm_ok, INFL.waves);
 
       // Build per-scenario sets once per event for O(1) ghost-index lookup.
       struct TrackSets { std::unordered_set<int> all, hgtd, trkptz, waves, waves_smear, truth; };
