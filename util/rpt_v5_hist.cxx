@@ -74,11 +74,6 @@ static constexpr double CENTRAL_ETA_MAX = JET_ETA_MIN;
 // oracle.
 static constexpr float MISAS_PURITY_CUT = 0.75f;
 
-// Event-level HS timing purity above which an event counts as "clean timing".
-// Matches the Score::WAVES_MISAS gate in event_processing.h so the purple curve
-// means the same thing here as in the clustering plots.
-static constexpr float CLEAN_TIMING_PURITY = 0.95f;
-
 // Reference-study truth-t0 smearing (util/myJet_ana_fr.C).
 static constexpr double TRUTH_VTX_SMEAR = 10.0;  // ps, on the HS vertex time
 static constexpr double TRUTH_TRK_SMEAR = 30.0;  // ps, on each track's own vertex time
@@ -687,6 +682,13 @@ int main(int argc, char** argv) {
         const double den = std::sqrt(TRUTH_VTX_SMEAR * TRUTH_VTX_SMEAR
                                    + TRUTH_TRK_SMEAR * TRUTH_TRK_SMEAR);
         for (int idx : base) {
+          // Only where HGTD actually measured. Idealising the TIME of a track
+          // the detector never timed would invent coverage it does not have --
+          // which shows up immediately in the central baseline, where |eta| <
+          // 2.4 is outside acceptance and every timing row must therefore lie
+          // exactly on ITk-only. The reference macro omits this check because
+          // it only ever looks at forward jets, where the distinction is moot.
+          if (branch.trackTimeValid[idx] != 1) { out.push_back(idx); continue; }
           if (!t_truth_ok[idx]) { out.push_back(idx); continue; }
           if (std::abs(t_truth_trk[idx] - t_truth_vtx) / den < GATE_SIGMA) out.push_back(idx);
         }
@@ -695,21 +697,41 @@ int main(int argc, char** argv) {
       std::vector<int> trk_truth     = truthGate(trk_all);
       std::vector<int> trk_truth_cen = truthGate(trk_all_cen);
 
-      // Event-level "clean timing" gate for the WAVeS oracle row.
-      const bool clean_ok =
-        (calcHSTimingPurity(trk_z, &branch) >= CLEAN_TIMING_PURITY);
+      // Same idealised track times, gated against the REAL WAVeS vertex time
+      // instead of the smeared truth one, so this row and the truth row differ
+      // in exactly one variable: where the vertex time comes from. Both respect
+      // HGTD coverage (see truthGate), so an untimed track is untouched here
+      // just as it is in every real scenario. The vertex sigma is still the
+      // real cluster's and carries its inflation; the track sigma is exactly
+      // 30 ps by construction.
+      auto smearGate = [&](const std::vector<int>& base, double t_vtx,
+                           double var_vtx, bool vtx_ok, double infl) {
+        std::vector<int> out; out.reserve(base.size());
+        const double den = std::sqrt(infl * infl * var_vtx
+                                   + TRUTH_TRK_SMEAR * TRUTH_TRK_SMEAR);
+        for (int idx : base) {
+          if (branch.trackTimeValid[idx] != 1) { out.push_back(idx); continue; }
+          if (!vtx_ok || !t_truth_ok[idx] || den <= 0) { out.push_back(idx); continue; }
+          if (std::abs(t_truth_trk[idx] - t_vtx) / den < GATE_SIGMA) out.push_back(idx);
+        }
+        return out;
+      };
+      std::vector<int> trk_wsm     = smearGate(trk_all,     t_waves, var_waves, waves_ok, INFL.waves);
+      std::vector<int> trk_wsm_cen = smearGate(trk_all_cen, t_waves, var_waves, waves_ok, INFL.waves);
 
       // Build per-scenario sets once per event for O(1) ghost-index lookup.
-      struct TrackSets { std::unordered_set<int> all, hgtd, trkptz, waves, truth; };
+      struct TrackSets { std::unordered_set<int> all, hgtd, trkptz, waves, waves_smear, truth; };
       TrackSets fwd{ {trk_all.begin(),    trk_all.end()},
                      {trk_hgtd.begin(),   trk_hgtd.end()},
                      {trk_trkptz.begin(), trk_trkptz.end()},
                      {trk_waves.begin(),  trk_waves.end()},
+                     {trk_wsm.begin(),    trk_wsm.end()},
                      {trk_truth.begin(),  trk_truth.end()} };
       TrackSets cen{ {trk_all_cen.begin(),    trk_all_cen.end()},
                      {trk_hgtd_cen.begin(),   trk_hgtd_cen.end()},
                      {trk_trkptz_cen.begin(), trk_trkptz_cen.end()},
                      {trk_waves_cen.begin(),  trk_waves_cen.end()},
+                     {trk_wsm_cen.begin(),    trk_wsm_cen.end()},
                      {trk_truth_cen.begin(),  trk_truth_cen.end()} };
 
       // ── Fill jets into pT slices. ─────────────────────────────────────────────
@@ -740,7 +762,7 @@ int main(int argc, char** argv) {
           fill(sv[1], S.hgtd);                        // HGTD t0 (Athena)
           fill(sv[2], S.trkptz);                      // TRKPTZ t0
           fill(sv[3], S.waves);                       // WAVeS t0
-          fill(sv[4], S.waves, clean_ok);             // WAVeS, clean-timing events only
+          fill(sv[4], S.waves_smear);                 // WAVeS t0, idealised 30 ps tracks
           fill(sv[5], S.truth);                       // truth t0, 10 (+) 30 ps
 
           // How the WAVeS gate moved this jet's R_pT relative to ITk-only.
@@ -857,7 +879,7 @@ int main(int argc, char** argv) {
             put(sv[1], fwd.hgtd);
             put(sv[2], fwd.trkptz);
             put(sv[3], fwd.waves);
-            if (clean_ok) put(sv[4], fwd.waves);
+            put(sv[4], fwd.waves_smear);
             put(sv[5], fwd.truth);
           };
 
