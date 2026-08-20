@@ -68,24 +68,13 @@ inline std::vector<Scenario> makeScenarios(const std::string& suffix) {
     {"hgtd",        "HGTD t_{0} (Athena)",         C01, nullptr, nullptr},
     {"trkptz",      "TRKPTZ t_{0}",                C02, nullptr, nullptr},
     {"waves",       "WAVeS t_{0}",                 C03, nullptr, nullptr},
-    // The real WAVeS vertex time, but with idealised 30 ps track times. Every
-    // event and every jet still enters, so unlike an event-purity oracle this
-    // changes no denominator. Paired with the truth row below it isolates one
-    // variable: the two differ ONLY in where the vertex time comes from, so
-    // the gap between them is the cost of our t0 selection and the gap from
-    // WAVeS up to here is the cost of real per-track timing.
-    {"waves_smear", "WAVeS t_{0}, 30 ps tracks",   C04, nullptr, nullptr},
-    // Reference-study truth t0: vertex time = Gaus(truth HS vertex, 10 ps),
-    // track time = Gaus(the track's OWN truth vertex, 30 ps) -- the 30 ps is
-    // what carries HS/PU separation, since a pileup track inherits its own
-    // vertex's time ~175 ps away. Gated with the same pull as everything else.
-    // ORACLE: same clusters, same real track times, but the cluster whose TIME
-    // is closest to the truth HS vertex is selected. Needs truth, so it is not
-    // deployable -- it is the ceiling any selector could reach on the current
-    // clustering, and the gap from the WAVeS row is what a perfect selector
-    // would buy. It cannot repair a cluster whose HS energy was SPLIT, since
-    // choosing among existing clusters cannot merge them.
-    {"waves_pure",  "Best-time cluster [oracle]",  C08, nullptr, nullptr},
+    // Idealised WAVeS: our clustering, but with BOTH idealisations at once --
+    // 30 ps track times, and the cluster selected by smallest |t - t_truth|
+    // instead of by score. It is the ceiling of our approach, so the gap up
+    // from the WAVeS row is what real times plus imperfect selection cost, and
+    // the gap remaining to the truth row is what the CLUSTERING itself costs.
+    // Needs truth for the selection, so it is an oracle, not deployable.
+    {"waves_ideal", "Idealised WAVeS [oracle]",    C04, nullptr, nullptr},
     {"truth",       "Truth t_{0} (10#oplus30 ps)",  C06, nullptr, nullptr},
   };
   for (auto& sc : s) {
