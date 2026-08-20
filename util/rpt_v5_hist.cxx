@@ -306,6 +306,35 @@ static void mergeRegionCases(std::vector<RegionCase>& dst,
 }
 
 // -----------------------------------------------------------------------------
+// EventCase — a display candidate for the non-region categories.
+//   Separate from RegionCase because these rank on event-level timing quality
+//   rather than on a jet pair, and carry no leg indices: no --jet_idx is
+//   emitted for them, so the wedges keep their truth colouring.
+// -----------------------------------------------------------------------------
+struct EventCase {
+  std::string file_path;
+  Long64_t    entry;
+  double      t_show, metric, v1, v2, v3;
+};
+
+static void insertEventCase(std::vector<EventCase>& v, EventCase c,
+                            int max_n = N_REGION_DISPLAYS) {
+  v.push_back(std::move(c));
+  std::sort(v.begin(), v.end(), [](const EventCase& a, const EventCase& b) {
+    return a.metric > b.metric; });
+  if ((int)v.size() > max_n) v.resize(max_n);
+}
+
+static void mergeEventCases(std::vector<EventCase>& dst,
+                            std::vector<EventCase>& src,
+                            int max_n = N_REGION_DISPLAYS) {
+  for (auto& c : src) dst.push_back(std::move(c));
+  std::sort(dst.begin(), dst.end(), [](const EventCase& a, const EventCase& b) {
+    return a.metric > b.metric; });
+  if ((int)dst.size() > max_n) dst.resize(max_n);
+}
+
+// -----------------------------------------------------------------------------
 // ThreadState
 //   Everything one worker thread accumulates across whatever task ranges it
 //   services: its own copy of the two pT-slice Scenario sets (each worker's
@@ -350,6 +379,7 @@ struct ThreadState {
 
   // Event-display candidates, R1/R2 only (see RegionCase doc comment above).
   std::vector<RegionCase> cases_r1, cases_r2;
+  std::vector<EventCase>  cases_mis, cases_wwin;
   // Per-scenario pull-width accumulators (see PRINT_PULL_DIAG).
   double pull_dt2_hgtd = 0, pull_var_hgtd = 0;
   double pull_dt2_trkptz = 0, pull_var_trkptz = 0;
@@ -842,6 +872,34 @@ int main(int argc, char** argv) {
       std::string filePath   = reader.GetTree()->GetCurrentFile()->GetName();
       Long64_t    localEntry = reader.GetTree()->GetReadEntry();
 
+      // ── Display candidates: track-time misassociation, and WAVeS-vs-TRKPTZ.
+      if (PRINT_EVENT_DISPLAYS) {
+        const double tTruth = branch.truthVtxTime[0];
+        int nTimedHS = 0;
+        for (int idx : trk_z)
+          if (branch.trackToTruthvtx[idx] == 0 && branch.trackTimeValid[idx] == 1) ++nTimedHS;
+        const float pur = calcHSTimingPurity(trk_z, &branch);
+
+        // Misassociation: forward HS tracks whose HGTD times disagree with
+        // truth. Requires a decently populated event, else "low purity" is one
+        // bad track; weighted by multiplicity so the picks are visually busy
+        // enough to read on a slide.
+        if (nTimedHS >= 5 && pur < 0.5f && waves_ok)
+          insertEventCase(state.cases_mis,
+                          {filePath, localEntry, t_waves,
+                           (1.0 - pur) * std::min(nTimedHS, 20),
+                           pur, (double)nTimedHS, t_waves - tTruth});
+
+        // WAVeS lands on truth where the TRKPTZ baseline does not -- the case
+        // the score change exists for.
+        if (waves_ok && trkptz_ok) {
+          const double dW = std::abs(t_waves - tTruth), dT = std::abs(t_trkptz - tTruth);
+          if (dW < 40.0 && dT > 120.0)
+            insertEventCase(state.cases_wwin,
+                            {filePath, localEntry, t_waves, dT - dW, dW, dT, 0.0});
+        }
+      }
+
       // ── VBS-topology regions ────────────────────────────────────────────────
       // Two topologies where forward timing is the deciding information, taken
       // off the SAME VBS candidate pair the clustering-side selection uses
@@ -1019,6 +1077,8 @@ int main(int argc, char** argv) {
     merged.pull_dt2_waves  += other.pull_dt2_waves;  merged.pull_var_waves  += other.pull_var_waves;  merged.pull_n_waves  += other.pull_n_waves;  merged.pull_dt_waves += other.pull_dt_waves;  merged.pull_ntail_waves += other.pull_ntail_waves;
     mergeRegionCases(merged.cases_r1, other.cases_r1);
     mergeRegionCases(merged.cases_r2, other.cases_r2);
+    mergeEventCases (merged.cases_mis,  other.cases_mis);
+    mergeEventCases (merged.cases_wwin, other.cases_wwin);
   }
 
   std::cout << "\nFINISHED PROCESSING\n";
@@ -1128,6 +1188,28 @@ int main(int argc, char** argv) {
   //     it impossible to tell which commands belonged to which study. The
   //     regions are the focus, so the display output is theirs alone.
   if (PRINT_EVENT_DISPLAYS) {
+    auto printEvents = [](const char* title, const char* desc,
+                          const std::vector<EventCase>& cases, const char* fmt) {
+      std::cout << "\n=== " << title << " ===\n  " << desc << "\n\n";
+      if (cases.empty()) { std::cout << "  (none found)\n"; return; }
+      for (const auto& c : cases) {
+        std::printf(fmt, c.v1, c.v2, c.v3);
+        std::printf("  cd python && python3 event_display.py --file_path \"%s\""
+                    " --event_num %lld --extra_time %.2f\n\n",
+                    c.file_path.c_str(), c.entry, c.t_show);
+      }
+    };
+    printEvents("TRACK-TIME MISASSOCIATION",
+                "Forward HS tracks whose HGTD times disagree with truth: the "
+                "times themselves are wrong, not merely imprecise.",
+                merged.cases_mis,
+                "  HS timing purity=%.2f  (%.0f timed HS tracks)  "
+                "t_waves - t_truth = %+.1f ps\n");
+    printEvents("WAVeS BEATS TRKPTZ",
+                "WAVeS lands on the truth time while the TRKPTZ baseline does not.",
+                merged.cases_wwin,
+                "  |dt|: WAVeS=%.1f ps  TRKPTZ=%.1f ps%.0s\n");
+
     auto printRegion = [](const char* title, const char* metric_desc,
                           const std::vector<RegionCase>& cases, bool isR1) {
       std::cout << "\n=== " << title << " ===\n";
