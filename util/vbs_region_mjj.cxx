@@ -88,10 +88,10 @@ namespace {
   // match within dR 0.6 above 4 GeV -- so a jet between the two cones is
   // neither, and those events have to land somewhere. It also holds the mixed
   // pairs whose second leg is beyond |eta| = MAX_ABS_ETA_JET.
-  enum Cat { R1 = 0, R2, R3, BOTH_HS, BOTH_PU, OTHER, NO_ACC, NCAT };
+  enum Cat { R1 = 0, R2, R3, BOTH_HS, OTHER, NCAT };
 
   const std::array<const char*, NCAT> CAT_KEY = {
-    "r1", "r2", "r3", "both_hs", "both_pu", "other", "no_acc"
+    "r1", "r2", "r3", "both_hs", "other"
   };
 
   const std::array<const char*, NCAT> CAT_LABEL = {
@@ -99,36 +99,20 @@ namespace {
     "R2: fwd PU + central HS",
     "R3: fwd HS + central PU",
     "Both tags truth-HS",
-    "Both tags pileup",
-    "Other",
-    "Neither tag in HGTD acceptance"
+    "Other"
   };
 
-  // Palette carries the message: the three topologies HGTD can act on are
-  // saturated and mutually distinct, everything it cannot reach is muted. Two
-  // greys rather than four so the neutral block stays legible; brown and violet
-  // keep the middle two separable without competing with the regions.
-  const std::array<Color_t, NCAT> CAT_COLOR = {
-    C01,        // R1       blue   -+
-    C02,        // R2       red     |- HGTD can contribute
-    C08,        // R3       green  -+
-    kGray,      // both HS  (dominant, so the lightest of the neutrals)
-    C06,        // both PU  brown
-    C04,        // other    violet
-    kGray + 2   // no acc.  dark grey
-  };
+  // The project palette, in registry order.
+  const std::array<Color_t, NCAT> CAT_COLOR = { C01, C02, C03, C04, C05 };
 
   // ── m_jj binning ─────────────────────────────────────────────────────────
-  // Starts at the 500 GeV analysis working point: below it the sample is not
-  // the one the analysis runs on, and including it compressed everything above
-  // into half the axis. Events below 500 are dropped from the plot and counted
-  // separately in the summary, so the exclusion is stated rather than implied.
-  //
   // Variable width: narrow where the spectrum is steep and every sample has
   // events, widening into the tail so Z+jets columns are not built from a
-  // handful of events.
+  // handful of events. 500 is deliberately an edge -- it is the analysis working
+  // point, marked with a line on the plot, so the columns to its left are
+  // exactly the events the cut throws away.
   const std::vector<double> MJJ_EDGES = {
-    500, 750, 1000, 1250, 1500, 1750, 2000, 2500, 3000, 4000
+    0, 250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500, 3000, 4000
   };
 
   // ── Region eta window ────────────────────────────────────────────────────
@@ -202,6 +186,9 @@ int main(int argc, char** argv) {
 
   long nSeen = 0, nSel = 0, nNoPair = 0, nBelowMjj = 0;
   long nDisagreeR1 = 0, nDisagreeR2 = 0;
+  // Merged into OTHER on the stack, but still counted: the plot got simpler,
+  // the information did not have to be thrown away.
+  long nNoAcc = 0, nBothPU = 0;
   std::array<long, NCAT> nCat{};
 
   // Where OTHER's mixed-truth events actually sit, so the residual does not
@@ -284,11 +271,14 @@ int main(int argc, char** argv) {
     if      (isR1) cat = R1;
     else if (isR2) cat = R2;
     else if (isR3) cat = R3;
-    // Nothing timeable at all. Checked before the truth split on purpose: see
-    // the NO_ACC note on the enum.
-    else if (zA != 1 && zB != 1) cat = NO_ACC;
-    else if (hsA && hsB)         cat = BOTH_HS;
-    else if (puA && puB)         cat = BOTH_PU;
+    // Nothing timeable at all. Still checked BEFORE the truth split, so an
+    // out-of-acceptance pair lands in OTHER whatever its tags truly are --
+    // "Both tags truth-HS" therefore means a genuine VBF pair with at least one
+    // leg HGTD could actually measure, which is the only version of that
+    // category the question cares about.
+    else if (zA != 1 && zB != 1) { cat = OTHER; ++nNoAcc; }
+    else if (hsA && hsB)           cat = BOTH_HS;
+    else if (puA && puB)         { cat = OTHER; ++nBothPU; }
     else {
       cat = OTHER;
       if ((hsA && puB) || (hsB && puA)) {
@@ -354,9 +344,15 @@ int main(int argc, char** argv) {
   stk->SetMinimum(0.0);
   c1->Modified();
 
-  // ATLAS labels on top, legend beneath them. The 500 GeV cut line that used to
-  // sit here is gone: the axis now starts at the cut, so it would just redraw
-  // the frame edge.
+  // Mark the analysis working point. 500 is a bin edge (see MJJ_EDGES), so the
+  // line falls between columns rather than cutting one in half.
+  TLine* cut = new TLine(500.0, 0.0, 500.0, 1.0);
+  cut->SetLineStyle(2);
+  cut->SetLineWidth(2);
+  cut->SetLineColor(kBlack);
+  cut->Draw();
+
+  // ATLAS labels on top, legend beneath them.
   ATLASLabel(0.18, 0.90, "Simulation Internal");
   ATLASEnergyLabel(0.18, 0.855, MyUtl::ENERGY_LABEL.c_str());
 
@@ -364,6 +360,7 @@ int main(int argc, char** argv) {
   StyleLegend(leg);
   leg->SetNColumns(2);
   for (int c = 0; c < NCAT; ++c) leg->AddEntry(frac[c], CAT_LABEL[c], "f");
+  leg->AddEntry(cut, "m_{jj} = 500 GeV (analysis cut)", "l");
   leg->Draw();
 
   c1->Print(pdf.c_str());
@@ -415,8 +412,11 @@ int main(int argc, char** argv) {
   printf("  Passing selection, with a pair   : %8ld  (%.2f%% of read)\n",
          nSel, nSeen ? 100.0 * nSel / nSeen : 0.0);
   printf("    excluded: no opp.-hemisphere pair : %8ld\n", nNoPair);
-  printf("    excluded: m_jj below %.0f GeV        : %8ld\n",
-         MJJ_EDGES.front(), nBelowMjj);
+  // Only meaningful when the axis has a floor above 0; silent otherwise rather
+  // than printing a guaranteed zero.
+  if (MJJ_EDGES.front() > 0.0)
+    printf("    excluded: m_jj below %.0f GeV      : %8ld\n",
+           MJJ_EDGES.front(), nBelowMjj);
   printf("  Plotted (denominator of every column): %8ld\n", nSel - nBelowMjj);
   const long nPlot = nSel - nBelowMjj;
   printf("\n  %-34s %10s %9s\n", "category", "events", "of plotted");
@@ -435,6 +435,11 @@ int main(int argc, char** argv) {
            "      The category ladder is not exhaustive; every column's stack\n"
            "      is therefore normalised against the wrong denominator.\n",
            sum, nPlot);
+
+  printf("\n  \"Other\" is made of: neither tag in HGTD acceptance %ld (%.2f%%),\n"
+         "                     both tags pileup %ld (%.2f%%), and the rest below.\n",
+         nNoAcc,  nPlot ? 100.0 * nNoAcc  / nPlot : 0.0,
+         nBothPU, nPlot ? 100.0 * nBothPU / nPlot : 0.0);
 
   // The headline this plot exists to give.
   const long nReach = nCat[R1] + nCat[R2] + nCat[R3];
