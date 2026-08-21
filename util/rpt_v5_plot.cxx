@@ -158,6 +158,10 @@ int main(int argc, char** argv) {
   // its ROC borrows scen_r1's HS side -- see SECTION 2b.
   std::vector<Scenario> scen_r1 = makeScenarios("_r1");
   std::vector<Scenario> scen_r2 = makeScenarios("_r2");
+  // R3 is self-contained, unlike R2: h_hs holds the confirmed genuine tag,
+  // h_pu holds OTHER forward truth-PU jets in the SAME event (not a borrowed
+  // leg), so it gets its own real ROC rather than R2's cross-region one.
+  std::vector<Scenario> scen_r3 = makeScenarios("_r3");
   long n_total, n_pass_basic, n_hgtd_valid;
   double pu_tot_pt, pu_floor_pt, hs_tot_pt, hs_floor_pt;
   double pu_tot_lo, pu_floor_lo, hs_tot_lo, hs_floor_lo;
@@ -167,6 +171,7 @@ int main(int argc, char** argv) {
     loadScenarios(reader, scen_hi);
     loadScenarios(reader, scen_r1);
     loadScenarios(reader, scen_r2);
+    loadScenarios(reader, scen_r3);
     loadScenarios(reader, scen_lo_cen);
     loadScenarios(reader, scen_hi_cen);
     n_total      = reader.ReadScalarLong("meta_n_total");
@@ -189,12 +194,26 @@ int main(int argc, char** argv) {
   TCanvas* canvas = new TCanvas("canvas", "RpT v5", 800, 700);
   canvas->Print(out_pdf + "[");
 
+  // Selection annotation, wrapped on "@@" (see the identical convention and
+  // its rationale in SECTION 4's ROC-page label drawer below: not a width
+  // estimate, since TLatex markup means glyph count != string length, and "|"
+  // cannot be the delimiter since it appears in every |#eta| label). This
+  // drawLabels has no legend to dodge, unlike the ROC page's, so lines just
+  // stack directly below the energy label.
   auto drawLabels = [](const char* extra = nullptr) {
     ATLASLabel(0.18, 0.88, "Simulation Internal");
     ATLASEnergyLabel(0.18, 0.82, MyUtl::ENERGY_LABEL.c_str());
     if (extra) {
       TLatex t; t.SetNDC(); t.SetTextFont(42); t.SetTextSize(0.032);
-      t.DrawLatex(0.18, 0.76, extra);
+      const std::string el(extra);
+      double ly = 0.76;
+      for (size_t pos = 0;;) {
+        const size_t d = el.find("@@", pos);
+        t.DrawLatex(0.18, ly, el.substr(pos, d == std::string::npos ? d : d - pos).c_str());
+        ly -= 0.05;
+        if (d == std::string::npos) break;
+        pos = d + 2;
+      }
     }
   };
   const char* lbl_lo = "30 < p_{T}^{jet} < 40 GeV@@2.4 < |#eta| < 3.8";
@@ -204,6 +223,7 @@ int main(int argc, char** argv) {
   const char* lbl_hi_cen = "p_{T}^{jet} > 40 GeV@@|#eta| < 2.4@@[central baseline]";
   const char* lbl_r1 = "VBS R1: both tags fwd@@HS leg vs PU leg@@p_{T}^{jet} > 30 GeV";
   const char* lbl_r2 = "VBS R2: fwd PU + cen. HS@@signal side from R1";
+  const char* lbl_r3 = "VBS R3: fwd HS + cen. PU@@confirmed tag vs other fwd PU jets@@p_{T}^{jet} > 30 GeV";
 
   // ===========================================================================
   // SECTION 2: Derive every Integral()/GetMean()-based number. styleScen is
@@ -251,6 +271,12 @@ int main(int argc, char** argv) {
     rocs_r2.push_back(generate_roc_grid(scen_r2[i].h_pu, scen_r1[i].h_hs, effGrid));
   // (styled below, once styleRoc is in scope)
 
+  // R3 is self-contained too, like R1: h_hs is the confirmed genuine tag,
+  // h_pu is OTHER forward truth-PU jets from the SAME events (not a leg
+  // borrowed from another region), so its ROC needs no cross-region pairing.
+  std::vector<TGraph*> rocs_r3;
+  for (auto& s : scen_r3) rocs_r3.push_back(generate_roc_grid(s.h_pu, s.h_hs, effGrid));
+
   auto styleRoc = [&](TGraph* g, Color_t col, double xmin, double xmax) {
     g->SetTitle("R_{pT} Discriminant;Hard Scatter Efficiency;Pile-Up Rejection (1 / Mistag Rate)");
     g->SetLineColor(col);
@@ -271,6 +297,7 @@ int main(int argc, char** argv) {
   for (size_t i = 0; i < rocs_r1.size(); ++i) {
     styleRoc(rocs_r1[i], scen_r1[i].color, roc_xmin_default, roc_xmax_default);
     styleRoc(rocs_r2[i], scen_r2[i].color, roc_xmin_default, roc_xmax_default);
+    styleRoc(rocs_r3[i], scen_r3[i].color, roc_xmin_default, roc_xmax_default);
   }
 
   // ── Console summary ──────────────────────────────────────────────────────────
@@ -376,6 +403,7 @@ int main(int argc, char** argv) {
   styleScen(scen_hi_cen);
   styleScen(scen_r1);
   styleScen(scen_r2);
+  styleScen(scen_r3);
 
   // ===========================================================================
   // SECTION 4: PDF drawing.
@@ -535,10 +563,13 @@ int main(int argc, char** argv) {
   // maximum badly -- R1's clean-timing peaks around 880 and R2's truth around
   // 1180 against an inclusive ceiling near 640 -- so sharing it clipped the
   // top off both panels.
-  double roc_ymax_reg = 1.5 * std::max(rocYMaxIn(rocs_r1, roc_xmin_default, roc_xmax_default),
-                                       rocYMaxIn(rocs_r2, roc_xmin_default, roc_xmax_default));
+  double roc_ymax_reg = 1.5 * std::max({rocYMaxIn(rocs_r1, roc_xmin_default, roc_xmax_default),
+                                        rocYMaxIn(rocs_r2, roc_xmin_default, roc_xmax_default),
+                                        rocYMaxIn(rocs_r3, roc_xmin_default, roc_xmax_default)});
   drawRocWithRatio(rocs_r1, scen_r1, roc_ymax_reg, 4.0,
                    roc_xmin_default, roc_xmax_default, lbl_r1);
+  drawRocWithRatio(rocs_r3, scen_r3, roc_ymax_reg, 4.0,
+                   roc_xmin_default, roc_xmax_default, lbl_r3);
   drawRocWithRatio(rocs_r2, scen_r2, roc_ymax_reg, 4.0,
                    roc_xmin_default, roc_xmax_default, lbl_r2);
 
@@ -645,20 +676,36 @@ int main(int argc, char** argv) {
   //   R2  forward truth-PU leg + central truth-HS leg -- can timing reject the
   //       forward PU jet? Its ROC's signal side is R1's forward HS leg (R2 has
   //       no forward HS jet by construction); see SECTION 2b.
+  //   R3  forward truth-HS leg + central truth-PU leg (classifyVbsRegion's
+  //       strict R3), plus classifyR3Broad's "confirm" case (same story, the
+  //       untimeable leg beyond acceptance instead of central) -- can timing
+  //       avoid emptying the genuine tag? Unlike R2, R3's PU side is its OWN:
+  //       every other forward truth-PU jet in the SAME events, not a leg
+  //       borrowed from another region (see fillOtherPu in rpt_v5_hist.cxx).
+  //       classifyR3Broad's "reject" sub-cases (no genuine tag at all, or the
+  //       fake beyond acceptance) are deliberately excluded from this ROC --
+  //       they answer a different question and stay part of the composition
+  //       plot's R3 count only.
   // ===========================================================================
-  // (The two region ROCs are drawn earlier, as pages 3-4 alongside the
-  // inclusive ROCs.) What remains here is the per-region R_pT shapes.
+  // (The three region ROCs are drawn earlier, alongside the inclusive ROCs.)
+  // What remains here is the per-region R_pT shapes.
+  // legX1/legY1/legX2/legY2 default to bottom-right: every region shape
+  // filled from a fake or a PU-suppressed leg falls off well before the right
+  // edge, so that corner is normally empty. R3's confirmed-HS distribution is
+  // the one exception -- it is a REAL forward jet's R_pT, spread across most
+  // of [0, 1] rather than piled at 0, so bottom-right collides with its tail;
+  // that one call passes an explicit top-right box instead, where the curve
+  // has already fallen two decades by the time it gets there.
   auto drawRegionShapes = [&](std::vector<Scenario>& sc, bool useHS,
-                              const char* title, const char* lbl) {
+                              const char* title, const char* lbl,
+                              double legX1 = 0.58, double legY1 = 0.16,
+                              double legX2 = 0.93, double legY2 = 0.40) {
     double ymax = 0.0;
     for (auto& s : sc) ymax = std::max(ymax, (useHS ? s.h_hs : s.h_pu)->GetMaximum());
     if (ymax <= 0.0) return;  // nothing filled (e.g. R2's empty HS side)
     canvas->Clear();
     canvas->SetLogy(true);
-    // Bottom-right: the region labels are long enough to run under a top-right
-    // legend, and these distributions fall off well before the right edge, so
-    // that corner is empty.
-    TLegend* L = new TLegend(0.58, 0.16, 0.93, 0.40);
+    TLegend* L = new TLegend(legX1, legY1, legX2, legY2);
     StyleLegend(L);
     for (size_t i = 0; i < sc.size(); ++i) {
       TH1D* h = useHS ? sc[i].h_hs : sc[i].h_pu;
@@ -674,6 +721,9 @@ int main(int argc, char** argv) {
   drawRegionShapes(scen_r1, true,  "R1 forward HS leg R_{pT};R_{pT};Entries", lbl_r1);
   drawRegionShapes(scen_r1, false, "R1 forward PU leg R_{pT};R_{pT};Entries", lbl_r1);
   drawRegionShapes(scen_r2, false, "R2 forward PU leg R_{pT};R_{pT};Entries", lbl_r2);
+  drawRegionShapes(scen_r3, true,  "R3 confirmed HS tag R_{pT};R_{pT};Entries", lbl_r3,
+                   0.58, 0.57, 0.93, 0.79);
+  drawRegionShapes(scen_r3, false, "R3 other forward PU jets R_{pT};R_{pT};Entries", lbl_r3);
 
   // Region yields -- these topologies are rare, so print the counts that the
   // ROCs above are built from. A region with very few entries makes its ROC
@@ -683,6 +733,10 @@ int main(int argc, char** argv) {
   std::printf("  R1 forward PU legs : %8.0f\n", scen_r1[0].h_pu->GetEntries());
   std::printf("  R2 forward PU legs : %8.0f\n", scen_r2[0].h_pu->GetEntries());
   std::printf("  (R2 HS side is empty by construction; its ROC uses R1's HS legs)\n");
+  std::printf("  R3 confirmed HS tags     : %8.0f\n", scen_r3[0].h_hs->GetEntries());
+  std::printf("  R3 other forward PU jets : %8.0f\n", scen_r3[0].h_pu->GetEntries());
+  std::printf("  (R3 is self-contained: its PU side comes from OTHER forward jets in\n"
+              "   the same events, not from a borrowed region, so its ROC is its own)\n");
 
   canvas->Print(out_pdf + "]");
 

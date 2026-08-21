@@ -353,6 +353,13 @@ struct ThreadState {
   // would leave the ROCs statistics-limited.
   std::vector<Scenario> scen_r1 = makeScenarios("_r1");  // both VBS legs forward
   std::vector<Scenario> scen_r2 = makeScenarios("_r2");  // fwd PU leg + central HS leg
+  // R3: everything BranchPointerWrapper::classifyR3Broad matches on top of
+  // strict R3 -- see its doc comment. Mixes two sub-populations in one
+  // Scenario set: h_hs holds the genuine tag's R_pT wherever one exists and is
+  // timeable ("confirm" cases), h_pu holds the fake leg's R_pT wherever no
+  // timeable genuine tag exists ("reject" cases, R2's job with the untimeable
+  // leg moved). An event contributes to at most one of the two.
+  std::vector<Scenario> scen_r3 = makeScenarios("_r3");
   long n_total = 0, n_pass_basic = 0, n_hgtd_valid = 0;
   // Z+jets-only breakdown (see event_processing.h EventResult::code doc for the
   // analogous clustering-side counters): n_pass_basic above is vertex-quality
@@ -994,73 +1001,118 @@ int main(int argc, char** argv) {
         auto region = branch.classifyVbsRegion(JET_ETA_MIN, JET_ETA_MAX,
                                                CENTRAL_ETA_MAX, &fwdHS, &fwdPU);
 
-        if (region != VbsRegion::NONE) {
-          // Fill one jet into a region's scenario set, as HS or PU.
-          auto fillRegion = [&](std::vector<Scenario>& sv, int j, bool asHS) {
-            double j_pt  = branch.topoJetPt[j];
-            double j_eta = branch.topoJetEta[j];
-            double j_phi = branch.topoJetPhi[j];
-            const auto& ghost = branch.topoJetGhostTrackIdx[j];
-            auto put = [&](Scenario& s, const std::unordered_set<int>& s_set) {
-              double r = computeRpT(&branch, ghost, j_pt, j_eta, j_phi, s_set);
-              (asHS ? s.h_hs : s.h_pu)->Fill(r);
-            };
-            put(sv[0], fwd.all);
-            put(sv[1], fwd.hgtd);
-            put(sv[2], fwd.trkptz);
-            put(sv[3], fwd.waves);
-            put(sv[4], fwd.waves_ideal);
-            put(sv[5], fwd.truth);
+        // Fill one jet into a region's scenario set, as HS or PU. Shared by
+        // every region below R1/R2/R3 alike, so it is defined unconditionally
+        // rather than nested inside the region != NONE branch.
+        auto fillRegion = [&](std::vector<Scenario>& sv, int j, bool asHS) {
+          double j_pt  = branch.topoJetPt[j];
+          double j_eta = branch.topoJetEta[j];
+          double j_phi = branch.topoJetPhi[j];
+          const auto& ghost = branch.topoJetGhostTrackIdx[j];
+          auto put = [&](Scenario& s, const std::unordered_set<int>& s_set) {
+            double r = computeRpT(&branch, ghost, j_pt, j_eta, j_phi, s_set);
+            (asHS ? s.h_hs : s.h_pu)->Fill(r);
           };
+          put(sv[0], fwd.all);
+          put(sv[1], fwd.hgtd);
+          put(sv[2], fwd.trkptz);
+          put(sv[3], fwd.waves);
+          put(sv[4], fwd.waves_ideal);
+          put(sv[5], fwd.truth);
+        };
 
-          // Per-jet RpT under the no-timing baseline and under WAVeS, used both
-          // to fill and to rank this event as an display candidate below.
-          auto rptOf = [&](int j, const std::unordered_set<int>& s_set) {
-            return computeRpT(&branch, branch.topoJetGhostTrackIdx[j],
-                              branch.topoJetPt[j], branch.topoJetEta[j],
-                              branch.topoJetPhi[j], s_set);
-          };
+        // Per-jet RpT under the no-timing baseline and under WAVeS, used both
+        // to fill and to rank this event as an display candidate below.
+        auto rptOf = [&](int j, const std::unordered_set<int>& s_set) {
+          return computeRpT(&branch, branch.topoJetGhostTrackIdx[j],
+                            branch.topoJetPt[j], branch.topoJetEta[j],
+                            branch.topoJetPhi[j], s_set);
+        };
 
-          if (region == VbsRegion::R1) {
-            fillRegion(state.scen_r1, fwdHS, true);
-            fillRegion(state.scen_r1, fwdPU, false);
+        // R3's h_pu draws from ANY OTHER forward truth-PU jet in the event,
+        // not from the VBS pair's own legs the way R1/R2 do -- R3's pair
+        // partner is by construction either central or beyond acceptance, so
+        // it can never itself be forward+truth-PU and pass this filter. No
+        // explicit exclusion of the pair's two legs is needed for exactly
+        // that reason: the confirmed leg is truth-HS (fails the PU check),
+        // and its partner fails the forward-acceptance check.
+        //
+        // This is what gives R3 a genuine, self-contained background sample
+        // for a proper efficiency-vs-rejection ROC, instead of only the rare
+        // classifyR3Broad edge cases (fake beyond acceptance, or no genuine
+        // tag at all) -- which stay part of the "R3" bucket for the
+        // composition plot's headline count, but are deliberately left OUT of
+        // this R_pT construction: they answer a different question ("reject
+        // a fake with nothing to confirm") than "is the confirmed tag safe
+        // while nearby pileup gets rejected".
+        auto fillOtherPu = [&](std::vector<Scenario>& sv) {
+          for (int j = 0; j < (int)branch.topoJetPt.GetSize(); ++j) {
+            if (branch.isJetRemoved(j)) continue;
+            double j_pt = branch.topoJetPt[j], j_eta = branch.topoJetEta[j];
+            if (j_pt <= MIN_JET_PT) continue;
+            if (std::abs(j_eta) <= JET_ETA_MIN || std::abs(j_eta) >= JET_ETA_MAX) continue;
+            if (!branch.isJetPaperPU(j_eta, branch.topoJetPhi[j])) continue;
+            fillRegion(sv, j, /*asHS=*/false);
+          }
+        };
 
-            // Rank by how much timing changes the HS-vs-PU RpT margin. The
-            // sign matters (positive = timing widened the correct gap,
-            // negative = timing eroded or inverted it), so rank on |delta| and
-            // let the printed line say which -- one list surfaces both the
-            // rescues and the regressions rather than needing two.
-            double mZ = rptOf(fwdHS, fwd.all)   - rptOf(fwdPU, fwd.all);
-            double mW = rptOf(fwdHS, fwd.waves) - rptOf(fwdPU, fwd.waves);
-            insertRegionCase(state.cases_r1,
-                             {filePath, localEntry, fwdHS, fwdPU,
-                              branch.topoJetPt[fwdHS], branch.topoJetEta[fwdHS],
-                              branch.topoJetPt[fwdPU], branch.topoJetEta[fwdPU],
-                              mZ, mW, mW - mZ, t_waves});
-          } else {  // R2 -- forward PU leg only; no forward HS leg exists.
-            fillRegion(state.scen_r2, fwdPU, false);
+        if (region == VbsRegion::R1) {
+          fillRegion(state.scen_r1, fwdHS, true);
+          fillRegion(state.scen_r1, fwdPU, false);
 
-            // Rank by how far timing pushes the fake's RpT down: a forward PU
-            // jet with high no-timing RpT is precisely the one that fakes a
-            // tagging jet, and the drop is the rejection actually delivered.
-            double rZ = rptOf(fwdPU, fwd.all);
-            double rW = rptOf(fwdPU, fwd.waves);
-            insertRegionCase(state.cases_r2,
-                             {filePath, localEntry, -1, fwdPU,
-                              0.0, 0.0,
-                              branch.topoJetPt[fwdPU], branch.topoJetEta[fwdPU],
-                              rZ, rW, rW - rZ, t_waves});
-            // R2's SUCCESS list above is one-sided by construction:
-            // applyTimeGate returns a subset, so rW <= rZ always and every
-            // entry is "suppressed". It therefore cannot show a failure.
-            // R2 fails when a fake SURVIVES -- high RpT still standing after
-            // the gate -- which has |rW - rZ| ~ 0 and sits at the bottom of
-            // that ranking. Rank those by the surviving RpT instead.
-            insertRegionCase(state.cases_r2_fail,
-                             {filePath, localEntry, -1, fwdPU,
-                              0.0, 0.0,
-                              branch.topoJetPt[fwdPU], branch.topoJetEta[fwdPU],
-                              rZ, rW, rW, t_waves});
+          // Rank by how much timing changes the HS-vs-PU RpT margin. The
+          // sign matters (positive = timing widened the correct gap,
+          // negative = timing eroded or inverted it), so rank on |delta| and
+          // let the printed line say which -- one list surfaces both the
+          // rescues and the regressions rather than needing two.
+          double mZ = rptOf(fwdHS, fwd.all)   - rptOf(fwdPU, fwd.all);
+          double mW = rptOf(fwdHS, fwd.waves) - rptOf(fwdPU, fwd.waves);
+          insertRegionCase(state.cases_r1,
+                           {filePath, localEntry, fwdHS, fwdPU,
+                            branch.topoJetPt[fwdHS], branch.topoJetEta[fwdHS],
+                            branch.topoJetPt[fwdPU], branch.topoJetEta[fwdPU],
+                            mZ, mW, mW - mZ, t_waves});
+        } else if (region == VbsRegion::R2) {
+          // R2 -- forward PU leg only; no forward HS leg exists.
+          fillRegion(state.scen_r2, fwdPU, false);
+
+          // Rank by how far timing pushes the fake's RpT down: a forward PU
+          // jet with high no-timing RpT is precisely the one that fakes a
+          // tagging jet, and the drop is the rejection actually delivered.
+          double rZ = rptOf(fwdPU, fwd.all);
+          double rW = rptOf(fwdPU, fwd.waves);
+          insertRegionCase(state.cases_r2,
+                           {filePath, localEntry, -1, fwdPU,
+                            0.0, 0.0,
+                            branch.topoJetPt[fwdPU], branch.topoJetEta[fwdPU],
+                            rZ, rW, rW - rZ, t_waves});
+          // R2's SUCCESS list above is one-sided by construction:
+          // applyTimeGate returns a subset, so rW <= rZ always and every
+          // entry is "suppressed". It therefore cannot show a failure.
+          // R2 fails when a fake SURVIVES -- high RpT still standing after
+          // the gate -- which has |rW - rZ| ~ 0 and sits at the bottom of
+          // that ranking. Rank those by the surviving RpT instead.
+          insertRegionCase(state.cases_r2_fail,
+                           {filePath, localEntry, -1, fwdPU,
+                            0.0, 0.0,
+                            branch.topoJetPt[fwdPU], branch.topoJetEta[fwdPU],
+                            rZ, rW, rW, t_waves});
+        } else if (region == VbsRegion::R3) {
+          // Strict R3: confirmed genuine tag is fwdHS; its partner is central
+          // by construction, so it never enters fillOtherPu's forward filter.
+          fillRegion(state.scen_r3, fwdHS, true);
+          fillOtherPu(state.scen_r3);
+        } else {
+          // region == NONE: only classifyR3Broad's "confirm" sub-case (a
+          // genuine tag forward and timeable, its partner beyond acceptance
+          // instead of central) still belongs in R3's h_hs. The "reject"
+          // sub-cases (fake beyond acceptance, or no genuine tag at all) are
+          // deliberately NOT filled here -- see fillOtherPu's comment above.
+          int hsLeg = -1;
+          if (branch.classifyR3Broad(JET_ETA_MIN, JET_ETA_MAX, CENTRAL_ETA_MAX,
+                                     &hsLeg, nullptr, nullptr) && hsLeg >= 0) {
+            fillRegion(state.scen_r3, hsLeg, true);
+            fillOtherPu(state.scen_r3);
           }
         }
       }
@@ -1088,6 +1140,10 @@ int main(int argc, char** argv) {
     for (size_t k = 0; k < merged.scen_r2.size(); ++k) {
       merged.scen_r2[k].h_hs->Add(other.scen_r2[k].h_hs);
       merged.scen_r2[k].h_pu->Add(other.scen_r2[k].h_pu);
+    }
+    for (size_t k = 0; k < merged.scen_r3.size(); ++k) {
+      merged.scen_r3[k].h_hs->Add(other.scen_r3[k].h_hs);
+      merged.scen_r3[k].h_pu->Add(other.scen_r3[k].h_pu);
     }
     for (size_t k = 0; k < merged.scen_hi.size(); ++k) {
       merged.scen_hi[k].h_hs->Add(other.scen_hi[k].h_hs);
@@ -1146,6 +1202,7 @@ int main(int argc, char** argv) {
   saveScenarios(writer, merged.scen_hi);
   saveScenarios(writer, merged.scen_r1);
   saveScenarios(writer, merged.scen_r2);
+  saveScenarios(writer, merged.scen_r3);
   saveScenarios(writer, merged.scen_lo_cen);
   saveScenarios(writer, merged.scen_hi_cen);
   writer.WriteScalar("meta_n_total",      static_cast<Long64_t>(merged.n_total));
