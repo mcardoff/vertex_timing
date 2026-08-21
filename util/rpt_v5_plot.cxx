@@ -197,13 +197,13 @@ int main(int argc, char** argv) {
       t.DrawLatex(0.18, 0.76, extra);
     }
   };
-  const char* lbl_lo = "30 < p_{T}^{jet} < 40 GeV, 2.4 < |#eta| < 3.8";
-  const char* lbl_hi = "p_{T}^{jet} > 40 GeV, 2.4 < |#eta| < 3.8";
+  const char* lbl_lo = "30 < p_{T}^{jet} < 40 GeV@@2.4 < |#eta| < 3.8";
+  const char* lbl_hi = "p_{T}^{jet} > 40 GeV@@2.4 < |#eta| < 3.8";
   // VBS-topology region labels (see rpt_v5_hist.cxx for the definitions).
-  const char* lbl_lo_cen = "30 < p_{T}^{jet} < 40 GeV, |#eta| < 2.4  [central baseline]";
-  const char* lbl_hi_cen = "p_{T}^{jet} > 40 GeV, |#eta| < 2.4  [central baseline]";
-  const char* lbl_r1 = "VBS pair: both legs fwd (HS vs PU), p_{T}^{jet} > 30 GeV";
-  const char* lbl_r2 = "VBS pair: fwd PU leg + central HS leg  [signal side from R1]";
+  const char* lbl_lo_cen = "30 < p_{T}^{jet} < 40 GeV@@|#eta| < 2.4@@[central baseline]";
+  const char* lbl_hi_cen = "p_{T}^{jet} > 40 GeV@@|#eta| < 2.4@@[central baseline]";
+  const char* lbl_r1 = "VBS R1: both tags fwd@@HS leg vs PU leg@@p_{T}^{jet} > 30 GeV";
+  const char* lbl_r2 = "VBS R2: fwd PU + cen. HS@@signal side from R1";
 
   // ===========================================================================
   // SECTION 2: Derive every Integral()/GetMean()-based number. styleScen is
@@ -414,7 +414,24 @@ int main(int argc, char** argv) {
       t.SetTextFont(72); t.SetTextSize(0.05); t.DrawLatex(0.18, 0.88, "ATLAS");
       t.SetTextFont(42); t.SetTextSize(0.05); t.DrawLatex(0.28, 0.88, "Simulation Internal");
       t.SetTextSize(0.044); t.DrawLatex(0.18, 0.80, MyUtl::ENERGY_LABEL.c_str());
-      if (extra_label) { t.SetTextSize(0.044); t.DrawLatex(0.18, 0.72, extra_label); }
+      // Selection annotation, wrapped. The legend is an opaque box whose left
+      // edge is at NDC 0.58 and which spans the same y range as this text, so a
+      // single long line is painted over by it. Lines are split on "@@" by the
+      // caller -- not on a width estimate, since TLatex markup means the glyph
+      // count is not the string length. "|" cannot be the delimiter: it already
+      // appears in every |#eta| label.
+      if (extra_label) {
+        t.SetTextSize(0.038);
+        const std::string el(extra_label);
+        double ly = 0.72;
+        for (size_t pos = 0;;) {
+          const size_t d = el.find("@@", pos);
+          t.DrawLatex(0.18, ly, el.substr(pos, d == std::string::npos ? d : d - pos).c_str());
+          ly -= 0.055;
+          if (d == std::string::npos) break;
+          pos = d + 2;
+        }
+      }
     }
 
     canvas->cd();
@@ -513,9 +530,16 @@ int main(int argc, char** argv) {
   drawRocWithRatio(rocs_hi_cen, scen_hi_cen, roc_ymax_cen, 4.0,
                    roc_xmin_default, roc_xmax_default, lbl_hi_cen);
 
-  drawRocWithRatio(rocs_r1, scen_r1, roc_ymax, 4.0,
+  // R1/R2 get their own y-scale rather than the inclusive slices'. With the
+  // truth-t0 and clean-timing rows added, both regions overshoot the inclusive
+  // maximum badly -- R1's clean-timing peaks around 880 and R2's truth around
+  // 1180 against an inclusive ceiling near 640 -- so sharing it clipped the
+  // top off both panels.
+  double roc_ymax_reg = 1.5 * std::max(rocYMaxIn(rocs_r1, roc_xmin_default, roc_xmax_default),
+                                       rocYMaxIn(rocs_r2, roc_xmin_default, roc_xmax_default));
+  drawRocWithRatio(rocs_r1, scen_r1, roc_ymax_reg, 4.0,
                    roc_xmin_default, roc_xmax_default, lbl_r1);
-  drawRocWithRatio(rocs_r2, scen_r2, roc_ymax, 4.0,
+  drawRocWithRatio(rocs_r2, scen_r2, roc_ymax_reg, 4.0,
                    roc_xmin_default, roc_xmax_default, lbl_r2);
 
   // (3+) Per-scenario HS vs PU, 30–40 GeV slice, log-y.

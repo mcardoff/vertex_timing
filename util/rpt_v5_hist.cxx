@@ -32,6 +32,7 @@
 #include <TStyle.h>
 #include <TTreeReader.h>
 #include <TTreeReaderArray.h>
+#include <TRandom3.h>
 #include <TVector2.h>
 #include <ROOT/TTreeProcessorMT.hxx>
 
@@ -72,6 +73,10 @@ static constexpr double CENTRAL_ETA_MAX = JET_ETA_MIN;
 // within |pull| < 3σ (calcHSTimingPurity).  Mirrors the Score::WAVES_MISAS
 // oracle.
 static constexpr float MISAS_PURITY_CUT = 0.75f;
+
+// Reference-study truth-t0 smearing (util/myJet_ana_fr.C).
+static constexpr double TRUTH_VTX_SMEAR = 10.0;  // ps, on the HS vertex time
+static constexpr double TRUTH_TRK_SMEAR = 30.0;  // ps, on each track's own vertex time
 
 // Per-track time-gate half-width in σ.  A 2σ cut over-trims genuine HS tracks
 // when the vertex time is slightly mis-estimated, dragging the high-efficiency
@@ -311,6 +316,10 @@ static void mergeRegionCases(std::vector<RegionCase>& dst,
 //   event loop.
 // -----------------------------------------------------------------------------
 struct ThreadState {
+  // Re-seeded per event from event-stable quantities, so the truth-t0 smearing
+  // does not depend on how TTreeProcessorMT distributes entries across threads.
+  TRandom3 rng{1};
+
   std::vector<Scenario> scen_lo = makeScenarios("_lo");  // 30–40 GeV, forward
   std::vector<Scenario> scen_hi = makeScenarios("_hi");  // >40 GeV,   forward
   // Same two pT slices at CENTRAL eta, as an ITk-only baseline: |eta| < 2.4 is
@@ -646,16 +655,112 @@ int main(int argc, char** argv) {
         accum(t_waves,  var_waves,  waves_ok,       state.pull_dt2_waves,  state.pull_var_waves,  state.pull_n_waves, state.pull_dt_waves, state.pull_ntail_waves);
       }
 
+      // ── Idealised-timing reference scenarios ──────────────────────────────
+      // Smeared times are generated ONCE per track here and then used for both
+      // the re-clustering below and the gates, so the vertex time and the track
+      // times a row is gated against always come from the same world. Building
+      // them separately would mean clustering on one draw and gating on
+      // another, which is what made the earlier version incoherent.
+      //
+      // Only tracks HGTD actually timed are smeared -- idealising the time of a
+      // track the detector never measured would invent coverage it does not
+      // have, which the central baseline catches immediately.
+      //
+      // Mirrors getSmearedTrackTime's priority (particle production time, then
+      // truth vertex time, then a pileup draw) but uses this thread's RNG:
+      // that helper draws from the GLOBAL gRandom, which is a data race under
+      // TTreeProcessorMT -- the same class of bug as the TColor race.
+      {
+        UInt_t sd = (UInt_t)std::llround(std::abs(branch.truthVtxZ[0])    * 1e4)
+                  ^ ((UInt_t)std::llround(std::abs(branch.truthVtxTime[0]) * 1e3) << 11)
+                  ^ ((UInt_t)branch.trackZ0.GetSize() << 23);
+        state.rng.SetSeed(sd ? sd : 1u);
+      }
+      std::unordered_map<int, double> smTimes, smRes;
+      for (size_t i = 0; i < branch.trackZ0.GetSize(); ++i) {
+        if (branch.trackTimeValid[i] != 1) continue;
+        const int pi = branch.trackToParticle[i];
+        const int vi = branch.trackToTruthvtx[i];
+        double tPart;
+        if (pi != -1)      tPart = branch.particleT[pi];
+        else if (vi != -1) tPart = branch.truthVtxTime[vi];
+        else               tPart = state.rng.Gaus(branch.truthVtxTime[0], PILEUP_SMEAR);
+        smTimes.emplace((int)i, state.rng.Gaus(tPart, TRUTH_TRK_SMEAR));
+        smRes.emplace((int)i, TRUTH_TRK_SMEAR);
+      }
+
+      // Re-cluster in the idealised world and re-select with the WAVeS score.
+      // The cluster structure depends on the track times, so reusing the t0
+      // built from the real times would evaluate good tracks against a vertex
+      // time derived from noisy ones. values[0] is the cluster's own weighted
+      // mean of the smeared times -- calculateTime() would recompute it from
+      // the REAL branch times and reintroduce exactly that mismatch.
+      double t_wsm = 0.0, var_wsm = 0.0;
+      bool   wsm_ok = false;
+      {
+        auto cl_sm = makeSimpleClusters(trk_z, &branch, /*useSmearedTimes=*/true,
+                                        smTimes, smRes, /*checkTimeValid=*/true,
+                                        /*usez0=*/false);
+        doIterativeClustering(&cl_sm, DIST_CUT_CONE);
+        // Second idealisation: select the cluster closest in time to truth
+        // rather than the highest-scoring one. Ranked on |dt|, not purity --
+        // purity was tried and fails badly (HS jets at R_pT = 0 rise
+        // 3.0% -> 11.8%), because it measures where a track CAME FROM, not
+        // whether its time is right: a lone HS track with a mis-assigned HGTD
+        // hit forms a 100%-pure cluster at a wrong time and wins. dt rejects
+        // those by construction.
+        if (!cl_sm.empty()) {
+          size_t bi = 0; double bestDt = 1e50;
+          for (size_t i = 0; i < cl_sm.size(); ++i) {
+            const double dt = std::abs(cl_sm[i].values[0] - branch.truthVtxTime[0]);
+            if (dt < bestDt) { bestDt = dt; bi = i; }
+          }
+          t_wsm   = cl_sm[bi].values[0];
+          var_wsm = cl_sm[bi].sigmas[0] * cl_sm[bi].sigmas[0];
+          wsm_ok  = true;
+        }
+      }
+
+      const double t_truth_vtx = state.rng.Gaus(branch.truthVtxTime[0], TRUTH_VTX_SMEAR);
+
+      // Shared gate: idealised track times against whichever vertex time.
+      auto smearedGate = [&](const std::vector<int>& base, double t_vtx,
+                             double var_vtx, bool vtx_ok, double infl) {
+        std::vector<int> out; out.reserve(base.size());
+        const double den = std::sqrt(infl * infl * var_vtx
+                                   + TRUTH_TRK_SMEAR * TRUTH_TRK_SMEAR);
+        for (int idx : base) {
+          auto it = smTimes.find(idx);
+          if (!vtx_ok || it == smTimes.end() || den <= 0) { out.push_back(idx); continue; }
+          if (std::abs(it->second - t_vtx) / den < GATE_SIGMA) out.push_back(idx);
+        }
+        return out;
+      };
+
+      // Truth row: ideal vertex time (10 ps) + the same ideal track times, so
+      // it differs from the WAVeS-smeared row in exactly one variable.
+      std::vector<int> trk_truth     = smearedGate(trk_all,     t_truth_vtx,
+                                                   TRUTH_VTX_SMEAR * TRUTH_VTX_SMEAR, true, 1.0);
+      std::vector<int> trk_truth_cen = smearedGate(trk_all_cen, t_truth_vtx,
+                                                   TRUTH_VTX_SMEAR * TRUTH_VTX_SMEAR, true, 1.0);
+
+      std::vector<int> trk_wsm     = smearedGate(trk_all,     t_wsm, var_wsm, wsm_ok, INFL.waves);
+      std::vector<int> trk_wsm_cen = smearedGate(trk_all_cen, t_wsm, var_wsm, wsm_ok, INFL.waves);
+
       // Build per-scenario sets once per event for O(1) ghost-index lookup.
-      struct TrackSets { std::unordered_set<int> all, hgtd, trkptz, waves; };
+      struct TrackSets { std::unordered_set<int> all, hgtd, trkptz, waves, waves_ideal, truth; };
       TrackSets fwd{ {trk_all.begin(),    trk_all.end()},
                      {trk_hgtd.begin(),   trk_hgtd.end()},
                      {trk_trkptz.begin(), trk_trkptz.end()},
-                     {trk_waves.begin(),  trk_waves.end()} };
+                     {trk_waves.begin(),  trk_waves.end()},
+                     {trk_wsm.begin(),    trk_wsm.end()},
+                     {trk_truth.begin(),  trk_truth.end()} };
       TrackSets cen{ {trk_all_cen.begin(),    trk_all_cen.end()},
                      {trk_hgtd_cen.begin(),   trk_hgtd_cen.end()},
                      {trk_trkptz_cen.begin(), trk_trkptz_cen.end()},
-                     {trk_waves_cen.begin(),  trk_waves_cen.end()} };
+                     {trk_waves_cen.begin(),  trk_waves_cen.end()},
+                     {trk_wsm_cen.begin(),    trk_wsm_cen.end()},
+                     {trk_truth_cen.begin(),  trk_truth_cen.end()} };
 
       // ── Fill jets into pT slices. ─────────────────────────────────────────────
       // eta_min/eta_max select the acceptance; do_floor is false for the central
@@ -685,6 +790,8 @@ int main(int argc, char** argv) {
           fill(sv[1], S.hgtd);                        // HGTD t0 (Athena)
           fill(sv[2], S.trkptz);                      // TRKPTZ t0
           fill(sv[3], S.waves);                       // WAVeS t0
+          fill(sv[4], S.waves_ideal);                 // ORACLE: 30 ps tracks + perfect selection
+          fill(sv[5], S.truth);                       // truth t0, 10 (+) 30 ps
 
           // How the WAVeS gate moved this jet's R_pT relative to ITk-only.
           // Forward only (do_floor marks the forward calls): central is outside
@@ -800,6 +907,8 @@ int main(int argc, char** argv) {
             put(sv[1], fwd.hgtd);
             put(sv[2], fwd.trkptz);
             put(sv[3], fwd.waves);
+            put(sv[4], fwd.waves_ideal);
+            put(sv[5], fwd.truth);
           };
 
           // Per-jet RpT under the no-timing baseline and under WAVeS, used both
