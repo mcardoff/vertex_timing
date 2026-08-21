@@ -26,6 +26,10 @@ parser.add_argument('--file_path', type=str, required=True,
                          'which only worked for the local default VBF ntuple\'s '
                          'fixed naming convention.')
 parser.add_argument('--extra_time', type=float, required=False)
+parser.add_argument('--infl', type=float, required=False, default=1.38,
+                    help='Vertex-time error inflation for the timed R_pT gate. '
+                         'Per-sample WAVeS values from rpt_v5_hist.cxx '
+                         'inflationFor(): vbf 1.38, zjets 1.65, dijet 1.46.')
 parser.add_argument('--jet_idx', type=int, required=False, default=None,
                     help='Index of jet to highlight (orange) in R-Z and eta-phi displays')
 parser.add_argument('--jet_label', type=str, required=False, default=None,
@@ -103,6 +107,9 @@ for _name in _FLAT_BRANCHES:
 branch.AntiKt4EMTopoJets_truthHSJet_idx = [
     list(inner) for inner in tree.AntiKt4EMTopoJets_truthHSJet_idx
 ]
+branch.AntiKt4EMTopoJets_ghostTrack_idx = [
+    list(inner) for inner in tree.AntiKt4EMTopoJets_ghostTrack_idx
+]
 
 reco_hs_z = branch.RecoVtx_z[0]
 reco_hs_t = branch.RecoVtx_time[0]
@@ -171,6 +178,17 @@ for idx, jet_pt in enumerate(branch.AntiKt4EMTopoJets_pt):
 # Caveat: this does NOT model the Z+jets lepton-jet overlap removal that
 # collectPtPassingJets applies, so on Z+jets a jet the analysis dropped could
 # still be picked here. No-op for vbf/dijet.
+# VBS hatch styling, shared by the wedge overlay and its legend swatch.
+# Muted steel blue rather than cyan, semi-transparent, and drawn UNDERNEATH the
+# jet wedges: at full saturation on top it read as the loudest thing on the
+# plot, which inverted the visual hierarchy -- truth identity (the fill colour)
+# is the primary information, VBS-ness is a qualifier on it.
+VBS_HATCH_COLOR = '#3B6EA5'
+VBS_HATCH_ALPHA = 0.55
+VBS_HATCH = 'xx'
+VBS_HATCH_LW = 1.2
+JET_FILL_Z, VBS_HATCH_Z = 2, 1     # fill above hatch
+
 vbs_mjj, vbs_deta = -1.0, -1.0
 vbs_pair = (None, None)
 for _a in range(len(jet_info)):
@@ -189,6 +207,75 @@ for _a in range(len(jet_info)):
 if vbs_pair[0] is not None:
     jet_info[vbs_pair[0]]['isVBS'] = True
     jet_info[vbs_pair[1]]['isVBS'] = True
+
+# --- R_pT per jet -------------------------------------------------------------
+# Ported from util/rpt_v5_hist.cxx so the number shown here is the same one the
+# analysis histograms: R_pT = sum pT(ghost tracks associated to PV0, within
+# dR < 0.2 of the jet axis) / pT(jet).
+#
+# The track-to-vertex association is eta-dependent, matching rpt_v5 exactly:
+# forward jets use the getNewDzpara parameterization (from the forward-region
+# reference study), central jets a z0-significance cut, because that
+# parameterization does not extrapolate below |eta| = 2.4 -- it returns
+# sigma_z0 = 31 um at eta = 0, several times tighter than ITk resolution.
+# Getting this split wrong would print a number that disagrees with the ROC
+# plots for exactly the central R2 legs the displays exist to explain.
+MIN_TRACK_PT, MAX_TRACK_PT = 1.0, 30.0
+DZ0_PARA_SCALE, CENTRAL_Z_SIGNIF, RPT_TRACK_JET_DR = 1.4, 5.0, 0.2
+JET_ETA_MIN = 2.4
+
+_DZ_COEFF = [
+    (1.5,   [0.0314036, 0.790955, -2.65987, 3.62073, -2.18228, 0.614866, -0.0634521]),
+    (2.5,   [0.0229273, 0.540101, -1.80727, 2.45187, -1.47382, 0.414345, -0.0426769]),
+    (5.0,   [0.0163773, 0.345112, -1.14474, 1.54382, -0.923523, 0.258617, -0.0265446]),
+    (10.0,  [0.010919, 0.179329, -0.581971, 0.773186, -0.45679, 0.126608, -0.012875]),
+    (1e18,  [0.00835945, 0.0957783, -0.299255, 0.38722, -0.22351, 0.0607521, -0.00606524]),
+]
+
+def _get_new_dzpara(eta, pt):
+    """Expected |z0 - z_vtx| scale in mm; mirrors rpt_v5_hist.cxx::getNewDzpara."""
+    eta = abs(eta)
+    coeff = next(c for hi, c in _DZ_COEFF if pt <= hi)
+    d, e = coeff[0], 1.0
+    for k in range(1, 7):
+        e *= eta
+        d += coeff[k] * e
+    return abs(d)
+
+def _assoc_tracks(central):
+    """Indices of tracks associated to PV0, by the rule the given region uses."""
+    out = set()
+    for _i in range(len(branch.Track_pt)):
+        _pt = branch.Track_pt[_i]
+        if _pt < MIN_TRACK_PT or _pt > MAX_TRACK_PT:
+            continue
+        if not branch.Track_quality[_i]:
+            continue
+        _dz = abs(branch.Track_z0[_i] - reco_hs_z)
+        if central:
+            _vz = branch.Track_var_z0[_i]
+            if not _vz > 0 or _dz / np.sqrt(_vz) > CENTRAL_Z_SIGNIF:
+                continue
+        elif _dz / _get_new_dzpara(branch.Track_eta[_i], _pt) > DZ0_PARA_SCALE:
+            continue
+        out.add(_i)
+    return out
+
+_assoc = {False: _assoc_tracks(False), True: _assoc_tracks(True)}
+
+for _j in jet_info:
+    _set = _assoc[abs(_j['eta']) < JET_ETA_MIN]
+    _sumpt = 0.0
+    for _t in branch.AntiKt4EMTopoJets_ghostTrack_idx[_j['idx']]:
+        if _t not in _set:
+            continue
+        _de = _j['eta'] - branch.Track_eta[_t]
+        _dp = np.arctan2(np.sin(_j['phi'] - branch.Track_phi[_t]),
+                         np.cos(_j['phi'] - branch.Track_phi[_t]))
+        if np.sqrt(_de * _de + _dp * _dp) > RPT_TRACK_JET_DR:
+            continue
+        _sumpt += branch.Track_pt[_t]
+    _j['rpt'] = _sumpt / _j['pt']
 
 
 # --- ROOT Macro Execution and Clustering ---
@@ -250,6 +337,58 @@ except subprocess.CalledProcessError as e:
     print(f"Error executing root script: {e.stderr}")
     track_clusters = []
     cluster_times = []
+
+# --- Timed R_pT ----------------------------------------------------------------
+# Second R_pT per jet, with rpt_v5's per-track time gate applied on top of the
+# same z-association: a track carrying a valid time is dropped when
+#   |t_trk - t_vtx| / sqrt(infl^2 * sigma_vtx^2 + sigma_trk^2) > GATE_SIGMA.
+# Untimed tracks are kept unconditionally, exactly as applyTimeGate does -- the
+# gate can only ever remove pT, so timed R_pT <= z-only R_pT by construction.
+#
+# t_vtx is the selected cluster, identified as the one whose time matches
+# --extra_time (that is the WAVeS-selected cluster time rpt_v5_hist prints with
+# each region candidate). sigma_vtx is rebuilt from that cluster's constituent
+# tracks as 1/sqrt(sum 1/sigma_i^2) -- the same inverse-variance combination
+# clustering_functions.h uses when merging, so it reproduces Cluster::sigmas[0]
+# rather than approximating it.
+GATE_SIGMA = 2.5
+_sel = None
+if args.extra_time is not None and cluster_times:
+    _sel = min(range(len(cluster_times)),
+               key=lambda i: abs(cluster_times[i] - args.extra_time))
+
+_t_vtx = _sig_vtx = None
+if _sel is not None and _sel < len(track_clusters):
+    _inv = 0.0
+    for _idx in track_clusters[_sel]:
+        _r = branch.Track_timeRes[_idx]
+        if _r > 0:
+            _inv += 1.0 / (_r * _r)
+    if _inv > 0:
+        _t_vtx, _sig_vtx = cluster_times[_sel], np.sqrt(1.0 / _inv)
+
+for _j in jet_info:
+    if _t_vtx is None:
+        _j['rpt_t'] = None
+        continue
+    _set = _assoc[abs(_j['eta']) < JET_ETA_MIN]
+    _sumpt = 0.0
+    for _t in branch.AntiKt4EMTopoJets_ghostTrack_idx[_j['idx']]:
+        if _t not in _set:
+            continue
+        _de = _j['eta'] - branch.Track_eta[_t]
+        _dp = np.arctan2(np.sin(_j['phi'] - branch.Track_phi[_t]),
+                         np.cos(_j['phi'] - branch.Track_phi[_t]))
+        if np.sqrt(_de * _de + _dp * _dp) > RPT_TRACK_JET_DR:
+            continue
+        if branch.Track_hasValidTime[_t] == 1:
+            _st = branch.Track_timeRes[_t]
+            _den = np.sqrt(args.infl * args.infl * _sig_vtx * _sig_vtx + _st * _st)
+            if _den > 0 and abs(branch.Track_time[_t] - _t_vtx) / _den > GATE_SIGMA:
+                continue
+        _sumpt += branch.Track_pt[_t]
+    _j['rpt_t'] = _sumpt / _j['pt']
+
 
 # --- Data for Histograms and Plotting ---
 hist_times, time_errors = [], []
@@ -342,19 +481,27 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
         wedge_x = [reco_hs_z, reco_hs_z + x_off1, reco_hs_z + x_off2]
         wedge_y = [0, y_off1, y_off2]
         ax.fill(wedge_x, wedge_y,
-                color=jet_color, alpha=0.7 if highlighted else 0.5)
+                color=jet_color, alpha=0.7 if highlighted else 0.5,
+                zorder=JET_FILL_Z)
 
-        # VBS candidate leg: cyan cross-hatch laid OVER the fill, so the wedge
-        # keeps showing its truth identity underneath. facecolor='none' is what
-        # makes this an overlay rather than a repaint.
+        # VBS candidate leg: cross-hatch drawn UNDER the wedge, showing through
+        # the fill's own transparency. facecolor='none' keeps it an overlay on
+        # the truth-identity colour rather than a repaint of it.
         if jet_tup.get('isVBS'):
-            ax.fill(wedge_x, wedge_y, facecolor='none', edgecolor='deepskyblue',
-                    hatch='xxx', linewidth=1.8, zorder=3)
+            ax.fill(wedge_x, wedge_y, facecolor='none',
+                    edgecolor=VBS_HATCH_COLOR, alpha=VBS_HATCH_ALPHA,
+                    hatch=VBS_HATCH, linewidth=VBS_HATCH_LW, zorder=VBS_HATCH_Z)
 
         txt_color = 'orange' if highlighted else ('green' if jet_tup['isHS'] >= 1 else 'black')
         label = f"Jet {jet_i+1}: $p_T$={jet_tup['pt']:.0f} GeV, $\eta$={jet_tup['eta']:.1f}"
         if jet_tup.get('isVBS'):
-            label += "  [VBS]"
+            _rz = jet_tup.get('rpt', float('nan'))
+            _rt = jet_tup.get('rpt_t')
+            if _rt is None:
+                label += f"  [VBS, $R_{{p_T}}$={_rz:.2f}]"
+            else:
+                label += (f"  [VBS, $R_{{p_T}}$={_rz:.2f}"
+                          f"$\\rightarrow${_rt:.2f}]")
         if highlighted:
             label += "  ← target"
         ax.text(reco_hs_z - 6.8, 0.9 - (1.2 + jet_i*0.1),
@@ -423,7 +570,9 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
         # Hatch-only swatch (no facecolor) -- it overlays the identity colours
         # rather than replacing them, and the legend should say so.
         legend_handles.append(mpatches.Rectangle((0, 0), 1, 1, facecolor='none',
-                                                 edgecolor='deepskyblue', hatch='xxx'))
+                                                 edgecolor=VBS_HATCH_COLOR,
+                                                 alpha=VBS_HATCH_ALPHA,
+                                                 hatch=VBS_HATCH))
         legend_labels.append(f'VBS pair ($m_{{jj}}$={vbs_mjj:.0f} GeV, '
                              f'$|\\Delta\\eta|$={vbs_deta:.1f})')
     ax.legend(legend_handles, legend_labels,
