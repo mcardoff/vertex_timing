@@ -58,7 +58,9 @@ namespace MyUtl {
   // ---------------------------------------------------------------------------
   // 2. passTrackVertexAssociation
   //   Returns true if the z₀ distance between track trackIdx and vertex
-  //   vertexIdx is within significanceCut standard deviations:
+  //   vertexIdx is within significanceCut standard deviations (or, when
+  //   MyUtl::USE_DZ_PARA is set, within DZ0_PARA_SCALE_CLUSTER × getNewDzpara —
+  //   see clustering_constants.h):
   //     |z0_trk - z_vtx| / sqrt(var_z0_trk) < significanceCut
   //   The vertex z variance is assumed to be zero (reco-vertex z is treated
   //   as exact).  Called by getAssociatedTracks and for the tighter MAX_NSIGMA
@@ -74,6 +76,14 @@ namespace MyUtl {
       trkZVar = branch->trackVarZ0[trackIdx],
       vxZ      = branch->recoVtxZ[vertexIdx],
       vxZVar  = 0.0;
+
+    // --dzpara: swap the significance cut for the R_pT parameterization. The
+    // caller's significanceCut is deliberately ignored here -- the two rules
+    // are not on a common scale, so DZ0_PARA_SCALE_CLUSTER replaces it wholesale.
+    if (USE_DZ_PARA)
+      return std::abs(trkZ0 - vxZ)
+             / getNewDzpara(branch->trackEta[trackIdx], branch->trackPt[trackIdx])
+             < DZ0_PARA_SCALE_CLUSTER;
 
     double nsigmaPrim = std::abs(trkZ0 - vxZ) / std::sqrt(Z0_VAR_INFLATION * trkZVar + vxZVar);
     return nsigmaPrim < significanceCut;

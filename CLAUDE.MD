@@ -116,12 +116,41 @@ primary workflow.
   RpT (jet-level pileup-discrimination) study. `rpt_v5_hist` runs the event
   loop (same `TTreeProcessorMT`/`ThreadState` structure as the legacy
   version) and writes its histogram file via `MyUtl::histFilePath()` (see
-  "Sample-prefixed output paths" below) (5 scenarios × 2 pT slices × {HS, PU}
-  histograms, plus event-count/floor-counter scalars). `rpt_v5_plot` reads
-  that file and does `generate_roc`, `rejAtEff`, the harmonized `[0.6, 1.0]`
-  ROC window (see below), the console summary tables, and all PDF drawing —
-  no ntuple access. Shared `Scenario`/binning/save-load logic lives in
+  "Sample-prefixed output paths" below). `rpt_v5_plot` reads that file and
+  does `generate_roc_grid`, `rejAtEff`, the harmonized `[0.80, 1.0]` ROC
+  window (see below), the console summary tables, and all PDF drawing — no
+  ntuple access. Shared `Scenario`/binning/save-load logic lives in
   `util/rpt_v5_common.h`.
+
+  **Six scenarios**, in `makeScenarios()` order — the index is load-bearing,
+  since `fillJets` fills `sv[0..5]` positionally:
+
+  | idx | name | what it is |
+  |---|------|------------|
+  | 0 | `zonly`       | ITk-only, no time gate |
+  | 1 | `hgtd`        | Athena `RecoVtx_time` |
+  | 2 | `trkptz`      | TRKPTZ-selected cluster time |
+  | 3 | `waves`       | WAVeS-selected cluster time (in-jet refined) |
+  | 4 | `waves_ideal` | ORACLE: re-clustered with 30 ps track times AND the cluster closest in time to truth |
+  | 5 | `truth`       | vertex = Gaus(truth HS vtx, 10 ps), tracks = Gaus(own truth vtx, 30 ps) |
+
+  **Four jet populations**, each filled for all six scenarios: two forward pT
+  slices (`_lo` 30–40 GeV, `_hi` >40 GeV, both 2.4 < |eta| < 3.8), the same
+  two at central |eta| < 2.4 (`_lo_cen`/`_hi_cen`), and the two VBS regions
+  (`_r1`/`_r2`). The central pair is an ITk-only baseline AND a standing
+  correctness check: |eta| < 2.4 is outside HGTD acceptance, so all six rows
+  must agree there. That check has caught two real bugs (see Physics
+  Findings).
+
+  Both idealised rows only smear tracks with `trackTimeValid == 1` — idealising
+  the time of a track HGTD never measured invents coverage it does not have,
+  which the central baseline exposes immediately. Their smeared times are
+  generated ONCE per track and shared by the re-clustering and both gates, so
+  a row never clusters on one draw and gates on another. The per-thread RNG is
+  re-seeded per event from event-stable quantities, so results do not depend on
+  how `TTreeProcessorMT` distributes entries. `clusterTracksInTime`'s own
+  `useSmearedTimes` path is NOT used: it calls `getSmearedTrackTime`, which
+  draws from the global `gRandom` and is a data race under MT.
 - **generate_rpt.cxx**, **rpt_v2.cxx**..**rpt_v4.cxx** (`util/`): Earlier
   iterations of the same study (z-only, real-HGTD, TRKPTZ-selected timing
   gates), monolithic (event loop + plotting), not split.
@@ -208,14 +237,32 @@ condor-scale for real work) even though the underlying data hadn't changed.
   the entire derived-numbers block, so calling it earlier would be a compile
   error (undeclared identifier), not a silent runtime bug.
 - **Harmonized ROC window**: the ROC x-axis ("Hard Scatter Efficiency") is a
-  fixed `[0.6, 1.0]` window for every sample and pT-slice, so plots are
-  directly comparable across vbf/zjets/dijet. This replaced an earlier
-  adaptive `pickXRange()` fallback (default `[0.8, 1.0]`, widening down to a
-  `MIN_HS_EFF = 0.5` floor when a sample's curve didn't reach the default
-  window — e.g. Z+jets, where many forward "HS" jets carry ~no tracks).
-  Tunable purely by editing `roc_xmin_default`/`roc_xmax_default` in
-  `rpt_v5_plot.cxx` and rerunning `rpt_v5_plot --sample=<sample>` locally
-  against an already-saved histogram file — no condor resubmission.
+  fixed `[0.80, 1.0]` window for every sample and pT-slice, so plots are
+  directly comparable across vbf/zjets/dijet and against the reference study,
+  whose ROCs use the same range. 0.80 is also where `rocEffGrid()`'s first
+  sampled working point sits — an earlier `[0.85, 1.0]` zoom cropped that
+  point off the drawn window. Tunable by editing
+  `roc_xmin_default`/`roc_xmax_default` in `rpt_v5_plot.cxx` and rerunning
+  `rpt_v5_plot --sample=<sample>` locally against an already-saved histogram
+  file — no condor resubmission.
+- **Fixed-efficiency ROC sampling**: `generate_roc_grid()` samples each curve
+  at the working points in `rocEffGrid()` (0.800 → 0.975 in 0.025 steps)
+  rather than once per histogram bin, so every scenario shares identical
+  x-points and the ratio panels are exact. Beware when reading the console
+  tables: `rejAtEff` returns the first bin with eff <= target, so near a step
+  a 0.02% efficiency difference can move the printed rejection by 30%.
+  Repeated identical values across working points mean the curve's ceiling
+  has been hit and the sampler is clamping, not that the physics is flat.
+- **Per-panel y-maxima**: the inclusive slices, the central baseline, and the
+  R1/R2 regions each compute their own. They are far apart in scale — with
+  the oracle rows, R1 peaks near 880 and R2 near 1180 against an inclusive
+  ceiling near 640 — so a shared maximum clips panels.
+- **Selection labels wrap** on an explicit `@@` delimiter supplied by the
+  caller. The legend is an opaque box whose left edge is at NDC 0.58 and which
+  spans the same y range as the label, so a long single line is painted over.
+  Splitting on a width estimate does not work (TLatex markup means glyph count
+  != string length) and `|` cannot be the delimiter (it appears in every
+  `|#eta|` label).
 - **Validated** (bin-for-bin histogram identity + pixel-for-pixel PDF
   identity) against the local default VBF sample for both split pairs before
   ever touching a grid sample — see git history for the validation method
@@ -284,6 +331,43 @@ PASS_SIGMA            = 60.0  // ps — ±window for "Core Fraction" efficiency 
 TRUTH_PULL_CUT        = 3.0   // σ — |pull| threshold for oracle timing purity gates
 WAVES_DR_FLOOR        = 0.05  // minimum ΔR for the WAVeS 1/ΔR weight (prevents divergence)
 ```
+
+RpT-specific, from `util/rpt_v5_hist.cxx`:
+```cpp
+JET_ETA_MIN / MAX     = 2.4 / 3.8  // forward jet acceptance
+CENTRAL_ETA_MAX       = 2.4        // central baseline, |eta| < this
+RPT_TRACK_JET_DR      = 0.2        // track must be within this of the jet axis
+DZ0_PARA_SCALE        = 1.4        // x getNewDzpara, FORWARD track-to-vertex association
+CENTRAL_Z_SIGNIF      = 5.0        // |z0-z_vtx|/sigma_z0, CENTRAL association
+GATE_SIGMA            = 2.5        // per-track time-gate half-width, in pulls
+TRUTH_VTX_SMEAR       = 10.0       // ps, truth-t0 row's vertex smear
+TRUTH_TRK_SMEAR       = 30.0       // ps, idealised per-track smear
+```
+
+**The two z-association rules are not interchangeable.** `getNewDzpara` comes
+from a FORWARD-region reference study and does not extrapolate inward: it
+returns sigma_z0 = 31 um at eta = 0 rising to 4.4 mm at eta = 3.8, and the
+central end is several times tighter than ITk z0 resolution at 1 GeV. Using it
+centrally roughly halves ITk-only rejection (163 -> 77 at 0.800 HS efficiency).
+5.0 is not a guess: it is the value the reference macro itself carries as a
+commented alternative, and an independent scan of ours reproduces it as the
+best working point.
+
+**Vertex-time inflation is per sample AND per scenario**, resolved by
+`inflationFor(SAMPLE_NAME)` in `main()` before any worker thread starts:
+
+| scenario | vbf | zjets | dijet |
+|---|---|---|---|
+| hgtd | 1.48 | 1.61 | 1.53 |
+| trkptz | 1.39 | 1.63 | 1.45 |
+| waves | 1.38 | 1.65 | 1.46 |
+
+Measured off `PRINT_PULL_DIAG`'s ratio column; the run echoes `[calibration]`
+at startup and prints the freshly measured ratio beside the value in use, so a
+stale entry is visible in the same log. The measurement is NOT circular (raw
+`var_vtx`, ungated track list, vertex times independent of the gate), so one
+pass suffices. Re-measure for any NEW sample. See Physics Findings for why
+this matters far less than it looks.
 `CONE_ITER_K` also still exists as a constant but its only historical
 consumer (a `cone_iter_k_sweep.cxx` sweep executable) is not present in this
 tree, so it's currently unused.
@@ -331,7 +415,29 @@ ROOT ntuples (tree name `"ntuple"`) with the branches bound in
 cd python && python event_display.py --file_num <NUM> --event_num <ENTRY> --extra_time <dt>
 ```
 
-Internally calls `runHGTD_Clustering.cxx` and parses its stdout to produce a 2-page PDF (R-Z geometry view + time histogram). Script lives in **`python/`** (not `share/scripts/`).
+Internally calls `runHGTD_Clustering.cxx` and parses its stdout to produce a
+3-page PDF. Script lives in **`python/`** (not `share/scripts/`).
+
+The VBS candidate pair is marked with a muted steel-blue cross-hatch drawn
+UNDER the jet wedges (fill colour is already spoken for: green = truth HS,
+grey = PU), and each tagging jet's label carries `R_pT = <z-only> -> <timed>`.
+The timed value applies rpt_v5's gate, so it needs `--infl` set to the
+sample's WAVeS inflation (vbf 1.38, zjets 1.65, dijet 1.46). t0 comes from
+`--extra_time` directly — NOT from the matched cluster's own weighted-mean
+time, which differs from WAVeS's in-jet refined time and made the displayed
+R_pT disagree with the analysis.
+
+`--jet_idx`/`--jet_label` paint a target jet orange, which OVERRIDES the
+truth-identity colouring. Do not pass them for region displays: which leg is
+HS and which is PU is the whole point of those plots.
+
+**The local box cannot run this without help.** Its ROOT needs python3.14
+while `~/.local/share/python/lib/python/site-packages` (a version-agnostic
+user site dir) holds python3.9's numpy, whose compiled extensions fail to load
+under 3.14. Set `PYTHONNOUSERSITE=1` to skip it and use `~/.venv-hgtd`, which
+has a matching matplotlib. On the AF use ROOT 6.38.04, not an LCG_106 view:
+that ships ROOT 6.32, where `TF1::GetParError` has no `const char*` overload
+and `src/plotting_utilities.h` fails to compile.
 
 ## Machine Learning Model
 
@@ -484,6 +590,132 @@ Key structures and entry points:
 - **`AtlasStyle.h`**: calls `atlasStyle->SetErrorX(0)` globally (effective for TH1/TGraphErrors; TEfficiency uses the conversion approach above).
 - **Histogram directory registration**: `clustering_hist.cxx`, `rpt_v5_hist.cxx` (and the legacy `clustering_dt.cxx`/`rpt_v5.cxx`) call `TH1::AddDirectory(kFALSE)` early in `main()`, before any histogram construction — required since all four parallelize their event loop (see Multicore below): every worker thread's lazily-built histogram set is identically named, and without this call they'd race on `gDirectory`'s registry. `PlotObj`/`AnalysisObj`'s own constructors still don't manage `gDirectory` themselves; they rely on the caller having set this first. The `*_plot` executables don't need this — they never build histograms concurrently, just load into ones already booked single-threaded.
 - **`AnalysisObj`/`PlotObj::saveTo`/`loadFrom`** (adjacent to `mergeFrom`/`plotPostProcessing`): round-trip the raw, event-loop-filled histograms through `src/histogram_io.h`'s `HistWriter`/`HistReader`. Mirror `mergeFrom`'s exact member list by construction — if a new histogram member is added to `AnalysisObj`, add it to `mergeFrom`, `saveTo`, and `loadFrom` together. See "Histogramming vs. Plotting Split" above for the full design.
+
+## Physics Findings
+
+Results as of 2026-08-20, from `rpt_v5` (grid samples, |Deta| >= 0 and
+m_jj >= 500 GeV) and `failure_decomposition` (local VBF). Numbers are pileup
+rejection (1/mistag) at fixed hard-scatter efficiency unless stated.
+
+### Where the loss actually lives
+
+`failure_decomposition` assigns each failing event one principal cause:
+
+| cause | share |
+|---|---|
+| Timing misassignment | **67.4%** |
+| Selection failure | 26.5% |
+| Misclustering | **3.1%** |
+| Track efficiency loss | 0.7% |
+| Irreducible | 2.3% |
+
+**The clustering is not the bottleneck.** Grouping all truth-HS tracks into
+one perfect cluster almost never rescues a lost event, so the good cluster is
+essentially always present and simply not chosen. Selection dominates in
+sparse events (52.9% at 0–1 forward HS tracks) and that is where nearly all
+failures live (78% fail rate at 0–1 tracks, ~1% above 14); timing
+misassignment dominates in track-rich ones.
+
+The scenario ladder says the same thing independently. VBF forward >40 GeV at
+0.90 efficiency: `zonly 65.0 -> waves 87.1 -> waves_ideal 106.2 -> truth
+111.3`. So **idealising times and selection together is worth ~22%, and the
+clustering leaves only ~5% more on the table**. dijet agrees (63.9 vs 68.0,
+~6%). Two independent measurements plus the 3.1% above.
+
+Caveat: part of the residual `waves_ideal -> truth` gap is not a clustering
+error at all — truth is handed a 10 ps vertex time, while even a perfectly
+chosen cluster must estimate t0 from a handful of 30 ps tracks. Separating
+those is open.
+
+### The gain is concentrated in the topology
+
+ITk -> WAVeS at 0.80 efficiency:
+
+| selection | VBF | dijet | Z+jets |
+|---|---|---|---|
+| Inclusive forward | x1.3 | x1.2 | x1.2 |
+| R1 (both tags forward) | **x1.87** | **x2.53** | x1.19 |
+| R2 (fwd PU + central HS) | x1.17 | x1.18 | x1.04 |
+
+The inclusive number understates HGTD roughly two-fold, because it averages
+over jets where timing is irrelevant: pileup jets with no PV0 tracks to begin
+with, and HS jets with ample track support.
+
+### R2 fails because WAVeS is captured by the fake
+
+The score ordering **inverts** between regions, consistently across all three
+samples — WAVeS wins R1, the jet-agnostic TRKPTZ wins R2 (VBF x1.32 vs x1.17;
+dijet x1.44 vs x1.18; Z+jets x1.09 vs x1.04).
+
+WAVeS weights tracks by proximity to forward jets. In R2 *the only forward jet
+is the pileup one*, so WAVeS up-weights exactly the tracks of the fake vertex,
+drags t0 toward it, and the fake then passes its own gate. The fix is either
+regional (use TRKPTZ in R2) or structural (compute t0 from tracks outside
+jets, so no single jet can capture the score).
+
+### Timing discriminates by severity, not frequency
+
+Per forward jet, VBF, WAVeS gate vs ITk-only:
+
+| jet | n | raised | lowered | -> zero | mean loss |
+|---|---|---|---|---|---|
+| HS | 56,342 | **0** | 26.5% | 0.6% | 18.4% |
+| PU | 15,307 | **0** | 7.3% | 6.0% | **90.4%** |
+
+The gate fires on HS jets more often than PU ones, but a touched PU jet loses
+90% of its R_pT against 18% for an HS jet. Most PU jets are untouched because
+they had nothing to remove (they pass the z-association at 0.8%). "Raised" is
+0 by construction: `applyTimeGate` returns a SUBSET, so R_pT can only fall.
+
+### The efficiency ceiling is the binding constraint
+
+A jet the gate empties goes to R_pT = 0 and becomes indistinguishable from
+pileup, so every timed scenario has a LOWER maximum reachable HS efficiency
+than ITk-only (VBF 30–40: 93.8% -> 91.0%; Z+jets: 87.6% -> 82.4%). This, not
+resolution, is why curves collapse above ~0.93 and why ratio panels fall back
+to 1. Proposed fix, NOT implemented: fall back to the jet's ITk-only R_pT when
+the gate empties it — the jet-level analogue of TDR self-tagging.
+
+### Calibration is correct but near-irrelevant
+
+The pull denominator is sqrt(f^2 sigma_vtx^2 + sigma_trk^2) with sigma_vtx
+~9 ps against sigma_trk ~26 ps, so a **17% change in inflation moves the
+effective gate width by 3%**. Worth having right; not worth another iteration.
+Offsets are 0.6–1.5 ps (negligible). Non-Gaussian tails outside a 150 ps core
+are 14–15% (VBF), 16–18% (dijet), 21–25% (Z+jets) — the tail, not the core, is
+what a Gaussian pull cannot handle.
+
+Z+jets is limited by t0 AVAILABILITY, not by the algorithm: Athena produces a
+valid vertex time for 80.1% of VBF events, 73.6% of dijet, and **16.5%** of
+Z+jets.
+
+### Reference-study replication
+
+Central region at the reference configuration (`util/myJet_ana_fr.C`, present
+in the main working tree but not committed — it covers both regions via
+commented-out eta lines and carries the z0-significance cut as a commented
+alternative): the
+**timing improvement factor reproduces** (ours 1.63 vs their ~1.6 at 0.800)
+but both absolute rejections sit ~2.3x low. A uniform offset cannot be caused
+by the time gate, so the open question is the pileup population or its
+normalisation, not the timing model. Jet collection (EMTopo) and the
+isHS/isPU definitions are confirmed to match.
+
+### Methodological warnings
+
+- **Never rank a selection oracle by cluster purity.** `calcPurity` is a
+  pT-weighted fraction of tracks from truth vertex 0 — it measures where a
+  track CAME FROM, not whether its time is right. A lone HS track carrying a
+  mis-assigned HGTD hit forms a 100%-pure cluster sitting at a wrong time, so
+  max-purity selects exactly the dominant failure mode (HS jets driven to
+  R_pT = 0 rise 3.0% -> 11.8%). Rank on `|t_cluster - t_truth|` instead.
+- **When selecting display candidates for a failure mode, require the
+  failure.** Gating on low HS timing purity alone yields events where the
+  tracks are badly mis-timed and the algorithm recovers the right time anyway.
+- **A flat 30 ps track smear is WORSE than HGTD's real timing** (Initial
+  scenario: 35/25/21 ps for 1/2/3 hits, ~26 ps effective), so the reference's
+  30 ps scenario is not an upper bound on what the simulated detector
+  delivers.
 
 ## Development Notes
 
