@@ -88,23 +88,22 @@ namespace {
   // match within dR 0.6 above 4 GeV -- so a jet between the two cones is
   // neither, and those events have to land somewhere. It also holds the mixed
   // pairs whose second leg is beyond |eta| = MAX_ABS_ETA_JET.
-  enum Cat { R1 = 0, R2, R3, OTHER_HELP, BOTH_HS, OTHER, NCAT };
+  enum Cat { R1 = 0, R2, OTHER_HELP, BOTH_HS, OTHER, NCAT };
 
   const std::array<const char*, NCAT> CAT_KEY = {
-    "r1", "r2", "r3", "other_help", "both_hs", "other"
+    "r1", "r2", "other_help", "both_hs", "other"
   };
 
   const std::array<const char*, NCAT> CAT_LABEL = {
     "R1: both tags fwd, HS + PU",
     "R2: fwd PU + central HS",
-    "R3: fwd HS + central PU",
     "Other: HGTD can still help",
     "Both tags truth-HS",
     "Other"
   };
 
   // The project palette, in registry order.
-  const std::array<Color_t, NCAT> CAT_COLOR = { C01, C02, C03, C04, C05, C06 };
+  const std::array<Color_t, NCAT> CAT_COLOR = { C01, C02, C03, C04, C05 };
 
   // ── m_jj binning ─────────────────────────────────────────────────────────
   // Variable width: narrow where the spectrum is steep and every sample has
@@ -190,6 +189,9 @@ int main(int argc, char** argv) {
   // Merged into OTHER on the stack, but still counted: the plot got simpler,
   // the information did not have to be thrown away.
   long nNoAcc = 0, nBothPU = 0;
+  // R3 shares a band with the other reachable cases now, but stays counted:
+  // it is still a region in its own right on the R_pT side.
+  long nR3 = 0;
   // Within OTHER, what could HGTD still say something about? The necessary
   // condition is a tag leg it can actually measure, so these count OTHER events
   // with >=1 leg in acceptance, by what the pair is:
@@ -279,7 +281,7 @@ int main(int argc, char** argv) {
     Cat cat;
     if      (isR1) cat = R1;
     else if (isR2) cat = R2;
-    else if (isR3) cat = R3;
+    else if (isR3) { cat = OTHER_HELP; ++nR3; }
     // Nothing timeable at all. Still checked BEFORE the truth split, so an
     // out-of-acceptance pair lands in OTHER whatever its tags truly are --
     // "Both tags truth-HS" therefore means a genuine VBF pair with at least one
@@ -465,8 +467,10 @@ int main(int argc, char** argv) {
          nOthAmbigTimeable, nPlot ? 100.0 * nOthAmbigTimeable / nPlot : 0.0);
 
   {
-    const long timeable = nOthAccHsBeyPu + nOthBeyHsAccPu + nOthBothPuTimeable;
+    const long timeable = nR3 + nOthAccHsBeyPu + nOthBeyHsAccPu + nOthBothPuTimeable;
     printf("\n  \"Other: HGTD can still help\" is made of:\n");
+    printf("      R3: fwd HS + central PU        %6ld (%.2f%%)  confirm the genuine tag\n",
+           nR3, nPlot ? 100.0*nR3/nPlot : 0.0);
     printf("      fwd HS + PU beyond |eta| %.1f  %6ld (%.2f%%)  R3-like: confirm the genuine tag\n",
            MAX_ABS_ETA_JET, nOthAccHsBeyPu, nPlot ? 100.0*nOthAccHsBeyPu/nPlot : 0.0);
     printf("      fwd PU + HS beyond |eta| %.1f  %6ld (%.2f%%)  R2-like: reject the fake\n",
@@ -478,13 +482,9 @@ int main(int argc, char** argv) {
   }
 
   // The headline this plot exists to give.
-  const long nReach = nCat[R1] + nCat[R2] + nCat[R3] + nCat[OTHER_HELP];
-  printf("\n  HGTD can contribute (R1 + R2 + R3 + other): %ld  (%.2f%% of plotted)\n",
+  const long nReach = nCat[R1] + nCat[R2] + nCat[OTHER_HELP];
+  printf("\n  HGTD can contribute: %ld  (%.2f%% of plotted)\n",
          nReach, nPlot ? 100.0 * nReach / nPlot : 0.0);
-  printf("    of which R1+R2+R3 %ld (%.2f%%), other reachable %ld (%.2f%%)\n",
-         nCat[R1]+nCat[R2]+nCat[R3],
-         nPlot ? 100.0*(nCat[R1]+nCat[R2]+nCat[R3])/nPlot : 0.0,
-         nCat[OTHER_HELP], nPlot ? 100.0*nCat[OTHER_HELP]/nPlot : 0.0);
 
   if (nDisagreeR1 || nDisagreeR2)
     printf("\n  *** WARNING: local R1/R2 disagree with classifyVbsRegion on\n"
