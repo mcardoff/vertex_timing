@@ -88,22 +88,23 @@ namespace {
   // match within dR 0.6 above 4 GeV -- so a jet between the two cones is
   // neither, and those events have to land somewhere. It also holds the mixed
   // pairs whose second leg is beyond |eta| = MAX_ABS_ETA_JET.
-  enum Cat { R1 = 0, R2, R3, BOTH_HS, OTHER, NCAT };
+  enum Cat { R1 = 0, R2, R3, OTHER_HELP, BOTH_HS, OTHER, NCAT };
 
   const std::array<const char*, NCAT> CAT_KEY = {
-    "r1", "r2", "r3", "both_hs", "other"
+    "r1", "r2", "r3", "other_help", "both_hs", "other"
   };
 
   const std::array<const char*, NCAT> CAT_LABEL = {
     "R1: both tags fwd, HS + PU",
     "R2: fwd PU + central HS",
     "R3: fwd HS + central PU",
+    "Other: HGTD can still help",
     "Both tags truth-HS",
     "Other"
   };
 
   // The project palette, in registry order.
-  const std::array<Color_t, NCAT> CAT_COLOR = { C01, C02, C03, C04, C05 };
+  const std::array<Color_t, NCAT> CAT_COLOR = { C01, C02, C03, C04, C05, C06 };
 
   // ── m_jj binning ─────────────────────────────────────────────────────────
   // Variable width: narrow where the spectrum is steep and every sample has
@@ -189,6 +190,14 @@ int main(int argc, char** argv) {
   // Merged into OTHER on the stack, but still counted: the plot got simpler,
   // the information did not have to be thrown away.
   long nNoAcc = 0, nBothPU = 0;
+  // Within OTHER, what could HGTD still say something about? The necessary
+  // condition is a tag leg it can actually measure, so these count OTHER events
+  // with >=1 leg in acceptance, by what the pair is:
+  //   accHS_beyondPU : genuine tag timeable, fake beyond |eta| MAX -- R3's logic
+  //   beyondHS_accPU : fake timeable, genuine one is not          -- R2's logic
+  //   bothPU_timeable: no genuine tag at all; timing can reject the whole fake
+  //   ambig_timeable : truth match ambiguous, so undecidable either way
+  long nOthAccHsBeyPu = 0, nOthBeyHsAccPu = 0, nOthBothPuTimeable = 0, nOthAmbigTimeable = 0;
   std::array<long, NCAT> nCat{};
 
   // Where OTHER's mixed-truth events actually sit, so the residual does not
@@ -278,13 +287,27 @@ int main(int argc, char** argv) {
     // category the question cares about.
     else if (zA != 1 && zB != 1) { cat = OTHER; ++nNoAcc; }
     else if (hsA && hsB)           cat = BOTH_HS;
-    else if (puA && puB)         { cat = OTHER; ++nBothPU; }
+    // No genuine tag at all, but a timeable one: HGTD can reject the whole fake
+    // pair. A different operation from R1-R3's disambiguation, still a use.
+    else if (puA && puB)         { cat = OTHER_HELP; ++nBothPU; ++nOthBothPuTimeable; }
     else {
-      cat = OTHER;
       if ((hsA && puB) || (hsB && puA)) {
         const int hsIdx = (hsA && puB) ? a : b;
         const int puIdx = (hsA && puB) ? b : a;
-        ++nMix[zone(hsIdx)][zone(puIdx)];
+        const int zHS = zone(hsIdx), zPU = zone(puIdx);
+        ++nMix[zHS][zPU];
+        // R3's and R2's logic with the untimeable leg beyond |eta| MAX rather
+        // than central. Timing does exactly the same job either way, so these
+        // belong with the reachable events, not in the residual.
+        if      (zHS == 1 && zPU == 2) { cat = OTHER_HELP; ++nOthAccHsBeyPu; }
+        else if (zHS == 2 && zPU == 1) { cat = OTHER_HELP; ++nOthBeyHsAccPu; }
+        else                             cat = OTHER;  // unreachable: R1/R2/R3
+      } else {
+        // Truth match ambiguous (a leg is neither paper-HS nor paper-PU), so
+        // whether HGTD helps is undecidable -- deliberately NOT counted as
+        // reachable, since that would be a choice dressed up as a measurement.
+        cat = OTHER;
+        ++nOthAmbigTimeable;
       }
     }
 
@@ -436,15 +459,32 @@ int main(int argc, char** argv) {
            "      is therefore normalised against the wrong denominator.\n",
            sum, nPlot);
 
-  printf("\n  \"Other\" is made of: neither tag in HGTD acceptance %ld (%.2f%%),\n"
-         "                     both tags pileup %ld (%.2f%%), and the rest below.\n",
-         nNoAcc,  nPlot ? 100.0 * nNoAcc  / nPlot : 0.0,
-         nBothPU, nPlot ? 100.0 * nBothPU / nPlot : 0.0);
+  printf("\n  Residual \"Other\" = neither tag in HGTD acceptance %ld (%.2f%%)\n"
+         "                    + ambiguous truth match %ld (%.2f%%)\n",
+         nNoAcc, nPlot ? 100.0 * nNoAcc / nPlot : 0.0,
+         nOthAmbigTimeable, nPlot ? 100.0 * nOthAmbigTimeable / nPlot : 0.0);
+
+  {
+    const long timeable = nOthAccHsBeyPu + nOthBeyHsAccPu + nOthBothPuTimeable;
+    printf("\n  \"Other: HGTD can still help\" is made of:\n");
+    printf("      fwd HS + PU beyond |eta| %.1f  %6ld (%.2f%%)  R3-like: confirm the genuine tag\n",
+           MAX_ABS_ETA_JET, nOthAccHsBeyPu, nPlot ? 100.0*nOthAccHsBeyPu/nPlot : 0.0);
+    printf("      fwd PU + HS beyond |eta| %.1f  %6ld (%.2f%%)  R2-like: reject the fake\n",
+           MAX_ABS_ETA_JET, nOthBeyHsAccPu, nPlot ? 100.0*nOthBeyHsAccPu/nPlot : 0.0);
+    printf("      both tags pileup, >=1 timeable %6ld (%.2f%%)  no genuine tag: reject the pair\n",
+           nOthBothPuTimeable, nPlot ? 100.0*nOthBothPuTimeable/nPlot : 0.0);
+    printf("      TOTAL                          %6ld (%.2f%%)\n",
+           timeable, nPlot ? 100.0*timeable/nPlot : 0.0);
+  }
 
   // The headline this plot exists to give.
-  const long nReach = nCat[R1] + nCat[R2] + nCat[R3];
-  printf("\n  HGTD can contribute (R1 + R2 + R3): %ld  (%.2f%% of plotted)\n",
+  const long nReach = nCat[R1] + nCat[R2] + nCat[R3] + nCat[OTHER_HELP];
+  printf("\n  HGTD can contribute (R1 + R2 + R3 + other): %ld  (%.2f%% of plotted)\n",
          nReach, nPlot ? 100.0 * nReach / nPlot : 0.0);
+  printf("    of which R1+R2+R3 %ld (%.2f%%), other reachable %ld (%.2f%%)\n",
+         nCat[R1]+nCat[R2]+nCat[R3],
+         nPlot ? 100.0*(nCat[R1]+nCat[R2]+nCat[R3])/nPlot : 0.0,
+         nCat[OTHER_HELP], nPlot ? 100.0*nCat[OTHER_HELP]/nPlot : 0.0);
 
   if (nDisagreeR1 || nDisagreeR2)
     printf("\n  *** WARNING: local R1/R2 disagree with classifyVbsRegion on\n"
