@@ -351,7 +351,7 @@ except subprocess.CalledProcessError as e:
 # tracks as 1/sqrt(sum 1/sigma_i^2) -- the same inverse-variance combination
 # clustering_functions.h uses when merging, so it reproduces Cluster::sigmas[0]
 # rather than approximating it.
-GATE_SIGMA = 2.5
+GATE_SIGMA = 3.0  # keep in sync with util/rpt_v5_hist.cxx's GATE_SIGMA
 _sel = None
 if args.extra_time is not None and cluster_times:
     _sel = min(range(len(cluster_times)),

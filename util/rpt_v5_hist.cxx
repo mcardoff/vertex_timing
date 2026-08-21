@@ -82,7 +82,17 @@ static constexpr double TRUTH_TRK_SMEAR = 30.0;  // ps, on each track's own vert
 // when the vertex time is slightly mis-estimated, dragging the high-efficiency
 // end of the ROC below ITk-only (worst in the >40 GeV slice).  Loosening it
 // recovers that region at a small low-efficiency cost.
-static constexpr double GATE_SIGMA = 2.5;
+//
+// 3.0 is the reference study's forward working point (jet_pileup_studies,
+// 5 Oct 2023, slide 30: "For Forward eta region 2.4 <|eta|< 3.8, best setting
+// is : dR<0.2, sigma_z0(pT,eta) cut < 1.4 & t30 <3.0"), chosen there by a scan
+// over 2.0/2.5/3.0.  Note the two gates are not literally the same quantity but
+// are close in effect: the reference divides by a FLAT 30 ps (every track in
+// that study carries a 30 ps smear), so its t30 < 3.0 is a fixed +-90 ps window,
+// while ours divides by the per-track pull denominator
+// sqrt(infl^2 * var_vtx + sigma_trk^2), which for a typical HGTD track
+// (sigma_trk ~26 ps, inflated sigma_vtx ~12 ps) is ~29 ps -> ~+-86 ps.
+static constexpr double GATE_SIGMA = 3.0;
 
 // ── Vertex-time error inflation, per scenario ────────────────────────────────
 // The quoted vertex-time uncertainty understates the true spread, so a nominal
@@ -154,61 +164,41 @@ static inline double dR(double j_eta, double j_phi, double t_eta, double t_phi) 
 // -----------------------------------------------------------------------------
 // Track-to-vertex association, reference-study definition.
 //
-// Ported verbatim (coefficients and all) from a colleague's RpT study,
-// util/myJet_ana_fr.C::getNewDzpara. Returns the expected |z0 - z_vtx| scale in
-// mm for a track of given |eta| and pT: a 6th-order polynomial in |eta| whose
-// coefficients are selected from five pT bins.
+// getNewDzpara now lives in src/clustering_constants.h (MyUtl), shared with the
+// clustering's own --dzpara association so the two cannot drift apart. It was
+// ported verbatim from util/myJet_ana_fr.C, where the reference study calls it
+// sigma_z0(pT, eta): an empirical parameterization of the OBSERVED z0 resolution,
+// used in place of the per-track covariance sqrt(var_z0).
 //
-// This REPLACES the z0-significance cut (|z0-z_vtx|/sqrt(var_z0) < N) that
-// rpt_v5 used previously. The two are not equivalent: the significance form
-// leans on the per-track covariance, which the z0_pull_diag study found
-// underestimates the true spread by ~15% (hence Z0_VAR_INFLATION elsewhere in
-// this codebase), while this is an empirical parameterization of the observed
-// resolution. Using it makes our RpT numerator directly comparable to the
-// reference study's.
-//
-// Note the pT bins are half-open on the low side and the <=1.5 bin catches
-// everything below, matching the original's if-chain exactly (no else-if, so a
-// value landing on a boundary takes the LAST matching branch -- preserved here
-// deliberately rather than "cleaned up", since changing it would silently shift
-// which coefficients boundary-pT tracks get).
+// The point of the substitution is that a significance cut is self-referential --
+// it scales each track's window by that track's own error estimate, so a badly
+// measured track earns a WIDER window. The parameterization sets the window from
+// (eta, pT) alone, which the track cannot influence. The reference study scanned
+// both and reported (5 Oct 2023, slide 30) the parameterization as the best
+// forward choice and plain significance as the best central one.
 // -----------------------------------------------------------------------------
-static double getNewDzpara(double eta, double pt) {
-  eta = std::abs(eta);
-  double p[7] = {0, 0, 0, 0, 0, 0, 0};
-  auto set = [&p](const double (&src)[7]) { std::copy(src, src + 7, p); };
-
-  if (pt <= 1.5) {
-    static const double c[7] = { 0.0314036, 0.790955, -2.65987, 3.62073, -2.18228, 0.614866, -0.0634521 };
-    set(c);
-  }
-  if (pt > 1.5 && pt <= 2.5) {
-    static const double c[7] = { 0.0229273, 0.540101, -1.80727, 2.45187, -1.47382, 0.414345, -0.0426769 };
-    set(c);
-  }
-  if (pt > 2.5 && pt <= 5.0) {
-    static const double c[7] = { 0.0163773, 0.345112, -1.14474, 1.54382, -0.923523, 0.258617, -0.0265446 };
-    set(c);
-  }
-  if (pt > 5.0 && pt <= 10.0) {
-    static const double c[7] = { 0.010919, 0.179329, -0.581971, 0.773186, -0.45679, 0.126608, -0.012875 };
-    set(c);
-  }
-  if (pt > 10.0) {
-    static const double c[7] = { 0.00835945, 0.0957783, -0.299255, 0.38722, -0.22351, 0.0607521, -0.00606524 };
-    set(c);
-  }
-
-  double d = p[0];
-  double e = 1.0;
-  for (int k = 1; k < 7; ++k) { e *= eta; d += p[k] * e; }
-  return std::abs(d);
-}
 
 // Multiple of getNewDzpara a track's |z0 - z_vtx| must stay within. 1.4 is the
 // reference study's working point (its comment notes 0.8 discriminates better;
 // left at 1.4 to match what the study actually ran).
 static constexpr double DZ0_PARA_SCALE = 1.4;
+
+// Forward R_pT track-to-vertex association. The parameterization is the default:
+// the reference study scanned both and reported it as the best forward choice,
+// and on local VBF it is worth roughly double the WAVeS improvement factor in the
+// 30-40 GeV slice (+19% vs +5% at 0.80 HS efficiency, +26% vs +14% at 0.85).
+//
+// --rpt-signif flips this list back to a plain z0-significance cut at
+// RPT_Z_SIGNIF, which is what rpt_v5 ran before 2026-08-13. Kept reachable
+// because the choice moves the ITk-only baseline (126.6 -> 139.1 at 0.80) and
+// therefore every "HGTD improves rejection by Nx" ratio quoted against it, so
+// the two must stay comparable on demand.
+//
+// This is INDEPENDENT of MyUtl::USE_DZ_PARA (--dzpara), which governs the
+// CLUSTERING's track selection. The two were briefly wired together; they are
+// separate questions and are kept separate.
+static constexpr double RPT_Z_SIGNIF = 2.5;
+inline bool RPT_USE_DZ_PARA = true;
 
 // Central (|eta| < 2.4) track-to-vertex association: |z0 - z_vtx| / sigma_z0.
 //
@@ -436,6 +426,23 @@ int main(int argc, char** argv) {
     boost::filesystem::create_directories(MyUtl::OUTPUT_DIR + "/hists");
   unsigned nThreads = MyUtl::resolveThreads(argc, argv);
 
+  // --dzpara: swap the z0-significance association for the reference study's
+  // getNewDzpara parameterization, in BOTH the R_pT track list and the WAVeS
+  // clustering input (they share passTrackVertexAssociation). Set before any
+  // worker thread starts; read-only afterwards. Default off -- see the trk_all
+  // comment for why the choice moves every improvement factor.
+  for (int i = 1; i < argc; ++i) {
+    std::string a(argv[i]);
+    if (a == "--dzpara")     MyUtl::USE_DZ_PARA = true;   // clustering input
+    if (a == "--rpt-signif") RPT_USE_DZ_PARA    = false;  // R_pT track list
+  }
+  std::cout << "[assoc] R_pT fwd: "
+            << (RPT_USE_DZ_PARA ? "getNewDzpara x " + std::to_string(DZ0_PARA_SCALE)
+                                : "z0 significance < " + std::to_string(RPT_Z_SIGNIF))
+            << " | R_pT central: z0 significance < " << CENTRAL_Z_SIGNIF
+            << " | clustering: "
+            << (MyUtl::USE_DZ_PARA ? "getNewDzpara" : "z0 significance") << '\n';
+
   // Per-sample vertex-time calibration. Resolved here, before any worker thread
   // exists, so the event loop only ever reads it. Echoed so a run's stdout
   // records which calibration produced its histograms -- the PRINT_PULL_DIAG
@@ -561,17 +568,30 @@ int main(int argc, char** argv) {
       if (branch.vetoLeptonOverlap()) continue;
 
       // ── Track selection: all tracks (no eta cut) associated to the primary
-      //    vertex by the reference study's parameterized |Δz₀| cut, for the
-      //    z-only baseline / ITk-only scenario. See getNewDzpara above for why
-      //    this replaced the previous z₀-significance cut. ──────────────────────
+      //    vertex, for the z-only baseline / ITk-only scenario.
+      //
+      //    Defaults to the reference study's getNewDzpara parameterization; see
+      //    RPT_USE_DZ_PARA above, and --rpt-signif for the z0-significance form.
+      //
+      //    The choice matters for how results are REPORTED, not just internally:
+      //    it moves the ITk-only baseline (126.6 significance vs 139.1
+      //    parameterized, forward 30-40 GeV at 0.80 HS efficiency on local VBF),
+      //    and every "HGTD improves rejection by Nx" number is a ratio to that
+      //    baseline. The same WAVeS curve reads as +5% or +19% depending only on
+      //    which association the denominator used. Always quote the association
+      //    alongside the factor.
       std::vector<int> trk_all;
       const double vtxZ = branch.recoVtxZ[0];
       for (size_t trk = 0; trk < branch.trackZ0.GetSize(); ++trk) {
         double trkPt = branch.trackPt[trk];
         if (trkPt < MIN_TRACK_PT || trkPt > MAX_TRACK_PT) continue;
         if (!branch.trackQuality[trk]) continue;
-        double dz = std::abs(branch.trackZ0[trk] - vtxZ);
-        if (dz / getNewDzpara(branch.trackEta[trk], trkPt) > DZ0_PARA_SCALE) continue;
+        if (RPT_USE_DZ_PARA) {
+          double dz = std::abs(branch.trackZ0[trk] - vtxZ);
+          if (dz / MyUtl::getNewDzpara(branch.trackEta[trk], trkPt) > DZ0_PARA_SCALE) continue;
+        } else if (!passTrackVertexAssociation((int)trk, 0, &branch, RPT_Z_SIGNIF)) {
+          continue;
+        }
         trk_all.push_back((int)trk);
       }
 
