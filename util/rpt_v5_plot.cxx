@@ -154,13 +154,11 @@ int main(int argc, char** argv) {
   std::vector<Scenario> scen_lo_cen = makeScenarios("_lo_cen");
   std::vector<Scenario> scen_hi_cen = makeScenarios("_hi_cen");
   // VBS-topology regions, see rpt_v5_hist.cxx's region block for definitions.
-  // scen_r2's h_hs is EMPTY by construction (region 2 has no forward HS jet);
-  // its ROC borrows scen_r1's HS side -- see SECTION 2b.
+  // All three are self-contained: h_hs/h_pu are filled from EVERY qualifying
+  // forward truth-HS/truth-PU jet in the event, not just the VBS-pair's own
+  // one or two legs -- no cross-region borrowing anywhere (see SECTION 2b).
   std::vector<Scenario> scen_r1 = makeScenarios("_r1");
   std::vector<Scenario> scen_r2 = makeScenarios("_r2");
-  // R3 is self-contained, unlike R2: h_hs holds the confirmed genuine tag,
-  // h_pu holds OTHER forward truth-PU jets in the SAME event (not a borrowed
-  // leg), so it gets its own real ROC rather than R2's cross-region one.
   std::vector<Scenario> scen_r3 = makeScenarios("_r3");
   long n_total, n_pass_basic, n_hgtd_valid;
   double pu_tot_pt, pu_floor_pt, hs_tot_pt, hs_floor_pt;
@@ -221,9 +219,12 @@ int main(int argc, char** argv) {
   // VBS-topology region labels (see rpt_v5_hist.cxx for the definitions).
   const char* lbl_lo_cen = "30 < p_{T}^{jet} < 40 GeV@@|#eta| < 2.4@@[central baseline]";
   const char* lbl_hi_cen = "p_{T}^{jet} > 40 GeV@@|#eta| < 2.4@@[central baseline]";
-  const char* lbl_r1 = "VBS R1: both tags fwd@@HS leg vs PU leg@@p_{T}^{jet} > 30 GeV";
-  const char* lbl_r2 = "VBS R2: fwd PU + cen. HS@@signal side from R1";
-  const char* lbl_r3 = "VBS R3: fwd HS + cen. PU@@confirmed tag vs other fwd PU jets@@p_{T}^{jet} > 30 GeV";
+  // All three: h_hs/h_pu = every forward truth-HS/truth-PU jet in the
+  // event, not just the pair leg(s) that define the region -- see
+  // fillOtherHs/fillOtherPu in rpt_v5_hist.cxx.
+  const char* lbl_r1 = "VBS R1: both tags fwd@@p_{T}^{jet} > 30 GeV";
+  const char* lbl_r2 = "VBS R2: fwd PU + cen. HS@@p_{T}^{jet} > 30 GeV";
+  const char* lbl_r3 = "VBS R3: fwd HS + cen. PU@@p_{T}^{jet} > 30 GeV";
 
   // ===========================================================================
   // SECTION 2: Derive every Integral()/GetMean()-based number. styleScen is
@@ -255,26 +256,23 @@ int main(int argc, char** argv) {
   const double roc_xmin_hi = roc_xmin_default, roc_xmax_hi = roc_xmax_default;
 
   // ── SECTION 2b: VBS-topology region ROCs ──────────────────────────────────
-  // R1 is self-contained: its own forward HS leg vs its own forward PU leg.
+  // Each region's h_hs/h_pu is filled (rpt_v5_hist.cxx's fillOtherHs/
+  // fillOtherPu) from EVERY forward truth-HS/truth-PU jet found in that
+  // region's events -- the VBS-pair legs land there too when they qualify,
+  // but so does any other forward activity in the event, since the pair
+  // search only ever picks the single highest-m_jj opposite-hemisphere pair
+  // and the event is not restricted to those two jets. No region ever reaches
+  // into another region's population for a substitute; each ROC is entirely
+  // its own.
   //
-  // R2 is NOT. By construction its only forward jet is the PU leg (the HS leg
-  // is central, outside HGTD acceptance), so scen_r2[i].h_hs is empty and
-  // generate_roc against it would divide by zero. The physics question R2 asks
-  // is "how well can timing reject a forward PU jet", which needs a forward-HS
-  // reference to trade off against -- and R1's HS leg is exactly that: a
-  // genuine forward HS jet under the same track selection and timing gate. So
-  // R2's ROC pairs r2.h_pu against r1.h_hs. This is a cross-region ROC and is
-  // labelled as such on the plot; do not "fix" it to use r2.h_hs.
-  std::vector<TGraph*> rocs_r1, rocs_r2;
+  // (An earlier version had R2 borrow R1's h_hs wholesale, on the premise
+  // that R2's defining pair has no forward HS leg -- true of the PAIR, not of
+  // the EVENT. That mixed the wrong population in: R1's HS legs come from
+  // both-forward topology events, not R2's, so it measured "how do R1's
+  // genuine tags compare to R2's fakes" rather than anything about R2 itself.)
+  std::vector<TGraph*> rocs_r1, rocs_r2, rocs_r3;
   for (auto& s : scen_r1) rocs_r1.push_back(generate_roc_grid(s.h_pu, s.h_hs, effGrid));
-  for (size_t i = 0; i < scen_r2.size(); ++i)
-    rocs_r2.push_back(generate_roc_grid(scen_r2[i].h_pu, scen_r1[i].h_hs, effGrid));
-  // (styled below, once styleRoc is in scope)
-
-  // R3 is self-contained too, like R1: h_hs is the confirmed genuine tag,
-  // h_pu is OTHER forward truth-PU jets from the SAME events (not a leg
-  // borrowed from another region), so its ROC needs no cross-region pairing.
-  std::vector<TGraph*> rocs_r3;
+  for (auto& s : scen_r2) rocs_r2.push_back(generate_roc_grid(s.h_pu, s.h_hs, effGrid));
   for (auto& s : scen_r3) rocs_r3.push_back(generate_roc_grid(s.h_pu, s.h_hs, effGrid));
 
   auto styleRoc = [&](TGraph* g, Color_t col, double xmin, double xmax) {
@@ -568,10 +566,10 @@ int main(int argc, char** argv) {
                                         rocYMaxIn(rocs_r3, roc_xmin_default, roc_xmax_default)});
   drawRocWithRatio(rocs_r1, scen_r1, roc_ymax_reg, 4.0,
                    roc_xmin_default, roc_xmax_default, lbl_r1);
-  drawRocWithRatio(rocs_r3, scen_r3, roc_ymax_reg, 4.0,
-                   roc_xmin_default, roc_xmax_default, lbl_r3);
   drawRocWithRatio(rocs_r2, scen_r2, roc_ymax_reg, 4.0,
                    roc_xmin_default, roc_xmax_default, lbl_r2);
+  drawRocWithRatio(rocs_r3, scen_r3, roc_ymax_reg, 4.0,
+                   roc_xmin_default, roc_xmax_default, lbl_r3);
 
   // (3+) Per-scenario HS vs PU, 30–40 GeV slice, log-y.
   canvas->Clear();
@@ -674,35 +672,35 @@ int main(int argc, char** argv) {
   //   R1  both VBS candidate legs forward, one truth-HS + one truth-PU --
   //       timing has to pick which forward jet is the hard-scatter one.
   //   R2  forward truth-PU leg + central truth-HS leg -- can timing reject the
-  //       forward PU jet? Its ROC's signal side is R1's forward HS leg (R2 has
-  //       no forward HS jet by construction); see SECTION 2b.
+  //       forward PU jet?
   //   R3  forward truth-HS leg + central truth-PU leg (classifyVbsRegion's
   //       strict R3), plus classifyR3Broad's "confirm" case (same story, the
   //       untimeable leg beyond acceptance instead of central) -- can timing
-  //       avoid emptying the genuine tag? Unlike R2, R3's PU side is its OWN:
-  //       every other forward truth-PU jet in the SAME events, not a leg
-  //       borrowed from another region (see fillOtherPu in rpt_v5_hist.cxx).
-  //       classifyR3Broad's "reject" sub-cases (no genuine tag at all, or the
-  //       fake beyond acceptance) are deliberately excluded from this ROC --
-  //       they answer a different question and stay part of the composition
-  //       plot's R3 count only.
+  //       avoid emptying the genuine tag? classifyR3Broad's "reject"
+  //       sub-cases (no genuine tag at all, or the fake beyond acceptance)
+  //       are deliberately excluded here: they answer a different question
+  //       and stay part of the composition plot's R3 count only.
+  //   All three fill h_hs/h_pu from EVERY qualifying forward jet in the
+  //   event, not just the VBS-pair leg(s) -- see fillOtherHs/fillOtherPu in
+  //   rpt_v5_hist.cxx and SECTION 2b above.
   // ===========================================================================
   // (The three region ROCs are drawn earlier, alongside the inclusive ROCs.)
   // What remains here is the per-region R_pT shapes.
-  // legX1/legY1/legX2/legY2 default to bottom-right: every region shape
-  // filled from a fake or a PU-suppressed leg falls off well before the right
-  // edge, so that corner is normally empty. R3's confirmed-HS distribution is
-  // the one exception -- it is a REAL forward jet's R_pT, spread across most
-  // of [0, 1] rather than piled at 0, so bottom-right collides with its tail;
-  // that one call passes an explicit top-right box instead, where the curve
-  // has already fallen two decades by the time it gets there.
+  // legX1/legY1/legX2/legY2 default to bottom-right: a region's PU-jet
+  // distribution (fakes, and anything a timing gate suppresses) falls off
+  // well before the right edge, so that corner is normally empty. The HS-jet
+  // distributions are the opposite -- real forward jets, spread across most
+  // of [0, 1] rather than piled at 0 -- so bottom-right collides with their
+  // tail; every useHS=true call below passes an explicit top-right box
+  // instead, where the curve has already fallen two decades by the time it
+  // gets there.
   auto drawRegionShapes = [&](std::vector<Scenario>& sc, bool useHS,
                               const char* title, const char* lbl,
                               double legX1 = 0.58, double legY1 = 0.16,
                               double legX2 = 0.93, double legY2 = 0.40) {
     double ymax = 0.0;
     for (auto& s : sc) ymax = std::max(ymax, (useHS ? s.h_hs : s.h_pu)->GetMaximum());
-    if (ymax <= 0.0) return;  // nothing filled (e.g. R2's empty HS side)
+    if (ymax <= 0.0) return;  // nothing filled for this region/leg combination
     canvas->Clear();
     canvas->SetLogy(true);
     TLegend* L = new TLegend(legX1, legY1, legX2, legY2);
@@ -718,25 +716,33 @@ int main(int argc, char** argv) {
     L->Draw();
     canvas->Print(out_pdf);
   };
-  drawRegionShapes(scen_r1, true,  "R1 forward HS leg R_{pT};R_{pT};Entries", lbl_r1);
-  drawRegionShapes(scen_r1, false, "R1 forward PU leg R_{pT};R_{pT};Entries", lbl_r1);
-  drawRegionShapes(scen_r2, false, "R2 forward PU leg R_{pT};R_{pT};Entries", lbl_r2);
-  drawRegionShapes(scen_r3, true,  "R3 confirmed HS tag R_{pT};R_{pT};Entries", lbl_r3,
+  // All six calls now fill from the SAME construction (every qualifying
+  // forward truth-HS/PU jet in the event, not just the VBS-pair leg), so the
+  // titles read identically across regions -- there is no longer a "confirmed
+  // tag" vs "other jets" distinction to name.
+  drawRegionShapes(scen_r1, true,  "R1 forward HS jets R_{pT};R_{pT};Entries", lbl_r1,
                    0.58, 0.57, 0.93, 0.79);
-  drawRegionShapes(scen_r3, false, "R3 other forward PU jets R_{pT};R_{pT};Entries", lbl_r3);
+  drawRegionShapes(scen_r1, false, "R1 forward PU jets R_{pT};R_{pT};Entries", lbl_r1);
+  drawRegionShapes(scen_r2, true,  "R2 forward HS jets R_{pT};R_{pT};Entries", lbl_r2,
+                   0.58, 0.57, 0.93, 0.79);
+  drawRegionShapes(scen_r2, false, "R2 forward PU jets R_{pT};R_{pT};Entries", lbl_r2);
+  drawRegionShapes(scen_r3, true,  "R3 forward HS jets R_{pT};R_{pT};Entries", lbl_r3,
+                   0.58, 0.57, 0.93, 0.79);
+  drawRegionShapes(scen_r3, false, "R3 forward PU jets R_{pT};R_{pT};Entries", lbl_r3);
 
   // Region yields -- these topologies are rare, so print the counts that the
   // ROCs above are built from. A region with very few entries makes its ROC
   // unreliable no matter how clean the curve looks.
   std::printf("\n=== VBS-topology region yields (zonly scenario) ===\n");
-  std::printf("  R1 forward HS legs : %8.0f\n", scen_r1[0].h_hs->GetEntries());
-  std::printf("  R1 forward PU legs : %8.0f\n", scen_r1[0].h_pu->GetEntries());
-  std::printf("  R2 forward PU legs : %8.0f\n", scen_r2[0].h_pu->GetEntries());
-  std::printf("  (R2 HS side is empty by construction; its ROC uses R1's HS legs)\n");
-  std::printf("  R3 confirmed HS tags     : %8.0f\n", scen_r3[0].h_hs->GetEntries());
-  std::printf("  R3 other forward PU jets : %8.0f\n", scen_r3[0].h_pu->GetEntries());
-  std::printf("  (R3 is self-contained: its PU side comes from OTHER forward jets in\n"
-              "   the same events, not from a borrowed region, so its ROC is its own)\n");
+  std::printf("  R1 forward HS jets : %8.0f\n", scen_r1[0].h_hs->GetEntries());
+  std::printf("  R1 forward PU jets : %8.0f\n", scen_r1[0].h_pu->GetEntries());
+  std::printf("  R2 forward HS jets : %8.0f\n", scen_r2[0].h_hs->GetEntries());
+  std::printf("  R2 forward PU jets : %8.0f\n", scen_r2[0].h_pu->GetEntries());
+  std::printf("  R3 forward HS jets : %8.0f\n", scen_r3[0].h_hs->GetEntries());
+  std::printf("  R3 forward PU jets : %8.0f\n", scen_r3[0].h_pu->GetEntries());
+  std::printf("  (all three self-contained: h_hs/h_pu are every qualifying forward\n"
+              "   jet in that region's events, not just the VBS-pair leg(s), and\n"
+              "   never borrowed from another region)\n");
 
   canvas->Print(out_pdf + "]");
 
