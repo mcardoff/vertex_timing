@@ -185,7 +185,6 @@ int main(int argc, char** argv) {
   TH1D* hTot = new TH1D("mjj_raw_total", "", nbin, eddy);
 
   long nSeen = 0, nSel = 0, nNoPair = 0, nBelowMjj = 0;
-  long nDisagreeR1 = 0, nDisagreeR2 = 0;
   // Merged into OTHER on the stack, but still counted: the plot got simpler,
   // the information did not have to be thrown away.
   long nNoAcc = 0, nBothPU = 0;
@@ -207,6 +206,14 @@ int main(int argc, char** argv) {
   // it. Indexed [HS leg zone][PU leg zone]: 0 = central |eta| < MIN_ABS_ETA_JET,
   // 1 = HGTD acceptance, 2 = beyond MAX_ABS_ETA_JET.
   long nMix[3][3] = {};
+
+  // Denominator for the "of events where a VBF jet is pileup" statistics: at
+  // least one candidate-pair leg is paper-PU. R1/R2/OTHER_HELP (R3-broad) are
+  // ALL, by construction, subsets of this -- every one of their matching
+  // conditions requires a paper-PU leg somewhere in the pair -- so their
+  // fractions of nHasPU say directly what share of the "there IS a fake here"
+  // population each region actually reaches.
+  long nHasPU = 0;
 
   const Long64_t nEntries = chain.GetEntries();
   const Long64_t denom    = (maxEvents > 0 && maxEvents < nEntries) ? maxEvents : nEntries;
@@ -236,84 +243,83 @@ int main(int argc, char** argv) {
     if (!pair.valid()) { ++nNoPair; continue; }
     ++nSel;
 
-    // R1/R2 from the SHARED classifier, so the regions here cannot mean
-    // something different from the ones rpt_v5 and the clustering analysis fill.
-    const VbsRegion region =
-        branch.classifyVbsRegion(MIN_ABS_ETA_JET, MAX_ABS_ETA_JET, MIN_ABS_ETA_JET);
-
     const int a = pair.idxI, b = pair.idxJ;
 
-    // Zones match classifyVbsRegion's own isFwd/isCentral exactly, including
-    // the strict inequalities: a jet sitting precisely on MIN_ABS_ETA_JET is
-    // neither central nor in acceptance there, so it must be neither here.
-    auto zone = [&](int j) {
-      const double e = std::abs((double)branch.topoJetEta[j]);
-      if (e < MIN_ABS_ETA_JET)                          return 0;  // central
-      if (e > MIN_ABS_ETA_JET && e < MAX_ABS_ETA_JET)   return 1;  // HGTD acc.
-      return 2;                                                    // beyond
-    };
+    // Region membership from the SHARED classifiers (clustering_structs.h),
+    // so vbs_region_mjj and rpt_v5_hist cannot drift on what R1/R2/R3 mean.
+    // classifyVbsRegion covers strict R1/R2/R3; classifyR3Broad covers the
+    // three extra cases folded into the SAME "R3" bucket here (see its own
+    // doc comment for what they are and why they share a name with strict R3).
+    int fwdHS = -1, fwdPU = -1;
+    const VbsRegion region =
+        branch.classifyVbsRegion(MIN_ABS_ETA_JET, MAX_ABS_ETA_JET, MIN_ABS_ETA_JET,
+                                 &fwdHS, &fwdPU);
 
-    // Same truth helpers classifyVbsRegion uses, on the same pair.
+    // Local re-derivation, ONLY for the diagnostic sub-case breakdown printed
+    // in the summary below -- the CATEGORY decision itself comes entirely from
+    // the shared classifiers above/below, so nothing here can make this file's
+    // regions disagree with rpt_v5's.
     const bool hsA = branch.isJetPaperHS(branch.topoJetEta[a], branch.topoJetPhi[a]);
     const bool puA = branch.isJetPaperPU(branch.topoJetEta[a], branch.topoJetPhi[a]);
     const bool hsB = branch.isJetPaperHS(branch.topoJetEta[b], branch.topoJetPhi[b]);
     const bool puB = branch.isJetPaperPU(branch.topoJetEta[b], branch.topoJetPhi[b]);
-    const int  zA  = zone(a), zB = zone(b);
+    if (puA || puB) ++nHasPU;
+    auto zone = [&](int j) {
+      const double e = std::abs((double)branch.topoJetEta[j]);
+      if (e < MIN_ABS_ETA_JET)                        return 0;
+      if (e > MIN_ABS_ETA_JET && e < MAX_ABS_ETA_JET) return 1;
+      return 2;
+    };
 
-    // ── The three regions, defined together ─────────────────────────────────
-    // Written out side by side rather than taking R1/R2 from the shared
-    // classifier and bolting R3 on beside them: the three are one set, and the
-    // symmetry between R2 and R3 (which leg is the timeable one) is the whole
-    // point. Spelling them out is what makes that readable.
-    //
-    // isR1/isR2 must still agree with classifyVbsRegion, since that is what
-    // rpt_v5 and the clustering analysis fill -- cross-checked per event below,
-    // so a future edit to either definition cannot drift silently.
-    const bool isR1 = (zA == 1 && zB == 1) && ((hsA && puB) || (hsB && puA));
-    const bool isR2 = (zA == 1 && puA && zB == 0 && hsB) ||
-                      (zB == 1 && puB && zA == 0 && hsA);
-    const bool isR3 = (zA == 1 && hsA && zB == 0 && puB) ||
-                      (zB == 1 && hsB && zA == 0 && puA);
-
-    if (isR1 != (region == VbsRegion::R1)) ++nDisagreeR1;
-    if (isR2 != (region == VbsRegion::R2)) ++nDisagreeR2;
-
+    // No local cross-check left to perform here: region is now read directly
+    // from the shared classifier rather than re-derived, so there is nothing
+    // independent to compare it against. (Previously this file recomputed
+    // R1/R2 from raw eta/truth and diffed against classifyVbsRegion; that guard
+    // is retired along with the recomputation it was checking.)
     Cat cat;
-    if      (isR1) cat = R1;
-    else if (isR2) cat = R2;
-    else if (isR3) { cat = OTHER_HELP; ++nR3; }
-    // Nothing timeable at all. Still checked BEFORE the truth split, so an
-    // out-of-acceptance pair lands in OTHER whatever its tags truly are --
-    // "Both tags truth-HS" therefore means a genuine VBF pair with at least one
-    // leg HGTD could actually measure, which is the only version of that
-    // category the question cares about.
-    else if (zA != 1 && zB != 1) { cat = OTHER; ++nNoAcc; }
-    else if (hsA && hsB)           cat = BOTH_HS;
-    // No genuine tag at all, but a timeable one: HGTD can reject the whole fake
-    // pair. A different operation from R1-R3's disambiguation, still a use.
-    else if (puA && puB)         { cat = OTHER_HELP; ++nBothPU; ++nOthBothPuTimeable; }
-    else {
-      if ((hsA && puB) || (hsB && puA)) {
-        const int hsIdx = (hsA && puB) ? a : b;
-        const int puIdx = (hsA && puB) ? b : a;
-        const int zHS = zone(hsIdx), zPU = zone(puIdx);
-        ++nMix[zHS][zPU];
-        // R3's and R2's logic with the untimeable leg beyond |eta| MAX rather
-        // than central. Timing does exactly the same job either way, so these
-        // belong with the reachable events, not in the residual.
-        if      (zHS == 1 && zPU == 2) { cat = OTHER_HELP; ++nOthAccHsBeyPu; }
-        else if (zHS == 2 && zPU == 1) { cat = OTHER_HELP; ++nOthBeyHsAccPu; }
-        else                             cat = OTHER;  // unreachable: R1/R2/R3
+    if (region == VbsRegion::R1) {
+      cat = R1;
+    } else if (region == VbsRegion::R2) {
+      cat = R2;
+    } else if (region == VbsRegion::R3) {
+      cat = OTHER_HELP; ++nR3;
+    } else {
+      int hsLeg = -1, puLegA = -1, puLegB = -1;
+      const bool broad = branch.classifyR3Broad(MIN_ABS_ETA_JET, MAX_ABS_ETA_JET,
+                                                MIN_ABS_ETA_JET,
+                                                &hsLeg, &puLegA, &puLegB);
+      if (broad && hsLeg >= 0) {
+        cat = OTHER_HELP; ++nOthAccHsBeyPu;
+        const int zHS = zone(hsLeg);
+        const int puIdx = (hsLeg == a) ? b : a;
+        ++nMix[zHS][zone(puIdx)];
+      } else if (broad && puLegB >= 0) {
+        cat = OTHER_HELP; ++nBothPU; ++nOthBothPuTimeable;
+      } else if (broad && puLegA >= 0) {
+        // Either "fwd PU + HS beyond" (R2-like) or "both PU, one forward leg"
+        // -- classifyR3Broad's outputs alone don't distinguish them, and the
+        // physics (reject a timeable fake) is close enough that the summary
+        // does not need to. hsA/hsB tell them apart if ever needed again.
+        cat = OTHER_HELP;
+        if (puA && puB) { ++nBothPU; ++nOthBothPuTimeable; }
+        else             ++nOthBeyHsAccPu;
+      // Nothing timeable at all. Checked before the truth split on purpose: an
+      // out-of-acceptance pair lands in OTHER whatever its tags truly are.
+      } else if (zone(a) != 1 && zone(b) != 1) {
+        cat = OTHER; ++nNoAcc;
+      } else if (hsA && hsB) {
+        cat = BOTH_HS;
+      } else if (puA && puB) {
+        cat = OTHER; ++nBothPU;   // both-PU, neither timeable: unreachable
       } else {
-        // Truth match ambiguous (a leg is neither paper-HS nor paper-PU), so
-        // whether HGTD helps is undecidable -- deliberately NOT counted as
-        // reachable, since that would be a choice dressed up as a measurement.
         cat = OTHER;
-        ++nOthAmbigTimeable;
+        if (!((hsA && puB) || (hsB && puA))) ++nOthAmbigTimeable;
       }
     }
 
     // Below the axis floor the event cannot be placed on this plot. Dropped
+    // rather than piled into the first column, which would misreport it, and
+    // counted so the drop is visible in the summary.    // Below the axis floor the event cannot be placed on this plot. Dropped
     // rather than piled into the first column, which would misreport it, and
     // counted so the drop is visible in the summary.
     if (pair.mjj < MJJ_EDGES.front()) { ++nBelowMjj; continue; }
@@ -486,13 +492,27 @@ int main(int argc, char** argv) {
   printf("\n  HGTD can contribute: %ld  (%.2f%% of plotted)\n",
          nReach, nPlot ? 100.0 * nReach / nPlot : 0.0);
 
-  if (nDisagreeR1 || nDisagreeR2)
-    printf("\n  *** WARNING: local R1/R2 disagree with classifyVbsRegion on\n"
-           "      %ld / %ld events. The regions here no longer mean what\n"
-           "      rpt_v5 and the clustering analysis fill.\n",
-           nDisagreeR1, nDisagreeR2);
-  else
-    printf("  (local R1/R2 agree with classifyVbsRegion on every event)\n");
+  // A different denominator than everything above: not "of all selected
+  // events" but "of events where at least one VBF-candidate jet is genuinely
+  // pileup" -- i.e. conditioned on a fake actually being present to act on.
+  // R1, R2 and OTHER_HELP (R3-broad) are each, by construction, a subset of
+  // this population (every one of their matching conditions requires a
+  // paper-PU leg), so their shares of nHasPU say what fraction of the "there
+  // IS a fake here" events each region actually reaches -- distinct from
+  // their share of ALL events, which is diluted by the ~54% of events with no
+  // fake at all (both tags truth-HS).
+  printf("\n  Of events where >=1 VBF-candidate jet is genuinely pileup (N=%ld,\n"
+         "  %.2f%% of plotted):\n",
+         nHasPU, nPlot ? 100.0 * nHasPU / nPlot : 0.0);
+  printf("    1. %-40s %6ld (%.2f%%)\n", "R1: both tags fwd, HS + PU",
+         nCat[R1], nHasPU ? 100.0 * nCat[R1] / nHasPU : 0.0);
+  printf("    2. %-40s %6ld (%.2f%%)\n", "R2: fwd PU + central HS",
+         nCat[R2], nHasPU ? 100.0 * nCat[R2] / nHasPU : 0.0);
+  printf("    3. %-40s %6ld (%.2f%%)\n", "Other: HGTD can still help",
+         nCat[OTHER_HELP], nHasPU ? 100.0 * nCat[OTHER_HELP] / nHasPU : 0.0);
+  printf("       %-40s %6ld (%.2f%%)\n", "(none of R1/R2/other -- unreachable)",
+         nHasPU - nCat[R1] - nCat[R2] - nCat[OTHER_HELP],
+         nHasPU ? 100.0 * (nHasPU - nCat[R1] - nCat[R2] - nCat[OTHER_HELP]) / nHasPU : 0.0);
 
   // Where the "HS + PU, other eta config" events actually sit. This is the
   // largest non-both-HS category, so it is worth saying what it is rather than

@@ -399,15 +399,20 @@ namespace MyUtl {
 
     // -----------------------------------------------------------------------
     // VbsRegion / classifyVbsRegion
-    //   The two VBS topologies where forward timing is the deciding
-    //   information, classified off the VBS candidate pair (calcBestVbsPair):
+    //   The three VBS topologies where forward timing bears on the event,
+    //   classified off the VBS candidate pair (calcBestVbsPair):
     //
     //     R1  both legs forward (HGTD acceptance), one paper-HS + one paper-PU.
     //         Both jets are timeable, so timing must say WHICH is the
     //         hard-scatter one.
-    //     R2  one leg forward + paper-PU, the other central + paper-HS.
+    //     R2  forward paper-PU leg + central paper-HS leg.
     //         Only the fake is timeable; the question is whether timing can
     //         reject it.
+    //     R3  forward paper-HS leg + central paper-PU leg -- the mirror of R2.
+    //         Only the GENUINE tag is timeable, so the question is whether a
+    //         timing gate can accidentally empty it: there is no fake here for
+    //         timing to reject, since the pileup leg is central and outside
+    //         HGTD's reach regardless of what timing does.
     //
     //   Single source of truth shared by rpt_v5 (which fills per-jet RpT
     //   histograms per region) and the clustering analysis (whose VBF_R1 /
@@ -420,8 +425,8 @@ namespace MyUtl {
     //
     //   outFwdHS / outFwdPU return the reco jet indices of the forward
     //   hard-scatter and forward pileup legs (-1 when the region has no such
-    //   leg -- R2 always has outFwdHS == -1 by construction), so callers can
-    //   fill or annotate the individual legs without redoing the pairing.
+    //   leg): R2 always has outFwdHS == -1 (its HS leg is central, not
+    //   forward), R3 always has outFwdPU == -1 (its PU leg is central).
     // -----------------------------------------------------------------------
     VbsRegion classifyVbsRegion(double fwdEtaMin, double fwdEtaMax,
                                 double centralEtaMax,
@@ -478,7 +483,107 @@ namespace MyUtl {
         if (outFwdPU) *outFwdPU = b;
         return VbsRegion::R2;
       }
+
+      // R3: forward HS leg + central PU leg. Written as R2's mirror on
+      // purpose -- swap paperHS/paperPU and outFwdPU/outFwdHS -- so the
+      // symmetry between "reject the fake" (R2) and "keep the genuine tag"
+      // (R3) is visible in the code, not just asserted in the comment above.
+      if (isFwd(a) && paperHS(a) && isCentral(b) && paperPU(b)) {
+        if (outFwdHS) *outFwdHS = a;
+        return VbsRegion::R3;
+      }
+      if (isFwd(b) && paperHS(b) && isCentral(a) && paperPU(a)) {
+        if (outFwdHS) *outFwdHS = b;
+        return VbsRegion::R3;
+      }
       return VbsRegion::NONE;
+    }
+
+    // -----------------------------------------------------------------------
+    // classifyR3Broad
+    //   Three more cases -- on TOP of strict R3 -- where a timing gate still
+    //   has a meaningful job to do, only ever called for a pair
+    //   classifyVbsRegion has already returned NONE for (this function does
+    //   NOT re-derive strict R1/R2/R3; callers add those separately from
+    //   classifyVbsRegion's own return value, so a pair is never matched by
+    //   both):
+    //
+    //     fwd HS + PU beyond fwdEtaMax   R3's story (protect the genuine tag)
+    //                                    with the untimeable leg past the
+    //                                    forward window instead of central.
+    //     fwd PU + HS beyond fwdEtaMax   R2's story (reject the fake) with the
+    //                                    untimeable leg past the window
+    //                                    instead of central.
+    //     both legs paper-PU, >=1 fwd    no genuine tag exists at all, so
+    //                                    every forward (timeable) leg is a
+    //                                    rejection candidate on its own --
+    //                                    fills BOTH outPuLegA and outPuLegB
+    //                                    when both legs happen to be forward.
+    //
+    //   At most one of {outHsLeg} or {outPuLegA[, outPuLegB]} is ever set per
+    //   event: a pair is either a "confirm the genuine tag" case or a
+    //   "reject the fake(s)" case, never both. Grouped under ONE name (R3)
+    //   because that is how it is presented downstream -- one composition-plot
+    //   band, one R_pT scenario set -- not because the two questions are the
+    //   same one.
+    // -----------------------------------------------------------------------
+    bool classifyR3Broad(double fwdEtaMin, double fwdEtaMax, double centralEtaMax,
+                         int* outHsLeg = nullptr,
+                         int* outPuLegA = nullptr,
+                         int* outPuLegB = nullptr) const {
+      if (outHsLeg)  *outHsLeg  = -1;
+      if (outPuLegA) *outPuLegA = -1;
+      if (outPuLegB) *outPuLegB = -1;
+
+      std::vector<int> passPtIdx;
+      int nPt = 0, nPtEta = 0;
+      this->collectPtPassingJets(passPtIdx, nPt, nPtEta);
+      VbsPair pair = this->calcBestVbsPair(passPtIdx);
+      if (!pair.valid())              return false;
+      if (pair.mjj  < VBS_JET_MJJ)    return false;
+      if (pair.dEta < VBS_JET_D_ETA)  return false;
+
+      // Three-way zone, unlike classifyVbsRegion's two (isFwd/isCentral):
+      // 0 = central, 1 = forward (HGTD acceptance), 2 = beyond fwdEtaMax. The
+      // "beyond" zone is exactly the gap strict R2/R3 leave uncovered, since
+      // both only ever pair a forward leg with a CENTRAL one.
+      auto zone = [&](int j) {
+        double e = std::abs((double)this->topoJetEta[j]);
+        if (e < centralEtaMax)                    return 0;
+        if (e > fwdEtaMin && e < fwdEtaMax)        return 1;
+        return 2;
+      };
+      auto paperHS = [&](int j) {
+        return this->isJetPaperHS(this->topoJetEta[j], this->topoJetPhi[j]);
+      };
+      auto paperPU = [&](int j) {
+        return this->isJetPaperPU(this->topoJetEta[j], this->topoJetPhi[j]);
+      };
+
+      const int a = pair.idxI, b = pair.idxJ;
+      const int zA = zone(a), zB = zone(b);
+      const bool hsA = paperHS(a), puA = paperPU(a);
+      const bool hsB = paperHS(b), puB = paperPU(b);
+
+      // fwd HS + PU beyond: confirm the genuine tag.
+      if (zA == 1 && hsA && zB == 2 && puB) { if (outHsLeg) *outHsLeg = a; return true; }
+      if (zB == 1 && hsB && zA == 2 && puA) { if (outHsLeg) *outHsLeg = b; return true; }
+
+      // fwd PU + HS beyond: reject the fake.
+      if (zA == 1 && puA && zB == 2 && hsB) { if (outPuLegA) *outPuLegA = a; return true; }
+      if (zB == 1 && puB && zA == 2 && hsA) { if (outPuLegA) *outPuLegA = b; return true; }
+
+      // Both legs pileup: reject whichever leg(s) are actually timeable.
+      if (puA && puB) {
+        int* slot[2] = {outPuLegA, outPuLegB};
+        int idx = 0;
+        bool any = false;
+        if (zA == 1) { if (slot[idx]) *slot[idx] = a; ++idx; any = true; }
+        if (zB == 1) { if (idx < 2 && slot[idx]) *slot[idx] = b; ++idx; any = true; }
+        return any;
+      }
+
+      return false;
     }
 
     // -----------------------------------------------------------------------

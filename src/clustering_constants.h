@@ -268,7 +268,7 @@ namespace MyUtl {
   //   Shared with rpt_v5's per-jet RpT regions so "R1" cannot come to mean two
   //   different event sets in the two analyses.
   // ---------------------------------------------------------------------------
-  enum class VbsRegion { NONE, R1, R2 };
+  enum class VbsRegion { NONE, R1, R2, R3 };
 
   // ---------------------------------------------------------------------------
   // 4. Histogram axis ranges and fold values
