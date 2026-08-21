@@ -102,6 +102,17 @@ auto main(int argc, char** argv) -> int {
     boost::filesystem::create_directories(MyUtl::OUTPUT_DIR + "/hists");
   unsigned nThreads = MyUtl::resolveThreads(argc, argv);
 
+  // --dzpara: use the R_pT study's getNewDzpara parameterization for
+  // track-to-vertex association instead of the z0-significance cut. Set here,
+  // before TTreeProcessorMT starts any worker, and read-only thereafter.
+  for (int i = 1; i < argc; ++i)
+    if (std::string(argv[i]) == "--dzpara") MyUtl::USE_DZ_PARA = true;
+  std::cout << "[assoc] track-to-vertex association: "
+            << (MyUtl::USE_DZ_PARA
+                  ? "getNewDzpara x " + std::to_string(MyUtl::DZ0_PARA_SCALE_CLUSTER)
+                  : "z0 significance < " + std::to_string(MyUtl::MAX_NSIGMA))
+            << '\n';
+
   // --- Data source ---
   TChain chain("ntuple");
   setupChain(chain, sample.ntupleDir.c_str());
