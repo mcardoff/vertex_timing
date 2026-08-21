@@ -13,6 +13,10 @@
 # trades topology purity for the statistics R1 needs to produce a readable
 # curve at all.
 #
+# SCOPE: these knobs gate the two VBS-topology REGIONS ONLY; the inclusive
+# _lo/_hi histograms stay selection-free by rpt_v5's design, so they will be
+# identical between this and the mjj>=500 run. Only R1/R2 differ.
+#
 # Expect this to be a genuinely different -- looser -- event selection, not a
 # higher-statistics version of the same one. vbs_mjj_diag measured Z+jets
 # candidate-pair purity (both legs truth-HS) at 2.69% with no topology cut and
