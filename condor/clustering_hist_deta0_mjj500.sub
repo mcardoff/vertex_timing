@@ -1,0 +1,87 @@
+# ---------------------------------------------------------------------------
+# clustering_hist_deta0_mjj200.sub — clustering_hist with VBS_JET_MJJ >= 200 GeV
+# in place of the default |Deta| >= 3 topology cut.
+#
+# Identical to clustering_hist.sub except for `--vbs-deta=0 --vbs-mjj=200`.
+# vbs_mjj_diag (util/vbs_mjj_diag.cxx) measured both variables against the
+# candidate pair's truth-HS-match denominator on all three samples: the
+# default |Deta| >= 3 cut is purity-NEGATIVE on Z+jets (2.69% -> 2.51%) and
+# dijet (40.1% -> 35.0%) -- it preferentially admits pileup-legged candidate
+# pairs -- while m_jj is at-least-as-good at matched HS efficiency everywhere
+# (dijet +8.7pp). This selection drops the counterproductive |Deta| cut
+# (--vbs-deta=0) and replaces it with m_jj (--vbs-mjj=200) rather than
+# stacking mjj on top of deta. See the comment on VBS_JET_MJJ in
+# src/clustering_constants.h for the full numbers.
+#
+# Output names are tagged by resolveSelection(), so these land as
+# <sample>/<sample>_deta0p0_mjj200p0_clustering_hist.root and CANNOT overwrite
+# the standard <sample>_clustering_hist.root. clustering_plot needs the
+# matching --vbs-deta=0 --vbs-mjj=200 (or --hist-file=) to find them.
+#
+# Setup (once):
+#   cd build && cmake .. && make clustering_hist   # build BEFORE submitting
+#   chmod +x condor/run_analysis.sh
+#
+# Submit (from inside condor/, so relative paths below resolve correctly):
+#   cd condor && condor_submit clustering_hist_deta0_mjj200.sub
+#
+# This queues 3 jobs, one per --sample value.
+# ---------------------------------------------------------------------------
+universe                 = vanilla
+executable               = run_analysis.sh
+arguments                = clustering_hist $(sample) 4 --vbs-deta=0 --vbs-mjj=500
+
+should_transfer_files    = YES
+when_to_transfer_output  = ON_EXIT
+transfer_input_files     = ../build/clustering_hist
+transfer_output_files    = $(sample)/$(sample)_deta0p0_mjj500p0_clustering_hist.root
+
+# Same remap rationale as clustering_hist.sub: condor flattens a nested
+# transfer_output_files path to its basename when staging back, so the remap
+# is what makes the file land under $(sample)/ on the submit side, matching
+# the local --sample= convention. The LHS must be a BARE FILENAME -- per
+# condor_submit(1), "You cannot specify directories to be remapped" -- while
+# directories are allowed on the RHS and are created as needed.
+transfer_output_remaps   = "$(sample)_deta0p0_mjj500p0_clustering_hist.root=$(sample)/$(sample)_deta0p0_mjj500p0_clustering_hist.root"
+
+getenv                   = True
+
++JobFlavour              = "tomorrow"
+
+# clustering_hist parallelizes its event loop via TTreeProcessorMT. The `4` in
+# `arguments` above is forwarded as --threads=4 by run_analysis.sh --
+# request_cpus must track that value, since condor's cgroup throttles any
+# threads spawned beyond what was requested, silently eating the speedup.
+request_cpus             = 4
+request_memory           = 4GB
+request_disk             = 4GB
+
+output                   = logs/clustering_hist_deta0_mjj500_$(sample).$(ClusterId).$(ProcId).out
+error                    = logs/clustering_hist_deta0_mjj500_$(sample).$(ClusterId).$(ProcId).err
+log                      = logs/clustering_hist_deta0_mjj500_$(sample).$(ClusterId).$(ProcId).log
+
+# Seven samples: the three originals re-run at the canonical selection so the
+# baseline is on one fiducial region, plus the mu=0 set and the channel-matched
+# zeejets control.
+#
+# For zeejets_mu0 and ttbar_mu0 the SELECTION BREAKDOWN is the deliverable, not
+# the timing plots -- passJetPtCut needs a forward jet and neither process makes
+# one without pileup, so a collapse in "Accepted" is the measurement of how much
+# of our forward-jet population is pileup.
+#
+# NOTE rpt_v5_hist is deliberately NOT extended to the mu=0 samples: it measures
+# HS-vs-PU jet discrimination, and at mu=0 the PU class is empty, so its ROC is
+# undefined rather than merely uninteresting.
+# CURRENTLY QUEUED: the mu=0 samples only.
+#
+# vbf and dijet already have canonical histograms, and zjets is running, so those
+# three are commented out rather than deleted -- re-enable them by moving them
+# back into the queue line when their jobs are done.
+#
+#   full list:  vbf, zjets, dijet, zeejets, vbf_mu0, zeejets_mu0, ttbar_mu0
+#
+# zeejets (mu=200, Zee ONLY) is also held back for now. It is the channel-matched
+# partner for zeejets_mu0 -- zjets is Zee+Zmumu combined, so without it the mu=0
+# Zee numbers have no like-for-like comparison. Worth running before drawing any
+# conclusion from zeejets_mu0.
+queue sample in (vbf_mu0, zeejets_mu0, ttbar_mu0)
