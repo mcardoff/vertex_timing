@@ -467,7 +467,14 @@ int main(int argc, char** argv) {
 
   TChain chain("ntuple");
   setupChain(chain, sample.ntupleDir.c_str());
-  if (chain.GetEntries() == 0) {
+  // No second chain.GetEntries() check here: that call opens every file in
+  // the chain (expensive on an O(1000)-file sample like Z+jets), and
+  // setupChain already ran the same check cheaply via GetListOfFiles(). The
+  // one real GetEntries() call this executable needs is N_EVENT below, which
+  // will itself read 0 and make the empty-chain case visible in the run's
+  // output (Starting Event Loop / 0 events) rather than a hard abort here --
+  // an empty ntupleDir is already reported by setupChain's own stderr line.
+  if (chain.GetListOfFiles()->GetEntries() == 0) {
     std::cerr << "No ROOT files found.  Aborting.\n";
     return 1;
   }

@@ -32,6 +32,17 @@ namespace MyUtl {
   //   since some samples (e.g. the highstats VBF H->Invisible ntuples) store
   //   their ROOT files one directory deeper than the usual flat layout. Exits
   //   with an error message if no ROOT files are found anywhere.
+  //
+  //   The empty-chain guard checks GetListOfFiles()->GetEntries() -- the
+  //   number of paths registered by Add() above -- NOT chain.GetEntries().
+  //   TChain::Add() is lazy (it just records the path); TChain::GetEntries()
+  //   is not -- it opens every file in the chain to read its tree header and
+  //   sum entries, which for an O(1000)-file sample (Z+jets) means O(1000)
+  //   file opens before the event loop has processed a single event. Every
+  //   caller of setupChain reads chain.GetEntries() again anyway, right
+  //   after this returns, for its own N_EVENT/progress-denominator -- so
+  //   calling it a second time here was a second full scan of the sample for
+  //   a check that only needs to know whether Add() found anything at all.
   // ---------------------------------------------------------------------------
   void setupChain(
     TChain &chain, const char* ntupleDir
@@ -49,7 +60,7 @@ namespace MyUtl {
       chain.Add(entry.path().c_str());
     }
 
-    if (chain.GetEntries() == 0) {
+    if (chain.GetListOfFiles()->GetEntries() == 0) {
       std::cerr << "No ROOT files found in directory: " << ntupleDir << "\n";
       return;
     }
