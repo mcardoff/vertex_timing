@@ -143,6 +143,82 @@ namespace MyUtl {
   // ~15%).  Inflating var_z0 by this factor before taking the square root matches the
   // observed spread, analogous to the 1.5² = 2.25 inflation used for the timing gate.
   const double Z0_VAR_INFLATION   = 1.15 * 1.15;  // = 1.3225
+
+  // ── Alternative track-to-vertex association: the R_pT parameterization ────
+  // getNewDzpara is an empirical parameterization of the observed |z0 - z_vtx|
+  // spread (mm) -- a 6th-order polynomial in |eta| with pT-binned coefficients --
+  // ported verbatim from the reference R_pT study (util/myJet_ana_fr.C) via
+  // util/rpt_v5_hist.cxx, where it already governs FORWARD track-to-jet-vertex
+  // association.
+  //
+  // Using it here is domain-safe in a way it is NOT in rpt_v5's central region:
+  // getAssociatedTracks cuts on MIN_HGTD_ETA < |eta| < MAX_HGTD_ETA before
+  // anything else, so the clustering only ever sees forward tracks -- exactly
+  // the range this fit was derived in. (Centrally it returns sigma_z0 = 31 um at
+  // eta = 0, several times tighter than ITk truly delivers; that is why rpt_v5
+  // uses a plain z0-significance cut there instead.)
+  //
+  // It also removes an inconsistency: today the tracks that BUILD t0 and the
+  // tracks that COUNT toward R_pT are associated by two different rules.
+  //
+  // Measured on local VBF forward tracks (pT/eta/quality-selected): the
+  // parameterization keeps ~9% fewer tracks than significance < 2.5 (194k vs
+  // 214k) for a HS purity of 27.8% vs 25.4%, at a HS recall of 74.9% vs 75.6% --
+  // i.e. it sheds pileup at nearly constant hard-scatter efficiency.
+  //
+  // The pT bins are half-open on the low side and the <=1.5 bin catches
+  // everything below, matching the original's if-chain exactly (no else-if, so a
+  // value landing on a boundary takes the LAST matching branch). Preserved
+  // deliberately rather than "cleaned up" -- changing it would silently shift
+  // which coefficients boundary-pT tracks get.
+  inline double getNewDzpara(double eta, double pt) {
+    eta = std::abs(eta);
+    double p[7] = {0, 0, 0, 0, 0, 0, 0};
+    auto set = [&p](const double (&src)[7]) { std::copy(src, src + 7, p); };
+
+    if (pt <= 1.5) {
+      static const double c[7] = { 0.0314036, 0.790955, -2.65987, 3.62073, -2.18228, 0.614866, -0.0634521 };
+      set(c);
+    }
+    if (pt > 1.5 && pt <= 2.5) {
+      static const double c[7] = { 0.0229273, 0.540101, -1.80727, 2.45187, -1.47382, 0.414345, -0.0426769 };
+      set(c);
+    }
+    if (pt > 2.5 && pt <= 5.0) {
+      static const double c[7] = { 0.0163773, 0.345112, -1.14474, 1.54382, -0.923523, 0.258617, -0.0265446 };
+      set(c);
+    }
+    if (pt > 5.0 && pt <= 10.0) {
+      static const double c[7] = { 0.010919, 0.179329, -0.581971, 0.773186, -0.45679, 0.126608, -0.012875 };
+      set(c);
+    }
+    if (pt > 10.0) {
+      static const double c[7] = { 0.00835945, 0.0957783, -0.299255, 0.38722, -0.22351, 0.0607521, -0.00606524 };
+      set(c);
+    }
+
+    double d = p[0];
+    double e = 1.0;
+    for (int k = 1; k < 7; ++k) { e *= eta; d += p[k] * e; }
+    return std::abs(d);
+  }
+
+  // Multiple of getNewDzpara a track's |z0 - z_vtx| must stay within. 1.4 is the
+  // reference study's working point, and the value rpt_v5_hist's DZ0_PARA_SCALE
+  // already runs at -- kept identical so the two associations agree exactly.
+  const double DZ0_PARA_SCALE_CLUSTER = 1.4;
+
+  // Selects which rule passTrackVertexAssociation applies. false (default) is
+  // the z0-significance cut this analysis has always used; true switches to the
+  // parameterization above, in which case the caller's significanceCut argument
+  // is ignored (DZ0_PARA_SCALE_CLUSTER takes its place) -- so the 3.0-then-
+  // MAX_NSIGMA two-step in processEventData collapses to a single selection.
+  //
+  // Runtime rather than compile-time, mirroring OVERLAP_REMOVAL above: set once
+  // in main() from --dzpara before any worker thread starts, read-only
+  // afterwards, so it is safe under TTreeProcessorMT. Default false means every
+  // executable that does not parse the flag is bit-for-bit unchanged.
+  inline bool USE_DZ_PARA = false;
   // ITERATIVE_SPLIT tunables (inline so diagnostics can sweep them).
   inline double T_PULL_SPLIT_THRESHOLD = 1.5;  // split clusters whose t-pull RMS exceeds this
   inline double DIST_CUT_SPLIT         = 2.0;  // tighter cut used when re-clustering after split

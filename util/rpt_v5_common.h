@@ -68,6 +68,14 @@ inline std::vector<Scenario> makeScenarios(const std::string& suffix) {
     {"hgtd",        "HGTD t_{0} (Athena)",         C01, nullptr, nullptr},
     {"trkptz",      "TRKPTZ t_{0}",                C02, nullptr, nullptr},
     {"waves",       "WAVeS t_{0}",                 C03, nullptr, nullptr},
+    // Idealised WAVeS: our clustering, but with BOTH idealisations at once --
+    // 30 ps track times, and the cluster selected by smallest |t - t_truth|
+    // instead of by score. It is the ceiling of our approach, so the gap up
+    // from the WAVeS row is what real times plus imperfect selection cost, and
+    // the gap remaining to the truth row is what the CLUSTERING itself costs.
+    // Needs truth for the selection, so it is an oracle, not deployable.
+    {"waves_ideal", "Idealised WAVeS [oracle]",    C04, nullptr, nullptr},
+    {"truth",       "Truth t_{0} (10#oplus30 ps)",  C06, nullptr, nullptr},
   };
   for (auto& sc : s) {
     sc.h_hs = makeHist(("HS_" + sc.name + suffix).c_str(),

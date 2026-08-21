@@ -50,6 +50,63 @@ using namespace MyUtl;
 // -----------------------------------------------------------------------------
 // ROC: HS efficiency vs PU rejection (1 / mistag).
 // -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
+// generate_roc_grid — ROC sampled at fixed HS-efficiency working points.
+//
+// Same construction rpt_v6 uses to match the TDR figure. generate_roc below
+// emits one point per histogram bin, which samples wherever the R_pT
+// distribution happens to put thresholds: points bunch unevenly, and wherever
+// the distribution has an atom (a large spike of jets sharing one R_pT value,
+// e.g. jets with no associated tracks at all) no threshold exists inside it, so
+// the curve shows a hard break.
+//
+// Sampling on efficiency instead walks the cumulative distributions and
+// linearly interpolates 1/mistag at each target efficiency. Interpolating
+// across an atom is the physically right thing -- it is what breaking ties at
+// random inside that bin would deliver -- and because every scenario then
+// shares identical x-points, ratio panels become exact rather than relying on
+// TGraph::Eval.
+//
+// Same explicit-bin-range discipline as generate_roc: Integral(i, bin+1)
+// throughout, never the no-arg form, so a prior SetRangeUser cannot silently
+// truncate the denominators.
+// -----------------------------------------------------------------------------
+TGraph* generate_roc_grid(TH1D* PU_hist, TH1D* HS_hist,
+                          const std::vector<double>& targets) {
+  const int bin = PU_hist->GetNbinsX();
+  const double HS_tot = HS_hist->Integral(1, bin + 1);
+  const double PU_tot = PU_hist->Integral(1, bin + 1);
+  std::vector<double> vx, vy;
+  if (HS_tot <= 0 || PU_tot <= 0) return new TGraph();
+
+  std::vector<double> S(bin + 2), B(bin + 2);
+  for (int i = 1; i <= bin + 1; ++i) {
+    S[i] = HS_hist->Integral(i, bin + 1) / HS_tot;
+    B[i] = PU_hist->Integral(i, bin + 1) / PU_tot;
+  }
+  for (double e : targets) {
+    if (e <= 0 || e > S[1]) continue;              // efficiency unreachable
+    int i = 1;
+    while (i <= bin + 1 && S[i] > e) ++i;
+    if (i <= 1 || i > bin + 1) continue;
+    const double s_hi = S[i - 1], s_lo = S[i];
+    const double b_hi = B[i - 1], b_lo = B[i];
+    const double f = (s_hi > s_lo) ? (s_hi - e) / (s_hi - s_lo) : 0.0;
+    const double b = b_hi + f * (b_lo - b_hi);
+    if (b <= 1e-9) continue;                       // background exhausted
+    vx.push_back(e);
+    vy.push_back(1.0 / b);
+  }
+  return new TGraph((int)vx.size(), vx.data(), vy.data());
+}
+
+// Working points matching the TDR figure's marker spacing.
+inline std::vector<double> rocEffGrid() {
+  std::vector<double> g;
+  for (double e = 0.800; e <= 0.9751; e += 0.025) g.push_back(e);
+  return g;
+}
+
 TGraph* generate_roc(TH1D* PU_hist, TH1D* HS_hist) {
   int bin = PU_hist->GetNbinsX();
   // Explicit bin range: Integral() with no arguments silently respects any
@@ -92,6 +149,10 @@ int main(int argc, char** argv) {
 
   std::vector<Scenario> scen_lo = makeScenarios("_lo");
   std::vector<Scenario> scen_hi = makeScenarios("_hi");
+  // Central (|eta| < 2.4) counterparts of the same two pT slices -- the
+  // ITk-only baseline the forward numbers are quoted against.
+  std::vector<Scenario> scen_lo_cen = makeScenarios("_lo_cen");
+  std::vector<Scenario> scen_hi_cen = makeScenarios("_hi_cen");
   // VBS-topology regions, see rpt_v5_hist.cxx's region block for definitions.
   // scen_r2's h_hs is EMPTY by construction (region 2 has no forward HS jet);
   // its ROC borrows scen_r1's HS side -- see SECTION 2b.
@@ -106,6 +167,8 @@ int main(int argc, char** argv) {
     loadScenarios(reader, scen_hi);
     loadScenarios(reader, scen_r1);
     loadScenarios(reader, scen_r2);
+    loadScenarios(reader, scen_lo_cen);
+    loadScenarios(reader, scen_hi_cen);
     n_total      = reader.ReadScalarLong("meta_n_total");
     n_pass_basic = reader.ReadScalarLong("meta_n_pass_basic");
     n_hgtd_valid = reader.ReadScalarLong("meta_n_hgtd_valid");
@@ -134,11 +197,13 @@ int main(int argc, char** argv) {
       t.DrawLatex(0.18, 0.76, extra);
     }
   };
-  const char* lbl_lo = "30 < p_{T}^{jet} < 40 GeV, 2.4 < |#eta| < 3.8";
-  const char* lbl_hi = "p_{T}^{jet} > 40 GeV, 2.4 < |#eta| < 3.8";
+  const char* lbl_lo = "30 < p_{T}^{jet} < 40 GeV@@2.4 < |#eta| < 3.8";
+  const char* lbl_hi = "p_{T}^{jet} > 40 GeV@@2.4 < |#eta| < 3.8";
   // VBS-topology region labels (see rpt_v5_hist.cxx for the definitions).
-  const char* lbl_r1 = "VBS pair: both legs fwd (HS vs PU), p_{T}^{jet} > 30 GeV";
-  const char* lbl_r2 = "VBS pair: fwd PU leg + central HS leg  [signal side from R1]";
+  const char* lbl_lo_cen = "30 < p_{T}^{jet} < 40 GeV@@|#eta| < 2.4@@[central baseline]";
+  const char* lbl_hi_cen = "p_{T}^{jet} > 40 GeV@@|#eta| < 2.4@@[central baseline]";
+  const char* lbl_r1 = "VBS R1: both tags fwd@@HS leg vs PU leg@@p_{T}^{jet} > 30 GeV";
+  const char* lbl_r2 = "VBS R2: fwd PU + cen. HS@@signal side from R1";
 
   // ===========================================================================
   // SECTION 2: Derive every Integral()/GetMean()-based number. styleScen is
@@ -147,15 +212,24 @@ int main(int argc, char** argv) {
 
   // Harmonized "high-efficiency working point" window: fixed for every sample
   // and pT-slice (rather than a per-sample adaptive range) so plots are
-  // directly comparable across samples. Zoomed to [0.85, 1.0] -- the
-  // high-efficiency region that is actually the working point of interest;
-  // the wider [0.6, 1.0] view was only needed while Z+jets curves fell short
-  // of this window, which the lepton overlap removal fixed (its HS-efficiency
-  // reach now extends to ~0.96).
-  const double roc_xmin_default = 0.85, roc_xmax_default = 1.0;
+  // directly comparable across samples. [0.80, 1.0] matches the x-range the
+  // reference study's ROCs use, so our panels can be read side by side with
+  // theirs; it also starts exactly where rocEffGrid()'s first sampled working
+  // point sits, so no computed point falls outside the drawn window.
+  // (An earlier [0.85, 1.0] zoom cropped the first grid point; the still
+  // wider [0.6, 1.0] view was only needed while Z+jets curves fell short of
+  // the window, which the lepton overlap removal fixed.)
+  const double roc_xmin_default = 0.80, roc_xmax_default = 1.0;
   std::vector<TGraph*> rocs_lo, rocs_hi;
-  for (auto& s : scen_lo) rocs_lo.push_back(generate_roc(s.h_pu, s.h_hs));
-  for (auto& s : scen_hi) rocs_hi.push_back(generate_roc(s.h_pu, s.h_hs));
+  // Fixed-efficiency working points (see generate_roc_grid): evenly spaced,
+  // no breaks across R_pT atoms, and identical x-points across scenarios so
+  // the ratio panels are exact.
+  const std::vector<double> effGrid = rocEffGrid();
+  for (auto& s : scen_lo) rocs_lo.push_back(generate_roc_grid(s.h_pu, s.h_hs, effGrid));
+  for (auto& s : scen_hi) rocs_hi.push_back(generate_roc_grid(s.h_pu, s.h_hs, effGrid));
+  std::vector<TGraph*> rocs_lo_cen, rocs_hi_cen;
+  for (auto& s : scen_lo_cen) rocs_lo_cen.push_back(generate_roc_grid(s.h_pu, s.h_hs, effGrid));
+  for (auto& s : scen_hi_cen) rocs_hi_cen.push_back(generate_roc_grid(s.h_pu, s.h_hs, effGrid));
 
   const double roc_xmin_lo = roc_xmin_default, roc_xmax_lo = roc_xmax_default;
   const double roc_xmin_hi = roc_xmin_default, roc_xmax_hi = roc_xmax_default;
@@ -172,9 +246,9 @@ int main(int argc, char** argv) {
   // R2's ROC pairs r2.h_pu against r1.h_hs. This is a cross-region ROC and is
   // labelled as such on the plot; do not "fix" it to use r2.h_hs.
   std::vector<TGraph*> rocs_r1, rocs_r2;
-  for (auto& s : scen_r1) rocs_r1.push_back(generate_roc(s.h_pu, s.h_hs));
+  for (auto& s : scen_r1) rocs_r1.push_back(generate_roc_grid(s.h_pu, s.h_hs, effGrid));
   for (size_t i = 0; i < scen_r2.size(); ++i)
-    rocs_r2.push_back(generate_roc(scen_r2[i].h_pu, scen_r1[i].h_hs));
+    rocs_r2.push_back(generate_roc_grid(scen_r2[i].h_pu, scen_r1[i].h_hs, effGrid));
   // (styled below, once styleRoc is in scope)
 
   auto styleRoc = [&](TGraph* g, Color_t col, double xmin, double xmax) {
@@ -189,6 +263,10 @@ int main(int argc, char** argv) {
   for (size_t i = 0; i < rocs_lo.size(); ++i) {
     styleRoc(rocs_lo[i], scen_lo[i].color, roc_xmin_lo, roc_xmax_lo);
     styleRoc(rocs_hi[i], scen_hi[i].color, roc_xmin_hi, roc_xmax_hi);
+  }
+  for (size_t i = 0; i < rocs_lo_cen.size(); ++i) {
+    styleRoc(rocs_lo_cen[i], scen_lo_cen[i].color, roc_xmin_default, roc_xmax_default);
+    styleRoc(rocs_hi_cen[i], scen_hi_cen[i].color, roc_xmin_default, roc_xmax_default);
   }
   for (size_t i = 0; i < rocs_r1.size(); ++i) {
     styleRoc(rocs_r1[i], scen_r1[i].color, roc_xmin_default, roc_xmax_default);
@@ -242,8 +320,13 @@ int main(int argc, char** argv) {
                   rejAtEff(s.h_pu, s.h_hs, 0.93), rejAtEff(s.h_pu, s.h_hs, 0.95),
                   rejAtEff(s.h_pu, s.h_hs, 0.97));
   };
-  printRejTable("(30-40 GeV)", scen_lo);
-  printRejTable("(>40 GeV)",   scen_hi);
+  printRejTable("(30-40 GeV, 2.4<|eta|<3.8)", scen_lo);
+  printRejTable("(>40 GeV, 2.4<|eta|<3.8)",   scen_hi);
+  printRejTable("(30-40 GeV, |eta|<2.4 CENTRAL BASELINE)", scen_lo_cen);
+  printRejTable("(>40 GeV, |eta|<2.4 CENTRAL BASELINE)",   scen_hi_cen);
+  std::cout << "\n  Central is outside HGTD acceptance, so its four scenarios are\n"
+               "  expected to agree to within the few jets whose tracks reach\n"
+               "  |eta| > 2.4; divergence there indicates a leak, not a gain.\n";
 
   std::cout << "\n=== UNTIMED-TRACK FLOOR (ghost & z-selected) ===\n";
   std::printf("  30-40 GeV  PU untimed: %.1f%%   HS untimed: %.1f%%\n",
@@ -289,6 +372,8 @@ int main(int argc, char** argv) {
   // reason as the two calls above: the region ROCs were built back in
   // SECTION 2b via generate_roc, which uses explicit bin ranges and is immune
   // to SetRangeUser, and the region yield printouts use GetEntries().
+  styleScen(scen_lo_cen);
+  styleScen(scen_hi_cen);
   styleScen(scen_r1);
   styleScen(scen_r2);
 
@@ -329,7 +414,24 @@ int main(int argc, char** argv) {
       t.SetTextFont(72); t.SetTextSize(0.05); t.DrawLatex(0.18, 0.88, "ATLAS");
       t.SetTextFont(42); t.SetTextSize(0.05); t.DrawLatex(0.28, 0.88, "Simulation Internal");
       t.SetTextSize(0.044); t.DrawLatex(0.18, 0.80, MyUtl::ENERGY_LABEL.c_str());
-      if (extra_label) { t.SetTextSize(0.044); t.DrawLatex(0.18, 0.72, extra_label); }
+      // Selection annotation, wrapped. The legend is an opaque box whose left
+      // edge is at NDC 0.58 and which spans the same y range as this text, so a
+      // single long line is painted over by it. Lines are split on "@@" by the
+      // caller -- not on a width estimate, since TLatex markup means the glyph
+      // count is not the string length. "|" cannot be the delimiter: it already
+      // appears in every |#eta| label.
+      if (extra_label) {
+        t.SetTextSize(0.038);
+        const std::string el(extra_label);
+        double ly = 0.72;
+        for (size_t pos = 0;;) {
+          const size_t d = el.find("@@", pos);
+          t.DrawLatex(0.18, ly, el.substr(pos, d == std::string::npos ? d : d - pos).c_str());
+          ly -= 0.055;
+          if (d == std::string::npos) break;
+          pos = d + 2;
+        }
+      }
     }
 
     canvas->cd();
@@ -418,9 +520,26 @@ int main(int argc, char** argv) {
   // Placed directly after the inclusive ROCs so the four discrimination plots
   // sit together at the front of the PDF. drawRocWithRatio Print()s the canvas
   // itself -- do not add another Print here.
-  drawRocWithRatio(rocs_r1, scen_r1, roc_ymax, 4.0,
+  // (2b) ROC — central baseline, both pT slices. Own y-scale: central rejection
+  //      sits well below forward, so sharing the forward maximum would squash
+  //      these into the axis.
+  double roc_ymax_cen = 1.5 * std::max(rocYMaxIn(rocs_lo_cen, roc_xmin_default, roc_xmax_default),
+                                       rocYMaxIn(rocs_hi_cen, roc_xmin_default, roc_xmax_default));
+  drawRocWithRatio(rocs_lo_cen, scen_lo_cen, roc_ymax_cen, 4.0,
+                   roc_xmin_default, roc_xmax_default, lbl_lo_cen);
+  drawRocWithRatio(rocs_hi_cen, scen_hi_cen, roc_ymax_cen, 4.0,
+                   roc_xmin_default, roc_xmax_default, lbl_hi_cen);
+
+  // R1/R2 get their own y-scale rather than the inclusive slices'. With the
+  // truth-t0 and clean-timing rows added, both regions overshoot the inclusive
+  // maximum badly -- R1's clean-timing peaks around 880 and R2's truth around
+  // 1180 against an inclusive ceiling near 640 -- so sharing it clipped the
+  // top off both panels.
+  double roc_ymax_reg = 1.5 * std::max(rocYMaxIn(rocs_r1, roc_xmin_default, roc_xmax_default),
+                                       rocYMaxIn(rocs_r2, roc_xmin_default, roc_xmax_default));
+  drawRocWithRatio(rocs_r1, scen_r1, roc_ymax_reg, 4.0,
                    roc_xmin_default, roc_xmax_default, lbl_r1);
-  drawRocWithRatio(rocs_r2, scen_r2, roc_ymax, 4.0,
+  drawRocWithRatio(rocs_r2, scen_r2, roc_ymax_reg, 4.0,
                    roc_xmin_default, roc_xmax_default, lbl_r2);
 
   // (3+) Per-scenario HS vs PU, 30–40 GeV slice, log-y.
@@ -476,6 +595,48 @@ int main(int argc, char** argv) {
     L->Draw();
     canvas->Print(out_pdf);
   }
+
+  // R_pT distributions for the CENTRAL baseline, same treatment as the forward
+  // slices above: per-scenario HS-vs-PU, then the all-scenario HS and PU
+  // overlays. The four central scenarios are expected to sit on top of one
+  // another (|eta| < 2.4 is outside HGTD acceptance, so the time gate is a
+  // no-op there) -- the overlays are where that is easiest to see, which is
+  // why they are worth drawing even though they carry no timing gain.
+  auto drawShapes = [&](std::vector<Scenario>& sv, const char* lbl) {
+    for (auto& s : sv) {
+      TLegend* L = new TLegend(0.60, 0.75, 0.92, 0.88);
+      StyleLegend(L);
+      L->AddEntry(s.h_hs, "Hard Scatter");
+      L->AddEntry(s.h_pu, "Pile-Up");
+      s.h_pu->SetMaximum(50.0 * std::max(s.h_hs->GetMaximum(), s.h_pu->GetMaximum()));
+      s.h_pu->SetTitle((std::string("R_{pT}: ") + s.legend).c_str());
+      s.h_pu->Draw("HIST");
+      s.h_hs->Draw("HIST SAME");
+      drawLabels(lbl);
+      L->Draw();
+      canvas->Print(out_pdf);
+    }
+    for (int pass = 0; pass < 2; ++pass) {          // 0 = HS overlay, 1 = PU overlay
+      TLegend* L = new TLegend(0.55, 0.68, 0.92, 0.88);
+      StyleLegend(L);
+      auto pick = [&](Scenario& s) { return pass == 0 ? s.h_hs : s.h_pu; };
+      double ymax = 0;
+      for (auto& s : sv) ymax = std::max(ymax, pick(s)->GetMaximum());
+      pick(sv[0])->SetMaximum(50.0 * ymax);
+      pick(sv[0])->SetTitle(pass == 0 ? "Hard Scatter R_{pT} — all scenarios"
+                                      : "Pile-Up R_{pT} — all scenarios");
+      for (size_t i = 0; i < sv.size(); ++i) {
+        pick(sv[i])->SetLineStyle(1);
+        pick(sv[i])->Draw(i == 0 ? "HIST" : "HIST SAME");
+        L->AddEntry(pick(sv[i]), sv[i].legend.c_str());
+      }
+      drawLabels(lbl);
+      L->Draw();
+      canvas->Print(out_pdf);
+    }
+  };
+  drawShapes(scen_lo_cen, lbl_lo_cen);
+  drawShapes(scen_hi_cen, lbl_hi_cen);
 
   // ===========================================================================
   // SECTION 5: VBS-topology regions.

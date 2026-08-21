@@ -22,7 +22,8 @@
 // Two jet pT windows:
 //   Slice A: 30 < pT < 40 GeV
 //   Slice B: pT > 40 GeV
-// Jet eta acceptance: 2.4 < |eta| < 3.8.
+// Jet eta acceptance: 2.4 < |eta| < 3.8 (forward, HGTD-covered), plus a
+// |eta| < 2.4 central baseline filled in the same run and pT slices.
 //
 // Output: <OUTPUT_DIR>/hists/rpt_v5_hist.root
 
@@ -31,6 +32,7 @@
 #include <TStyle.h>
 #include <TTreeReader.h>
 #include <TTreeReaderArray.h>
+#include <TRandom3.h>
 #include <TVector2.h>
 #include <ROOT/TTreeProcessorMT.hxx>
 
@@ -72,11 +74,86 @@ static constexpr double CENTRAL_ETA_MAX = JET_ETA_MIN;
 // oracle.
 static constexpr float MISAS_PURITY_CUT = 0.75f;
 
+// Reference-study truth-t0 smearing (util/myJet_ana_fr.C).
+static constexpr double TRUTH_VTX_SMEAR = 10.0;  // ps, on the HS vertex time
+static constexpr double TRUTH_TRK_SMEAR = 30.0;  // ps, on each track's own vertex time
+
 // Per-track time-gate half-width in σ.  A 2σ cut over-trims genuine HS tracks
 // when the vertex time is slightly mis-estimated, dragging the high-efficiency
 // end of the ROC below ITk-only (worst in the >40 GeV slice).  Loosening it
 // recovers that region at a small low-efficiency cost.
-static constexpr double GATE_SIGMA = 2.5;
+//
+// 3.0 is the reference study's forward working point (jet_pileup_studies,
+// 5 Oct 2023, slide 30: "For Forward eta region 2.4 <|eta|< 3.8, best setting
+// is : dR<0.2, sigma_z0(pT,eta) cut < 1.4 & t30 <3.0"), chosen there by a scan
+// over 2.0/2.5/3.0.  Note the two gates are not literally the same quantity but
+// are close in effect: the reference divides by a FLAT 30 ps (every track in
+// that study carries a 30 ps smear), so its t30 < 3.0 is a fixed +-90 ps window,
+// while ours divides by the per-track pull denominator
+// sqrt(infl^2 * var_vtx + sigma_trk^2), which for a typical HGTD track
+// (sigma_trk ~26 ps, inflated sigma_vtx ~12 ps) is ~29 ps -> ~+-86 ps.
+static constexpr double GATE_SIGMA = 3.0;
+
+// ── Vertex-time error inflation, per scenario ────────────────────────────────
+// The quoted vertex-time uncertainty understates the true spread, so a nominal
+// N-sigma gate behaves like a much tighter one and discards genuine HS tracks.
+// rpt_v6 measured this on the Athena vertex time (sigma_trk 27.0 ps, sigma_vtx
+// 9.1 ps quoted vs a 50.8 ps observed core: a 1.78x understatement) and showed
+// that correcting it turns a ratio that fell BELOW 1 at 0.875 efficiency into a
+// sustained ~1.3-1.45.
+//
+// The factor is NOT shared: each scenario derives its vertex time differently,
+// so each has its own calibration. Values below are measured by the
+// PRINT_PULL_DIAG block at the end of this file -- run it, read the "sigma
+// ratio" column, and set these to it. Applied as sigma_vtx *= f, i.e. var_vtx
+// *= f^2, replacing the previous blanket 2.25 (= 1.5^2) applied to every
+// scenario alike.
+//
+// The factor is also PER SAMPLE, not just per scenario: how badly the quoted
+// vertex-time error understates the truth depends on how often a usable vertex
+// time exists at all, which varies enormously between samples (VBF 80.1% valid,
+// dijet 73.6%, Z+jets only 16.5%). Z+jets needs ~1.6 where VBF needs ~1.4, so
+// letting it inherit VBF's numbers ran its gate ~18% tighter than nominal,
+// over-trimming genuine HS tracks -- which shows up downstream as a depressed
+// maximum reachable HS efficiency (its RpT==0 spike, and so its ROC endpoint,
+// is the worst of the three).
+//
+// MEASURED by the PRINT_PULL_DIAG block below (truth-HS tracks, |dt| < 150 ps
+// core), read straight off its "ratio" column, one full-statistics grid run per
+// sample:
+//
+//   scenario      vbf     zjets     dijet
+//   hgtd         1.48      1.61      1.53
+//   trkptz       1.39      1.63      1.45
+//   waves        1.38      1.65      1.46
+//
+// The measurement is NOT circular: the accumulator uses the RAW quoted var_vtx
+// and the ungated track list, and the vertex times themselves (cluster
+// selection) do not depend on the gate -- so a single pass measures the ratio
+// that the next run should apply, with no need to iterate to a fixed point.
+//
+// The Athena vertex time is the least well calibrated of the three on VBF, as
+// expected; on Z+jets all three are comparably bad. Compared to rpt_v6's 1.78
+// on the same Athena time, part of the difference is population rather than
+// calibration: rpt_v6 measured over every timed HS track, while these are
+// measured after the z-association, which already removes the worst outliers.
+struct Inflation { double hgtd, trkptz, waves; };
+
+// Keyed on MyUtl::SAMPLE_NAME. The local default run (no --sample, so an empty
+// SAMPLE_NAME) reads the VBF ntuples, so it correctly falls through to the VBF
+// row rather than needing an entry of its own.
+static Inflation inflationFor(const std::string& sample) {
+  if (sample == "zjets") return {1.61, 1.63, 1.65};
+  if (sample == "dijet") return {1.53, 1.45, 1.46};
+  return {1.48, 1.39, 1.38};  // vbf, and the local default run
+}
+
+// Resolved once in main() before the event loop starts, then only read by the
+// worker threads -- write-once-before-fork, so no synchronisation is needed.
+static Inflation INFL = {1.48, 1.39, 1.38};
+
+// Set true to print the measured per-scenario pull widths after the event loop.
+static constexpr bool PRINT_PULL_DIAG = true;
 
 static inline double dR(double j_eta, double j_phi, double t_eta, double t_phi) {
   double deta = j_eta - t_eta;
@@ -87,61 +164,56 @@ static inline double dR(double j_eta, double j_phi, double t_eta, double t_phi) 
 // -----------------------------------------------------------------------------
 // Track-to-vertex association, reference-study definition.
 //
-// Ported verbatim (coefficients and all) from a colleague's RpT study,
-// util/myJet_ana_fr.C::getNewDzpara. Returns the expected |z0 - z_vtx| scale in
-// mm for a track of given |eta| and pT: a 6th-order polynomial in |eta| whose
-// coefficients are selected from five pT bins.
+// getNewDzpara now lives in src/clustering_constants.h (MyUtl), shared with the
+// clustering's own --dzpara association so the two cannot drift apart. It was
+// ported verbatim from util/myJet_ana_fr.C, where the reference study calls it
+// sigma_z0(pT, eta): an empirical parameterization of the OBSERVED z0 resolution,
+// used in place of the per-track covariance sqrt(var_z0).
 //
-// This REPLACES the z0-significance cut (|z0-z_vtx|/sqrt(var_z0) < N) that
-// rpt_v5 used previously. The two are not equivalent: the significance form
-// leans on the per-track covariance, which the z0_pull_diag study found
-// underestimates the true spread by ~15% (hence Z0_VAR_INFLATION elsewhere in
-// this codebase), while this is an empirical parameterization of the observed
-// resolution. Using it makes our RpT numerator directly comparable to the
-// reference study's.
-//
-// Note the pT bins are half-open on the low side and the <=1.5 bin catches
-// everything below, matching the original's if-chain exactly (no else-if, so a
-// value landing on a boundary takes the LAST matching branch -- preserved here
-// deliberately rather than "cleaned up", since changing it would silently shift
-// which coefficients boundary-pT tracks get).
+// The point of the substitution is that a significance cut is self-referential --
+// it scales each track's window by that track's own error estimate, so a badly
+// measured track earns a WIDER window. The parameterization sets the window from
+// (eta, pT) alone, which the track cannot influence. The reference study scanned
+// both and reported (5 Oct 2023, slide 30) the parameterization as the best
+// forward choice and plain significance as the best central one.
 // -----------------------------------------------------------------------------
-static double getNewDzpara(double eta, double pt) {
-  eta = std::abs(eta);
-  double p[7] = {0, 0, 0, 0, 0, 0, 0};
-  auto set = [&p](const double (&src)[7]) { std::copy(src, src + 7, p); };
-
-  if (pt <= 1.5) {
-    static const double c[7] = { 0.0314036, 0.790955, -2.65987, 3.62073, -2.18228, 0.614866, -0.0634521 };
-    set(c);
-  }
-  if (pt > 1.5 && pt <= 2.5) {
-    static const double c[7] = { 0.0229273, 0.540101, -1.80727, 2.45187, -1.47382, 0.414345, -0.0426769 };
-    set(c);
-  }
-  if (pt > 2.5 && pt <= 5.0) {
-    static const double c[7] = { 0.0163773, 0.345112, -1.14474, 1.54382, -0.923523, 0.258617, -0.0265446 };
-    set(c);
-  }
-  if (pt > 5.0 && pt <= 10.0) {
-    static const double c[7] = { 0.010919, 0.179329, -0.581971, 0.773186, -0.45679, 0.126608, -0.012875 };
-    set(c);
-  }
-  if (pt > 10.0) {
-    static const double c[7] = { 0.00835945, 0.0957783, -0.299255, 0.38722, -0.22351, 0.0607521, -0.00606524 };
-    set(c);
-  }
-
-  double d = p[0];
-  double e = 1.0;
-  for (int k = 1; k < 7; ++k) { e *= eta; d += p[k] * e; }
-  return std::abs(d);
-}
 
 // Multiple of getNewDzpara a track's |z0 - z_vtx| must stay within. 1.4 is the
 // reference study's working point (its comment notes 0.8 discriminates better;
 // left at 1.4 to match what the study actually ran).
 static constexpr double DZ0_PARA_SCALE = 1.4;
+
+// Forward R_pT track-to-vertex association. The parameterization is the default:
+// the reference study scanned both and reported it as the best forward choice,
+// and on local VBF it is worth roughly double the WAVeS improvement factor in the
+// 30-40 GeV slice (+19% vs +5% at 0.80 HS efficiency, +26% vs +14% at 0.85).
+//
+// --rpt-signif flips this list back to a plain z0-significance cut at
+// RPT_Z_SIGNIF, which is what rpt_v5 ran before 2026-08-13. Kept reachable
+// because the choice moves the ITk-only baseline (126.6 -> 139.1 at 0.80) and
+// therefore every "HGTD improves rejection by Nx" ratio quoted against it, so
+// the two must stay comparable on demand.
+//
+// This is INDEPENDENT of MyUtl::USE_DZ_PARA (--dzpara), which governs the
+// CLUSTERING's track selection. The two were briefly wired together; they are
+// separate questions and are kept separate.
+static constexpr double RPT_Z_SIGNIF = 2.5;
+inline bool RPT_USE_DZ_PARA = true;
+
+// Central (|eta| < 2.4) track-to-vertex association: |z0 - z_vtx| / sigma_z0.
+//
+// getNewDzpara comes from myJet_ana_fr.C -- a FORWARD-region study -- and does
+// not extrapolate inward: it returns sigma_z0 = 31 um at eta = 0 rising to
+// 4.4 mm at eta = 3.8, and the central end is several times tighter than ITk
+// z0 resolution at 1 GeV. The reference study does not use it centrally either;
+// its central plots scan a track significance cut instead.
+//
+// 5.0 is that scan's best working point, and an independent scan of our own
+// (rpt_v6 --etamin=0 --etamax=1.5 --zcut=signif, ITk-only rejection at 0.800
+// HS efficiency) reproduces it: para 77, then 90 / 124 / 145 / 156 / 163 for
+// s = 2.0 / 2.5 / 3.0 / 4.0 / 5.0 -- monotonic, and every significance value
+// beats the parameterization.
+static constexpr double CENTRAL_Z_SIGNIF = 5.0;
 
 // dR(track, jet) cone for the RpT numerator. The reference study applies this
 // ON TOP of ghost association -- ghost-associated tracks outside the cone are
@@ -224,6 +296,35 @@ static void mergeRegionCases(std::vector<RegionCase>& dst,
 }
 
 // -----------------------------------------------------------------------------
+// EventCase — a display candidate for the non-region categories.
+//   Separate from RegionCase because these rank on event-level timing quality
+//   rather than on a jet pair, and carry no leg indices: no --jet_idx is
+//   emitted for them, so the wedges keep their truth colouring.
+// -----------------------------------------------------------------------------
+struct EventCase {
+  std::string file_path;
+  Long64_t    entry;
+  double      t_show, metric, v1, v2, v3;
+};
+
+static void insertEventCase(std::vector<EventCase>& v, EventCase c,
+                            int max_n = N_REGION_DISPLAYS) {
+  v.push_back(std::move(c));
+  std::sort(v.begin(), v.end(), [](const EventCase& a, const EventCase& b) {
+    return a.metric > b.metric; });
+  if ((int)v.size() > max_n) v.resize(max_n);
+}
+
+static void mergeEventCases(std::vector<EventCase>& dst,
+                            std::vector<EventCase>& src,
+                            int max_n = N_REGION_DISPLAYS) {
+  for (auto& c : src) dst.push_back(std::move(c));
+  std::sort(dst.begin(), dst.end(), [](const EventCase& a, const EventCase& b) {
+    return a.metric > b.metric; });
+  if ((int)dst.size() > max_n) dst.resize(max_n);
+}
+
+// -----------------------------------------------------------------------------
 // ThreadState
 //   Everything one worker thread accumulates across whatever task ranges it
 //   services: its own copy of the two pT-slice Scenario sets (each worker's
@@ -234,8 +335,19 @@ static void mergeRegionCases(std::vector<RegionCase>& dst,
 //   event loop.
 // -----------------------------------------------------------------------------
 struct ThreadState {
-  std::vector<Scenario> scen_lo = makeScenarios("_lo");  // 30–40 GeV
-  std::vector<Scenario> scen_hi = makeScenarios("_hi");  // >40 GeV
+  // Re-seeded per event from event-stable quantities, so the truth-t0 smearing
+  // does not depend on how TTreeProcessorMT distributes entries across threads.
+  TRandom3 rng{1};
+
+  std::vector<Scenario> scen_lo = makeScenarios("_lo");  // 30–40 GeV, forward
+  std::vector<Scenario> scen_hi = makeScenarios("_hi");  // >40 GeV,   forward
+  // Same two pT slices at CENTRAL eta, as an ITk-only baseline: |eta| < 2.4 is
+  // outside HGTD acceptance, so its tracks have no valid time, the gate is a
+  // no-op there and all four scenarios should land on top of each other. That
+  // makes these both the reference the forward gain is measured against AND a
+  // standing check that the timing machinery stays inert where it has no data.
+  std::vector<Scenario> scen_lo_cen = makeScenarios("_lo_cen");  // 30–40 GeV, |eta|<2.4
+  std::vector<Scenario> scen_hi_cen = makeScenarios("_hi_cen");  // >40 GeV,   |eta|<2.4
   // VBS-topology regions (see classifyRegion below). pT-inclusive (>MIN_JET_PT)
   // rather than sliced: both are rare topologies and splitting them further
   // would leave the ROCs statistics-limited.
@@ -256,7 +368,24 @@ struct ThreadState {
   double pu_tot_lo = 0, pu_floor_lo = 0, hs_tot_lo = 0, hs_floor_lo = 0;  // 30-40
 
   // Event-display candidates, R1/R2 only (see RegionCase doc comment above).
-  std::vector<RegionCase> cases_r1, cases_r2;
+  std::vector<RegionCase> cases_r1, cases_r2, cases_r2_fail;
+  std::vector<EventCase>  cases_mis, cases_wwin;
+  // Per-scenario pull-width accumulators (see PRINT_PULL_DIAG).
+  double pull_dt2_hgtd = 0, pull_var_hgtd = 0;
+  double pull_dt2_trkptz = 0, pull_var_trkptz = 0;
+  double pull_dt2_waves = 0, pull_var_waves = 0;
+  long   pull_n_hgtd = 0, pull_n_trkptz = 0, pull_n_waves = 0;
+  // First moment and out-of-core counts, so the diagnostic can separate a
+  // systematic OFFSET (which an inflation cannot fix) from genuine spread, and
+  // report how much of each scenario's distribution the core window discards.
+  double pull_dt_hgtd = 0, pull_dt_trkptz = 0, pull_dt_waves = 0;
+  long   pull_ntail_hgtd = 0, pull_ntail_trkptz = 0, pull_ntail_waves = 0;
+  // Per-jet effect of the WAVeS time gate vs ITk-only, forward slices.
+  // 'up' must stay 0: applyTimeGate returns a SUBSET of its input, so R_pT can
+  // only fall. It is counted anyway as a standing assertion on that property.
+  long rpt_n[2] = {0, 0}, rpt_up[2] = {0, 0}, rpt_same[2] = {0, 0};
+  long rpt_down[2] = {0, 0}, rpt_zeroed[2] = {0, 0};
+  double rpt_relloss[2] = {0.0, 0.0};
 };
 
 // RpT numerator: sum pT of tracks that are ghost-associated to the jet AND in
@@ -296,6 +425,34 @@ int main(int argc, char** argv) {
   if (MyUtl::SAMPLE_NAME.empty())
     boost::filesystem::create_directories(MyUtl::OUTPUT_DIR + "/hists");
   unsigned nThreads = MyUtl::resolveThreads(argc, argv);
+
+  // --dzpara: swap the z0-significance association for the reference study's
+  // getNewDzpara parameterization, in BOTH the R_pT track list and the WAVeS
+  // clustering input (they share passTrackVertexAssociation). Set before any
+  // worker thread starts; read-only afterwards. Default off -- see the trk_all
+  // comment for why the choice moves every improvement factor.
+  for (int i = 1; i < argc; ++i) {
+    std::string a(argv[i]);
+    if (a == "--dzpara")     MyUtl::USE_DZ_PARA = true;   // clustering input
+    if (a == "--rpt-signif") RPT_USE_DZ_PARA    = false;  // R_pT track list
+  }
+  std::cout << "[assoc] R_pT fwd: "
+            << (RPT_USE_DZ_PARA ? "getNewDzpara x " + std::to_string(DZ0_PARA_SCALE)
+                                : "z0 significance < " + std::to_string(RPT_Z_SIGNIF))
+            << " | R_pT central: z0 significance < " << CENTRAL_Z_SIGNIF
+            << " | clustering: "
+            << (MyUtl::USE_DZ_PARA ? "getNewDzpara" : "z0 significance") << '\n';
+
+  // Per-sample vertex-time calibration. Resolved here, before any worker thread
+  // exists, so the event loop only ever reads it. Echoed so a run's stdout
+  // records which calibration produced its histograms -- the PRINT_PULL_DIAG
+  // table at the end then prints the freshly measured ratio beside these in its
+  // "in use" column, making a stale entry visible in the same log.
+  INFL = inflationFor(MyUtl::SAMPLE_NAME);
+  std::printf("[calibration] vertex-time inflation for '%s': "
+              "hgtd %.2f  trkptz %.2f  waves %.2f\n",
+              MyUtl::SAMPLE_NAME.empty() ? "local (vbf)" : MyUtl::SAMPLE_NAME.c_str(),
+              INFL.hgtd, INFL.trkptz, INFL.waves);
 
   TChain chain("ntuple");
   setupChain(chain, sample.ntupleDir.c_str());
@@ -411,18 +568,49 @@ int main(int argc, char** argv) {
       if (branch.vetoLeptonOverlap()) continue;
 
       // ── Track selection: all tracks (no eta cut) associated to the primary
-      //    vertex by the reference study's parameterized |Δz₀| cut, for the
-      //    z-only baseline / ITk-only scenario. See getNewDzpara above for why
-      //    this replaced the previous z₀-significance cut. ──────────────────────
+      //    vertex, for the z-only baseline / ITk-only scenario.
+      //
+      //    Defaults to the reference study's getNewDzpara parameterization; see
+      //    RPT_USE_DZ_PARA above, and --rpt-signif for the z0-significance form.
+      //
+      //    The choice matters for how results are REPORTED, not just internally:
+      //    it moves the ITk-only baseline (126.6 significance vs 139.1
+      //    parameterized, forward 30-40 GeV at 0.80 HS efficiency on local VBF),
+      //    and every "HGTD improves rejection by Nx" number is a ratio to that
+      //    baseline. The same WAVeS curve reads as +5% or +19% depending only on
+      //    which association the denominator used. Always quote the association
+      //    alongside the factor.
       std::vector<int> trk_all;
       const double vtxZ = branch.recoVtxZ[0];
       for (size_t trk = 0; trk < branch.trackZ0.GetSize(); ++trk) {
         double trkPt = branch.trackPt[trk];
         if (trkPt < MIN_TRACK_PT || trkPt > MAX_TRACK_PT) continue;
         if (!branch.trackQuality[trk]) continue;
-        double dz = std::abs(branch.trackZ0[trk] - vtxZ);
-        if (dz / getNewDzpara(branch.trackEta[trk], trkPt) > DZ0_PARA_SCALE) continue;
+        if (RPT_USE_DZ_PARA) {
+          double dz = std::abs(branch.trackZ0[trk] - vtxZ);
+          if (dz / MyUtl::getNewDzpara(branch.trackEta[trk], trkPt) > DZ0_PARA_SCALE) continue;
+        } else if (!passTrackVertexAssociation((int)trk, 0, &branch, RPT_Z_SIGNIF)) {
+          continue;
+        }
         trk_all.push_back((int)trk);
+      }
+
+      // Central counterpart of the list above, on a z0-significance cut rather
+      // than the forward parameterization (see CENTRAL_Z_SIGNIF). Kept as a
+      // separate list rather than switching per track inside one loop: a
+      // forward jet's dR < 0.2 cone can reach below |eta| = 2.4, and mixing
+      // the two associations inside a single list would silently change the
+      // forward numbers this baseline is meant to be compared against.
+      std::vector<int> trk_all_cen;
+      for (size_t trk = 0; trk < branch.trackZ0.GetSize(); ++trk) {
+        double trkPt = branch.trackPt[trk];
+        if (trkPt < MIN_TRACK_PT || trkPt > MAX_TRACK_PT) continue;
+        if (!branch.trackQuality[trk]) continue;
+        double vz = branch.trackVarZ0[trk];
+        if (!(vz > 0)) continue;
+        double dz = std::abs(branch.trackZ0[trk] - vtxZ);
+        if (dz / std::sqrt(vz) > CENTRAL_Z_SIGNIF) continue;
+        trk_all_cen.push_back((int)trk);
       }
 
       // ── HGTD-acceptance tracks only (used for WAVeS clustering). ────────────
@@ -464,7 +652,7 @@ int main(int argc, char** argv) {
       // ── Per-track time gate.  pull width ~1.5 → var_vtx ×2.25. ──────────────
       auto applyTimeGate = [&](const std::vector<int>& base,
                                 double t_vtx, double var_vtx, bool vtx_valid,
-                                double sigma = 2.0) {
+                                double sigma = 2.0, double infl = 1.5) {
         std::vector<int> out;
         out.reserve(base.size());
         for (int idx : base) {
@@ -472,31 +660,172 @@ int main(int argc, char** argv) {
           if (!apply) { out.push_back(idx); continue; }
           double dt    = branch.trackTime[idx] - t_vtx;
           double var_t = branch.trackTimeRes[idx] * branch.trackTimeRes[idx];
-          double pull  = std::abs(dt) / std::sqrt(2.25 * var_vtx + var_t);
+          double pull  = std::abs(dt) / std::sqrt(infl * infl * var_vtx + var_t);
           if (pull < sigma) out.push_back(idx);
         }
         return out;
       };
 
-      std::vector<int> trk_hgtd   = applyTimeGate(trk_all, t_hgtd,   var_hgtd,   hgtd_vtx_valid, GATE_SIGMA);
-      std::vector<int> trk_waves  = applyTimeGate(trk_all, t_waves,  var_waves,  waves_ok,       GATE_SIGMA);
-      std::vector<int> trk_trkptz = applyTimeGate(trk_all, t_trkptz, var_trkptz, trkptz_ok,      GATE_SIGMA);
+      std::vector<int> trk_hgtd   = applyTimeGate(trk_all, t_hgtd,   var_hgtd,   hgtd_vtx_valid, GATE_SIGMA, INFL.hgtd);
+      std::vector<int> trk_waves  = applyTimeGate(trk_all, t_waves,  var_waves,  waves_ok,       GATE_SIGMA, INFL.waves);
+      std::vector<int> trk_trkptz = applyTimeGate(trk_all, t_trkptz, var_trkptz, trkptz_ok,      GATE_SIGMA, INFL.trkptz);
+      // Central list gets the identical gate. It is a no-op there in practice
+      // (no HGTD coverage below |eta| 2.4, so no track carries a valid time),
+      // but applying it keeps all four central scenarios defined exactly as
+      // their forward counterparts -- which is what makes their agreement a
+      // meaningful check rather than a tautology.
+      std::vector<int> trk_hgtd_cen   = applyTimeGate(trk_all_cen, t_hgtd,   var_hgtd,   hgtd_vtx_valid, GATE_SIGMA, INFL.hgtd);
+      std::vector<int> trk_waves_cen  = applyTimeGate(trk_all_cen, t_waves,  var_waves,  waves_ok,       GATE_SIGMA, INFL.waves);
+      std::vector<int> trk_trkptz_cen = applyTimeGate(trk_all_cen, t_trkptz, var_trkptz, trkptz_ok,      GATE_SIGMA, INFL.trkptz);
+
+      // ── Pull-width measurement, one accumulator set per scenario ───────────
+      // Truth-HS tracks only (trackToTruthvtx == 0) with a valid time, in
+      // events where that scenario produced a vertex time. Accumulates the
+      // observed dt spread inside a generous core window against the QUOTED
+      // uncertainty; the ratio of the two is the inflation factor to set above.
+      if (PRINT_PULL_DIAG) {
+        auto accum = [&](double t_vtx, double var_vtx, bool ok,
+                         double& sum_dt2, double& sum_var, long& n,
+                         double& sum_dt, long& n_tail) {
+          if (!ok) return;
+          for (int idx : trk_all) {
+            if (branch.trackTimeValid[idx] != 1) continue;
+            if (branch.trackToTruthvtx[idx] != 0) continue;   // truth-HS only
+            double dt = branch.trackTime[idx] - t_vtx;
+            if (std::abs(dt) > 150.0) { ++n_tail; continue; } // core window
+            double var_t = branch.trackTimeRes[idx] * branch.trackTimeRes[idx];
+            sum_dt2 += dt * dt;
+            sum_dt  += dt;
+            sum_var += var_vtx + var_t;
+            ++n;
+          }
+        };
+        accum(t_hgtd,   var_hgtd,   hgtd_vtx_valid, state.pull_dt2_hgtd,   state.pull_var_hgtd,   state.pull_n_hgtd, state.pull_dt_hgtd, state.pull_ntail_hgtd);
+        accum(t_trkptz, var_trkptz, trkptz_ok,      state.pull_dt2_trkptz, state.pull_var_trkptz, state.pull_n_trkptz, state.pull_dt_trkptz, state.pull_ntail_trkptz);
+        accum(t_waves,  var_waves,  waves_ok,       state.pull_dt2_waves,  state.pull_var_waves,  state.pull_n_waves, state.pull_dt_waves, state.pull_ntail_waves);
+      }
+
+      // ── Idealised-timing reference scenarios ──────────────────────────────
+      // Smeared times are generated ONCE per track here and then used for both
+      // the re-clustering below and the gates, so the vertex time and the track
+      // times a row is gated against always come from the same world. Building
+      // them separately would mean clustering on one draw and gating on
+      // another, which is what made the earlier version incoherent.
+      //
+      // Only tracks HGTD actually timed are smeared -- idealising the time of a
+      // track the detector never measured would invent coverage it does not
+      // have, which the central baseline catches immediately.
+      //
+      // Mirrors getSmearedTrackTime's priority (particle production time, then
+      // truth vertex time, then a pileup draw) but uses this thread's RNG:
+      // that helper draws from the GLOBAL gRandom, which is a data race under
+      // TTreeProcessorMT -- the same class of bug as the TColor race.
+      {
+        UInt_t sd = (UInt_t)std::llround(std::abs(branch.truthVtxZ[0])    * 1e4)
+                  ^ ((UInt_t)std::llround(std::abs(branch.truthVtxTime[0]) * 1e3) << 11)
+                  ^ ((UInt_t)branch.trackZ0.GetSize() << 23);
+        state.rng.SetSeed(sd ? sd : 1u);
+      }
+      std::unordered_map<int, double> smTimes, smRes;
+      for (size_t i = 0; i < branch.trackZ0.GetSize(); ++i) {
+        if (branch.trackTimeValid[i] != 1) continue;
+        const int pi = branch.trackToParticle[i];
+        const int vi = branch.trackToTruthvtx[i];
+        double tPart;
+        if (pi != -1)      tPart = branch.particleT[pi];
+        else if (vi != -1) tPart = branch.truthVtxTime[vi];
+        else               tPart = state.rng.Gaus(branch.truthVtxTime[0], PILEUP_SMEAR);
+        smTimes.emplace((int)i, state.rng.Gaus(tPart, TRUTH_TRK_SMEAR));
+        smRes.emplace((int)i, TRUTH_TRK_SMEAR);
+      }
+
+      // Re-cluster in the idealised world and re-select with the WAVeS score.
+      // The cluster structure depends on the track times, so reusing the t0
+      // built from the real times would evaluate good tracks against a vertex
+      // time derived from noisy ones. values[0] is the cluster's own weighted
+      // mean of the smeared times -- calculateTime() would recompute it from
+      // the REAL branch times and reintroduce exactly that mismatch.
+      double t_wsm = 0.0, var_wsm = 0.0;
+      bool   wsm_ok = false;
+      {
+        auto cl_sm = makeSimpleClusters(trk_z, &branch, /*useSmearedTimes=*/true,
+                                        smTimes, smRes, /*checkTimeValid=*/true,
+                                        /*usez0=*/false);
+        doIterativeClustering(&cl_sm, DIST_CUT_CONE);
+        // Second idealisation: select the cluster closest in time to truth
+        // rather than the highest-scoring one. Ranked on |dt|, not purity --
+        // purity was tried and fails badly (HS jets at R_pT = 0 rise
+        // 3.0% -> 11.8%), because it measures where a track CAME FROM, not
+        // whether its time is right: a lone HS track with a mis-assigned HGTD
+        // hit forms a 100%-pure cluster at a wrong time and wins. dt rejects
+        // those by construction.
+        if (!cl_sm.empty()) {
+          size_t bi = 0; double bestDt = 1e50;
+          for (size_t i = 0; i < cl_sm.size(); ++i) {
+            const double dt = std::abs(cl_sm[i].values[0] - branch.truthVtxTime[0]);
+            if (dt < bestDt) { bestDt = dt; bi = i; }
+          }
+          t_wsm   = cl_sm[bi].values[0];
+          var_wsm = cl_sm[bi].sigmas[0] * cl_sm[bi].sigmas[0];
+          wsm_ok  = true;
+        }
+      }
+
+      const double t_truth_vtx = state.rng.Gaus(branch.truthVtxTime[0], TRUTH_VTX_SMEAR);
+
+      // Shared gate: idealised track times against whichever vertex time.
+      auto smearedGate = [&](const std::vector<int>& base, double t_vtx,
+                             double var_vtx, bool vtx_ok, double infl) {
+        std::vector<int> out; out.reserve(base.size());
+        const double den = std::sqrt(infl * infl * var_vtx
+                                   + TRUTH_TRK_SMEAR * TRUTH_TRK_SMEAR);
+        for (int idx : base) {
+          auto it = smTimes.find(idx);
+          if (!vtx_ok || it == smTimes.end() || den <= 0) { out.push_back(idx); continue; }
+          if (std::abs(it->second - t_vtx) / den < GATE_SIGMA) out.push_back(idx);
+        }
+        return out;
+      };
+
+      // Truth row: ideal vertex time (10 ps) + the same ideal track times, so
+      // it differs from the WAVeS-smeared row in exactly one variable.
+      std::vector<int> trk_truth     = smearedGate(trk_all,     t_truth_vtx,
+                                                   TRUTH_VTX_SMEAR * TRUTH_VTX_SMEAR, true, 1.0);
+      std::vector<int> trk_truth_cen = smearedGate(trk_all_cen, t_truth_vtx,
+                                                   TRUTH_VTX_SMEAR * TRUTH_VTX_SMEAR, true, 1.0);
+
+      std::vector<int> trk_wsm     = smearedGate(trk_all,     t_wsm, var_wsm, wsm_ok, INFL.waves);
+      std::vector<int> trk_wsm_cen = smearedGate(trk_all_cen, t_wsm, var_wsm, wsm_ok, INFL.waves);
 
       // Build per-scenario sets once per event for O(1) ghost-index lookup.
-      std::unordered_set<int> set_all   (trk_all.begin(),    trk_all.end());
-      std::unordered_set<int> set_hgtd  (trk_hgtd.begin(),   trk_hgtd.end());
-      std::unordered_set<int> set_trkptz(trk_trkptz.begin(), trk_trkptz.end());
-      std::unordered_set<int> set_waves (trk_waves.begin(),  trk_waves.end());
+      struct TrackSets { std::unordered_set<int> all, hgtd, trkptz, waves, waves_ideal, truth; };
+      TrackSets fwd{ {trk_all.begin(),    trk_all.end()},
+                     {trk_hgtd.begin(),   trk_hgtd.end()},
+                     {trk_trkptz.begin(), trk_trkptz.end()},
+                     {trk_waves.begin(),  trk_waves.end()},
+                     {trk_wsm.begin(),    trk_wsm.end()},
+                     {trk_truth.begin(),  trk_truth.end()} };
+      TrackSets cen{ {trk_all_cen.begin(),    trk_all_cen.end()},
+                     {trk_hgtd_cen.begin(),   trk_hgtd_cen.end()},
+                     {trk_trkptz_cen.begin(), trk_trkptz_cen.end()},
+                     {trk_waves_cen.begin(),  trk_waves_cen.end()},
+                     {trk_wsm_cen.begin(),    trk_wsm_cen.end()},
+                     {trk_truth_cen.begin(),  trk_truth_cen.end()} };
 
       // ── Fill jets into pT slices. ─────────────────────────────────────────────
-      auto fillJets = [&](std::vector<Scenario>& sv, double pt_lo, double pt_hi) {
+      // eta_min/eta_max select the acceptance; do_floor is false for the central
+      // baseline so its jets cannot contaminate the forward untimed-floor
+      // counters, which are reported as a forward quantity.
+      auto fillJets = [&](std::vector<Scenario>& sv, double pt_lo, double pt_hi,
+                          double eta_min, double eta_max, bool do_floor,
+                          const TrackSets& S) {
         for (int j = 0; j < (int)branch.topoJetPt.GetSize(); ++j) {
           if (branch.isJetRemoved(j)) continue;  // lepton-overlap removed (Z+jets)
           double j_pt  = branch.topoJetPt[j];
           double j_eta = branch.topoJetEta[j];
           double j_phi = branch.topoJetPhi[j];
           if (j_pt <= pt_lo || j_pt >= pt_hi) continue;
-          if (std::abs(j_eta) < JET_ETA_MIN || std::abs(j_eta) > JET_ETA_MAX) continue;
+          if (std::abs(j_eta) < eta_min || std::abs(j_eta) > eta_max) continue;
           bool isHS = paperIsHS(j_eta, j_phi);
           bool isPU = paperIsPU(j_eta, j_phi);
           if (!isHS && !isPU) continue;
@@ -507,14 +836,35 @@ int main(int argc, char** argv) {
             if (isHS) s.h_hs->Fill(r);
             else      s.h_pu->Fill(r);
           };
-          fill(sv[0], set_all);                       // ITk-only
-          fill(sv[1], set_hgtd);                      // HGTD t0 (Athena)
-          fill(sv[2], set_trkptz);                    // TRKPTZ t0
-          fill(sv[3], set_waves);                     // WAVeS t0
+          fill(sv[0], S.all);                         // ITk-only
+          fill(sv[1], S.hgtd);                        // HGTD t0 (Athena)
+          fill(sv[2], S.trkptz);                      // TRKPTZ t0
+          fill(sv[3], S.waves);                       // WAVeS t0
+          fill(sv[4], S.waves_ideal);                 // ORACLE: 30 ps tracks + perfect selection
+          fill(sv[5], S.truth);                       // truth t0, 10 (+) 30 ps
 
-          // Untimed floor accounting, per slice.
+          // How the WAVeS gate moved this jet's R_pT relative to ITk-only.
+          // Forward only (do_floor marks the forward calls): central is outside
+          // HGTD acceptance, so its gate is a no-op and would only dilute this
+          // with a wall of "unchanged".
+          if (do_floor) {
+            double r_z = computeRpT(&branch, ghost, j_pt, j_eta, j_phi, S.all);
+            double r_w = computeRpT(&branch, ghost, j_pt, j_eta, j_phi, S.waves);
+            int k = isHS ? 0 : 1;
+            state.rpt_n[k]++;
+            if      (r_w > r_z + 1e-9) state.rpt_up[k]++;
+            else if (r_w > r_z - 1e-9) state.rpt_same[k]++;
+            else {
+              state.rpt_down[k]++;
+              if (r_w <= 0.0) state.rpt_zeroed[k]++;
+              if (r_z > 0.0)  state.rpt_relloss[k] += (r_z - r_w) / r_z;
+            }
+          }
+
+          // Untimed floor accounting, per slice (forward only).
+          if (!do_floor) continue;
           for (int idx : ghost) {
-            if (!set_all.count(idx)) continue;
+            if (!S.all.count(idx)) continue;
             double pt = branch.trackPt[idx];
             bool untimed = (branch.trackTimeValid[idx] != 1);
             if (pt_lo >= 40.0) {
@@ -528,8 +878,10 @@ int main(int argc, char** argv) {
         }
       };
 
-      fillJets(state.scen_lo, 30.0, 40.0);
-      fillJets(state.scen_hi, 40.0, 1e9);
+      fillJets(state.scen_lo, 30.0, 40.0, JET_ETA_MIN, JET_ETA_MAX, true,  fwd);
+      fillJets(state.scen_hi, 40.0, 1e9,  JET_ETA_MIN, JET_ETA_MAX, true,  fwd);
+      fillJets(state.scen_lo_cen, 30.0, 40.0, 0.0, CENTRAL_ETA_MAX, false, cen);
+      fillJets(state.scen_hi_cen, 40.0, 1e9,  0.0, CENTRAL_ETA_MAX, false, cen);
 
       // Full ntuple file path + local (per-file) entry number for the
       // event-display commands printed after the loop. Same
@@ -539,6 +891,58 @@ int main(int argc, char** argv) {
       // sequential reader would return a chain-global entry number instead).
       std::string filePath   = reader.GetTree()->GetCurrentFile()->GetName();
       Long64_t    localEntry = reader.GetTree()->GetReadEntry();
+
+      // ── Display candidates: track-time misassociation, and WAVeS-vs-TRKPTZ.
+      if (PRINT_EVENT_DISPLAYS) {
+        const double tTruth = branch.truthVtxTime[0];
+        // Count forward HS tracks that are timed, and how many of those carry a
+        // time inconsistent with truth -- the same |pull| >= TRUTH_PULL_CUT
+        // test calcHSTimingPurity uses, but counting TRACKS rather than
+        // pT-weighting, since what makes a display legible is how many wrong
+        // bars are visible.
+        int nTimedHS = 0, nMisTimed = 0;
+        for (int idx : trk_z) {
+          if (branch.trackToTruthvtx[idx] != 0 || branch.trackTimeValid[idx] != 1) continue;
+          ++nTimedHS;
+          const int    pi = branch.trackToParticle[idx];
+          const double tTrue = (pi != -1) ? branch.particleT[pi]
+                                          : branch.truthVtxTime[branch.trackToTruthvtx[idx]];
+          if (std::abs(branch.trackTime[idx] - tTrue) / branch.trackTimeRes[idx] >= TRUTH_PULL_CUT)
+            ++nMisTimed;
+        }
+        const float pur = calcHSTimingPurity(trk_z, &branch);
+
+        // Misassociation: ranked by the NUMBER of mis-timed forward HS tracks.
+        // Ranking on purity alone pinned every pick at the 8-track floor (a
+        // sparse event reaches a low fraction easily); ranking on
+        // (1 - purity) x multiplicity favoured busy events and never went below
+        // ~0.2 purity. The count is the quantity that is actually low-purity
+        // AND populated, which is what makes the wrong times visible on a slide.
+        // The two criteria pull against each other: a low purity FRACTION is
+        // easiest to reach in a sparse event, while a high mis-timed COUNT
+        // favours busy ones with middling purity. So gate on genuinely low
+        // purity, then rank by count within that -- the busiest of the
+        // genuinely bad events, rather than the extreme of either alone.
+        // The event must also FAIL. Gating on low purity alone selected events
+        // where the tracks are badly mis-timed and the algorithm recovers the
+        // right vertex time anyway -- which illustrates the opposite of the
+        // point. failure_decomposition's timing-misassignment category requires
+        // both the mis-timed tracks AND the resulting time being wrong, so the
+        // delivered time must miss truth by more than the efficiency window.
+        if (pur < 0.25f && waves_ok && std::abs(t_waves - tTruth) > PASS_SIGMA)
+          insertEventCase(state.cases_mis,
+                          {filePath, localEntry, t_waves, (double)nMisTimed,
+                           pur, (double)nMisTimed, t_waves - tTruth});
+
+        // WAVeS lands on truth where the TRKPTZ baseline does not -- the case
+        // the score change exists for.
+        if (waves_ok && trkptz_ok) {
+          const double dW = std::abs(t_waves - tTruth), dT = std::abs(t_trkptz - tTruth);
+          if (dW < 40.0 && dT > 120.0)
+            insertEventCase(state.cases_wwin,
+                            {filePath, localEntry, t_waves, dT - dW, dW, dT, 0.0});
+        }
+      }
 
       // ── VBS-topology regions ────────────────────────────────────────────────
       // Two topologies where forward timing is the deciding information, taken
@@ -601,10 +1005,12 @@ int main(int argc, char** argv) {
               double r = computeRpT(&branch, ghost, j_pt, j_eta, j_phi, s_set);
               (asHS ? s.h_hs : s.h_pu)->Fill(r);
             };
-            put(sv[0], set_all);
-            put(sv[1], set_hgtd);
-            put(sv[2], set_trkptz);
-            put(sv[3], set_waves);
+            put(sv[0], fwd.all);
+            put(sv[1], fwd.hgtd);
+            put(sv[2], fwd.trkptz);
+            put(sv[3], fwd.waves);
+            put(sv[4], fwd.waves_ideal);
+            put(sv[5], fwd.truth);
           };
 
           // Per-jet RpT under the no-timing baseline and under WAVeS, used both
@@ -624,8 +1030,8 @@ int main(int argc, char** argv) {
             // negative = timing eroded or inverted it), so rank on |delta| and
             // let the printed line say which -- one list surfaces both the
             // rescues and the regressions rather than needing two.
-            double mZ = rptOf(fwdHS, set_all)   - rptOf(fwdPU, set_all);
-            double mW = rptOf(fwdHS, set_waves) - rptOf(fwdPU, set_waves);
+            double mZ = rptOf(fwdHS, fwd.all)   - rptOf(fwdPU, fwd.all);
+            double mW = rptOf(fwdHS, fwd.waves) - rptOf(fwdPU, fwd.waves);
             insertRegionCase(state.cases_r1,
                              {filePath, localEntry, fwdHS, fwdPU,
                               branch.topoJetPt[fwdHS], branch.topoJetEta[fwdHS],
@@ -637,13 +1043,24 @@ int main(int argc, char** argv) {
             // Rank by how far timing pushes the fake's RpT down: a forward PU
             // jet with high no-timing RpT is precisely the one that fakes a
             // tagging jet, and the drop is the rejection actually delivered.
-            double rZ = rptOf(fwdPU, set_all);
-            double rW = rptOf(fwdPU, set_waves);
+            double rZ = rptOf(fwdPU, fwd.all);
+            double rW = rptOf(fwdPU, fwd.waves);
             insertRegionCase(state.cases_r2,
                              {filePath, localEntry, -1, fwdPU,
                               0.0, 0.0,
                               branch.topoJetPt[fwdPU], branch.topoJetEta[fwdPU],
                               rZ, rW, rW - rZ, t_waves});
+            // R2's SUCCESS list above is one-sided by construction:
+            // applyTimeGate returns a subset, so rW <= rZ always and every
+            // entry is "suppressed". It therefore cannot show a failure.
+            // R2 fails when a fake SURVIVES -- high RpT still standing after
+            // the gate -- which has |rW - rZ| ~ 0 and sits at the bottom of
+            // that ranking. Rank those by the surviving RpT instead.
+            insertRegionCase(state.cases_r2_fail,
+                             {filePath, localEntry, -1, fwdPU,
+                              0.0, 0.0,
+                              branch.topoJetPt[fwdPU], branch.topoJetEta[fwdPU],
+                              rZ, rW, rW, t_waves});
           }
         }
       }
@@ -676,6 +1093,22 @@ int main(int argc, char** argv) {
       merged.scen_hi[k].h_hs->Add(other.scen_hi[k].h_hs);
       merged.scen_hi[k].h_pu->Add(other.scen_hi[k].h_pu);
     }
+    for (int k = 0; k < 2; ++k) {
+      merged.rpt_n[k]      += other.rpt_n[k];
+      merged.rpt_up[k]     += other.rpt_up[k];
+      merged.rpt_same[k]   += other.rpt_same[k];
+      merged.rpt_down[k]   += other.rpt_down[k];
+      merged.rpt_zeroed[k] += other.rpt_zeroed[k];
+      merged.rpt_relloss[k]+= other.rpt_relloss[k];
+    }
+    for (size_t k = 0; k < merged.scen_lo_cen.size(); ++k) {
+      merged.scen_lo_cen[k].h_hs->Add(other.scen_lo_cen[k].h_hs);
+      merged.scen_lo_cen[k].h_pu->Add(other.scen_lo_cen[k].h_pu);
+    }
+    for (size_t k = 0; k < merged.scen_hi_cen.size(); ++k) {
+      merged.scen_hi_cen[k].h_hs->Add(other.scen_hi_cen[k].h_hs);
+      merged.scen_hi_cen[k].h_pu->Add(other.scen_hi_cen[k].h_pu);
+    }
     merged.n_total      += other.n_total;
     merged.n_pass_basic += other.n_pass_basic;
     merged.n_hgtd_valid += other.n_hgtd_valid;
@@ -694,8 +1127,14 @@ int main(int argc, char** argv) {
 
     // Event-display diagnostic candidates: merge each category's top-N
     // (see mergeCases doc comment near the top of this file).
+    merged.pull_dt2_hgtd   += other.pull_dt2_hgtd;   merged.pull_var_hgtd   += other.pull_var_hgtd;   merged.pull_n_hgtd   += other.pull_n_hgtd;  merged.pull_dt_hgtd += other.pull_dt_hgtd;  merged.pull_ntail_hgtd += other.pull_ntail_hgtd;
+    merged.pull_dt2_trkptz += other.pull_dt2_trkptz; merged.pull_var_trkptz += other.pull_var_trkptz; merged.pull_n_trkptz += other.pull_n_trkptz;  merged.pull_dt_trkptz += other.pull_dt_trkptz;  merged.pull_ntail_trkptz += other.pull_ntail_trkptz;
+    merged.pull_dt2_waves  += other.pull_dt2_waves;  merged.pull_var_waves  += other.pull_var_waves;  merged.pull_n_waves  += other.pull_n_waves;  merged.pull_dt_waves += other.pull_dt_waves;  merged.pull_ntail_waves += other.pull_ntail_waves;
     mergeRegionCases(merged.cases_r1, other.cases_r1);
     mergeRegionCases(merged.cases_r2, other.cases_r2);
+    mergeRegionCases(merged.cases_r2_fail, other.cases_r2_fail);
+    mergeEventCases (merged.cases_mis,  other.cases_mis);
+    mergeEventCases (merged.cases_wwin, other.cases_wwin);
   }
 
   std::cout << "\nFINISHED PROCESSING\n";
@@ -707,6 +1146,8 @@ int main(int argc, char** argv) {
   saveScenarios(writer, merged.scen_hi);
   saveScenarios(writer, merged.scen_r1);
   saveScenarios(writer, merged.scen_r2);
+  saveScenarios(writer, merged.scen_lo_cen);
+  saveScenarios(writer, merged.scen_hi_cen);
   writer.WriteScalar("meta_n_total",      static_cast<Long64_t>(merged.n_total));
   writer.WriteScalar("meta_n_pass_basic", static_cast<Long64_t>(merged.n_pass_basic));
   writer.WriteScalar("meta_n_hgtd_valid", static_cast<Long64_t>(merged.n_hgtd_valid));
@@ -742,6 +1183,59 @@ int main(int argc, char** argv) {
   std::cout << "    Rejected, 1 good lepton   : " << merged.n_rej_one_lepton   << '\n';
   std::cout << "    Rejected, no OS-SF pair   : " << merged.n_rej_no_ossf_pair << '\n';
 
+  // --- Per-scenario vertex-time calibration -----------------------------------
+  //     sigma ratio = observed core spread of (t_trk - t_vtx) for truth-HS
+  //     tracks, divided by the QUOTED sqrt(var_vtx + var_trk). A value above 1
+  //     means the quoted error is understated by that factor, so a nominal
+  //     GATE_SIGMA cut behaves like GATE_SIGMA/ratio. Set INFL_* to the ratio.
+  if (PRINT_PULL_DIAG) {
+    std::printf("\n=== VERTEX-TIME CALIBRATION (truth-HS tracks, |dt| < 150 ps core) ===\n");
+    std::printf("  %-8s %9s %9s %10s %10s %8s %8s %7s\n",
+                "scenario", "n core", "mean dt", "core sig", "quoted", "ratio", "tail>150", "in use");
+    auto row = [](const char* nm, double dt2, double dt1, double var, long n,
+                  long ntail, double inuse) {
+      if (n < 100) { std::printf("  %-8s %9ld   (too few)\n", nm, n); return; }
+      double mean = dt1 / n;
+      // Width ABOUT THE MEAN: a systematic offset is a bias, not resolution, and
+      // scaling sigma_vtx cannot correct it -- so it must not be folded into the
+      // inflation the way an RMS about zero would fold it.
+      double sig  = std::sqrt(std::max(0.0, dt2 / n - mean * mean));
+      double quo  = std::sqrt(var / n);
+      double tail = 100.0 * ntail / double(n + ntail);
+      std::printf("  %-8s %9ld %7.1fps %8.1fps %8.1fps %8.2f %7.1f%% %7.2f\n",
+                  nm, n, mean, sig, quo, quo > 0 ? sig / quo : 0.0, tail, inuse);
+    };
+    row("hgtd",   merged.pull_dt2_hgtd,   merged.pull_dt_hgtd,   merged.pull_var_hgtd,
+        merged.pull_n_hgtd,   merged.pull_ntail_hgtd,   INFL.hgtd);
+    row("trkptz", merged.pull_dt2_trkptz, merged.pull_dt_trkptz, merged.pull_var_trkptz,
+        merged.pull_n_trkptz, merged.pull_ntail_trkptz, INFL.trkptz);
+    row("waves",  merged.pull_dt2_waves,  merged.pull_dt_waves,  merged.pull_var_waves,
+        merged.pull_n_waves,  merged.pull_ntail_waves,  INFL.waves);
+    std::printf("  mean dt : systematic offset -- an inflation CANNOT correct this.\n");
+    std::printf("  tail    : fraction outside the core window, i.e. how much\n");
+    std::printf("            structure the core-width calibration does not see.\n");
+    std::printf("  (ratio != in use -> update this sample's row in inflationFor() and rebuild)\n");
+  }
+
+  {
+    std::printf("\n=== PER-JET EFFECT OF THE WAVeS TIME GATE (forward, vs ITk-only) ===\n");
+    std::printf("  %-4s %9s %7s %9s %9s %9s %12s\n",
+                "jet", "n", "raised", "unchanged", "lowered", "->zero", "mean loss*");
+    const char* nm[2] = {"HS", "PU"};
+    for (int k = 0; k < 2; ++k) {
+      long n = merged.rpt_n[k];
+      if (n == 0) continue;
+      std::printf("  %-4s %9ld %7ld %8.1f%% %8.1f%% %8.1f%% %11.1f%%\n",
+                  nm[k], n, merged.rpt_up[k],
+                  100.0 * merged.rpt_same[k]   / n,
+                  100.0 * merged.rpt_down[k]   / n,
+                  100.0 * merged.rpt_zeroed[k] / n,
+                  merged.rpt_down[k] ? 100.0 * merged.rpt_relloss[k] / merged.rpt_down[k] : 0.0);
+    }
+    std::printf("  *mean fractional R_pT loss, averaged over the LOWERED jets only.\n");
+    std::printf("  'raised' must be 0 by construction (the gate returns a subset).\n");
+  }
+
   // --- Event displays, R1/R2 ONLY -------------------------------------------
   //     The older WAVeS-vs-HGTD jet comparison and "timing-hurt HS jets"
   //     listings were removed rather than kept alongside these: they ranked on
@@ -750,6 +1244,27 @@ int main(int argc, char** argv) {
   //     it impossible to tell which commands belonged to which study. The
   //     regions are the focus, so the display output is theirs alone.
   if (PRINT_EVENT_DISPLAYS) {
+    auto printEvents = [](const char* title, const char* desc,
+                          const std::vector<EventCase>& cases, const char* fmt) {
+      std::cout << "\n=== " << title << " ===\n  " << desc << "\n\n";
+      if (cases.empty()) { std::cout << "  (none found)\n"; return; }
+      for (const auto& c : cases) {
+        std::printf(fmt, c.v1, c.v2, c.v3);
+        std::printf("  cd python && python3 event_display.py --file_path \"%s\""
+                    " --event_num %lld --extra_time %.2f\n\n",
+                    c.file_path.c_str(), c.entry, c.t_show);
+      }
+    };
+    printEvents("TRACK-TIME MISASSOCIATION",
+                "Forward HS tracks whose HGTD times disagree with truth: the "
+                "times themselves are wrong, not merely imprecise.",
+                merged.cases_mis,
+                "  HS timing purity=%.2f  --  %.0f mis-timed HS tracks  --  delivered time off truth by %+.1f ps\n");
+    printEvents("WAVeS BEATS TRKPTZ",
+                "WAVeS lands on the truth time while the TRKPTZ baseline does not.",
+                merged.cases_wwin,
+                "  |dt|: WAVeS=%.1f ps  TRKPTZ=%.1f ps%.0s\n");
+
     auto printRegion = [](const char* title, const char* metric_desc,
                           const std::vector<RegionCase>& cases, bool isR1) {
       std::cout << "\n=== " << title << " ===\n";
@@ -766,7 +1281,7 @@ int main(int argc, char** argv) {
           std::printf("  fwd PU leg pT=%.1f eta=%+.2f  RpT: %.3f -> %.3f"
                       "  (%+.3f, timing %s)\n",
                       c.pu_pt, c.pu_eta, c.val_zonly, c.val_waves, c.metric,
-                      c.metric < 0 ? "SUPPRESSED the fake" : "raised it");
+                      c.metric < 0 ? "SUPPRESSED the fake" : "left it untouched");
         }
         // --jet_idx highlights the leg the region is about: the HS leg in R1
         // (which one is the hard scatter?), the fake in R2 (can we kill it?).
@@ -781,6 +1296,12 @@ int main(int argc, char** argv) {
     printRegion("VBS REGION R1 - both candidate legs forward (HS vs PU)",
                 "Ranked by |change in HS-minus-PU RpT margin| between ITk-only and WAVeS.",
                 merged.cases_r1, true);
+    printRegion("VBS REGION R2 FAILURES - fakes that SURVIVED the gate",
+                "Ranked by the forward-PU RpT still standing after WAVeS. "
+                "The success list below cannot show these: rW <= rZ always, so "
+                "every entry there is 'suppressed' and failures rank last.",
+                merged.cases_r2_fail, false);
+
     printRegion("VBS REGION R2 - forward PU leg + central HS leg",
                 "Ranked by |change in forward-PU RpT| between ITk-only and WAVeS.",
                 merged.cases_r2, false);
