@@ -11,7 +11,7 @@
 
 #include <Rtypes.h>  // Long64_t
 
-#include "clustering_constants.h"  // VBS_JET_D_ETA (runtime-settable)
+#include "clustering_constants.h"  // VBS_JET_D_ETA, VBS_JET_MJJ (runtime-settable)
 
 #include <algorithm>
 #include <cmath>
@@ -97,51 +97,69 @@ namespace MyUtl {
 
   // ---------------------------------------------------------------------------
   // resolveSelection
-  //   Optional selection override via --vbs-deta=<x>, which sets the VBS
-  //   candidate-pair |Deta| requirement (default VBS_JET_D_ETA_DEFAULT = 3.0;
-  //   pass 0 to disable the cut entirely while keeping the >=1 forward jet
-  //   requirement, i.e. "still a forward-jet event, but not forced into a VBS
-  //   topology"). See the comment on VBS_JET_D_ETA in clustering_constants.h for
-  //   why this needs to be measurable rather than assumed.
+  //   Optional selection overrides for the VBS candidate-pair cuts:
+  //     --vbs-deta=<x>  VBS_JET_D_ETA (default 3.0); pass 0 to disable while
+  //                     keeping the >=1 forward jet requirement, i.e. "still a
+  //                     forward-jet event, but not forced into a VBS topology".
+  //     --vbs-mjj=<x>   VBS_JET_MJJ (default 0, a no-op).
+  //   Independent knobs, not alternatives -- passJetPtCut requires both. See
+  //   the comments on VBS_JET_D_ETA / VBS_JET_MJJ in clustering_constants.h
+  //   for why each needs to be measurable/settable rather than assumed.
   //
-  //   Also sets SELECTION_TAG whenever the value differs from the default, so
-  //   the loosened run writes <sample>_deta0p0_<name>.root instead of colliding
-  //   with the standard <sample>_<name>.root. Absent flag => no tag => every
-  //   existing path unchanged.
+  //   Each sets a SELECTION_TAG component whenever its value differs from its
+  //   default, joined with '_' if both are non-default, so a loosened run
+  //   writes e.g. <sample>_deta0p0_mjj200p0_<name>.root instead of colliding
+  //   with the standard <sample>_<name>.root. Neither flag given => no tag =>
+  //   every existing path unchanged.
   //
-  //   Call once in main() alongside resolveSample(). Executables that never see
-  //   the flag are unaffected.
+  //   Call once in main() alongside resolveSample(). Executables that never
+  //   see either flag are unaffected.
   // ---------------------------------------------------------------------------
   inline void resolveSelection(int argc, char** argv) {
-    const std::string prefix = "--vbs-deta=";
-    for (int i = 1; i < argc; ++i) {
-      std::string arg = argv[i];
-      if (arg.rfind(prefix, 0) != 0) continue;
+    // Parses --<name>=<x> if present; returns false (default, val untouched)
+    // if the flag never appears. Shared by both knobs below so a bad/missing
+    // value is reported the same way for each.
+    auto parseFlag = [&](const char* name, double& val) -> bool {
+      const std::string prefix = std::string("--") + name + "=";
+      for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg.rfind(prefix, 0) != 0) continue;
+        try {
+          val = std::stod(arg.substr(prefix.size()));
+        } catch (const std::exception&) {
+          std::cerr << "Bad --" << name << " value '" << arg.substr(prefix.size())
+                    << "'; expected a number (e.g. --" << name << "=0).\n";
+          std::exit(1);
+        }
+        if (val < 0.0) {
+          std::cerr << "--" << name << " must be >= 0 (got " << val << ").\n";
+          std::exit(1);
+        }
+        return true;
+      }
+      return false;
+    };
 
-      double v = 0.0;
-      try {
-        v = std::stod(arg.substr(prefix.size()));
-      } catch (const std::exception&) {
-        std::cerr << "Bad --vbs-deta value '" << arg.substr(prefix.size())
-                  << "'; expected a number (e.g. --vbs-deta=0).\n";
-        std::exit(1);
-      }
-      if (v < 0.0) {
-        std::cerr << "--vbs-deta must be >= 0 (got " << v << ").\n";
-        std::exit(1);
-      }
+    auto addTag = [&](const char* label, double v) {
+      std::ostringstream os;
+      os << label << std::fixed << std::setprecision(1) << v;
+      std::string tag = os.str();
+      std::replace(tag.begin(), tag.end(), '.', 'p');
+      SELECTION_TAG = SELECTION_TAG.empty() ? tag : SELECTION_TAG + "_" + tag;
+    };
 
-      VBS_JET_D_ETA = v;
-      if (std::abs(v - VBS_JET_D_ETA_DEFAULT) > 1e-9) {
-        std::ostringstream os;
-        os << "deta" << std::fixed << std::setprecision(1) << v;
-        std::string tag = os.str();
-        std::replace(tag.begin(), tag.end(), '.', 'p');
-        SELECTION_TAG = tag;
-      }
-      break;
+    double deta = VBS_JET_D_ETA, mjj = VBS_JET_MJJ;
+    if (parseFlag("vbs-deta", deta)) {
+      VBS_JET_D_ETA = deta;
+      if (std::abs(deta - VBS_JET_D_ETA_DEFAULT) > 1e-9) addTag("deta", deta);
     }
+    if (parseFlag("vbs-mjj", mjj)) {
+      VBS_JET_MJJ = mjj;
+      if (std::abs(mjj - VBS_JET_MJJ_DEFAULT) > 1e-9) addTag("mjj", mjj);
+    }
+
     std::cout << "[selection] VBS |Deta| >= " << VBS_JET_D_ETA
+              << ", m_jj >= " << VBS_JET_MJJ << " GeV"
               << (SELECTION_TAG.empty() ? "  (default)"
                                         : "  (tag: " + SELECTION_TAG + ")")
               << '\n';

@@ -50,6 +50,11 @@ inline auto buildAnalysisMap(
   m.emplace(Score::TEST_MISAS, AnalysisObj(label, Score::TEST_MISAS));
   m.emplace(Score::WAVES_MISCL, AnalysisObj(label, Score::WAVES_MISCL));
   m.emplace(Score::WAVES_MISAS, AnalysisObj(label, Score::WAVES_MISAS));
+  // VBS topology regions: WAVeS selection restricted to R1 / R2 events. Read
+  // against the plain WAVES row above to see what the topology costs or buys,
+  // with the algorithm held fixed.
+  m.emplace(Score::VBF_R1,      AnalysisObj(label, Score::VBF_R1));
+  m.emplace(Score::VBF_R2,      AnalysisObj(label, Score::VBF_R2));
 
   // Scores active only in the real-HGTD scenario
   if (scenario == Scenario::HGTD) {
@@ -100,6 +105,19 @@ inline void makeComparisonPlots(
 	      &mapHGTD.at(Score::WAVES),
 	    },
 	    {C01, C02, C03});
+
+  // VBS topology regions: the same WAVeS algorithm measured inclusively, in R1
+  // (both candidate legs forward), and in R2 (forward PU leg + central HS leg).
+  // WAVES is included as the reference the two regions are read against -- the
+  // algorithm is identical across all three curves, so any separation is the
+  // topology talking, not the selector.
+  moneyPlot(MyUtl::plotFilePath("comparisons", TString::Format("vbf_regions_%s.pdf", key).Data()).c_str(), key, canvas,
+	    {
+	      &mapHGTD.at(Score::WAVES),
+	      &mapHGTD.at(Score::VBF_R1),
+	      &mapHGTD.at(Score::VBF_R2),
+	    },
+	    {C03, C08, C02});
 
 }
 

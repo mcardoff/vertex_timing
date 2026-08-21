@@ -59,6 +59,7 @@ add_executable(export_training_data util/export_training_data.cxx)
 add_executable(failure_decomposition util/failure_decomposition.cxx)
 add_executable(maxpt_jet_test util/maxpt_jet_test.cxx)
 add_executable(track_dt util/track_dt.cxx)
+add_executable(vbs_mjj_diag util/vbs_mjj_diag.cxx)
 add_executable(ttreemt_prototype util/ttreemt_prototype.cxx)
 
 # Specify the include directories for your header files
@@ -78,6 +79,7 @@ foreach(_tgt
     failure_decomposition
     maxpt_jet_test
     track_dt
+    vbs_mjj_diag
     ttreemt_prototype
 )
     target_include_directories(${_tgt}

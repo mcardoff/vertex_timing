@@ -302,14 +302,31 @@ namespace MyUtl {
     }
 
     // -----------------------------------------------------------------------
-    // calcBestVbsDeltaEta
-    //   Among the given pT-passing jet indices, finds the pair in opposite
-    //   η hemispheres (η_i · η_j < 0) with the largest invariant mass m_jj
-    //   — the standard VBS-candidate-jet definition — and returns their |Δη|.
-    //   Returns -1 if no opposite-hemisphere pair exists.
+    // VbsPair / calcBestVbsPair
+    //   The VBS candidate jet pair: among the given pT-passing jet indices, the
+    //   pair in opposite η hemispheres (η_i · η_j < 0) with the largest
+    //   invariant mass m_jj — the standard VBS-candidate-jet definition.
+    //
+    //   Returns m_jj alongside |Δη| (and the two reco jet indices) because the
+    //   pair search is identical either way: this used to return |Δη| only and
+    //   discard the m_jj it had just computed, which forced any m_jj study to
+    //   redo the whole search. The indices let callers ask whether each leg is
+    //   truth-HS-matched (isJetTruthHS) — i.e. whether the topology is genuine
+    //   or manufactured by a pileup jet.
+    //
+    //   All fields keep their -1 sentinel when no opposite-hemisphere pair
+    //   exists; passJetPtCut relies on dEta staying -1 there so a no-pair event
+    //   fails even when the |Δη| requirement is disabled via --vbs-deta=0.
     // -----------------------------------------------------------------------
-    double calcBestVbsDeltaEta(const std::vector<int>& passPtIdx) const {
-      double bestMjj = -1.0, bestDEta = -1.0;
+    struct VbsPair {
+      double mjj  = -1.0;
+      double dEta = -1.0;
+      int    idxI = -1, idxJ = -1;
+      bool valid() const { return idxI >= 0; }
+    };
+
+    VbsPair calcBestVbsPair(const std::vector<int>& passPtIdx) const {
+      VbsPair best;
       for (size_t a = 0; a < passPtIdx.size(); ++a) {
         for (size_t b = a + 1; b < passPtIdx.size(); ++b) {
           int i = passPtIdx[a], j = passPtIdx[b];
@@ -321,13 +338,174 @@ namespace MyUtl {
           jj.SetPtEtaPhiM(this->topoJetPt[j], etaJ, this->topoJetPhi[j], 0.0);
           double mjj = (ji + jj).M();
 
-          if (mjj > bestMjj) {
-            bestMjj  = mjj;
-            bestDEta = std::abs(etaI - etaJ);
-          }
+          if (mjj > best.mjj)
+            best = {mjj, std::abs((double)etaI - (double)etaJ), i, j};
         }
       }
-      return bestDEta;
+      return best;
+    }
+
+    // -----------------------------------------------------------------------
+    // isJetTruthHS
+    //   True if reco jet j is matched to at least one truth hard-scatter jet,
+    //   via the ntuple's own AntiKt4EMTopoJets_truthHSJet_idx association (a
+    //   non-empty index list means matched — the same idiom event_display.py
+    //   uses). Preferred over the ΔR-cone paperIsHS lambdas duplicated across
+    //   the rpt_v* diagnostics: it is the production's own matching, and the
+    //   branch was already bound here but read by nothing.
+    // -----------------------------------------------------------------------
+    bool isJetTruthHS(int j) const {
+      return j >= 0 && j < (int)this->topoJetTruthHSIdx.GetSize()
+             && !this->topoJetTruthHSIdx[j].empty();
+    }
+
+    // -----------------------------------------------------------------------
+    // isJetPaperHS / isJetPaperPU
+    //   Jet truth labels per ATL-HGTD-PUB-2022-001 Sec. 3, hoisted out of the
+    //   rpt_v* diagnostics (where they lived as event-loop-local lambdas,
+    //   copy-pasted across rpt_v2/v3/v4/v5) so the clustering side can share
+    //   them.
+    //
+    //   HS: dR < 0.3 from a truth HS jet with pT > 10 GeV.
+    //   PU: dR > 0.6 from EVERY truth HS jet with pT > 4 GeV.
+    //   Note PU is NOT !HS -- a jet in the 0.3-0.6 band, or near a 4-10 GeV
+    //   truth jet, is neither, and callers are expected to skip those.
+    //
+    //   Deliberately kept separate from isJetTruthHS (the ntuple's own
+    //   AntiKt4EMTopoJets_truthHSJet_idx association) rather than unified:
+    //   classifyVbsRegion below uses THESE, because the R1/R2 ROCs in rpt_v5
+    //   were measured with them, and switching definitions would silently
+    //   redefine which events land in each region.
+    // -----------------------------------------------------------------------
+    bool isJetPaperHS(double jEta, double jPhi) const {
+      for (int t = 0; t < (int)this->truthHSJetPt.GetSize(); ++t) {
+        if (this->truthHSJetPt[t] < 10.0) continue;
+        double deta = jEta - this->truthHSJetEta[t];
+        double dphi = TVector2::Phi_mpi_pi(jPhi - this->truthHSJetPhi[t]);
+        if (std::hypot(deta, dphi) < 0.3) return true;
+      }
+      return false;
+    }
+
+    bool isJetPaperPU(double jEta, double jPhi) const {
+      for (int t = 0; t < (int)this->truthHSJetPt.GetSize(); ++t) {
+        if (this->truthHSJetPt[t] < 4.0) continue;
+        double deta = jEta - this->truthHSJetEta[t];
+        double dphi = TVector2::Phi_mpi_pi(jPhi - this->truthHSJetPhi[t]);
+        if (std::hypot(deta, dphi) < 0.6) return false;
+      }
+      return true;
+    }
+
+    // -----------------------------------------------------------------------
+    // VbsRegion / classifyVbsRegion
+    //   The two VBS topologies where forward timing is the deciding
+    //   information, classified off the VBS candidate pair (calcBestVbsPair):
+    //
+    //     R1  both legs forward (HGTD acceptance), one paper-HS + one paper-PU.
+    //         Both jets are timeable, so timing must say WHICH is the
+    //         hard-scatter one.
+    //     R2  one leg forward + paper-PU, the other central + paper-HS.
+    //         Only the fake is timeable; the question is whether timing can
+    //         reject it.
+    //
+    //   Single source of truth shared by rpt_v5 (which fills per-jet RpT
+    //   histograms per region) and the clustering analysis (whose VBF_R1 /
+    //   VBF_R2 scores gate their denominator on the event's region). Both must
+    //   agree on membership or the two "R1"s silently mean different samples.
+    //
+    //   The pair must also clear the runtime VBS topology knobs
+    //   (VBS_JET_MJJ / VBS_JET_D_ETA) -- calcBestVbsPair only finds the
+    //   max-m_jj pair, it does not cut on it.
+    //
+    //   outFwdHS / outFwdPU return the reco jet indices of the forward
+    //   hard-scatter and forward pileup legs (-1 when the region has no such
+    //   leg -- R2 always has outFwdHS == -1 by construction), so callers can
+    //   fill or annotate the individual legs without redoing the pairing.
+    // -----------------------------------------------------------------------
+    VbsRegion classifyVbsRegion(double fwdEtaMin, double fwdEtaMax,
+                                double centralEtaMax,
+                                int* outFwdHS = nullptr,
+                                int* outFwdPU = nullptr) const {
+      if (outFwdHS) *outFwdHS = -1;
+      if (outFwdPU) *outFwdPU = -1;
+
+      std::vector<int> passPtIdx;
+      int nPt = 0, nPtEta = 0;
+      this->collectPtPassingJets(passPtIdx, nPt, nPtEta);
+      VbsPair pair = this->calcBestVbsPair(passPtIdx);
+      if (!pair.valid())              return VbsRegion::NONE;
+      if (pair.mjj  < VBS_JET_MJJ)    return VbsRegion::NONE;
+      if (pair.dEta < VBS_JET_D_ETA)  return VbsRegion::NONE;
+
+      auto isFwd = [&](int j) {
+        double e = std::abs((double)this->topoJetEta[j]);
+        return e > fwdEtaMin && e < fwdEtaMax;
+      };
+      auto isCentral = [&](int j) {
+        return std::abs((double)this->topoJetEta[j]) < centralEtaMax;
+      };
+      auto paperHS = [&](int j) {
+        return this->isJetPaperHS(this->topoJetEta[j], this->topoJetPhi[j]);
+      };
+      auto paperPU = [&](int j) {
+        return this->isJetPaperPU(this->topoJetEta[j], this->topoJetPhi[j]);
+      };
+
+      const int a = pair.idxI, b = pair.idxJ;
+
+      // R1: both legs forward, exactly one HS and one PU.
+      if (isFwd(a) && isFwd(b)) {
+        if (paperHS(a) && paperPU(b)) {
+          if (outFwdHS) *outFwdHS = a;
+          if (outFwdPU) *outFwdPU = b;
+          return VbsRegion::R1;
+        }
+        if (paperHS(b) && paperPU(a)) {
+          if (outFwdHS) *outFwdHS = b;
+          if (outFwdPU) *outFwdPU = a;
+          return VbsRegion::R1;
+        }
+        return VbsRegion::NONE;
+      }
+
+      // R2: forward PU leg + central HS leg.
+      if (isFwd(a) && paperPU(a) && isCentral(b) && paperHS(b)) {
+        if (outFwdPU) *outFwdPU = a;
+        return VbsRegion::R2;
+      }
+      if (isFwd(b) && paperPU(b) && isCentral(a) && paperHS(a)) {
+        if (outFwdPU) *outFwdPU = b;
+        return VbsRegion::R2;
+      }
+      return VbsRegion::NONE;
+    }
+
+    // -----------------------------------------------------------------------
+    // collectPtPassingJets
+    //   Single jet loop behind passJetPtCut: fills passPtIdx with the indices
+    //   of reco jets above MIN_JET_PT (skipping lepton-overlap-removed ones)
+    //   and reports how many of those are also in the forward HGTD acceptance.
+    //   Split out so a diagnostic can reach the same jet counts and the same
+    //   VBS candidate pair *without* the |Δη| requirement bundled in — i.e.
+    //   see the m_jj/|Δη| distribution of everything the rest of the selection
+    //   admits, which is what a cut on either has to be chosen from.
+    // -----------------------------------------------------------------------
+    void collectPtPassingJets(std::vector<int>& passPtIdx,
+                              int& nPassPt, int& nPassPtEta) const {
+      passPtIdx.clear();
+      nPassPt = 0; nPassPtEta = 0;
+      for (int jetIdx = 0; jetIdx < (int)this->topoJetPt.GetSize(); ++jetIdx) {
+        if (this->isJetRemoved(jetIdx)) continue;  // lepton-overlap removed (Z+jets)
+        float eta = std::abs(this->topoJetEta[jetIdx]);
+        float pt  = this->topoJetPt[jetIdx];
+        if (DEBUG) std::cout << "reco jet pt, eta: " << pt << ", " << eta << '\n';
+        bool passpt    = pt > MIN_JET_PT;
+        bool passpteta = passpt && eta > MIN_ABS_ETA_JET && eta < MAX_ABS_ETA_JET;
+        nPassPt    += passpt    ? 1 : 0;
+        nPassPtEta += passpteta ? 1 : 0;
+        if (passpt) passPtIdx.push_back(jetIdx);
+      }
     }
 
     // -----------------------------------------------------------------------
@@ -336,29 +514,21 @@ namespace MyUtl {
     //   at least MIN_PASSETA_JETS of which are in the forward HGTD acceptance,
     //   and that the VBS candidate pair — the opposite-hemisphere,
     //   pT-passing jet pair with the largest m_jj — has an η separation ≥
-    //   VBS_JET_D_ETA. No truth-HS matching required.
+    //   VBS_JET_D_ETA, and m_jj >= VBS_JET_MJJ (0 by default -- a no-op, since
+    //   any valid pair has mjj > 0; see the comment on VBS_JET_MJJ). No
+    //   truth-HS matching required.
     // -----------------------------------------------------------------------
     bool passJetPtCut() {
       int passptcount = 0, passptetacount = 0;
       std::vector<int> passPtIdx;  // indices of pT-passing jets
-
-      for (int jetIdx = 0; jetIdx < (int)this->topoJetPt.GetSize(); ++jetIdx) {
-        if (this->isJetRemoved(jetIdx)) continue;  // lepton-overlap removed (Z+jets)
-        float eta = std::abs(this->topoJetEta[jetIdx]);
-        float pt  = this->topoJetPt[jetIdx];
-        if (DEBUG) std::cout << "reco jet pt, eta: " << pt << ", " << eta << '\n';
-        bool passpt    = pt > MIN_JET_PT;
-        bool passpteta = passpt && eta > MIN_ABS_ETA_JET && eta < MAX_ABS_ETA_JET;
-        passptcount    += passpt    ? 1 : 0;
-        passptetacount += passpteta ? 1 : 0;
-        if (passpt) passPtIdx.push_back(jetIdx);
-      }
+      collectPtPassingJets(passPtIdx, passptcount, passptetacount);
 
       bool passesPt   = passptcount   >= MIN_PASSPT_JETS;
       bool passesEta  = passptetacount >= MIN_PASSETA_JETS;
-      double bestDEta = calcBestVbsDeltaEta(passPtIdx);
-      bool passesDEta = bestDEta >= VBS_JET_D_ETA;
-      return passesPt && passesEta && passesDEta;
+      VbsPair pair    = calcBestVbsPair(passPtIdx);
+      bool passesDEta = pair.dEta >= VBS_JET_D_ETA;
+      bool passesMjj  = pair.mjj  >= VBS_JET_MJJ;
+      return passesPt && passesEta && passesDEta && passesMjj;
     }
 
     // -----------------------------------------------------------------------
@@ -684,6 +854,9 @@ namespace MyUtl {
       // (cluster purity / HS timing purity) applied at fill time in event_processing.h.
       this->scores[Score::WAVES_MISCL.id] = this->scores.at(Score::WAVES.id);
       this->scores[Score::WAVES_MISAS.id] = this->scores.at(Score::WAVES.id);
+      // VBS region rows: same WAVeS selection, region gate applied at fill time.
+      this->scores[Score::VBF_R1.id]      = this->scores.at(Score::WAVES.id);
+      this->scores[Score::VBF_R2.id]      = this->scores.at(Score::WAVES.id);
 
       // TEST_MISAS uses TRKPTZ as its selection score; the purity gate is applied
       // at efficiency-check time in event_processing.h (both pass and total fills).
