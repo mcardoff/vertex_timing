@@ -292,20 +292,20 @@ namespace MyUtl {
   //             timing has to say WHICH forward jet is the hard-scatter one.
   //   R2        no forward HS, >=1 forward PU, >=1 CENTRAL HS. Only the fake
   //             is timeable; timing's job is to reject it.
-  //   CAN_HELP  everything else where timing still has real work:
-  //               - >=1 forward HS with NO forward PU: the genuine tag is
-  //                 timeable and timing confirms it. Covers the pileup being
-  //                 central, beyond |eta| MAX, or absent entirely -- one
-  //                 condition, since all three differ only in where the
-  //                 non-competing pileup sits.
-  //               - >=1 forward PU and NO hard-scatter jet anywhere in the
-  //                 event: nothing genuine to protect, but the fake is
-  //                 timeable, so timing can reject the event's forward
-  //                 activity outright.
-  //   MAY_NOT   no forward jet at all (nothing HGTD can measure), or forward
-  //             PU whose only hard-scatter counterpart sits beyond |eta| MAX
-  //             -- rare, and counted separately in the diagnostics so it stays
-  //             visible rather than silently folded in.
+  //   CAN_HELP  >=1 forward PU and NO hard-scatter jet anywhere in the event:
+  //             nothing genuine to protect, but the fake is timeable, so
+  //             timing can reject the event's forward activity outright.
+  //   MAY_NOT   everything else, principally:
+  //               - >=1 forward HS with NO forward PU. Timing would only
+  //                 confirm a tag with no competitor, so this is not counted
+  //                 as reachable -- see classifyEventRegion's ladder comment
+  //                 for the measurement behind excluding it.
+  //               - no forward jet at all (nothing HGTD can measure).
+  //               - forward PU whose only hard-scatter counterpart sits beyond
+  //                 |eta| MAX -- rare, counted separately in the diagnostics.
+  //
+  //   Every reachable region therefore requires a forward PU jet: something
+  //   for timing to act against.
   enum class EventRegion { R1, R2, CAN_HELP, MAY_NOT };
 
   // ---------------------------------------------------------------------------

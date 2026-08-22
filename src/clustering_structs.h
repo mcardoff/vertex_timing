@@ -560,14 +560,16 @@ namespace MyUtl {
         outCounts[2] = nCenHS; outCounts[3] = nAnyHS;
       }
 
-      // Ladder order matters only between R2 and the no-HS-anywhere CAN_HELP
-      // case; R1 and the forward-HS CAN_HELP case are already disjoint from
-      // everything below them by their forward-PU count.
-      if (nFwdHS >= 1 && nFwdPU >= 1) return EventRegion::R1;
-      if (nFwdHS >= 1)                return EventRegion::CAN_HELP;  // nFwdPU == 0
+      // Every reachable region requires a forward PU jet -- something for
+      // timing to actually act against. A forward HS jet with NO forward
+      // pileup is deliberately NOT reachable: timing would only confirm a tag
+      // that had no competitor to be confused with, and on local VBF that
+      // single case is 72.7% of events, which alone drove the "HGTD can
+      // contribute" fraction to 98.9% and made the split meaningless.
       if (nFwdPU >= 1) {
-        if (nCenHS >= 1) return EventRegion::R2;
-        if (nAnyHS == 0) return EventRegion::CAN_HELP;  // fake with nothing genuine
+        if (nFwdHS >= 1) return EventRegion::R1;        // both timeable
+        if (nCenHS >= 1) return EventRegion::R2;        // only the fake timeable
+        if (nAnyHS == 0) return EventRegion::CAN_HELP;  // fake, nothing genuine
         // else: the only hard-scatter jet sits beyond fwdEtaMax -- falls through.
       }
       return EventRegion::MAY_NOT;

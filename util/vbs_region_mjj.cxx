@@ -296,11 +296,11 @@ int main(int argc, char** argv) {
     // Sub-case bookkeeping for the summary, mirroring the ladder in
     // classifyEventRegion so the printed breakdown cannot disagree with it.
     if (region == EventRegion::CAN_HELP) {
-      if (cnt[0] >= 1) ++state.nHelpFwdHS;   // genuine forward tag, no forward fake
-      else             ++state.nHelpNoHS;    // forward fake, no hard-scatter at all
+      ++state.nHelpNoHS;                          // forward fake, no HS anywhere
     } else if (region == EventRegion::MAY_NOT) {
-      if (cnt[1] >= 1) ++state.nMayNotHsBeyond;  // fwd PU, HS only beyond acceptance
-      else             ++state.nMayNotNoFwd;     // nothing forward to time at all
+      if      (cnt[0] >= 1) ++state.nHelpFwdHS;   // fwd HS, no competing fwd PU
+      else if (cnt[1] >= 1) ++state.nMayNotHsBeyond;  // fwd PU, HS beyond acceptance
+      else                  ++state.nMayNotNoFwd;     // nothing forward at all
     }
     if (cnt[0] >= 1 || cnt[1] >= 1) ++state.nAnyFwd;
 
@@ -491,14 +491,13 @@ int main(int argc, char** argv) {
 
   // Both "Other" bands broken out, so neither is a black box on the plot.
   printf("\n  \"Other: HGTD can help\" is made of:\n");
-  printf("      fwd HS, no fwd PU         %8ld (%.2f%%)  confirm the genuine tag\n"
-         "                                                   (pileup central, beyond |eta| %.1f,\n"
-         "                                                    or absent -- never competing)\n",
-         nHelpFwdHS, nPlot ? 100.0*nHelpFwdHS/nPlot : 0.0, MAX_ABS_ETA_JET);
   printf("      fwd PU, no HS anywhere    %8ld (%.2f%%)  reject the fake outright\n",
          nHelpNoHS, nPlot ? 100.0*nHelpNoHS/nPlot : 0.0);
 
   printf("\n  \"Other: HGTD may not help\" is made of:\n");
+  printf("      fwd HS, no fwd PU         %8ld (%.2f%%)  genuine tag, but no competing\n"
+         "                                                   fake -- nothing to disambiguate\n",
+         nHelpFwdHS, nPlot ? 100.0*nHelpFwdHS/nPlot : 0.0);
   printf("      no forward jet at all     %8ld (%.2f%%)  nothing timeable\n",
          nMayNotNoFwd, nPlot ? 100.0*nMayNotNoFwd/nPlot : 0.0);
   printf("      fwd PU, HS only beyond |eta| %.1f %5ld (%.2f%%)  edge case, kept visible\n",
