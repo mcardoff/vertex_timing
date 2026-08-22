@@ -568,8 +568,13 @@ int main(int argc, char** argv) {
                    roc_xmin_default, roc_xmax_default, lbl_r1);
   drawRocWithRatio(rocs_r2, scen_r2, roc_ymax_reg, 4.0,
                    roc_xmin_default, roc_xmax_default, lbl_r2);
-  drawRocWithRatio(rocs_r3, scen_r3, roc_ymax_reg, 4.0,
-                   roc_xmin_default, roc_xmax_default, lbl_r3);
+  // No ROC for the "Other" region: it is defined as having no hard-scatter jet
+  // anywhere, so it has no signal side -- forward or central -- and an
+  // efficiency axis cannot be built from it without borrowing another region's
+  // population. Its PU suppression plot below carries the whole story instead.
+  if (scen_r3[0].h_hs->GetEntries() > 0)
+    drawRocWithRatio(rocs_r3, scen_r3, roc_ymax_reg, 4.0,
+                     roc_xmin_default, roc_xmax_default, lbl_r3);
 
   // (3+) Per-scenario HS vs PU, 30–40 GeV slice, log-y.
   canvas->Clear();
@@ -722,10 +727,49 @@ int main(int argc, char** argv) {
   // forward truth-HS/PU jet in the event, not just the VBS-pair leg), so the
   // titles read identically across regions -- there is no longer a "confirmed
   // tag" vs "other jets" distinction to name.
+  // Pile-up suppression: the SAME forward PU jets' R_pT under ITk-only and
+  // under each timing scenario, overlaid. For R2 and Other this is the whole
+  // result (no meaningful efficiency axis exists there); for R1 it is the
+  // rejection half of its ROC, shown directly rather than inferred from it.
+  // ITk-only is drawn thick and black so the reference the others are being
+  // compared against is unambiguous.
+  auto drawPuSuppression = [&](std::vector<Scenario>& sc, const char* lbl) {
+    double ymax = 0.0;
+    for (auto& s2 : sc) ymax = std::max(ymax, s2.h_pu->GetMaximum());
+    if (ymax <= 0.0) return;
+    canvas->Clear();
+    canvas->SetLogy(true);
+    TLegend* L = new TLegend(0.58, 0.16, 0.93, 0.42);
+    StyleLegend(L);
+    for (size_t i = 0; i < sc.size(); ++i) {
+      TH1D* h = sc[i].h_pu;
+      h->SetLineStyle(1);
+      // sc[0] is zonly (see makeScenarios' ordering) -- the reference.
+      h->SetLineWidth(i == 0 ? 4 : 2);
+      h->SetLineColor(i == 0 ? kBlack : sc[i].color);
+      if (i == 0) {
+        h->SetMaximum(50.0 * ymax);
+        h->SetTitle("Pile-up R_{pT}: ITk-only vs timed;R_{pT};Entries");
+      }
+      h->Draw(i == 0 ? "HIST" : "HIST SAME");
+      L->AddEntry(h, i == 0 ? "ITk-only (reference)" : sc[i].legend.c_str());
+    }
+    drawLabels(lbl);
+    L->Draw();
+    canvas->Print(out_pdf);
+    // Restore zonly's styling so later pages that reuse these histograms are
+    // not left with the thick black reference line.
+    sc[0].h_pu->SetLineWidth(2);
+    sc[0].h_pu->SetLineColor(sc[0].color);
+  };
+  drawPuSuppression(scen_r1, lbl_r1);
+  drawPuSuppression(scen_r2, lbl_r2);
+  drawPuSuppression(scen_r3, lbl_r3);
+
   drawRegionShapes(scen_r1, true,  "R1 forward HS jets R_{pT};R_{pT};Entries", lbl_r1,
                    0.58, 0.57, 0.93, 0.79);
   drawRegionShapes(scen_r1, false, "R1 forward PU jets R_{pT};R_{pT};Entries", lbl_r1);
-  drawRegionShapes(scen_r2, true,  "R2 forward HS jets R_{pT};R_{pT};Entries", lbl_r2,
+  drawRegionShapes(scen_r2, true,  "R2 central HS jets R_{pT};R_{pT};Entries", lbl_r2,
                    0.58, 0.57, 0.93, 0.79);
   drawRegionShapes(scen_r2, false, "R2 forward PU jets R_{pT};R_{pT};Entries", lbl_r2);
   drawRegionShapes(scen_r3, true,  "Other-region forward HS jets R_{pT};R_{pT};Entries", lbl_r3,
@@ -738,7 +782,7 @@ int main(int argc, char** argv) {
   std::printf("\n=== VBS-topology region yields (zonly scenario) ===\n");
   std::printf("  R1 forward HS jets : %8.0f\n", scen_r1[0].h_hs->GetEntries());
   std::printf("  R1 forward PU jets : %8.0f\n", scen_r1[0].h_pu->GetEntries());
-  std::printf("  R2 forward HS jets : %8.0f\n", scen_r2[0].h_hs->GetEntries());
+  std::printf("  R2 central HS jets : %8.0f\n", scen_r2[0].h_hs->GetEntries());
   std::printf("  R2 forward PU jets : %8.0f\n", scen_r2[0].h_pu->GetEntries());
   std::printf("  Other  forward HS jets : %8.0f\n", scen_r3[0].h_hs->GetEntries());
   std::printf("  Other  forward PU jets : %8.0f\n", scen_r3[0].h_pu->GetEntries());

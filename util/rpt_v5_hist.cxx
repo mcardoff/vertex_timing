@@ -1065,6 +1065,28 @@ int main(int argc, char** argv) {
             fillRegion(sv, j, /*asHS=*/false);
           }
         };
+        // R2's signal side. R2 is DEFINED as having no forward HS jet, so
+        // fillOtherHs finds nothing there -- but it is equally defined as
+        // having central HS activity, which is self-contained and needs no
+        // borrowing from another region.
+        //
+        // Read the resulting ROC knowing what it mixes: the efficiency axis is
+        // built from CENTRAL jets, which are outside HGTD acceptance, so the
+        // time gate is a no-op on them and their R_pT barely moves between
+        // scenarios. The curve therefore shows rejection improving at roughly
+        // fixed efficiency -- which is precisely R2's question ("can timing
+        // reject the forward fake without disturbing the real central jet?"),
+        // not a defect.
+        auto fillCentralHs = [&](std::vector<Scenario>& sv) {
+          for (int j = 0; j < (int)branch.topoJetPt.GetSize(); ++j) {
+            if (branch.isJetRemoved(j)) continue;
+            double j_pt = branch.topoJetPt[j], j_eta = branch.topoJetEta[j];
+            if (j_pt <= MIN_JET_PT) continue;
+            if (std::abs(j_eta) >= CENTRAL_ETA_MAX) continue;
+            if (!branch.isJetPaperHS(j_eta, branch.topoJetPhi[j])) continue;
+            fillRegion(sv, j, /*asHS=*/true);
+          }
+        };
         auto fillOtherHs = [&](std::vector<Scenario>& sv) {
           for (int j = 0; j < (int)branch.topoJetPt.GetSize(); ++j) {
             if (branch.isJetRemoved(j)) continue;
@@ -1087,10 +1109,14 @@ int main(int argc, char** argv) {
           fillOtherHs(state.scen_r1);
           fillOtherPu(state.scen_r1);
         } else if (evRegion == EventRegion::R2) {
-          fillOtherHs(state.scen_r2);
+          // Central HS as the signal side -- see fillCentralHs.
+          fillCentralHs(state.scen_r2);
           fillOtherPu(state.scen_r2);
         } else if (evRegion == EventRegion::CAN_HELP) {
-          fillOtherHs(state.scen_r3);
+          // No hard-scatter jet exists anywhere in this region by definition,
+          // so there is no signal side at all -- forward OR central. Only the
+          // PU side is filled; its plot is the suppression distribution, and
+          // rpt_v5_plot draws no ROC for it.
           fillOtherPu(state.scen_r3);
         }
 
