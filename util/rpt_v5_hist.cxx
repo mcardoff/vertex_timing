@@ -361,9 +361,9 @@ struct ThreadState {
   // "reject" sub-cases (no genuine tag at all, or the fake beyond acceptance)
   // are deliberately excluded -- they answer a different question and stay
   // part of the composition plot's R3 count only.
-  std::vector<Scenario> scen_r1 = makeScenarios("_r1");  // both VBS legs forward
-  std::vector<Scenario> scen_r2 = makeScenarios("_r2");  // fwd PU leg + central HS leg
-  std::vector<Scenario> scen_r3 = makeScenarios("_r3");  // fwd HS leg + central PU leg
+  std::vector<Scenario> scen_r1 = makeScenarios("_r1");  // fwd HS + fwd PU
+  std::vector<Scenario> scen_r2 = makeScenarios("_r2");  // fwd PU + central HS
+  std::vector<Scenario> scen_r3 = makeScenarios("_r3");  // fwd PU, no HS anywhere
   long n_total = 0, n_pass_basic = 0, n_hgtd_valid = 0;
   // Z+jets-only breakdown (see event_processing.h EventResult::code doc for the
   // analogous clustering-side counters): n_pass_basic above is vertex-quality
@@ -1076,15 +1076,32 @@ int main(int argc, char** argv) {
           }
         };
 
-        if (region == VbsRegion::R1) {
+        // Event-level region (classifyEventRegion, clustering_structs.h),
+        // shared with vbs_region_mjj so the two cannot drift. Membership is
+        // decided over EVERY jet in the event, not over the VBS candidate
+        // pair; the pair legs below are used only to rank display candidates.
+        const EventRegion evRegion =
+            branch.classifyEventRegion(JET_ETA_MIN, JET_ETA_MAX, CENTRAL_ETA_MAX);
+
+        if (evRegion == EventRegion::R1) {
           fillOtherHs(state.scen_r1);
           fillOtherPu(state.scen_r1);
+        } else if (evRegion == EventRegion::R2) {
+          fillOtherHs(state.scen_r2);
+          fillOtherPu(state.scen_r2);
+        } else if (evRegion == EventRegion::CAN_HELP) {
+          fillOtherHs(state.scen_r3);
+          fillOtherPu(state.scen_r3);
+        }
 
-          // Rank by how much timing changes the HS-vs-PU RpT margin, using the
-          // SPECIFIC pair legs (not the aggregate histograms above) -- the
-          // display candidate is about these two tagging jets' own fate. The
-          // sign matters (positive = timing widened the correct gap, negative
-          // = timing eroded or inverted it), so rank on |delta| and let the
+        // Display candidates still key off the VBS PAIR, not the event region:
+        // a candidate is about two specific tagging jets' own fate, which is
+        // what the event display draws. Kept on the pair-level classifier for
+        // exactly that reason.
+        if (region == VbsRegion::R1) {
+          // Rank by how much timing changes the HS-vs-PU RpT margin. The sign
+          // matters (positive = timing widened the correct gap, negative =
+          // timing eroded or inverted it), so rank on |delta| and let the
           // printed line say which.
           double mZ = rptOf(fwdHS, fwd.all)   - rptOf(fwdPU, fwd.all);
           double mW = rptOf(fwdHS, fwd.waves) - rptOf(fwdPU, fwd.waves);
@@ -1094,9 +1111,6 @@ int main(int argc, char** argv) {
                             branch.topoJetPt[fwdPU], branch.topoJetEta[fwdPU],
                             mZ, mW, mW - mZ, t_waves});
         } else if (region == VbsRegion::R2) {
-          fillOtherHs(state.scen_r2);
-          fillOtherPu(state.scen_r2);
-
           // Rank by how far timing pushes the fake's RpT down: a forward PU
           // jet with high no-timing RpT is precisely the one that fakes a
           // tagging jet, and the drop is the rejection actually delivered.
@@ -1118,23 +1132,6 @@ int main(int argc, char** argv) {
                             0.0, 0.0,
                             branch.topoJetPt[fwdPU], branch.topoJetEta[fwdPU],
                             rZ, rW, rW, t_waves});
-        } else if (region == VbsRegion::R3) {
-          fillOtherHs(state.scen_r3);
-          fillOtherPu(state.scen_r3);
-        } else {
-          // region == NONE: only classifyR3Broad's "confirm" sub-case (a
-          // genuine tag forward and timeable, its partner beyond acceptance
-          // instead of central) still belongs to R3. The "reject" sub-cases
-          // (fake beyond acceptance, or no genuine tag at all) are
-          // deliberately NOT filled here: they answer a different question
-          // ("reject a fake with nothing to confirm") and stay part of the
-          // composition plot's R3 count only, not this ROC's construction.
-          int hsLeg = -1;
-          if (branch.classifyR3Broad(JET_ETA_MIN, JET_ETA_MAX, CENTRAL_ETA_MAX,
-                                     &hsLeg, nullptr, nullptr) && hsLeg >= 0) {
-            fillOtherHs(state.scen_r3);
-            fillOtherPu(state.scen_r3);
-          }
         }
       }
 

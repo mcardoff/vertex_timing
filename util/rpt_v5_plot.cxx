@@ -222,9 +222,9 @@ int main(int argc, char** argv) {
   // All three: h_hs/h_pu = every forward truth-HS/truth-PU jet in the
   // event, not just the pair leg(s) that define the region -- see
   // fillOtherHs/fillOtherPu in rpt_v5_hist.cxx.
-  const char* lbl_r1 = "VBS R1: both tags fwd@@p_{T}^{jet} > 30 GeV";
-  const char* lbl_r2 = "VBS R2: fwd PU + cen. HS@@p_{T}^{jet} > 30 GeV";
-  const char* lbl_r3 = "VBS R3: fwd HS + cen. PU@@p_{T}^{jet} > 30 GeV";
+  const char* lbl_r1 = "R1: fwd HS + fwd PU@@p_{T}^{jet} > 30 GeV";
+  const char* lbl_r2 = "R2: fwd PU + central HS@@p_{T}^{jet} > 30 GeV";
+  const char* lbl_r3 = "Other: fwd PU, no HS@@p_{T}^{jet} > 30 GeV";
 
   // ===========================================================================
   // SECTION 2: Derive every Integral()/GetMean()-based number. styleScen is
@@ -668,21 +668,23 @@ int main(int argc, char** argv) {
   drawShapes(scen_hi_cen, lbl_hi_cen);
 
   // ===========================================================================
-  // SECTION 5: VBS-topology regions.
-  //   R1  both VBS candidate legs forward, one truth-HS + one truth-PU --
-  //       timing has to pick which forward jet is the hard-scatter one.
-  //   R2  forward truth-PU leg + central truth-HS leg -- can timing reject the
-  //       forward PU jet?
-  //   R3  forward truth-HS leg + central truth-PU leg (classifyVbsRegion's
-  //       strict R3), plus classifyR3Broad's "confirm" case (same story, the
-  //       untimeable leg beyond acceptance instead of central) -- can timing
-  //       avoid emptying the genuine tag? classifyR3Broad's "reject"
-  //       sub-cases (no genuine tag at all, or the fake beyond acceptance)
-  //       are deliberately excluded here: they answer a different question
-  //       and stay part of the composition plot's R3 count only.
+  // SECTION 5: event-level regions (classifyEventRegion, shared with
+  // vbs_region_mjj -- membership is decided over EVERY jet in the event, not
+  // over the VBS candidate pair).
+  //   R1     >=1 forward HS and >=1 forward PU jet -- both timeable, so timing
+  //          has to say which forward jet is the hard-scatter one.
+  //   R2     no forward HS, >=1 forward PU, >=1 central HS -- only the fake is
+  //          timeable; timing's job is to reject it.
+  //   Other  >=1 forward PU with no hard-scatter jet anywhere -- nothing
+  //          genuine to protect, but the fake is timeable, so timing can
+  //          reject the event's forward activity outright. Rare.
+  //   Every region requires a forward PU jet: something for timing to act
+  //   against. "Forward HS with no forward PU" is deliberately excluded (see
+  //   classifyEventRegion) -- timing would only confirm an uncontested tag.
+  //
   //   All three fill h_hs/h_pu from EVERY qualifying forward jet in the
-  //   event, not just the VBS-pair leg(s) -- see fillOtherHs/fillOtherPu in
-  //   rpt_v5_hist.cxx and SECTION 2b above.
+  //   event via fillOtherHs/fillOtherPu in rpt_v5_hist.cxx, split by the PAPER
+  //   labels (the region membership uses them too, so the two cannot disagree).
   // ===========================================================================
   // (The three region ROCs are drawn earlier, alongside the inclusive ROCs.)
   // What remains here is the per-region R_pT shapes.
@@ -726,9 +728,9 @@ int main(int argc, char** argv) {
   drawRegionShapes(scen_r2, true,  "R2 forward HS jets R_{pT};R_{pT};Entries", lbl_r2,
                    0.58, 0.57, 0.93, 0.79);
   drawRegionShapes(scen_r2, false, "R2 forward PU jets R_{pT};R_{pT};Entries", lbl_r2);
-  drawRegionShapes(scen_r3, true,  "R3 forward HS jets R_{pT};R_{pT};Entries", lbl_r3,
+  drawRegionShapes(scen_r3, true,  "Other-region forward HS jets R_{pT};R_{pT};Entries", lbl_r3,
                    0.58, 0.57, 0.93, 0.79);
-  drawRegionShapes(scen_r3, false, "R3 forward PU jets R_{pT};R_{pT};Entries", lbl_r3);
+  drawRegionShapes(scen_r3, false, "Other-region forward PU jets R_{pT};R_{pT};Entries", lbl_r3);
 
   // Region yields -- these topologies are rare, so print the counts that the
   // ROCs above are built from. A region with very few entries makes its ROC
@@ -738,8 +740,8 @@ int main(int argc, char** argv) {
   std::printf("  R1 forward PU jets : %8.0f\n", scen_r1[0].h_pu->GetEntries());
   std::printf("  R2 forward HS jets : %8.0f\n", scen_r2[0].h_hs->GetEntries());
   std::printf("  R2 forward PU jets : %8.0f\n", scen_r2[0].h_pu->GetEntries());
-  std::printf("  R3 forward HS jets : %8.0f\n", scen_r3[0].h_hs->GetEntries());
-  std::printf("  R3 forward PU jets : %8.0f\n", scen_r3[0].h_pu->GetEntries());
+  std::printf("  Other  forward HS jets : %8.0f\n", scen_r3[0].h_hs->GetEntries());
+  std::printf("  Other  forward PU jets : %8.0f\n", scen_r3[0].h_pu->GetEntries());
   std::printf("  (all three self-contained: h_hs/h_pu are every qualifying forward\n"
               "   jet in that region's events, not just the VBS-pair leg(s), and\n"
               "   never borrowed from another region)\n");
