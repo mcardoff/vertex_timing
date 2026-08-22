@@ -41,12 +41,16 @@
 #include <THStack.h>
 #include <TStyle.h>
 #include <TTreeReader.h>
+#include <ROOT/TTreeProcessorMT.hxx>
 
 #include <boost/filesystem.hpp>
 #include <array>
 #include <cstdio>
 #include <iostream>
 #include <string>
+#include <atomic>
+#include <memory>
+#include <mutex>
 #include <vector>
 
 #include "clustering_constants.h"
@@ -88,22 +92,21 @@ namespace {
   // match within dR 0.6 above 4 GeV -- so a jet between the two cones is
   // neither, and those events have to land somewhere. It also holds the mixed
   // pairs whose second leg is beyond |eta| = MAX_ABS_ETA_JET.
-  enum Cat { R1 = 0, R2, OTHER_HELP, BOTH_HS, OTHER, NCAT };
+  enum Cat { R1 = 0, R2, CAN_HELP, MAY_NOT, NCAT };
 
   const std::array<const char*, NCAT> CAT_KEY = {
-    "r1", "r2", "other_help", "both_hs", "other"
+    "r1", "r2", "can_help", "may_not"
   };
 
   const std::array<const char*, NCAT> CAT_LABEL = {
-    "R1: both tags fwd, HS + PU",
+    "R1: fwd HS + fwd PU",
     "R2: fwd PU + central HS",
-    "Other: HGTD can still help",
-    "Both tags truth-HS",
-    "Other"
+    "Other: HGTD can help",
+    "Other: HGTD may not help"
   };
 
   // The project palette, in registry order.
-  const std::array<Color_t, NCAT> CAT_COLOR = { C01, C02, C03, C04, C05 };
+  const std::array<Color_t, NCAT> CAT_COLOR = { C01, C02, C03, C04 };
 
   // ── m_jj binning ─────────────────────────────────────────────────────────
   // Variable width: narrow where the spectrum is steep and every sample has
@@ -135,12 +138,49 @@ namespace {
     return std::min(v, h->GetXaxis()->GetBinCenter(h->GetNbinsX()));
   }
 
+// -----------------------------------------------------------------------------
+// ThreadState -- one per TTreeProcessorMT worker, merged after the loop.
+//
+// Same hand-rolled mutex-guarded-registry + thread_local-pointer-cache pattern
+// as util/rpt_v5_hist.cxx and src/clustering_hist.cxx, and for the same reason:
+// this struct is trivially copy-constructible via its raw TH1D*, so
+// ROOT::TThreadedObject would silently SHALLOW-copy the pointers into every
+// "cloned" slot and have all workers Fill() the same histograms unsynchronised.
+//
+// Histograms are constructed here rather than in main() so each worker owns its
+// own set; TH1::AddDirectory(kFALSE) in main() keeps the identically-named sets
+// from racing on ROOT's global directory registry.
+// -----------------------------------------------------------------------------
+struct ThreadState {
+  std::array<TH1D*, NCAT> raw{};
+  TH1D* hTot = nullptr;
+
+  long nSeen = 0, nSel = 0, nNoPair = 0, nBelowMjj = 0;
+  std::array<long, NCAT> nCat{};
+  long nHelpFwdHS = 0, nHelpNoHS = 0;
+  long nMayNotHsBeyond = 0, nMayNotNoFwd = 0;
+  long nAnyFwd = 0;
+
+  ThreadState() {
+    const int    nbin = (int)MJJ_EDGES.size() - 1;
+    const double* ed  = MJJ_EDGES.data();
+    for (int c = 0; c < NCAT; ++c)
+      raw[c] = new TH1D((std::string("mjj_raw_") + CAT_KEY[c]).c_str(), "", nbin, ed);
+    hTot = new TH1D("mjj_raw_total", "", nbin, ed);
+  }
+};
+
 }  // namespace
 
 int main(int argc, char** argv) {
   SetAtlasStyle();
   gStyle->SetOptStat(0);
   gErrorIgnoreLevel = kFatal;
+  // REQUIRED before any histogram is constructed: every worker thread builds
+  // an identically-named ThreadState histogram set, and without this they race
+  // on ROOT's global gDirectory registry. Same reason clustering_hist.cxx and
+  // rpt_v5_hist.cxx call it.
+  TH1::AddDirectory(kFALSE);
   // The PDF page comes out portrait with the landscape canvas in one corner --
   // ROOT's default paper, shared by every plot in this project. SetPaperSize
   // does NOT override it here (tried); pdf_to_jpg.sh trims the border on the
@@ -152,6 +192,7 @@ int main(int argc, char** argv) {
   SAMPLE_NAME     = cfg.sampleName;
   OVERLAP_REMOVAL = cfg.overlapRemoval;
   const Long64_t maxEvents = resolveMaxEvents(argc, argv);
+  const unsigned nThreads  = resolveThreads(argc, argv);
 
   // Strip the VBF topology selection. classifyVbsRegion applies VBS_JET_MJJ and
   // VBS_JET_D_ETA itself and returns NONE when either fails, so leaving them at
@@ -172,57 +213,49 @@ int main(int argc, char** argv) {
 
   TChain chain("ntuple");
   setupChain(chain, cfg.ntupleDir.c_str());
-  TTreeReader reader(&chain);
-  BranchPointerWrapper branch(reader);
+  if (chain.GetListOfFiles()->GetEntries() == 0) {
+    std::cerr << "No ROOT files found.  Aborting.\n";
+    return 1;
+  }
+  ROOT::EnableImplicitMT(nThreads);
 
-  const int    nbin  = (int)MJJ_EDGES.size() - 1;
-  const double* eddy = MJJ_EDGES.data();
+  // Per-thread state registry, merged into one after the loop. The mutex
+  // serializes the whole ThreadState construction, not just the push_back --
+  // see the note on the struct, and the TColor race this pattern was
+  // originally hardened against in clustering_dt.cxx.
+  std::mutex stateRegistryMutex;
+  std::vector<std::unique_ptr<ThreadState>> stateRegistry;
+  std::atomic<Long64_t> progressCounter{0};
 
-  std::array<TH1D*, NCAT> raw{};
-  for (int c = 0; c < NCAT; ++c)
-    raw[c] = new TH1D((std::string("mjj_raw_") + CAT_KEY[c]).c_str(), "", nbin, eddy);
-
-  TH1D* hTot = new TH1D("mjj_raw_total", "", nbin, eddy);
-
-  long nSeen = 0, nSel = 0, nNoPair = 0, nBelowMjj = 0;
-  // Merged into OTHER on the stack, but still counted: the plot got simpler,
-  // the information did not have to be thrown away.
-  long nNoAcc = 0, nBothPU = 0;
-  // R3 shares a band with the other reachable cases now, but stays counted:
-  // it is still a region in its own right on the R_pT side.
-  long nR3 = 0;
-  // Within OTHER, what could HGTD still say something about? The necessary
-  // condition is a tag leg it can actually measure, so these count OTHER events
-  // with >=1 leg in acceptance, by what the pair is:
-  //   accHS_beyondPU : genuine tag timeable, fake beyond |eta| MAX -- R3's logic
-  //   beyondHS_accPU : fake timeable, genuine one is not          -- R2's logic
-  //   bothPU_timeable: no genuine tag at all; timing can reject the whole fake
-  //   ambig_timeable : truth match ambiguous, so undecidable either way
-  long nOthAccHsBeyPu = 0, nOthBeyHsAccPu = 0, nOthBothPuTimeable = 0, nOthAmbigTimeable = 0;
-  std::array<long, NCAT> nCat{};
-
-  // Where OTHER's mixed-truth events actually sit, so the residual does not
-  // become the black box that "other eta config" was before R3 was split out of
-  // it. Indexed [HS leg zone][PU leg zone]: 0 = central |eta| < MIN_ABS_ETA_JET,
-  // 1 = HGTD acceptance, 2 = beyond MAX_ABS_ETA_JET.
-  long nMix[3][3] = {};
-
-  // Denominator for the "of events where a VBF jet is pileup" statistics: at
-  // least one candidate-pair leg is paper-PU. R1/R2/OTHER_HELP (R3-broad) are
-  // ALL, by construction, subsets of this -- every one of their matching
-  // conditions requires a paper-PU leg somewhere in the pair -- so their
-  // fractions of nHasPU say directly what share of the "there IS a fake here"
-  // population each region actually reaches.
-  long nHasPU = 0;
-
+  // One chain scan for the progress denominator -- chain.GetEntries() opens
+  // every file, so it is called exactly once here and never again (see
+  // setupChain's own note on why its guard uses GetListOfFiles instead).
   const Long64_t nEntries = chain.GetEntries();
   const Long64_t denom    = (maxEvents > 0 && maxEvents < nEntries) ? maxEvents : nEntries;
+  std::cout << "Starting Event Loop (" << nThreads << " threads)\n";
+
+  ROOT::TTreeProcessorMT proc(chain, nThreads);
+  proc.Process([&](TTreeReader& reader) {
+    // Fresh per invocation: a worker can be handed a different TTreeReader
+    // across task ranges, so this cannot be thread_local.
+    BranchPointerWrapper branch(reader);
+
+    thread_local ThreadState* tlState = nullptr;
+    if (!tlState) {
+      std::lock_guard<std::mutex> lock(stateRegistryMutex);
+      stateRegistry.push_back(std::make_unique<ThreadState>());
+      tlState = stateRegistry.back().get();
+    }
+    ThreadState& state = *tlState;
 
   while (reader.Next()) {
-    if (maxEvents > 0 && nSeen >= maxEvents) break;
-    ++nSeen;
-    if (nSeen % 20000 == 0)
-      std::cout << "Progress: " << nSeen << "/" << denom << "\r" << std::flush;
+    // Shared counter, same pattern as clustering_hist.cxx: stop this worker's
+    // range once the global cap is crossed rather than capping per-thread.
+    const Long64_t n = ++progressCounter;
+    if (maxEvents > 0 && n > maxEvents) break;
+    ++state.nSeen;
+    if (n % 20000 == 0)
+      std::cout << "Progress: " << n << "/" << denom << "\r" << std::flush;
 
     // Same preamble as processEventData / vbs_mjj_diag, minus the topology cut.
     branch.computeOverlapRemoval();
@@ -240,96 +273,85 @@ int main(int argc, char** argv) {
     // on this axis at all. Excluded from the denominator and counted, so the
     // exclusion shows up in the summary instead of quietly shrinking the sample.
     auto pair = branch.calcBestVbsPair(passPtIdx);
-    if (!pair.valid()) { ++nNoPair; continue; }
-    ++nSel;
+    if (!pair.valid()) { ++state.nNoPair; continue; }
+    ++state.nSel;
 
-    const int a = pair.idxI, b = pair.idxJ;
+    // Event-level region from the SHARED classifier (clustering_structs.h),
+    // so vbs_region_mjj and rpt_v5_hist cannot drift on what the regions mean.
+    // Membership is decided over EVERY jet in the event via isJetTruthHS, not
+    // over the VBS candidate pair -- m_jj below is only the x-axis variable.
+    int cnt[4] = {0, 0, 0, 0};   // nFwdHS, nFwdPU, nCenHS, nAnyHS
+    const EventRegion region =
+        branch.classifyEventRegion(MIN_ABS_ETA_JET, MAX_ABS_ETA_JET,
+                                   MIN_ABS_ETA_JET, cnt);
 
-    // Region membership from the SHARED classifiers (clustering_structs.h),
-    // so vbs_region_mjj and rpt_v5_hist cannot drift on what R1/R2/R3 mean.
-    // classifyVbsRegion covers strict R1/R2/R3; classifyR3Broad covers the
-    // three extra cases folded into the SAME "R3" bucket here (see its own
-    // doc comment for what they are and why they share a name with strict R3).
-    int fwdHS = -1, fwdPU = -1;
-    const VbsRegion region =
-        branch.classifyVbsRegion(MIN_ABS_ETA_JET, MAX_ABS_ETA_JET, MIN_ABS_ETA_JET,
-                                 &fwdHS, &fwdPU);
-
-    // Local re-derivation, ONLY for the diagnostic sub-case breakdown printed
-    // in the summary below -- the CATEGORY decision itself comes entirely from
-    // the shared classifiers above/below, so nothing here can make this file's
-    // regions disagree with rpt_v5's.
-    const bool hsA = branch.isJetPaperHS(branch.topoJetEta[a], branch.topoJetPhi[a]);
-    const bool puA = branch.isJetPaperPU(branch.topoJetEta[a], branch.topoJetPhi[a]);
-    const bool hsB = branch.isJetPaperHS(branch.topoJetEta[b], branch.topoJetPhi[b]);
-    const bool puB = branch.isJetPaperPU(branch.topoJetEta[b], branch.topoJetPhi[b]);
-    if (puA || puB) ++nHasPU;
-    auto zone = [&](int j) {
-      const double e = std::abs((double)branch.topoJetEta[j]);
-      if (e < MIN_ABS_ETA_JET)                        return 0;
-      if (e > MIN_ABS_ETA_JET && e < MAX_ABS_ETA_JET) return 1;
-      return 2;
-    };
-
-    // No local cross-check left to perform here: region is now read directly
-    // from the shared classifier rather than re-derived, so there is nothing
-    // independent to compare it against. (Previously this file recomputed
-    // R1/R2 from raw eta/truth and diffed against classifyVbsRegion; that guard
-    // is retired along with the recomputation it was checking.)
     Cat cat;
-    if (region == VbsRegion::R1) {
-      cat = R1;
-    } else if (region == VbsRegion::R2) {
-      cat = R2;
-    } else if (region == VbsRegion::R3) {
-      cat = OTHER_HELP; ++nR3;
-    } else {
-      int hsLeg = -1, puLegA = -1, puLegB = -1;
-      const bool broad = branch.classifyR3Broad(MIN_ABS_ETA_JET, MAX_ABS_ETA_JET,
-                                                MIN_ABS_ETA_JET,
-                                                &hsLeg, &puLegA, &puLegB);
-      if (broad && hsLeg >= 0) {
-        cat = OTHER_HELP; ++nOthAccHsBeyPu;
-        const int zHS = zone(hsLeg);
-        const int puIdx = (hsLeg == a) ? b : a;
-        ++nMix[zHS][zone(puIdx)];
-      } else if (broad && puLegB >= 0) {
-        cat = OTHER_HELP; ++nBothPU; ++nOthBothPuTimeable;
-      } else if (broad && puLegA >= 0) {
-        // Either "fwd PU + HS beyond" (R2-like) or "both PU, one forward leg"
-        // -- classifyR3Broad's outputs alone don't distinguish them, and the
-        // physics (reject a timeable fake) is close enough that the summary
-        // does not need to. hsA/hsB tell them apart if ever needed again.
-        cat = OTHER_HELP;
-        if (puA && puB) { ++nBothPU; ++nOthBothPuTimeable; }
-        else             ++nOthBeyHsAccPu;
-      // Nothing timeable at all. Checked before the truth split on purpose: an
-      // out-of-acceptance pair lands in OTHER whatever its tags truly are.
-      } else if (zone(a) != 1 && zone(b) != 1) {
-        cat = OTHER; ++nNoAcc;
-      } else if (hsA && hsB) {
-        cat = BOTH_HS;
-      } else if (puA && puB) {
-        cat = OTHER; ++nBothPU;   // both-PU, neither timeable: unreachable
-      } else {
-        cat = OTHER;
-        if (!((hsA && puB) || (hsB && puA))) ++nOthAmbigTimeable;
-      }
+    switch (region) {
+      case EventRegion::R1:       cat = R1;       break;
+      case EventRegion::R2:       cat = R2;       break;
+      case EventRegion::CAN_HELP: cat = CAN_HELP; break;
+      default:                    cat = MAY_NOT;  break;
     }
+
+    // Sub-case bookkeeping for the summary, mirroring the ladder in
+    // classifyEventRegion so the printed breakdown cannot disagree with it.
+    if (region == EventRegion::CAN_HELP) {
+      if (cnt[0] >= 1) ++state.nHelpFwdHS;   // genuine forward tag, no forward fake
+      else             ++state.nHelpNoHS;    // forward fake, no hard-scatter at all
+    } else if (region == EventRegion::MAY_NOT) {
+      if (cnt[1] >= 1) ++state.nMayNotHsBeyond;  // fwd PU, HS only beyond acceptance
+      else             ++state.nMayNotNoFwd;     // nothing forward to time at all
+    }
+    if (cnt[0] >= 1 || cnt[1] >= 1) ++state.nAnyFwd;
 
     // Below the axis floor the event cannot be placed on this plot. Dropped
     // rather than piled into the first column, which would misreport it, and
     // counted so the drop is visible in the summary.    // Below the axis floor the event cannot be placed on this plot. Dropped
     // rather than piled into the first column, which would misreport it, and
     // counted so the drop is visible in the summary.
-    if (pair.mjj < MJJ_EDGES.front()) { ++nBelowMjj; continue; }
+    if (pair.mjj < MJJ_EDGES.front()) { ++state.nBelowMjj; continue; }
 
-    const double m = folded(hTot, pair.mjj);
-    raw[cat]->Fill(m);
-    hTot->Fill(m);
-    ++nCat[cat];
+    const double m = folded(state.hTot, pair.mjj);
+    state.raw[cat]->Fill(m);
+    state.hTot->Fill(m);
+    ++state.nCat[cat];
   }
+  });
   std::cout << "\nFINISHED PROCESSING\n";
+
+  // --- Merge per-thread state into one ---
+  if (stateRegistry.empty()) {
+    std::cerr << "No events processed.  Aborting.\n";
+    return 1;
+  }
+  ThreadState& merged = *stateRegistry.front();
+  for (size_t i = 1; i < stateRegistry.size(); ++i) {
+    ThreadState& o = *stateRegistry[i];
+    for (int c = 0; c < NCAT; ++c) {
+      merged.raw[c]->Add(o.raw[c]);
+      merged.nCat[c] += o.nCat[c];
+    }
+    merged.hTot->Add(o.hTot);
+    merged.nSeen     += o.nSeen;      merged.nSel        += o.nSel;
+    merged.nNoPair   += o.nNoPair;    merged.nBelowMjj   += o.nBelowMjj;
+    merged.nHelpFwdHS += o.nHelpFwdHS; merged.nHelpNoHS  += o.nHelpNoHS;
+    merged.nMayNotHsBeyond += o.nMayNotHsBeyond;
+    merged.nMayNotNoFwd    += o.nMayNotNoFwd;
+    merged.nAnyFwd   += o.nAnyFwd;
+  }
+
+  // Local aliases so the plotting/summary code below reads unchanged.
+  auto& raw  = merged.raw;
+  auto* hTot = merged.hTot;
+  auto& nCat = merged.nCat;
+  const long nSeen = merged.nSeen, nSel = merged.nSel;
+  const long nNoPair = merged.nNoPair, nBelowMjj = merged.nBelowMjj;
+  const long nHelpFwdHS = merged.nHelpFwdHS, nHelpNoHS = merged.nHelpNoHS;
+  const long nMayNotHsBeyond = merged.nMayNotHsBeyond;
+  const long nMayNotNoFwd = merged.nMayNotNoFwd;
+  const long nAnyFwd = merged.nAnyFwd;
+  (void)nSeen;
+  const int nbin = (int)MJJ_EDGES.size() - 1;
 
   // ── Per-column normalisation ─────────────────────────────────────────────
   // Empty columns are left empty rather than filled with NaN: a bin with no
@@ -467,69 +489,44 @@ int main(int argc, char** argv) {
            "      is therefore normalised against the wrong denominator.\n",
            sum, nPlot);
 
-  printf("\n  Residual \"Other\" = neither tag in HGTD acceptance %ld (%.2f%%)\n"
-         "                    + ambiguous truth match %ld (%.2f%%)\n",
-         nNoAcc, nPlot ? 100.0 * nNoAcc / nPlot : 0.0,
-         nOthAmbigTimeable, nPlot ? 100.0 * nOthAmbigTimeable / nPlot : 0.0);
+  // Both "Other" bands broken out, so neither is a black box on the plot.
+  printf("\n  \"Other: HGTD can help\" is made of:\n");
+  printf("      fwd HS, no fwd PU         %8ld (%.2f%%)  confirm the genuine tag\n"
+         "                                                   (pileup central, beyond |eta| %.1f,\n"
+         "                                                    or absent -- never competing)\n",
+         nHelpFwdHS, nPlot ? 100.0*nHelpFwdHS/nPlot : 0.0, MAX_ABS_ETA_JET);
+  printf("      fwd PU, no HS anywhere    %8ld (%.2f%%)  reject the fake outright\n",
+         nHelpNoHS, nPlot ? 100.0*nHelpNoHS/nPlot : 0.0);
 
-  {
-    const long timeable = nR3 + nOthAccHsBeyPu + nOthBeyHsAccPu + nOthBothPuTimeable;
-    printf("\n  \"Other: HGTD can still help\" is made of:\n");
-    printf("      R3: fwd HS + central PU        %6ld (%.2f%%)  confirm the genuine tag\n",
-           nR3, nPlot ? 100.0*nR3/nPlot : 0.0);
-    printf("      fwd HS + PU beyond |eta| %.1f  %6ld (%.2f%%)  R3-like: confirm the genuine tag\n",
-           MAX_ABS_ETA_JET, nOthAccHsBeyPu, nPlot ? 100.0*nOthAccHsBeyPu/nPlot : 0.0);
-    printf("      fwd PU + HS beyond |eta| %.1f  %6ld (%.2f%%)  R2-like: reject the fake\n",
-           MAX_ABS_ETA_JET, nOthBeyHsAccPu, nPlot ? 100.0*nOthBeyHsAccPu/nPlot : 0.0);
-    printf("      both tags pileup, >=1 timeable %6ld (%.2f%%)  no genuine tag: reject the pair\n",
-           nOthBothPuTimeable, nPlot ? 100.0*nOthBothPuTimeable/nPlot : 0.0);
-    printf("      TOTAL                          %6ld (%.2f%%)\n",
-           timeable, nPlot ? 100.0*timeable/nPlot : 0.0);
-  }
+  printf("\n  \"Other: HGTD may not help\" is made of:\n");
+  printf("      no forward jet at all     %8ld (%.2f%%)  nothing timeable\n",
+         nMayNotNoFwd, nPlot ? 100.0*nMayNotNoFwd/nPlot : 0.0);
+  printf("      fwd PU, HS only beyond |eta| %.1f %5ld (%.2f%%)  edge case, kept visible\n",
+         MAX_ABS_ETA_JET, nMayNotHsBeyond,
+         nPlot ? 100.0*nMayNotHsBeyond/nPlot : 0.0);
 
   // The headline this plot exists to give.
-  const long nReach = nCat[R1] + nCat[R2] + nCat[OTHER_HELP];
+  const long nReach = nCat[R1] + nCat[R2] + nCat[CAN_HELP];
   printf("\n  HGTD can contribute: %ld  (%.2f%% of plotted)\n",
          nReach, nPlot ? 100.0 * nReach / nPlot : 0.0);
 
-  // A different denominator than everything above: not "of all selected
-  // events" but "of events where at least one VBF-candidate jet is genuinely
-  // pileup" -- i.e. conditioned on a fake actually being present to act on.
-  // R1, R2 and OTHER_HELP (R3-broad) are each, by construction, a subset of
-  // this population (every one of their matching conditions requires a
-  // paper-PU leg), so their shares of nHasPU say what fraction of the "there
-  // IS a fake here" events each region actually reaches -- distinct from
-  // their share of ALL events, which is diluted by the ~54% of events with no
-  // fake at all (both tags truth-HS).
-  printf("\n  Of events where >=1 VBF-candidate jet is genuinely pileup (N=%ld,\n"
-         "  %.2f%% of plotted):\n",
-         nHasPU, nPlot ? 100.0 * nHasPU / nPlot : 0.0);
-  printf("    1. %-40s %6ld (%.2f%%)\n", "R1: both tags fwd, HS + PU",
-         nCat[R1], nHasPU ? 100.0 * nCat[R1] / nHasPU : 0.0);
-  printf("    2. %-40s %6ld (%.2f%%)\n", "R2: fwd PU + central HS",
-         nCat[R2], nHasPU ? 100.0 * nCat[R2] / nHasPU : 0.0);
-  printf("    3. %-40s %6ld (%.2f%%)\n", "Other: HGTD can still help",
-         nCat[OTHER_HELP], nHasPU ? 100.0 * nCat[OTHER_HELP] / nHasPU : 0.0);
-  printf("       %-40s %6ld (%.2f%%)\n", "(none of R1/R2/other -- unreachable)",
-         nHasPU - nCat[R1] - nCat[R2] - nCat[OTHER_HELP],
-         nHasPU ? 100.0 * (nHasPU - nCat[R1] - nCat[R2] - nCat[OTHER_HELP]) / nHasPU : 0.0);
-
-  // Where the "HS + PU, other eta config" events actually sit. This is the
-  // largest non-both-HS category, so it is worth saying what it is rather than
-  // leaving it as a residual.
-  const char* ZONE[3] = { "central", "HGTD acc", "beyond" };
-  printf("\n  \"Other\" mixed-truth breakdown (rows = HS leg, cols = PU leg):\n");
-  printf("    %-10s %10s %10s %10s %10s\n", "HS \\ PU", ZONE[0], ZONE[1], ZONE[2], "total");
-  printf("    %s\n", std::string(54, '-').c_str());
-  for (int i = 0; i < 3; ++i) {
-    long rowsum = nMix[i][0] + nMix[i][1] + nMix[i][2];
-    printf("    %-10s %10ld %10ld %10ld %10ld\n",
-           ZONE[i], nMix[i][0], nMix[i][1], nMix[i][2], rowsum);
-  }
-  printf("    (R1/R2/R3 are already broken out, so acc/acc, acc-PU/central-HS and\n"
-         "     acc-HS/central-PU are absent here by construction. central =\n"
-         "     |eta| < %.2f, HGTD acc = %.2f-%.2f, beyond = above that.)\n",
-         MIN_ABS_ETA_JET, MIN_ABS_ETA_JET, MAX_ABS_ETA_JET);
+  // A different denominator: not "of all selected events" but "of events with
+  // any forward jet at all" -- i.e. conditioned on HGTD having something in
+  // acceptance to measure in the first place. R1, R2 and CAN_HELP are each by
+  // construction a subset of this (every matching condition requires a forward
+  // jet), so their shares say what fraction of the reachable-in-principle
+  // population each region actually accounts for.
+  printf("\n  Of events with >=1 forward jet (N=%ld, %.2f%% of plotted):\n",
+         nAnyFwd, nPlot ? 100.0 * nAnyFwd / nPlot : 0.0);
+  printf("    1. %-38s %8ld (%.2f%%)\n", CAT_LABEL[R1],
+         nCat[R1], nAnyFwd ? 100.0 * nCat[R1] / nAnyFwd : 0.0);
+  printf("    2. %-38s %8ld (%.2f%%)\n", CAT_LABEL[R2],
+         nCat[R2], nAnyFwd ? 100.0 * nCat[R2] / nAnyFwd : 0.0);
+  printf("    3. %-38s %8ld (%.2f%%)\n", CAT_LABEL[CAN_HELP],
+         nCat[CAN_HELP], nAnyFwd ? 100.0 * nCat[CAN_HELP] / nAnyFwd : 0.0);
+  printf("       %-38s %8ld (%.2f%%)\n", "(forward jet but unreachable)",
+         nAnyFwd - nCat[R1] - nCat[R2] - nCat[CAN_HELP],
+         nAnyFwd ? 100.0 * (nAnyFwd - nCat[R1] - nCat[R2] - nCat[CAN_HELP]) / nAnyFwd : 0.0);
 
   printf("\n  Wrote %s\n", pdf.c_str());
   printf("  Wrote %s\n", rootPath.c_str());

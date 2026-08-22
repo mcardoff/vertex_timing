@@ -3,8 +3,8 @@
 #
 # Runs util/vbs_region_mjj.cxx, which produces the VBS-topology composition of
 # the selection as a function of m_jj: a stacked histogram, one column per m_jj
-# bin, every column normalised to 1 (see the file header for what the six
-# categories are and why they must be exhaustive).
+# bin, every column normalised to 1 (see the file header for what the four
+# regions are and why they must partition the events exactly).
 #
 # Unlike clustering_hist / rpt_v5_hist this is NOT a histogramming stage --
 # it is a single executable that writes its own PDF, so there is no separate
@@ -29,17 +29,18 @@
 universe                 = vanilla
 executable               = run_analysis.sh
 
-# No <threads> argument: this is a jet-level loop with no track clustering and
-# no TTreeProcessorMT, so it is single-threaded by construction. Passing a
-# thread count here would be forwarded as --threads=N and silently ignored,
-# while inflating request_cpus below for nothing.
+# The `4` is forwarded as --threads=4 by run_analysis.sh. vbs_region_mjj
+# parallelizes its event loop via TTreeProcessorMT (verified bit-identical
+# between 1 and 8 threads on local VBF), and request_cpus below must track this
+# value -- condor's cgroup throttles any threads spawned beyond what was
+# requested, silently eating the speedup.
 #
 # NOTE the executable does NOT need --vbs-mjj=0 --vbs-deta=0 passed here, even
 # though the plot deliberately has no VBF topology selection: it zeroes both
 # knobs internally (see main() in util/vbs_region_mjj.cxx). That is on purpose --
 # a forgotten flag on a grid submission would not fail, it would return a
 # plausible-looking plot in which every low-m_jj event had been classified NONE.
-arguments                = vbs_region_mjj $(sample)
+arguments                = vbs_region_mjj $(sample) 4
 
 should_transfer_files    = YES
 when_to_transfer_output  = ON_EXIT
@@ -68,8 +69,8 @@ getenv                   = True
 # CERN-style job-length hint; harmless no-op on pools that don't read it.
 +JobFlavour              = "workday"
 
-request_cpus             = 1
-request_memory           = 2GB
+request_cpus             = 4
+request_memory           = 4GB
 request_disk             = 2GB
 
 output                   = logs/vbs_region_mjj_$(sample).$(ClusterId).$(ProcId).out
