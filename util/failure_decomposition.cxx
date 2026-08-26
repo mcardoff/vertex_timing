@@ -55,6 +55,7 @@
 #include <TStyle.h>
 #include "clustering_constants.h"
 #include "event_processing.h"
+#include "sample_config.h"
 
 using namespace MyUtl;
 
@@ -442,9 +443,16 @@ static void plotFailures(const std::vector<BinData>& bins, const char* label) {
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
-auto main() -> int {
+auto main(int argc, char** argv) -> int {
+  // Selection knobs (--vbs-deta= / --vbs-mjj=). Called even though this
+  // executable has no selection-specific behaviour of its own: without it the
+  // VBS defaults still apply via passJetPtCut, so the run silently inherits
+  // whatever they currently are, with no way to pin them and no record in the
+  // output of which was used. The defaults moved on 2026-08-26.
+  MyUtl::resolveSelection(argc, argv);
+
   TChain chain("ntuple");
-  setupChain(chain, "../../ntuple-hgtd/");
+  setupChain(chain, MyUtl::resolveSample(argc, argv).ntupleDir.c_str());
   TTreeReader reader(&chain);
   BranchPointerWrapper branch(reader);
   ROOT::EnableImplicitMT();

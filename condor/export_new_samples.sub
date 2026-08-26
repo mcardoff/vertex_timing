@@ -1,4 +1,10 @@
 # ---------------------------------------------------------------------------
+# TAG CHANGED 2026-08-26: --vbs-deta=0 is now the DEFAULT, so it no longer
+# contributes a "deta0p0" component. The output tag is now "mjj500p0" alone.
+# Filenames below were updated to match; the old paths in any notes or
+# scripts that reference this run will not resolve.
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # export_new_samples.sub — training-data export for the mu=0 samples and the
 # channel-matched mu=200 control.
 #
@@ -14,7 +20,7 @@
 # CANONICAL SELECTION: --vbs-deta=0.0 --vbs-mjj=500. The analysis definition moved
 # from the |Deta| >= 3 topology cut to an m_jj-based one, so every sample here is
 # exported against that and NOT against the old default. Output is tagged
-# deta0p0_mjj500p0, so these cannot collide with the earlier tight exports.
+# mjj500p0, so these cannot collide with the earlier tight exports.
 #
 # The pre-existing vbf/zjets/dijet exports are on the OLD selection, which makes
 # them unusable as a basis alongside these -- any model mixing samples would be
@@ -38,10 +44,10 @@ arguments                = export_training_data $(sample) --vbs-deta=0.0 --vbs-m
 should_transfer_files    = YES
 when_to_transfer_output  = ON_EXIT
 transfer_input_files     = ../build/export_training_data
-transfer_output_files    = $(sample)/$(sample)_deta0p0_mjj500p0_training.root
+transfer_output_files    = $(sample)/$(sample)_mjj500p0_training.root
 # LHS must be a BARE FILENAME -- condor_submit(1): "You cannot specify
 # directories to be remapped". Directories are allowed on the RHS.
-transfer_output_remaps   = "$(sample)_deta0p0_mjj500p0_training.root=$(sample)/$(sample)_deta0p0_mjj500p0_training.root"
+transfer_output_remaps   = "$(sample)_mjj500p0_training.root=$(sample)/$(sample)_mjj500p0_training.root"
 
 getenv                   = True
 +JobFlavour              = "tomorrow"

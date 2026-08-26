@@ -262,16 +262,25 @@ int main(int argc, char** argv) {
   const std::vector<double> detaThr = {0, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0};
   auto mjjRows  = scan(mjjThr,  mjjVals,  bothHSVals);
   auto detaRows = scan(detaThr, detaVals, bothHSVals);
+  // |Deta| working point this diagnostic compares against. Deliberately a
+  // LOCAL constant and NOT VBS_JET_D_ETA_DEFAULT: this tool exists to compare
+  // candidate working points against each other, so its reference has to stay
+  // put when the analysis default moves. It moved on 2026-08-26 (3.0 -> 0.0,
+  // partly because of THIS diagnostic's output); tracking it would have made
+  // the comparison below "|Deta| >= 0", i.e. no cut at all, silently turning
+  // the equal-efficiency test into a comparison of the baseline with itself.
+  constexpr double DETA_REFERENCE = 3.0;
+
   printScan("m_jj cut scan [GeV]", "GeV", mjjRows,  nSel, nBothHS);
   printScan("|Deta| cut scan",     "",    detaRows, nSel, nBothHS);
 
   // Equal-efficiency comparison: find the m_jj threshold that keeps the same
-  // fraction of genuine pairs as the current |Deta| >= VBS_JET_D_ETA_DEFAULT
+  // fraction of genuine pairs as the |Deta| >= DETA_REFERENCE
   // working point, then compare purities. This is the apples-to-apples question
   // -- at matched signal efficiency, which cut admits less pileup topology?
   long detaKeptHS = 0, detaKept = 0;
   for (size_t i = 0; i < detaVals.size(); ++i) {
-    if (detaVals[i] < VBS_JET_D_ETA_DEFAULT) continue;
+    if (detaVals[i] < DETA_REFERENCE) continue;
     ++detaKept;
     if (bothHSVals[i]) ++detaKeptHS;
   }
@@ -290,7 +299,7 @@ int main(int argc, char** argv) {
     }
     printf("\n  Equal-genuine-efficiency comparison\n");
     printf("    |Deta| >= %.1f  : eff %.2f%%  purity %.2f%%  (kept %ld)\n",
-           VBS_JET_D_ETA_DEFAULT, 100.0 * targetEff,
+           DETA_REFERENCE, 100.0 * targetEff,
            detaKept ? 100.0 * detaKeptHS / detaKept : 0.0, detaKept);
     printf("    m_jj  >= %-5.0f : eff %.2f%%  purity %.2f%%  (kept %ld)\n",
            bestThr, nBothHS ? 100.0 * bestKeptHS / nBothHS : 0.0,

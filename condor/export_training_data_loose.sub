@@ -1,4 +1,12 @@
 # ---------------------------------------------------------------------------
+# !! NOW REDUNDANT (2026-08-26) !!
+# The selection this file requests became the DEFAULT on 2026-08-26, so it
+# produces exactly what the plain .sub produces and its output is UNTAGGED --
+# the SELECTION_TAG only records deviations from the default. Kept so the
+# submission recipe stays greppable, but prefer the plain .sub (which also
+# supports sharding). Delete when you are sure nothing references it.
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # export_training_data_loose.sub — training export with the VBS topology cut OFF.
 #
 # Identical to export_training_data.sub except for `--vbs-deta=0`, which drops
@@ -15,7 +23,7 @@
 # the effect rather than exposing it. Expect roughly 7.7x more Z+jets events.
 #
 # Output names are tagged by resolveSelection(), so these land as
-# <sample>/<sample>_deta0p0_training.root and CANNOT overwrite the standard
+# <sample>/<sample>_training.root and CANNOT overwrite the standard
 # export. Both selections can be loaded side by side in training.ipynb.
 #
 # Submit (from inside condor/):
@@ -34,14 +42,14 @@ arguments                = export_training_data $(sample) --vbs-deta=0
 should_transfer_files    = YES
 when_to_transfer_output  = ON_EXIT
 transfer_input_files     = ../build/export_training_data
-transfer_output_files    = $(sample)/$(sample)_deta0p0_training.root
+transfer_output_files    = $(sample)/$(sample)_training.root
 
 # Same remap rationale as the other .sub files: condor flattens a nested
 # transfer_output_files path to its basename when staging back, so the remap is
 # what makes the file land under $(sample)/ on the submit side. The LHS must be a
 # BARE FILENAME -- per condor_submit(1), "You cannot specify directories to be
 # remapped" -- while directories are allowed on the RHS and created as needed.
-transfer_output_remaps   = "$(sample)_deta0p0_training.root=$(sample)/$(sample)_deta0p0_training.root"
+transfer_output_remaps   = "$(sample)_training.root=$(sample)/$(sample)_training.root"
 
 getenv                   = True
 

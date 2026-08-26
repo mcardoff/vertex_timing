@@ -1,4 +1,12 @@
 # ---------------------------------------------------------------------------
+# !! NOW REDUNDANT (2026-08-26) !!
+# The selection this file requests became the DEFAULT on 2026-08-26, so it
+# produces exactly what the plain .sub produces and its output is UNTAGGED --
+# the SELECTION_TAG only records deviations from the default. Kept so the
+# submission recipe stays greppable, but prefer the plain .sub (which also
+# supports sharding). Delete when you are sure nothing references it.
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # rpt_v5_hist_deta0_mjj200.sub — rpt_v5_hist at the LOOSER m_jj working point:
 # |Deta| requirement OFF, m_jj >= 200 GeV. All three samples.
 #
@@ -25,7 +33,8 @@
 # events). Do NOT compare its ROCs directly against the m_jj >= 500 vbf/dijet
 # runs.
 #
-# Output tag is deta0p0_mjj200p0, so this cannot overwrite either the standard
+# Output is UNTAGGED (this selection is now the default), so it DOES collide
+# with a plain default run -- that is the redundancy noted at the top
 # run or the m_jj >= 500 one. rpt_v5_plot needs the matching
 # --vbs-deta=0 --vbs-mjj=200 (or an explicit --hist-file=) to find it.
 #
@@ -40,14 +49,14 @@ arguments                = rpt_v5_hist $(sample) 4 --vbs-deta=0 --vbs-mjj=200
 should_transfer_files    = YES
 when_to_transfer_output  = ON_EXIT
 transfer_input_files     = ../build/rpt_v5_hist
-transfer_output_files    = $(sample)/$(sample)_deta0p0_mjj200p0_rpt_v5_hist.root
+transfer_output_files    = $(sample)/$(sample)_rpt_v5_hist.root
 
 # Same remap rationale as the other .sub files: condor flattens a nested
 # transfer_output_files path to its basename when staging back, so the remap is
 # what makes the file land under $(sample)/ on the submit side. The LHS must be
 # a BARE FILENAME -- per condor_submit(1), "You cannot specify directories to be
 # remapped" -- while directories are allowed on the RHS and created as needed.
-transfer_output_remaps   = "$(sample)_deta0p0_mjj200p0_rpt_v5_hist.root=$(sample)/$(sample)_deta0p0_mjj200p0_rpt_v5_hist.root"
+transfer_output_remaps   = "$(sample)_rpt_v5_hist.root=$(sample)/$(sample)_rpt_v5_hist.root"
 
 getenv                   = True
 

@@ -1,4 +1,12 @@
 # ---------------------------------------------------------------------------
+# !! NOW REDUNDANT (2026-08-26) !!
+# The selection this file requests became the DEFAULT on 2026-08-26, so it
+# produces exactly what the plain .sub produces and its output is UNTAGGED --
+# the SELECTION_TAG only records deviations from the default. Kept so the
+# submission recipe stays greppable, but prefer the plain .sub (which also
+# supports sharding). Delete when you are sure nothing references it.
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # clustering_hist_deta0_mjj200.sub — clustering_hist with VBS_JET_MJJ >= 200 GeV
 # in place of the default |Deta| >= 3 topology cut.
 #
@@ -14,7 +22,7 @@
 # src/clustering_constants.h for the full numbers.
 #
 # Output names are tagged by resolveSelection(), so these land as
-# <sample>/<sample>_deta0p0_mjj200p0_clustering_hist.root and CANNOT overwrite
+# <sample>/<sample>_clustering_hist.root and CANNOT overwrite
 # the standard <sample>_clustering_hist.root. clustering_plot needs the
 # matching --vbs-deta=0 --vbs-mjj=200 (or --hist-file=) to find them.
 #
@@ -34,7 +42,7 @@ arguments                = clustering_hist $(sample) 4 --vbs-deta=0 --vbs-mjj=20
 should_transfer_files    = YES
 when_to_transfer_output  = ON_EXIT
 transfer_input_files     = ../build/clustering_hist
-transfer_output_files    = $(sample)/$(sample)_deta0p0_mjj200p0_clustering_hist.root
+transfer_output_files    = $(sample)/$(sample)_clustering_hist.root
 
 # Same remap rationale as clustering_hist.sub: condor flattens a nested
 # transfer_output_files path to its basename when staging back, so the remap
@@ -42,7 +50,7 @@ transfer_output_files    = $(sample)/$(sample)_deta0p0_mjj200p0_clustering_hist.
 # the local --sample= convention. The LHS must be a BARE FILENAME -- per
 # condor_submit(1), "You cannot specify directories to be remapped" -- while
 # directories are allowed on the RHS and are created as needed.
-transfer_output_remaps   = "$(sample)_deta0p0_mjj200p0_clustering_hist.root=$(sample)/$(sample)_deta0p0_mjj200p0_clustering_hist.root"
+transfer_output_remaps   = "$(sample)_clustering_hist.root=$(sample)/$(sample)_clustering_hist.root"
 
 getenv                   = True
 

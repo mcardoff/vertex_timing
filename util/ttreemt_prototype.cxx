@@ -139,6 +139,12 @@ namespace {
 
 int main(int argc, char** argv) {
   auto sample = MyUtl::resolveSample(argc, argv);
+  // Selection knobs (--vbs-deta= / --vbs-mjj=). Called even though this
+  // executable has no selection-specific behaviour of its own: without it
+  // the VBS defaults still apply via passJetPtCut, so the run silently
+  // inherits whatever they currently are with no way to pin them and no
+  // record of which was used. The defaults moved on 2026-08-26.
+  MyUtl::resolveSelection(argc, argv);
   unsigned nThreads = MyUtl::resolveThreads(argc, argv);
 
   // Must precede any histogram construction: prevents concurrent TH1
