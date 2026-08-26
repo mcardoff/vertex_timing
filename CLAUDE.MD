@@ -615,7 +615,20 @@ Measured from the three-sample `rpt_v5_hist` clusters of 2026-07-03 (`condor/log
 
 That is 5–30 min, varying **4x run-to-run on the same sample** — filesystem contention, not a per-sample property. It is 15–20% of a zjets job but **40–80% of a vbf or dijet job**. Sampled at condor's 5-minute granularity, so ±5 min.
 
-Mechanism: `TChain::Add` is lazy (opens nothing), but `TChain::GetEntries()` opens **every file** in the chain to sum entry counts — 0.3–1.2 s per file on `/data` against 4.3 ms on local SSD. That call has been removed from `setupChain` (the "did we find files?" question is answered by `GetListOfFiles()->GetEntries()` with no I/O) and from the `*_hist` progress denominators, leaving only `TTreeProcessorMT`'s own unavoidable pass. **Do not reintroduce it** — see the note on `setupChain` in `src/event_processing.h`.
+Mechanism: `TChain::Add` is lazy (opens nothing), but `TChain::GetEntries()` opens **every file** in the chain to sum entry counts — 0.3–1.2 s per file on `/data` against 4.3 ms on local SSD. That call has been removed from `setupChain` (the "did we find files?" question is answered by `GetListOfFiles()->GetEntries()` with no I/O) and from the `*_hist` progress denominators, leaving only `TTreeProcessorMT`'s own pass. **Do not reintroduce it** — see the note on `setupChain` in `src/event_processing.h`.
+
+How much that actually saved, measured on the local 33-file sample (time from start to the first event reaching a worker):
+
+| | serial startup |
+|---|---:|
+| with `GetEntries()` | 0.205 s (6.1 ms/file) |
+| deferred | 0.103 s (3.1 ms/file) |
+
+**~50%**, not more: `TTreeProcessorMT` still opens every file serially for cluster boundaries before dispatching any task. In the old ordering that second pass was nearly free (0.004 s) only because `GetEntries` had already warmed the files.
+
+**What is left, and what does NOT fix it.** The remaining pass is latency-bound, so overlapping it looks attractive — opening every file concurrently first does collapse the serial scan to 0.004 s. But the prewarm then costs as much as it saves (0.132 s at 8 threads vs a 0.117 s scan): on local SSD the opens are bandwidth-bound and concurrency buys nothing. Whether the AF's shared storage behaves differently is untested and should not be assumed — an earlier plausible-sounding fix here (hoisting `passBasicCuts` above the Z+jets lepton work, so rejected events never touch per-track branches) measured at **1 µs/event**, i.e. 0.1 min over 8M events, and was dropped.
+
+The change that would actually remove this cost is **sharding a sample across several condor jobs** (`--file-shard=i/N` plus a merge step): N jobs each open 1/N of the files, and their event loops run concurrently. That attacks the startup and the event loop at once — zjets' 183 min would go to roughly 20 min at N=10 — but it needs a merger that sums the `TParameter` scalars `HistWriter` writes (plain `hadd` keeps the first occurrence and would silently corrupt the event counts). Not implemented.
 
 The remaining dead time is the ATLAS/cvmfs `lsetup` in `run_analysis.sh`, which now prints `[job t+NNNNs]` stamps around itself so setup and analysis are separately attributable; the executables print `[t+NNN.N s]` phase marks (`MyUtl::PhaseTimer`). Both flush immediately — a block-buffered stdout with no flushes is why a working job looked hung under `condor_tail`, which is what sent an earlier investigation after "file loading" in the first place.
 
