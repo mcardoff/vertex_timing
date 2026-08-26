@@ -639,12 +639,19 @@ cd build && cmake .. && make clustering_hist rpt_v5_hist hist_merge
 cd condor
 condor_submit -a sample=vbf   -a nshards=4  clustering_hist.sub
 condor_submit -a sample=dijet -a nshards=4  clustering_hist.sub
-condor_submit -a sample=zjets -a nshards=32 clustering_hist.sub
-# after they land:
-cd ../build
-./hist_merge ../zjets/zjets_clustering_hist.root ../zjets/zjets_clustering_hist.shard*of32.root
-./clustering_plot --sample=zjets                                 # unchanged
+condor_submit -a sample=zjets -a nshards=12 clustering_hist.sub
+# after they land -- note condor/<sample>/, NOT <repo-root>/<sample>/:
+cd ..
+./build/hist_merge condor/zjets/zjets_clustering_hist.root \
+                   condor/zjets/zjets_clustering_hist.shard*of12.root
+./build/clustering_plot --sample=zjets --hist-file=condor/zjets/zjets_clustering_hist.root
 ```
+
+**Outputs land in `condor/<sample>/`.** `transfer_output_remaps`' RHS resolves
+against the **submit** directory, and submission happens from `condor/`. An
+earlier version of this section said `<repo-root>/<sample>/`; that is wrong,
+and since `clustering_plot --sample=` looks under `OUTPUT_DIR` it needs
+`--hist-file=` unless the merged file is moved.
 
 A non-default VBS selection needs **two** matching macros, because
 `resolveSelection` stamps a `SELECTION_TAG` onto the output filename (so a
@@ -669,13 +676,35 @@ transfer a file that does not exist — but `condor_submit -dump` shows the
 expanded name, and running the executable locally with the same `selargs`
 prints `[selection] ... (tag: ...)`.
 
-**Shard counts should track EVENT count, not file count** — zjets has 8.08M events against vbf's 0.50M and dijet's 0.70M, so an equal split would leave zjets jobs ~16x longer than the rest. 4/4/32 puts every job in the same ballpark.
+**Shard counts should track EVENT count, not file count.** Beware that the
+counts in the "Job cost" table above are from the 2026-07-03 runs, and the
+zjets dataset has since been **replaced** (`...20260712_Output`, produced
+2026-07-12): the current zjets is **2.0M events over 2000 files**, not 8.08M.
+Re-measure before sizing shards for a sample you have not run recently -- the
+`[chain] N files added` line plus the run's own event total give it for free.
+At 2.0M, zjets wants ~12 shards, not 32; the 32-shard run below spent 49 s of
+cvmfs setup against 257 s of actual work per job.
 
 `--file-shard` tags the output filename whenever it is passed, **including at N = 1** (`Shard::given`, not `count > 1`). That looks redundant but is what lets one `.sub` template the output name on `$(ProcId)/$(nshards)` for any shard count: tying the tag to `count > 1` would make `nshards=1` write an untagged file the submit file then fails to transfer back — a foot-gun that only fires at the least-tested value.
 
 The sort in `setupChain` is load-bearing, not tidiness: `directory_iterator` order is filesystem-defined and not guaranteed stable, so without it two shards could disagree about which file is "3rd" and silently double-process or skip data. It also makes an unsharded run deterministic, which it previously was not — harmless for full runs, but it changes *which* events a `--max-events` run sees.
 
 **`hadd` will not do this job.** It merges anything with a `Merge()` method and keeps the **first occurrence** of everything else. Every scalar `HistWriter` emits is a `TParameter` — event counts, rejection tallies, the pT accumulators `rpt_v5_plot` turns into untimed-fraction percentages — and `TParameter` has no `Merge()`. `hadd` would produce histograms summed over N shards alongside one shard's event counts, silently. `util/hist_merge.cxx` sums them explicitly, and refuses (rather than dropping) any key type it does not recognise.
+
+**First real grid run** (cluster 2928803, 2026-08-26, zjets `clustering_hist`,
+32 shards, `--vbs-deta=0 --vbs-mjj=200`): **32/32 shards completed, none held**,
+end-to-end **5.3 min**. Per shard: cvmfs setup 49 s mean / 58 s max, `[chain]`
+build **0.1 s for 63 files**, event loop 257 s mean / 265 s max.
+
+Two things that confirms:
+
+- **The startup diagnosis was right.** cvmfs is only ~50 s, so the 5–30 min of
+  pre-loop dead time seen in July was almost entirely the `TChain::GetEntries()`
+  file-open pass — 0.1 s for 63 files now, against 0.3–1.2 s *per file* before.
+- **Sharding delivers.** The 32 shards' event loops total 137 min, which is
+  what one unsharded job would have spent (same 4 threads, 32x the events),
+  plus the 10–40 min serial open pass that no longer exists. So ~150–180 min
+  unsharded against 5.3 min sharded: **~30x**.
 
 **Validation** (local VBF, `util/scratch/compare_hists.py`, unsharded vs sharded-and-merged):
 

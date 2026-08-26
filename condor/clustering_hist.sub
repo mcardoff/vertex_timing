@@ -21,9 +21,12 @@
 #   condor_submit -a sample=dijet -a nshards=4  clustering_hist.sub
 #   condor_submit -a sample=zjets -a nshards=32 clustering_hist.sub
 #
-# Then merge each sample's shards (hist_merge, NOT hadd -- see below):
-#   cd ../build
-#   ./hist_merge ../zjets/zjets_clustering_hist.root ../zjets/zjets_clustering_hist.shard*of32.root
+# Then merge each sample's shards (hist_merge, NOT hadd -- see below).
+# Outputs land in condor/<sample>/: transfer_output_remaps' RHS resolves
+# against the SUBMIT directory, which is this one.
+#   cd ..
+#   ./build/hist_merge condor/zjets/zjets_clustering_hist.root \\
+#                      condor/zjets/zjets_clustering_hist.shard*of12.root
 #
 # Execute hosts don't share a filesystem with the submit host (confirmed via
 # a FileSystemDomain match failure), so the built executable is staged in via
@@ -47,8 +50,9 @@ executable               = run_analysis.sh
 #
 # Shard counts should track EVENT count, not file count: zjets has 8.08M
 # events against vbf's 0.50M and dijet's 0.70M (measured, see CLAUDE.md's
-# "Job cost" section), so an equal split across samples would leave zjets
-# jobs ~16x longer than the rest. Suggested: vbf 4, dijet 4, zjets 32.
+# "Job cost" section) -- but RE-MEASURE: the zjets dataset was replaced on
+# 2026-07-12 and is now 2.0M events, not 8.08M. Suggested: vbf 4, dijet 4,
+# zjets 12.
 sample                   = vbf
 nshards                  = 4
 
