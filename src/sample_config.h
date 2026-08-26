@@ -258,12 +258,23 @@ namespace MyUtl {
   struct Shard {
     int index = 0;
     int count = 1;
+    // Whether --file-shard was actually passed. Deliberately separate from
+    // count > 1: a submit file that templates the output name on the shard
+    // must get a shard-tagged name for EVERY shard count it might be run at,
+    // including N = 1. Tying the tag to count > 1 instead would make
+    // --file-shard=0/1 write an untagged file that the .sub then fails to
+    // transfer back -- a foot-gun that only fires at the least-tested value.
+    bool given = false;
+
+    // True when the rule actually partitions the file list. N = 1 selects
+    // everything, so it does not.
     bool active() const { return count > 1; }
+
     // Filename-safe marker woven into the output path so shards of one sample
     // cannot overwrite each other.
     std::string tag() const {
-      return active() ? ".shard" + std::to_string(index) + "of" + std::to_string(count)
-                      : std::string();
+      return given ? ".shard" + std::to_string(index) + "of" + std::to_string(count)
+                   : std::string();
     }
   };
 
@@ -284,6 +295,7 @@ namespace MyUtl {
         std::exit(1);
       }
       Shard s;
+      s.given = true;
       try {
         s.index = std::stoi(v.substr(0, slash));
         s.count = std::stoi(v.substr(slash + 1));
@@ -408,7 +420,7 @@ namespace MyUtl {
   //   sample land side by side instead of overwriting each other. Empty for
   //   an unsharded run, leaving every existing path byte-identical.
   inline std::string shardTagged(const std::string& baseName) {
-    if (!FILE_SHARD.active()) return baseName;
+    if (FILE_SHARD.tag().empty()) return baseName;
     auto dot = baseName.rfind('.');
     return dot == std::string::npos
              ? baseName + FILE_SHARD.tag()

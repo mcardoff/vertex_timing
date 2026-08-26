@@ -632,12 +632,23 @@ How much that actually saved, measured on the local 33-file sample (time from st
 
 `--file-shard=<i>/<N>` restricts a `*_hist` process to files i, i+N, i+2N, … of the **sorted** file list, and `hist_merge` combines the per-shard outputs. N jobs each pay 1/N of the per-file startup *and* run 1/N of the event loop concurrently, so it attacks both costs at once.
 
+Both `*_hist.sub` files now take `sample` and `nshards` as submit macros and queue `$(nshards)` jobs for **one** sample, with `$(ProcId)` as the shard index — so each sample gets its own ClusterId and its own shard count:
+
 ```bash
-cd build
-./clustering_hist --sample=zjets --threads=4 --file-shard=0/10   # ... one job per shard
-./hist_merge zjets/zjets_clustering_hist.root zjets/zjets_clustering_hist.shard*of10.root
-./clustering_plot --sample=zjets                                  # unchanged
+cd build && cmake .. && make clustering_hist rpt_v5_hist hist_merge
+cd condor
+condor_submit -a sample=vbf   -a nshards=4  clustering_hist.sub
+condor_submit -a sample=dijet -a nshards=4  clustering_hist.sub
+condor_submit -a sample=zjets -a nshards=32 clustering_hist.sub
+# after they land:
+cd ../build
+./hist_merge ../zjets/zjets_clustering_hist.root ../zjets/zjets_clustering_hist.shard*of32.root
+./clustering_plot --sample=zjets                                 # unchanged
 ```
+
+**Shard counts should track EVENT count, not file count** — zjets has 8.08M events against vbf's 0.50M and dijet's 0.70M, so an equal split would leave zjets jobs ~16x longer than the rest. 4/4/32 puts every job in the same ballpark.
+
+`--file-shard` tags the output filename whenever it is passed, **including at N = 1** (`Shard::given`, not `count > 1`). That looks redundant but is what lets one `.sub` template the output name on `$(ProcId)/$(nshards)` for any shard count: tying the tag to `count > 1` would make `nshards=1` write an untagged file the submit file then fails to transfer back — a foot-gun that only fires at the least-tested value.
 
 The sort in `setupChain` is load-bearing, not tidiness: `directory_iterator` order is filesystem-defined and not guaranteed stable, so without it two shards could disagree about which file is "3rd" and silently double-process or skip data. It also makes an unsharded run deterministic, which it previously was not — harmless for full runs, but it changes *which* events a `--max-events` run sees.
 

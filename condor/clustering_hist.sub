@@ -1,5 +1,6 @@
 # ---------------------------------------------------------------------------
-# clustering_hist.sub — condor submit template: one job per sample.
+# clustering_hist.sub — condor submit template: one SAMPLE per submit,
+# split into $(nshards) parallel shard jobs.
 #
 # Histogramming stage of the clustering_dt split (see CLAUDE.md's "Main
 # Executables" section): runs the event loop and writes
@@ -12,8 +13,17 @@
 #   cd build && cmake .. && make clustering_hist    # build BEFORE submitting
 #   chmod +x condor/run_analysis.sh
 #
-# Submit (from inside condor/, so relative paths below resolve correctly):
-#   cd condor && condor_submit clustering_hist.sub
+# Submit (from inside condor/, so relative paths below resolve correctly).
+# One condor_submit per sample -- each gets its own ClusterId, and shard
+# counts differ per sample because event counts do:
+#   cd condor
+#   condor_submit -a sample=vbf   -a nshards=4  clustering_hist.sub
+#   condor_submit -a sample=dijet -a nshards=4  clustering_hist.sub
+#   condor_submit -a sample=zjets -a nshards=32 clustering_hist.sub
+#
+# Then merge each sample's shards (hist_merge, NOT hadd -- see below):
+#   cd ../build
+#   ./hist_merge ../zjets/zjets_clustering_hist.root ../zjets/zjets_clustering_hist.shard*of32.root
 #
 # Execute hosts don't share a filesystem with the submit host (confirmed via
 # a FileSystemDomain match failure), so the built executable is staged in via
@@ -22,16 +32,32 @@
 # /data/mcardiff/... (an absolute path baked into --sample=vbf|zjets|dijet),
 # not transferred.
 #
-# This queues 3 jobs, one per --sample value.
+# Sharding exists because a single unsplit job pays the whole per-file
+# startup serially (0.3-1.2 s per file on /data) AND runs the whole event
+# loop -- together, 183 minutes for zjets. Splitting divides both. Validated
+# bit-identical against an unsplit run before first use; see CLAUDE.md.
+#
+# This queues $(nshards) jobs for ONE sample.
 # ---------------------------------------------------------------------------
 universe                 = vanilla
 executable               = run_analysis.sh
-arguments                = clustering_hist $(sample) 4
+# One sample per submit, sharded $(nshards) ways. Both are macros with
+# defaults, overridden per submission:
+#   condor_submit -a sample=zjets -a nshards=32 clustering_hist.sub
+#
+# Shard counts should track EVENT count, not file count: zjets has 8.08M
+# events against vbf's 0.50M and dijet's 0.70M (measured, see CLAUDE.md's
+# "Job cost" section), so an equal split across samples would leave zjets
+# jobs ~16x longer than the rest. Suggested: vbf 4, dijet 4, zjets 32.
+sample                   = vbf
+nshards                  = 4
+
+arguments                = clustering_hist $(sample) 4 --file-shard=$(ProcId)/$(nshards)
 
 should_transfer_files    = YES
 when_to_transfer_output  = ON_EXIT
 transfer_input_files     = ../build/clustering_hist
-transfer_output_files    = $(sample)/$(sample)_clustering_hist.root
+transfer_output_files    = $(sample)/$(sample)_clustering_hist.shard$(ProcId)of$(nshards).root
 # The histogram file name is now sample-prefixed (src/sample_config.h's
 # histFilePath()), so the 3 queued jobs' output basenames
 # (vbf_clustering_hist.root, zjets_clustering_hist.root,
@@ -59,7 +85,11 @@ transfer_output_files    = $(sample)/$(sample)_clustering_hist.root
 # inside the execution directory, not by the path used to locate it via
 # transfer_output_files. Directories ARE allowed on the RHS (`newname`) and
 # are created as needed.
-transfer_output_remaps   = "$(sample)_clustering_hist.root=$(sample)/$(sample)_clustering_hist.root"
+transfer_output_remaps   = "$(sample)_clustering_hist.shard$(ProcId)of$(nshards).root=$(sample)/$(sample)_clustering_hist.shard$(ProcId)of$(nshards).root"
+# $(ProcId) is the shard index: `queue $(nshards)` below runs ProcId
+# 0..nshards-1, which --file-shard consumes directly. Merge the results
+# afterwards with hist_merge -- NOT hadd, which would silently keep one
+# shard's event counts (see util/hist_merge.cxx).
 
 getenv                   = True
 
@@ -90,4 +120,9 @@ output                   = logs/clustering_hist_$(sample).$(ClusterId).$(ProcId)
 error                    = logs/clustering_hist_$(sample).$(ClusterId).$(ProcId).err
 log                      = logs/clustering_hist_$(sample).$(ClusterId).$(ProcId).log
 
-queue sample in (vbf, zjets, dijet)
+queue $(nshards)
+
+# After all shards land:
+#   cd ../build
+#   ./hist_merge ../$(sample)/$(sample)_clustering_hist.root \
+#                ../$(sample)/$(sample)_clustering_hist.shard*of$(nshards).root
