@@ -83,6 +83,7 @@ int main(int argc, char* argv[]) {
   MyUtl::ENERGY_LABEL    = sample.energyLabel;
   MyUtl::OUTPUT_DIR      = sample.outputDir;
   MyUtl::SAMPLE_NAME     = sample.sampleName;
+  MyUtl::FILE_SHARD      = MyUtl::resolveShard(argc, argv);
   MyUtl::OVERLAP_REMOVAL = sample.overlapRemoval;
   boost::filesystem::create_directories(MyUtl::OUTPUT_DIR);
   if (MyUtl::SAMPLE_NAME.empty())
@@ -105,7 +106,7 @@ int main(int argc, char* argv[]) {
   std::cout << '\n';
 
   TChain chain("ntuple");
-  setupChain(chain, sample.ntupleDir.c_str());
+  setupChain(chain, sample.ntupleDir.c_str(), MyUtl::FILE_SHARD);
   phase.mark("chain built");
   ROOT::EnableImplicitMT(nThreads);
   gErrorIgnoreLevel = kFatal;

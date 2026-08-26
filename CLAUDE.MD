@@ -628,7 +628,32 @@ How much that actually saved, measured on the local 33-file sample (time from st
 
 **What is left, and what does NOT fix it.** The remaining pass is latency-bound, so overlapping it looks attractive — opening every file concurrently first does collapse the serial scan to 0.004 s. But the prewarm then costs as much as it saves (0.132 s at 8 threads vs a 0.117 s scan): on local SSD the opens are bandwidth-bound and concurrency buys nothing. Whether the AF's shared storage behaves differently is untested and should not be assumed — an earlier plausible-sounding fix here (hoisting `passBasicCuts` above the Z+jets lepton work, so rejected events never touch per-track branches) measured at **1 µs/event**, i.e. 0.1 min over 8M events, and was dropped.
 
-The change that would actually remove this cost is **sharding a sample across several condor jobs** (`--file-shard=i/N` plus a merge step): N jobs each open 1/N of the files, and their event loops run concurrently. That attacks the startup and the event loop at once — zjets' 183 min would go to roughly 20 min at N=10 — but it needs a merger that sums the `TParameter` scalars `HistWriter` writes (plain `hadd` keeps the first occurrence and would silently corrupt the event counts). Not implemented.
+### Sharding a sample across jobs
+
+`--file-shard=<i>/<N>` restricts a `*_hist` process to files i, i+N, i+2N, … of the **sorted** file list, and `hist_merge` combines the per-shard outputs. N jobs each pay 1/N of the per-file startup *and* run 1/N of the event loop concurrently, so it attacks both costs at once.
+
+```bash
+cd build
+./clustering_hist --sample=zjets --threads=4 --file-shard=0/10   # ... one job per shard
+./hist_merge zjets/zjets_clustering_hist.root zjets/zjets_clustering_hist.shard*of10.root
+./clustering_plot --sample=zjets                                  # unchanged
+```
+
+The sort in `setupChain` is load-bearing, not tidiness: `directory_iterator` order is filesystem-defined and not guaranteed stable, so without it two shards could disagree about which file is "3rd" and silently double-process or skip data. It also makes an unsharded run deterministic, which it previously was not — harmless for full runs, but it changes *which* events a `--max-events` run sees.
+
+**`hadd` will not do this job.** It merges anything with a `Merge()` method and keeps the **first occurrence** of everything else. Every scalar `HistWriter` emits is a `TParameter` — event counts, rejection tallies, the pT accumulators `rpt_v5_plot` turns into untimed-fraction percentages — and `TParameter` has no `Merge()`. `hadd` would produce histograms summed over N shards alongside one shard's event counts, silently. `util/hist_merge.cxx` sums them explicitly, and refuses (rather than dropping) any key type it does not recognise.
+
+**Validation** (local VBF, `util/scratch/compare_hists.py`, unsharded vs sharded-and-merged):
+
+| executable | shards | histograms bit-identical | worst relative bin diff |
+|---|---|---|---|
+| `rpt_v5_hist`      | 3 | **72 / 72**       | **0** (exactly) |
+| `clustering_hist`  | 4 | 461 / 477         | 5.6e-13 |
+| `assoc_study_hist` | 5 | 1326 / 1378       | 1.1e-12 |
+
+Every scalar matched exactly in all three, and shard event counts summed to the unsharded total exactly (12353+11785+11635+11762 = 47535). `assoc_study_plot`'s full numeric output was **byte-identical** between the unsharded and merged files.
+
+The only objects that differ are `TProfile2D`s, which accumulate sums of floating-point values whose addition order changes with the partition — machine epsilon, ~12 orders of magnitude below any physics tolerance. Every other histogram is bit-identical because all fills in this codebase are unweighted, so bin contents are integer-valued sums. `rpt_v5_hist` matching exactly also independently confirms that its per-event RNG re-seeding really is independent of how work is distributed (see the Diagnostics section) — sharding is a stronger test of that than varying the thread count.
 
 The remaining dead time is the ATLAS/cvmfs `lsetup` in `run_analysis.sh`, which now prints `[job t+NNNNs]` stamps around itself so setup and analysis are separately attributable; the executables print `[t+NNN.N s]` phase marks (`MyUtl::PhaseTimer`). Both flush immediately — a block-buffered stdout with no flushes is why a working job looked hung under `condor_tail`, which is what sent an earlier investigation after "file loading" in the first place.
 

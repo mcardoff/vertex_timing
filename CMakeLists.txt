@@ -63,6 +63,7 @@ add_executable(vbs_mjj_diag util/vbs_mjj_diag.cxx)
 add_executable(ttreemt_prototype util/ttreemt_prototype.cxx)
 add_executable(assoc_study_hist util/assoc_study_hist.cxx)
 add_executable(assoc_study_plot util/assoc_study_plot.cxx)
+add_executable(hist_merge util/hist_merge.cxx)
 
 # Specify the include directories for your header files
 foreach(_tgt
@@ -85,6 +86,7 @@ foreach(_tgt
     ttreemt_prototype
     assoc_study_hist
     assoc_study_plot
+    hist_merge
 )
     target_include_directories(${_tgt}
         PRIVATE

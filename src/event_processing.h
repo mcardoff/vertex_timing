@@ -47,34 +47,64 @@ namespace MyUtl {
   //   the process sits at ~60 MB with ROOT loaded and no output for the
   //   duration, before the worker threads allocate their histograms.
   // ---------------------------------------------------------------------------
+  //   `shard` restricts this process to files index, index+count, index+2*count,
+  //   ... of the SORTED file list. The default {0, 1} takes everything.
+  //
+  //   The sort is load-bearing, not tidiness: directory_iterator's order is
+  //   filesystem-defined and not guaranteed stable, so without it two shards
+  //   could disagree about which file is "3rd" and silently double-process or
+  //   skip data. Sorting makes the partition exact and reproducible. It also
+  //   makes an unsharded run deterministic, which it previously was not --
+  //   harmless for full runs (every fill is unweighted, so bin contents are
+  //   order-independent integer sums) but it does change WHICH events a
+  //   --max-events run sees.
+  //
+  //   Round-robin rather than contiguous blocks so that any systematic trend
+  //   in file size or content along the listing is spread evenly across shards
+  //   instead of concentrated in one.
   void setupChain(
-    TChain &chain, const char* ntupleDir
+    TChain &chain, const char* ntupleDir, Shard shard = {}
   ) {
+    std::vector<std::string> paths;
     for (const auto& entry : directory_iterator(ntupleDir)) {
       if (entry.is_directory()) {
         for (const auto& nested : directory_iterator(entry.path())) {
           if (nested.is_directory()) continue;
-          if(DEBUG) {std::cout << "Adding file: " << nested.path() << '\n';}
-          chain.Add(nested.path().c_str());
+          paths.push_back(nested.path().string());
         }
         continue;
       }
-      if(DEBUG) {std::cout << "Adding file: " << entry.path() << '\n';}
-      chain.Add(entry.path().c_str());
+      paths.push_back(entry.path().string());
+    }
+    std::sort(paths.begin(), paths.end());
+
+    const size_t nFound = paths.size();
+    for (size_t i = 0; i < paths.size(); ++i) {
+      if (shard.active() && (int)(i % (size_t)shard.count) != shard.index) continue;
+      if (DEBUG) { std::cout << "Adding file: " << paths[i] << '\n'; }
+      chain.Add(paths[i].c_str());
     }
 
     // Counts what Add() recorded, NOT what the files contain -- no file is
     // opened. Previously this was `chain.GetEntries() == 0`, which also only
     // ever needed to distinguish zero from non-zero.
-    const int nFiles = chain.GetListOfFiles() ? chain.GetListOfFiles()->GetEntries() : 0;
-    if (nFiles == 0) {
+    const int nAdded = chain.GetListOfFiles() ? chain.GetListOfFiles()->GetEntries() : 0;
+    if (nFound == 0) {
       // Was a bare `return`, which left the caller running on an empty chain
       // after printing to stderr -- a silent no-op run rather than a failure.
       std::cerr << "No ROOT files found in directory: " << ntupleDir << "\n";
       std::exit(1);
     }
-    std::cout << "[chain] " << nFiles << " files added from " << ntupleDir
-              << " (entry counts deferred)" << std::endl;
+    if (nAdded == 0) {
+      std::cerr << "--file-shard=" << shard.index << "/" << shard.count
+                << " selects no files out of " << nFound << " found.\n";
+      std::exit(1);
+    }
+    std::cout << "[chain] " << nAdded << " files added from " << ntupleDir;
+    if (shard.active())
+      std::cout << " (shard " << shard.index << "/" << shard.count
+                << " of " << nFound << ")";
+    std::cout << " (entry counts deferred)" << std::endl;
   }
 
   // ---------------------------------------------------------------------------

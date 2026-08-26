@@ -424,6 +424,7 @@ int main(int argc, char** argv) {
   MyUtl::ENERGY_LABEL = sample.energyLabel;
   MyUtl::OUTPUT_DIR   = sample.outputDir;
   MyUtl::SAMPLE_NAME  = sample.sampleName;
+  MyUtl::FILE_SHARD   = MyUtl::resolveShard(argc, argv);
   MyUtl::OVERLAP_REMOVAL = sample.overlapRemoval;  // Z+jets lepton–jet overlap removal
   boost::filesystem::create_directories(MyUtl::OUTPUT_DIR);
   if (MyUtl::SAMPLE_NAME.empty())
@@ -464,7 +465,7 @@ int main(int argc, char** argv) {
   // opened every file in the chain -- 0.3-1.2 s each on the AF's /data, so
   // 5-30 minutes of dead time -- to answer a question the file list already
   // answers. See setupChain's note in src/event_processing.h.
-  setupChain(chain, sample.ntupleDir.c_str());
+  setupChain(chain, sample.ntupleDir.c_str(), MyUtl::FILE_SHARD);
   phase.mark("chain built");
   ROOT::EnableImplicitMT(nThreads);
 

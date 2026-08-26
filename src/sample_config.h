@@ -245,6 +245,67 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
+  // Shard: which slice of a sample's files this process handles.
+  //   index in [0, count), count >= 1. The default {0, 1} means "all files",
+  //   so any executable or invocation that never mentions sharding is
+  //   unchanged.
+  //
+  //   Sharding exists because a single job pays the whole per-file startup
+  //   cost serially (0.3-1.2 s per file on the AF's /data) AND runs the whole
+  //   event loop. Splitting a sample N ways divides both. See CLAUDE.md's
+  //   "Job cost" section for the measurements that motivated it.
+  // ---------------------------------------------------------------------------
+  struct Shard {
+    int index = 0;
+    int count = 1;
+    bool active() const { return count > 1; }
+    // Filename-safe marker woven into the output path so shards of one sample
+    // cannot overwrite each other.
+    std::string tag() const {
+      return active() ? ".shard" + std::to_string(index) + "of" + std::to_string(count)
+                      : std::string();
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // resolveShard
+  //   --file-shard=<i>/<N>: this process handles files i, i+N, i+2N, ... of the
+  //   sample's sorted file list. Absent => {0, 1} => every file.
+  // ---------------------------------------------------------------------------
+  inline Shard resolveShard(int argc, char** argv) {
+    const std::string prefix = "--file-shard=";
+    for (int i = 1; i < argc; ++i) {
+      std::string arg = argv[i];
+      if (arg.rfind(prefix, 0) != 0) continue;
+      std::string v = arg.substr(prefix.size());
+      auto slash = v.find('/');
+      if (slash == std::string::npos) {
+        std::cerr << "Bad --file-shard value '" << v << "'; expected <i>/<N>, e.g. 0/10.\n";
+        std::exit(1);
+      }
+      Shard s;
+      try {
+        s.index = std::stoi(v.substr(0, slash));
+        s.count = std::stoi(v.substr(slash + 1));
+      } catch (const std::exception&) {
+        std::cerr << "Bad --file-shard value '" << v << "'; expected <i>/<N>, e.g. 0/10.\n";
+        std::exit(1);
+      }
+      if (s.count < 1 || s.index < 0 || s.index >= s.count) {
+        std::cerr << "--file-shard out of range: got " << s.index << "/" << s.count
+                  << "; need 0 <= i < N and N >= 1.\n";
+        std::exit(1);
+      }
+      return s;
+    }
+    return {};
+  }
+
+  // Set once in main() alongside SAMPLE_NAME, read by histFilePath() so every
+  // shard writes a distinct file. Mirrors SELECTION_TAG's role.
+  inline Shard FILE_SHARD = {};
+
+  // ---------------------------------------------------------------------------
   // resolveMaxEvents
   //   Optional event cap via a --max-events=<N> CLI flag, for quick local
   //   sanity checks (e.g. a diagnostic breakdown) without waiting on a full
@@ -342,8 +403,20 @@ namespace MyUtl {
     std::chrono::steady_clock::time_point start_;
   };
 
+  //   FILE_SHARD (non-default only when --file-shard was given) inserts a
+  //   ".shard<i>of<N>" marker before the extension, so the N shards of one
+  //   sample land side by side instead of overwriting each other. Empty for
+  //   an unsharded run, leaving every existing path byte-identical.
+  inline std::string shardTagged(const std::string& baseName) {
+    if (!FILE_SHARD.active()) return baseName;
+    auto dot = baseName.rfind('.');
+    return dot == std::string::npos
+             ? baseName + FILE_SHARD.tag()
+             : baseName.substr(0, dot) + FILE_SHARD.tag() + baseName.substr(dot);
+  }
+
   inline std::string histFilePath(const std::string& baseName) {
-    const std::string base = selectionTagged(baseName);
+    const std::string base = shardTagged(selectionTagged(baseName));
     if (!SAMPLE_NAME.empty())
       return OUTPUT_DIR + "/" + SAMPLE_NAME + "_" + base;
     return OUTPUT_DIR + "/hists/" + base;

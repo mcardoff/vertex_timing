@@ -103,6 +103,7 @@ auto main(int argc, char** argv) -> int {
   MyUtl::ENERGY_LABEL = sample.energyLabel;
   MyUtl::OUTPUT_DIR   = sample.outputDir;
   MyUtl::SAMPLE_NAME  = sample.sampleName;
+  MyUtl::FILE_SHARD   = MyUtl::resolveShard(argc, argv);
   MyUtl::OVERLAP_REMOVAL = sample.overlapRemoval;  // Z+jets lepton–jet overlap removal
   boost::filesystem::create_directories(MyUtl::OUTPUT_DIR);
   if (MyUtl::SAMPLE_NAME.empty())
@@ -122,7 +123,7 @@ auto main(int argc, char** argv) -> int {
 
   // --- Data source ---
   TChain chain("ntuple");
-  setupChain(chain, sample.ntupleDir.c_str());
+  setupChain(chain, sample.ntupleDir.c_str(), MyUtl::FILE_SHARD);
   phase.mark("chain built");
   ROOT::EnableImplicitMT(nThreads);
 
