@@ -49,12 +49,35 @@ executable               = run_analysis.sh
 sample                   = vbf
 nshards                  = 4
 
-arguments                = rpt_v5_hist $(sample) 4 --file-shard=$(ProcId)/$(nshards)
+# Non-default VBS selection (resolveSelection in src/sample_config.h).
+# Empty = the standard selection, and every path below is then exactly as
+# documented above.
+#
+# These two MUST agree: selargs changes the cuts, and the executable stamps a
+# matching SELECTION_TAG onto the output FILENAME so a loosened run cannot
+# overwrite the standard one. transfer_output_files has to name that same
+# file. seltag is that tag INCLUDING its trailing underscore.
+#
+#   selargs                          seltag
+#   (empty)                          (empty)
+#   --vbs-deta=0                     deta0p0_
+#   --vbs-mjj=200                    mjj200p0_
+#   --vbs-deta=0 --vbs-mjj=200       deta0p0_mjj200p0_
+#
+# Verify before submitting -- `condor_submit -dump` prints the expanded
+# transfer_output_files, and running the executable locally with the same
+# selargs prints "[selection] ... (tag: ...)". A mismatch is not silent: the
+# job completes and then goes on hold failing to transfer a file that does
+# not exist.
+selargs                  =
+seltag                   =
+
+arguments                = rpt_v5_hist $(sample) 4 --file-shard=$(ProcId)/$(nshards) $(selargs)
 
 should_transfer_files    = YES
 when_to_transfer_output  = ON_EXIT
 transfer_input_files     = ../build/rpt_v5_hist
-transfer_output_files    = $(sample)/$(sample)_rpt_v5_hist.shard$(ProcId)of$(nshards).root
+transfer_output_files    = $(sample)/$(sample)_$(seltag)rpt_v5_hist.shard$(ProcId)of$(nshards).root
 # The histogram file name is now sample-prefixed (src/sample_config.h's
 # histFilePath()), so the 3 queued jobs' output basenames
 # (vbf_rpt_v5_hist.root, zjets_rpt_v5_hist.root, dijet_rpt_v5_hist.root) no
@@ -80,7 +103,7 @@ transfer_output_files    = $(sample)/$(sample)_rpt_v5_hist.shard$(ProcId)of$(nsh
 # execution directory, not by the path used to locate it via
 # transfer_output_files. Directories ARE allowed on the RHS (`newname`) and
 # are created as needed.
-transfer_output_remaps   = "$(sample)_rpt_v5_hist.shard$(ProcId)of$(nshards).root=$(sample)/$(sample)_rpt_v5_hist.shard$(ProcId)of$(nshards).root"
+transfer_output_remaps   = "$(sample)_$(seltag)rpt_v5_hist.shard$(ProcId)of$(nshards).root=$(sample)/$(sample)_$(seltag)rpt_v5_hist.shard$(ProcId)of$(nshards).root"
 # $(ProcId) is the shard index: `queue $(nshards)` below runs ProcId
 # 0..nshards-1, which --file-shard consumes directly. Merge the results
 # afterwards with hist_merge -- NOT hadd, which would silently keep one

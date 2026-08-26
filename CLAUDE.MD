@@ -646,6 +646,29 @@ cd ../build
 ./clustering_plot --sample=zjets                                 # unchanged
 ```
 
+A non-default VBS selection needs **two** matching macros, because
+`resolveSelection` stamps a `SELECTION_TAG` onto the output filename (so a
+loosened run cannot overwrite the standard one) and `transfer_output_files`
+must name that same file:
+
+| `selargs` | `seltag` (note trailing `_`) |
+|---|---|
+| *(empty)* | *(empty)* |
+| `--vbs-deta=0` | `deta0p0_` |
+| `--vbs-mjj=200` | `mjj200p0_` |
+| `--vbs-deta=0 --vbs-mjj=200` | `deta0p0_mjj200p0_` |
+
+```bash
+condor_submit -a sample=zjets -a nshards=32 \
+              -a 'selargs=--vbs-deta=0 --vbs-mjj=200' \
+              -a seltag=deta0p0_mjj200p0_ clustering_hist.sub
+```
+
+A mismatch is not silent — the job completes and then goes on hold failing to
+transfer a file that does not exist — but `condor_submit -dump` shows the
+expanded name, and running the executable locally with the same `selargs`
+prints `[selection] ... (tag: ...)`.
+
 **Shard counts should track EVENT count, not file count** — zjets has 8.08M events against vbf's 0.50M and dijet's 0.70M, so an equal split would leave zjets jobs ~16x longer than the rest. 4/4/32 puts every job in the same ballpark.
 
 `--file-shard` tags the output filename whenever it is passed, **including at N = 1** (`Shard::given`, not `count > 1`). That looks redundant but is what lets one `.sub` template the output name on `$(ProcId)/$(nshards)` for any shard count: tying the tag to `count > 1` would make `nshards=1` write an untagged file the submit file then fails to transfer back — a foot-gun that only fires at the least-tested value.
