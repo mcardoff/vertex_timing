@@ -591,7 +591,134 @@ cd ../build
 ./rpt_v5_plot --sample=<sample>
 ```
 
-Logs land in `condor/logs/clustering_hist_<sample>.<ClusterId>.<ProcId>.{out,err,log}` (prefixed `rpt_v5_hist_` for the rpt_v5_hist cluster).
+Logs land in `condor/logs/clustering_hist_<sample>.<ClusterId>.<ProcId>.{out,err,log}` (prefixed `rpt_v5_hist_` for the rpt_v5_hist cluster). `stream_output`/`stream_error` are **on**, so `.out`/`.err` are written back to the submit node as the job runs rather than only on exit — without that, `condor_tail` mid-job shows only whatever happened to be flushed.
+
+### Job cost: where the time actually goes
+
+Measured from the three-sample `rpt_v5_hist` clusters of 2026-07-03 (`condor/logs/`, three repeats each):
+
+| sample | files | events | wall | CPU | wall/event |
+|---|---:|---:|---:|---:|---:|
+| vbf   | 1002 |   499,100 |  24.9 min | 12.2 min | 2.99 ms |
+| dijet | 1414 |   699,500 |  25.2 min |  8.4 min | 2.16 ms |
+| zjets | 2005 | 8,084,000 | 183.3 min | 108.0 min | 1.36 ms |
+
+**Z+jets is not inefficient — it is 16.2x larger than vbf** (both DSIDs, Zee+Zmumu). Per event it is the *fastest* of the three. File count is not a driver either: dijet has 1.4x vbf's files and 1.4x its events at the same wall time.
+
+**Startup dead time is the real inefficiency, and it is not proportional to anything.** From the condor `.log` image-size timeline (memory sits at ~60 MB with ROOT loaded and nothing allocated, then jumps to ~500 MB when the worker threads book their histograms):
+
+| sample | run 1 | run 2 | run 3 |
+|---|---|---|---|
+| vbf   | 20.2 min |  5.1 min | 15.2 min |
+| dijet | 10.2 min | 20.2 min | 10.1 min |
+| zjets | 30.2 min | 25.2 min | 20.2 min |
+
+That is 5–30 min, varying **4x run-to-run on the same sample** — filesystem contention, not a per-sample property. It is 15–20% of a zjets job but **40–80% of a vbf or dijet job**. Sampled at condor's 5-minute granularity, so ±5 min.
+
+Mechanism: `TChain::Add` is lazy (opens nothing), but `TChain::GetEntries()` opens **every file** in the chain to sum entry counts — 0.3–1.2 s per file on `/data` against 4.3 ms on local SSD. That call has been removed from `setupChain` (the "did we find files?" question is answered by `GetListOfFiles()->GetEntries()` with no I/O) and from the `*_hist` progress denominators, leaving only `TTreeProcessorMT`'s own pass. **Do not reintroduce it** — see the note on `setupChain` in `src/event_processing.h`.
+
+How much that actually saved, measured on the local 33-file sample (time from start to the first event reaching a worker):
+
+| | serial startup |
+|---|---:|
+| with `GetEntries()` | 0.205 s (6.1 ms/file) |
+| deferred | 0.103 s (3.1 ms/file) |
+
+**~50%**, not more: `TTreeProcessorMT` still opens every file serially for cluster boundaries before dispatching any task. In the old ordering that second pass was nearly free (0.004 s) only because `GetEntries` had already warmed the files.
+
+**What is left, and what does NOT fix it.** The remaining pass is latency-bound, so overlapping it looks attractive — opening every file concurrently first does collapse the serial scan to 0.004 s. But the prewarm then costs as much as it saves (0.132 s at 8 threads vs a 0.117 s scan): on local SSD the opens are bandwidth-bound and concurrency buys nothing. Whether the AF's shared storage behaves differently is untested and should not be assumed — an earlier plausible-sounding fix here (hoisting `passBasicCuts` above the Z+jets lepton work, so rejected events never touch per-track branches) measured at **1 µs/event**, i.e. 0.1 min over 8M events, and was dropped.
+
+### Sharding a sample across jobs
+
+`--file-shard=<i>/<N>` restricts a `*_hist` process to files i, i+N, i+2N, … of the **sorted** file list, and `hist_merge` combines the per-shard outputs. N jobs each pay 1/N of the per-file startup *and* run 1/N of the event loop concurrently, so it attacks both costs at once.
+
+Both `*_hist.sub` files now take `sample` and `nshards` as submit macros and queue `$(nshards)` jobs for **one** sample, with `$(ProcId)` as the shard index — so each sample gets its own ClusterId and its own shard count:
+
+```bash
+cd build && cmake .. && make clustering_hist rpt_v5_hist hist_merge
+cd condor
+condor_submit -a sample=vbf   -a nshards=4  clustering_hist.sub
+condor_submit -a sample=dijet -a nshards=4  clustering_hist.sub
+condor_submit -a sample=zjets -a nshards=12 clustering_hist.sub
+# after they land -- note condor/<sample>/, NOT <repo-root>/<sample>/:
+cd ..
+./build/hist_merge condor/zjets/zjets_clustering_hist.root \
+                   condor/zjets/zjets_clustering_hist.shard*of12.root
+./build/clustering_plot --sample=zjets --hist-file=condor/zjets/zjets_clustering_hist.root
+```
+
+**Outputs land in `condor/<sample>/`.** `transfer_output_remaps`' RHS resolves
+against the **submit** directory, and submission happens from `condor/`. An
+earlier version of this section said `<repo-root>/<sample>/`; that is wrong,
+and since `clustering_plot --sample=` looks under `OUTPUT_DIR` it needs
+`--hist-file=` unless the merged file is moved.
+
+A non-default VBS selection needs **two** matching macros, because
+`resolveSelection` stamps a `SELECTION_TAG` onto the output filename (so a
+loosened run cannot overwrite the standard one) and `transfer_output_files`
+must name that same file:
+
+| `selargs` | `seltag` (note trailing `_`) |
+|---|---|
+| *(empty)* | *(empty)* |
+| `--vbs-deta=0` | `deta0p0_` |
+| `--vbs-mjj=200` | `mjj200p0_` |
+| `--vbs-deta=0 --vbs-mjj=200` | `deta0p0_mjj200p0_` |
+
+```bash
+condor_submit -a sample=zjets -a nshards=32 \
+              -a 'selargs=--vbs-deta=0 --vbs-mjj=200' \
+              -a seltag=deta0p0_mjj200p0_ clustering_hist.sub
+```
+
+A mismatch is not silent — the job completes and then goes on hold failing to
+transfer a file that does not exist — but `condor_submit -dump` shows the
+expanded name, and running the executable locally with the same `selargs`
+prints `[selection] ... (tag: ...)`.
+
+**Shard counts should track EVENT count, not file count.** Beware that the
+counts in the "Job cost" table above are from the 2026-07-03 runs, and the
+zjets dataset has since been **replaced** (`...20260712_Output`, produced
+2026-07-12): the current zjets is **2.0M events over 2000 files**, not 8.08M.
+Re-measure before sizing shards for a sample you have not run recently -- the
+`[chain] N files added` line plus the run's own event total give it for free.
+At 2.0M, zjets wants ~12 shards, not 32; the 32-shard run below spent 49 s of
+cvmfs setup against 257 s of actual work per job.
+
+`--file-shard` tags the output filename whenever it is passed, **including at N = 1** (`Shard::given`, not `count > 1`). That looks redundant but is what lets one `.sub` template the output name on `$(ProcId)/$(nshards)` for any shard count: tying the tag to `count > 1` would make `nshards=1` write an untagged file the submit file then fails to transfer back — a foot-gun that only fires at the least-tested value.
+
+The sort in `setupChain` is load-bearing, not tidiness: `directory_iterator` order is filesystem-defined and not guaranteed stable, so without it two shards could disagree about which file is "3rd" and silently double-process or skip data. It also makes an unsharded run deterministic, which it previously was not — harmless for full runs, but it changes *which* events a `--max-events` run sees.
+
+**`hadd` will not do this job.** It merges anything with a `Merge()` method and keeps the **first occurrence** of everything else. Every scalar `HistWriter` emits is a `TParameter` — event counts, rejection tallies, the pT accumulators `rpt_v5_plot` turns into untimed-fraction percentages — and `TParameter` has no `Merge()`. `hadd` would produce histograms summed over N shards alongside one shard's event counts, silently. `util/hist_merge.cxx` sums them explicitly, and refuses (rather than dropping) any key type it does not recognise.
+
+**First real grid run** (cluster 2928803, 2026-08-26, zjets `clustering_hist`,
+32 shards, `--vbs-deta=0 --vbs-mjj=200`): **32/32 shards completed, none held**,
+end-to-end **5.3 min**. Per shard: cvmfs setup 49 s mean / 58 s max, `[chain]`
+build **0.1 s for 63 files**, event loop 257 s mean / 265 s max.
+
+Two things that confirms:
+
+- **The startup diagnosis was right.** cvmfs is only ~50 s, so the 5–30 min of
+  pre-loop dead time seen in July was almost entirely the `TChain::GetEntries()`
+  file-open pass — 0.1 s for 63 files now, against 0.3–1.2 s *per file* before.
+- **Sharding delivers.** The 32 shards' event loops total 137 min, which is
+  what one unsharded job would have spent (same 4 threads, 32x the events),
+  plus the 10–40 min serial open pass that no longer exists. So ~150–180 min
+  unsharded against 5.3 min sharded: **~30x**.
+
+**Validation** (local VBF, `util/scratch/compare_hists.py`, unsharded vs sharded-and-merged):
+
+| executable | shards | histograms bit-identical | worst relative bin diff |
+|---|---|---|---|
+| `rpt_v5_hist`      | 3 | **72 / 72**       | **0** (exactly) |
+| `clustering_hist`  | 4 | 461 / 477         | 5.6e-13 |
+| `assoc_study_hist` | 5 | 1326 / 1378       | 1.1e-12 |
+
+Every scalar matched exactly in all three, and shard event counts summed to the unsharded total exactly (12353+11785+11635+11762 = 47535). `assoc_study_plot`'s full numeric output was **byte-identical** between the unsharded and merged files.
+
+The only objects that differ are `TProfile2D`s, which accumulate sums of floating-point values whose addition order changes with the partition — machine epsilon, ~12 orders of magnitude below any physics tolerance. Every other histogram is bit-identical because all fills in this codebase are unweighted, so bin contents are integer-valued sums. `rpt_v5_hist` matching exactly also independently confirms that its per-event RNG re-seeding really is independent of how work is distributed (see the Diagnostics section) — sharding is a stronger test of that than varying the thread count.
+
+The remaining dead time is the ATLAS/cvmfs `lsetup` in `run_analysis.sh`, which now prints `[job t+NNNNs]` stamps around itself so setup and analysis are separately attributable; the executables print `[t+NNN.N s]` phase marks (`MyUtl::PhaseTimer`). Both flush immediately — a block-buffered stdout with no flushes is why a working job looked hung under `condor_tail`, which is what sent an earlier investigation after "file loading" in the first place.
 
 **Caveat:** the build uses `-march=native` (see Compiler Flags above), tuned to whichever machine ran `make`. If execute hosts have a different CPU microarchitecture than the build host, jobs can crash with an "Illegal instruction" (SIGILL) rather than a normal error.
 

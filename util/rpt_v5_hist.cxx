@@ -414,12 +414,17 @@ int main(int argc, char** argv) {
   // produces identically-named histograms, harmless only because of this.
   TH1::AddDirectory(kFALSE);
 
+  // Flushed phase timestamps -- see the identical rationale in
+  // src/clustering_hist.cxx and MyUtl::PhaseTimer.
+  MyUtl::PhaseTimer phase;
+
   // --- Sample selection (--sample=vbf|zjets|dijet; default: local VBF ntuple) ---
   auto sample = MyUtl::resolveSample(argc, argv);
   MyUtl::resolveSelection(argc, argv);  // --vbs-deta=<x>; sets SELECTION_TAG
   MyUtl::ENERGY_LABEL = sample.energyLabel;
   MyUtl::OUTPUT_DIR   = sample.outputDir;
   MyUtl::SAMPLE_NAME  = sample.sampleName;
+  MyUtl::FILE_SHARD   = MyUtl::resolveShard(argc, argv);
   MyUtl::OVERLAP_REMOVAL = sample.overlapRemoval;  // Z+jets lepton–jet overlap removal
   boost::filesystem::create_directories(MyUtl::OUTPUT_DIR);
   if (MyUtl::SAMPLE_NAME.empty())
@@ -455,11 +460,13 @@ int main(int argc, char** argv) {
               INFL.hgtd, INFL.trkptz, INFL.waves);
 
   TChain chain("ntuple");
-  setupChain(chain, sample.ntupleDir.c_str());
-  if (chain.GetEntries() == 0) {
-    std::cerr << "No ROOT files found.  Aborting.\n";
-    return 1;
-  }
+  // setupChain now validates the file list itself (and aborts if empty) with
+  // no file I/O. The chain.GetEntries() == 0 check that used to sit here
+  // opened every file in the chain -- 0.3-1.2 s each on the AF's /data, so
+  // 5-30 minutes of dead time -- to answer a question the file list already
+  // answers. See setupChain's note in src/event_processing.h.
+  setupChain(chain, sample.ntupleDir.c_str(), MyUtl::FILE_SHARD);
+  phase.mark("chain built");
   ROOT::EnableImplicitMT(nThreads);
 
   // --- Per-thread state registry, merged into one after the event loop.
@@ -482,14 +489,13 @@ int main(int argc, char** argv) {
 
   std::atomic<Long64_t> progressCounter{0};
 
-  std::cout << "Starting Event Loop\n";
-  const Long64_t N_EVENT = chain.GetEntries();
-
   // Optional --max-events=<N> cap for quick local checks (see resolveMaxEvents
   // in sample_config.h). -1 means unlimited -- every existing invocation
-  // without the flag is unaffected.
+  // without the flag is unaffected. The denominator is deliberately NOT
+  // chain.GetEntries(): see the note above and in setupChain. Uncapped, the
+  // total is simply unknown and progress prints as a bare count.
   const Long64_t maxEvents     = MyUtl::resolveMaxEvents(argc, argv);
-  const Long64_t progressDenom = (maxEvents > 0) ? std::min(maxEvents, N_EVENT) : N_EVENT;
+  const Long64_t progressDenom = (maxEvents > 0) ? maxEvents : -1;
   if (maxEvents > 0)
     std::cout << "Restricting to first " << progressDenom << " events (--max-events)\n";
 
@@ -540,7 +546,16 @@ int main(int argc, char** argv) {
       ++state.n_total;
 
       if (n % 5000 == 0)
-        std::cout << "Progress: " << n << "/" << progressDenom << "\r" << std::flush;
+      {
+        // '\r' only when stdout is a terminal; under condor it is a file,
+        // where overwriting one line yields an unreadable mega-line and no
+        // sense of rate. See MyUtl::STDOUT_IS_TTY.
+        if (MyUtl::STDOUT_IS_TTY)
+          std::cout << "Progress: " << n << (progressDenom > 0
+                       ? "/" + std::to_string(progressDenom) : "") << "\r" << std::flush;
+        else if (n % 100000 == 0)
+          phase.mark("processed " + std::to_string(n) + " events");
+      }
 
       // ── Require only vertex quality (paper Sec. 3: |z_reco − z_truth| < 2 mm).
       if (branch.recoVtxZ.GetSize() == 0 || branch.truthVtxZ.GetSize() == 0) continue;
@@ -1138,6 +1153,7 @@ int main(int argc, char** argv) {
   }
 
   std::cout << "\nFINISHED PROCESSING\n";
+  phase.mark("event loop done");
 
   // --- Save every histogram + scalar accumulator to a ROOT file ---
   const std::string histPath = MyUtl::histFilePath("rpt_v5_hist.root");
@@ -1166,6 +1182,7 @@ int main(int argc, char** argv) {
   writer.WriteRunMeta(MyUtl::ENERGY_LABEL, merged.n_total);
   writer.Close();
   std::cout << "Wrote histograms to " << histPath << "\n";
+  phase.mark("histograms written");
 
   // --- Z+jets event-selection breakdown (no-op elsewhere: n_pass_lepton_sel
   //     == n_pass_basic when OVERLAP_REMOVAL is unset). Printed directly here

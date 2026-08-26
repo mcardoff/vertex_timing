@@ -1,5 +1,6 @@
 # ---------------------------------------------------------------------------
-# rpt_v5_hist.sub — condor submit template: one job per sample.
+# rpt_v5_hist.sub — condor submit template: one SAMPLE per submit,
+# split into $(nshards) parallel shard jobs.
 #
 # Histogramming stage of the rpt_v5 split (see CLAUDE.md's "Main Executables"
 # section): runs the event loop and writes
@@ -13,8 +14,20 @@
 #   cd build && cmake .. && make rpt_v5_hist        # build BEFORE submitting
 #   chmod +x condor/run_analysis.sh
 #
-# Submit (from inside condor/, so relative paths below resolve correctly):
-#   cd condor && condor_submit rpt_v5_hist.sub
+# Submit (from inside condor/, so relative paths below resolve correctly).
+# One condor_submit per sample -- each gets its own ClusterId, and shard
+# counts differ per sample because event counts do:
+#   cd condor
+#   condor_submit -a sample=vbf   -a nshards=4  rpt_v5_hist.sub
+#   condor_submit -a sample=dijet -a nshards=4  rpt_v5_hist.sub
+#   condor_submit -a sample=zjets -a nshards=32 rpt_v5_hist.sub
+#
+# Then merge each sample's shards (hist_merge, NOT hadd -- see below).
+# Outputs land in condor/<sample>/: transfer_output_remaps' RHS resolves
+# against the SUBMIT directory, which is this one.
+#   cd ..
+#   ./build/hist_merge condor/zjets/zjets_rpt_v5_hist.root \\
+#                      condor/zjets/zjets_rpt_v5_hist.shard*of12.root
 #
 # Separate .sub file from clustering_hist.sub on purpose: each condor_submit
 # call gets its own ClusterId, so this runs as an independent job cluster
@@ -28,12 +41,47 @@
 # ---------------------------------------------------------------------------
 universe                 = vanilla
 executable               = run_analysis.sh
-arguments                = rpt_v5_hist $(sample) 4
+# One sample per submit, sharded $(nshards) ways. Both are macros with
+# defaults, overridden per submission:
+#   condor_submit -a sample=zjets -a nshards=32 rpt_v5_hist.sub
+#
+# Shard counts should track EVENT count, not file count: zjets has 8.08M
+# events against vbf's 0.50M and dijet's 0.70M (measured, see CLAUDE.md's
+# "Job cost" section) -- but RE-MEASURE: the zjets dataset was replaced on
+# 2026-07-12 and is now 2.0M events, not 8.08M. Suggested: vbf 4, dijet 4,
+# zjets 12.
+sample                   = vbf
+nshards                  = 4
+
+# Non-default VBS selection (resolveSelection in src/sample_config.h).
+# Empty = the standard selection, and every path below is then exactly as
+# documented above.
+#
+# These two MUST agree: selargs changes the cuts, and the executable stamps a
+# matching SELECTION_TAG onto the output FILENAME so a loosened run cannot
+# overwrite the standard one. transfer_output_files has to name that same
+# file. seltag is that tag INCLUDING its trailing underscore.
+#
+#   selargs                          seltag
+#   (empty)                          (empty)
+#   --vbs-deta=0                     deta0p0_
+#   --vbs-mjj=200                    mjj200p0_
+#   --vbs-deta=0 --vbs-mjj=200       deta0p0_mjj200p0_
+#
+# Verify before submitting -- `condor_submit -dump` prints the expanded
+# transfer_output_files, and running the executable locally with the same
+# selargs prints "[selection] ... (tag: ...)". A mismatch is not silent: the
+# job completes and then goes on hold failing to transfer a file that does
+# not exist.
+selargs                  =
+seltag                   =
+
+arguments                = rpt_v5_hist $(sample) 4 --file-shard=$(ProcId)/$(nshards) $(selargs)
 
 should_transfer_files    = YES
 when_to_transfer_output  = ON_EXIT
 transfer_input_files     = ../build/rpt_v5_hist
-transfer_output_files    = $(sample)/$(sample)_rpt_v5_hist.root
+transfer_output_files    = $(sample)/$(sample)_$(seltag)rpt_v5_hist.shard$(ProcId)of$(nshards).root
 # The histogram file name is now sample-prefixed (src/sample_config.h's
 # histFilePath()), so the 3 queued jobs' output basenames
 # (vbf_rpt_v5_hist.root, zjets_rpt_v5_hist.root, dijet_rpt_v5_hist.root) no
@@ -59,9 +107,23 @@ transfer_output_files    = $(sample)/$(sample)_rpt_v5_hist.root
 # execution directory, not by the path used to locate it via
 # transfer_output_files. Directories ARE allowed on the RHS (`newname`) and
 # are created as needed.
-transfer_output_remaps   = "$(sample)_rpt_v5_hist.root=$(sample)/$(sample)_rpt_v5_hist.root"
+transfer_output_remaps   = "$(sample)_$(seltag)rpt_v5_hist.shard$(ProcId)of$(nshards).root=$(sample)/$(sample)_$(seltag)rpt_v5_hist.shard$(ProcId)of$(nshards).root"
+# $(ProcId) is the shard index: `queue $(nshards)` below runs ProcId
+# 0..nshards-1, which --file-shard consumes directly. Merge the results
+# afterwards with hist_merge -- NOT hadd, which would silently keep one
+# shard's event counts (see util/hist_merge.cxx).
 
 getenv                   = True
+
+# Write .out/.err back to the submit node AS THEY ARE PRODUCED, rather than
+# only on exit (condor's default). Without this a `condor_tail` mid-job shows
+# whatever happened to be flushed, which for a job whose startup is minutes of
+# silent file I/O is indistinguishable from a hang -- and that misread is what
+# sent a performance investigation after "file loading" when the executables
+# simply were not reporting. Cheap now that the event loop emits one progress
+# line per 100k events instead of overwriting a single line every 5k.
+stream_output            = True
+stream_error             = True
 
 # CERN-style job-length hint; harmless no-op on pools that don't read it,
 # remove if your condor pool doesn't recognize +JobFlavour.
@@ -80,4 +142,9 @@ output                   = logs/rpt_v5_hist_$(sample).$(ClusterId).$(ProcId).out
 error                    = logs/rpt_v5_hist_$(sample).$(ClusterId).$(ProcId).err
 log                      = logs/rpt_v5_hist_$(sample).$(ClusterId).$(ProcId).log
 
-queue sample in (vbf, zjets, dijet)
+queue $(nshards)
+
+# After all shards land:
+#   cd ../build
+#   ./hist_merge ../$(sample)/$(sample)_rpt_v5_hist.root \
+#                ../$(sample)/$(sample)_rpt_v5_hist.shard*of$(nshards).root

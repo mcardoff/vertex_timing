@@ -20,6 +20,9 @@
 #include <map>
 #include <sstream>
 #include <string>
+#include <cstdio>
+#include <unistd.h>
+#include <chrono>
 #include <thread>
 
 namespace MyUtl {
@@ -242,6 +245,79 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
+  // Shard: which slice of a sample's files this process handles.
+  //   index in [0, count), count >= 1. The default {0, 1} means "all files",
+  //   so any executable or invocation that never mentions sharding is
+  //   unchanged.
+  //
+  //   Sharding exists because a single job pays the whole per-file startup
+  //   cost serially (0.3-1.2 s per file on the AF's /data) AND runs the whole
+  //   event loop. Splitting a sample N ways divides both. See CLAUDE.md's
+  //   "Job cost" section for the measurements that motivated it.
+  // ---------------------------------------------------------------------------
+  struct Shard {
+    int index = 0;
+    int count = 1;
+    // Whether --file-shard was actually passed. Deliberately separate from
+    // count > 1: a submit file that templates the output name on the shard
+    // must get a shard-tagged name for EVERY shard count it might be run at,
+    // including N = 1. Tying the tag to count > 1 instead would make
+    // --file-shard=0/1 write an untagged file that the .sub then fails to
+    // transfer back -- a foot-gun that only fires at the least-tested value.
+    bool given = false;
+
+    // True when the rule actually partitions the file list. N = 1 selects
+    // everything, so it does not.
+    bool active() const { return count > 1; }
+
+    // Filename-safe marker woven into the output path so shards of one sample
+    // cannot overwrite each other.
+    std::string tag() const {
+      return given ? ".shard" + std::to_string(index) + "of" + std::to_string(count)
+                   : std::string();
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // resolveShard
+  //   --file-shard=<i>/<N>: this process handles files i, i+N, i+2N, ... of the
+  //   sample's sorted file list. Absent => {0, 1} => every file.
+  // ---------------------------------------------------------------------------
+  inline Shard resolveShard(int argc, char** argv) {
+    const std::string prefix = "--file-shard=";
+    for (int i = 1; i < argc; ++i) {
+      std::string arg = argv[i];
+      if (arg.rfind(prefix, 0) != 0) continue;
+      std::string v = arg.substr(prefix.size());
+      auto slash = v.find('/');
+      if (slash == std::string::npos) {
+        std::cerr << "Bad --file-shard value '" << v << "'; expected <i>/<N>, e.g. 0/10.\n";
+        std::exit(1);
+      }
+      Shard s;
+      s.given = true;
+      try {
+        s.index = std::stoi(v.substr(0, slash));
+        s.count = std::stoi(v.substr(slash + 1));
+      } catch (const std::exception&) {
+        std::cerr << "Bad --file-shard value '" << v << "'; expected <i>/<N>, e.g. 0/10.\n";
+        std::exit(1);
+      }
+      if (s.count < 1 || s.index < 0 || s.index >= s.count) {
+        std::cerr << "--file-shard out of range: got " << s.index << "/" << s.count
+                  << "; need 0 <= i < N and N >= 1.\n";
+        std::exit(1);
+      }
+      return s;
+    }
+    return {};
+  }
+
+  // Set once in main() alongside SAMPLE_NAME, read by histFilePath() so every
+  // shard writes a distinct file. Mirrors SELECTION_TAG's role.
+  inline Shard FILE_SHARD = {};
+
+  // ---------------------------------------------------------------------------
   // resolveMaxEvents
   //   Optional event cap via a --max-events=<N> CLI flag, for quick local
   //   sanity checks (e.g. a diagnostic breakdown) without waiting on a full
@@ -298,8 +374,61 @@ namespace MyUtl {
     return SELECTION_TAG.empty() ? baseName : SELECTION_TAG + "_" + baseName;
   }
 
+  // True when stdout is a terminal. Progress output that overwrites its own
+  // line with '\r' is right for a terminal and wrong for a condor log, where
+  // it collapses the whole run into one unreadable line; callers branch on
+  // this rather than emitting terminal control characters into a file.
+  inline const bool STDOUT_IS_TTY = isatty(fileno(stdout)) != 0;
+
+  // ---------------------------------------------------------------------------
+  // PhaseTimer
+  //   Prints "[t+SSS.S s] <label>" for each milestone of a long-running job,
+  //   flushed immediately.
+  //
+  //   Both halves matter on condor. The timestamps make the pre-event-loop
+  //   cost attributable instead of guessable -- the startup dead time on the
+  //   AF has been measured at 5-30 minutes and varies ~4x run-to-run on the
+  //   same sample, so it has to be measured per run, not assumed. And the
+  //   flush matters because a redirected stdout is block-buffered: without it
+  //   a `condor_tail` of a job that is genuinely working shows nothing at
+  //   all, which is indistinguishable from a hang.
+  // ---------------------------------------------------------------------------
+  class PhaseTimer {
+  public:
+    PhaseTimer() : start_(std::chrono::steady_clock::now()) {}
+    // Composed into one string and written with a single insertion: mark() is
+    // called from TTreeProcessorMT worker threads as well as main, and
+    // streaming several fragments would let two threads interleave mid-line.
+    void mark(const std::string& label) const {
+      double t = std::chrono::duration<double>(
+                   std::chrono::steady_clock::now() - start_).count();
+      std::ostringstream os;
+      os << "[t+" << std::fixed << std::setprecision(1) << std::setw(7)
+         << t << " s] " << label << '\n';
+      std::cout << os.str() << std::flush;
+    }
+    double elapsed() const {
+      return std::chrono::duration<double>(
+               std::chrono::steady_clock::now() - start_).count();
+    }
+  private:
+    std::chrono::steady_clock::time_point start_;
+  };
+
+  //   FILE_SHARD (non-default only when --file-shard was given) inserts a
+  //   ".shard<i>of<N>" marker before the extension, so the N shards of one
+  //   sample land side by side instead of overwriting each other. Empty for
+  //   an unsharded run, leaving every existing path byte-identical.
+  inline std::string shardTagged(const std::string& baseName) {
+    if (FILE_SHARD.tag().empty()) return baseName;
+    auto dot = baseName.rfind('.');
+    return dot == std::string::npos
+             ? baseName + FILE_SHARD.tag()
+             : baseName.substr(0, dot) + FILE_SHARD.tag() + baseName.substr(dot);
+  }
+
   inline std::string histFilePath(const std::string& baseName) {
-    const std::string base = selectionTagged(baseName);
+    const std::string base = shardTagged(selectionTagged(baseName));
     if (!SAMPLE_NAME.empty())
       return OUTPUT_DIR + "/" + SAMPLE_NAME + "_" + base;
     return OUTPUT_DIR + "/hists/" + base;
