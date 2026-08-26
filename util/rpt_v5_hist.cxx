@@ -1179,7 +1179,7 @@ int main(int argc, char** argv) {
   writer.WriteScalar("meta_pu_floor_lo",  merged.pu_floor_lo);
   writer.WriteScalar("meta_hs_tot_lo",    merged.hs_tot_lo);
   writer.WriteScalar("meta_hs_floor_lo",  merged.hs_floor_lo);
-  writer.WriteRunMeta(MyUtl::ENERGY_LABEL, merged.n_total);
+  writer.WriteRunMeta(MyUtl::ENERGY_LABEL, merged.n_total, MyUtl::VBS_JET_D_ETA, MyUtl::VBS_JET_MJJ);
   writer.Close();
   std::cout << "Wrote histograms to " << histPath << "\n";
   phase.mark("histograms written");

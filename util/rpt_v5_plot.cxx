@@ -163,6 +163,7 @@ int main(int argc, char** argv) {
   double pu_tot_lo, pu_floor_lo, hs_tot_lo, hs_floor_lo;
   {
     MyUtl::HistReader reader(histFile);
+    reader.CheckSelection(MyUtl::VBS_JET_D_ETA, MyUtl::VBS_JET_MJJ);
     loadScenarios(reader, scen_lo);
     loadScenarios(reader, scen_hi);
     loadScenarios(reader, scen_r1);

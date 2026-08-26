@@ -27,6 +27,9 @@
 #include <TObjString.h>
 #include <TParameter.h>
 
+#include <cmath>
+#include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -91,12 +94,23 @@ namespace MyUtl {
     }
 
     // Run metadata written once, after all histograms/scalars are in place.
-    void WriteRunMeta(const std::string& energyLabel, Long64_t nEventsTotal) {
+    //   The VBS selection is REQUIRED rather than optional, so it cannot be
+    //   forgotten. It is provenance the filename can no longer carry: the
+    //   SELECTION_TAG in the path only records DEVIATIONS from the current
+    //   defaults, so when those defaults changed (2026-08-26, |Deta| >= 3 /
+    //   m_jj >= 0 -> no |Deta| / m_jj >= 200) every previously-written
+    //   "untagged" file kept a name that now denotes a different selection.
+    //   Recording the actual values inside the file makes that detectable --
+    //   see HistReader::CheckSelection, which the plot stages call.
+    void WriteRunMeta(const std::string& energyLabel, Long64_t nEventsTotal,
+                      double vbsDeta, double vbsMjj) {
       if (!file_) throw std::runtime_error("HistWriter: file not open");
       file_->cd();
       TObjString label(energyLabel.c_str());
       label.Write("meta_energy_label", TObject::kOverwrite);
       WriteScalar("meta_n_events_total", nEventsTotal);
+      WriteScalar("meta_vbs_deta", vbsDeta);
+      WriteScalar("meta_vbs_mjj",  vbsMjj);
     }
 
   private:
@@ -181,6 +195,47 @@ namespace MyUtl {
     }
 
     Long64_t ReadNEventsTotal() { return ReadScalarLong("meta_n_events_total"); }
+
+    // -----------------------------------------------------------------------
+    // CheckSelection
+    //   Verifies the file was produced with the VBS selection this process is
+    //   configured for, and aborts if not: the plot stage stamps its own
+    //   selection onto every axis label and summary line, so reading a file
+    //   made under a different one silently mislabels the output rather than
+    //   failing.
+    //
+    //   A file written before meta_vbs_* existed cannot be checked -- warn
+    //   loudly and continue, because refusing would make every pre-existing
+    //   histogram file unreadable. That warning is the whole point: those are
+    //   exactly the files whose name no longer implies their selection.
+    // -----------------------------------------------------------------------
+    void CheckSelection(double vbsDeta, double vbsMjj) {
+      if (!file_) throw std::runtime_error("HistReader: file not open");
+      auto* d = file_->Get<TParameter<Double_t>>("meta_vbs_deta");
+      auto* m = file_->Get<TParameter<Double_t>>("meta_vbs_mjj");
+      if (!d || !m) {
+        std::cerr << "WARNING: this histogram file predates selection metadata, so the\n"
+                     "         selection it was produced with CANNOT be verified. The\n"
+                     "         defaults changed on 2026-08-26 (|Deta| >= 3, m_jj >= 0\n"
+                     "         -> no |Deta|, m_jj >= 200), so an untagged file may have\n"
+                     "         been made under the OLD selection. Plots will be labelled\n"
+                     "         |Deta| >= " << vbsDeta << ", m_jj >= " << vbsMjj
+                  << " GeV regardless. Re-run the\n"
+                     "         histogramming stage if the provenance matters.\n";
+        return;
+      }
+      const double tol = 1e-9;
+      if (std::abs(d->GetVal() - vbsDeta) > tol || std::abs(m->GetVal() - vbsMjj) > tol) {
+        std::ostringstream os;
+        os << "HistReader::CheckSelection: this file was produced with |Deta| >= "
+           << d->GetVal() << ", m_jj >= " << m->GetVal()
+           << " GeV, but this process is configured for |Deta| >= " << vbsDeta
+           << ", m_jj >= " << vbsMjj << " GeV. Plots would be mislabelled. "
+              "Pass matching --vbs-deta=/--vbs-mjj= flags, or re-run the "
+              "histogramming stage.";
+        throw std::runtime_error(os.str());
+      }
+    }
 
   private:
     TFile* file_;

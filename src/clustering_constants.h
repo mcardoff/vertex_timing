@@ -69,16 +69,28 @@ namespace MyUtl {
   // genuine Z+jets event rarely supplies one. That is precisely the pathology the
   // timing study is trying to measure, so it has to be possible to run with and
   // without the cut rather than assume it is neutral.
-  const  double VBS_JET_D_ETA_DEFAULT = 3.0;
+  //
+  // DEFAULT IS NOW 0 (no requirement), changed 2026-08-26. The cut was never
+  // shown to help: vbs_mjj_diag measured it purity-NEUTRAL on VBF (57.1% ->
+  // 57.2%) and purity-NEGATIVE on Z+jets (2.69% -> 2.51%) and dijet (40.1% ->
+  // 35.0%), i.e. on two samples out of three it actively admits more
+  // pileup-legged candidate pairs than it removes. m_jj does the same job
+  // better everywhere (see VBS_JET_MJJ below), so the topology requirement is
+  // now carried by mass alone.
+  //
+  // 0 disables the |Deta| test only. passJetPtCut still requires the jet-pT
+  // and forward-jet counts, so this is "still a forward-jet event, not forced
+  // into a VBS topology" -- not "no topology selection at all".
+  const  double VBS_JET_D_ETA_DEFAULT = 0.0;
   inline double VBS_JET_D_ETA         = VBS_JET_D_ETA_DEFAULT;
   // VBS candidate-pair m_jj requirement. RUNTIME-SETTABLE (inline, not const)
   // via --vbs-mjj=<x>; see resolveSelection() in sample_config.h.
   //
-  // Off by default (0 -- any valid pair has mjj > 0, so this is a no-op):
-  // added alongside VBS_JET_D_ETA, not in place of it, after vbs_mjj_diag
+  // Measured against |Deta| by vbs_mjj_diag
   // (util/vbs_mjj_diag.cxx) measured both variables against the same
   // candidate-pair truth-HS-match denominator on all three samples. Findings
-  // that justify defaulting this off rather than baking in a value:
+  // that motivated making this the default topology requirement in place of
+  // |Deta|:
   //   - |Deta| >= 3 (the current default) is purity-neutral on VBF (57.1% ->
   //     57.2%) but purity-NEGATIVE on Z+jets (2.69% -> 2.51%) and dijet
   //     (40.1% -> 35.0%) -- it preferentially admits pileup-legged pairs on
@@ -93,10 +105,22 @@ namespace MyUtl {
   //     manufactures a large mass); |Deta| degrades past ~4-5 similarly.
   // In short: swapping in m_jj is a real but sample-dependent improvement,
   // not a fix for the underlying issue that neither reco-jet kinematic
-  // variable enforces the candidate pair actually being hard-scatter. See
+  // variable enforces the candidate pair actually being hard-scatter -- it is
+  // the better of two imperfect proxies, which is why it is the default and
+  // why it stays tunable. See
   // isJetTruthHS (clustering_structs.h) for the one thing that does, at
   // truth level.
-  const  double VBS_JET_MJJ_DEFAULT = 0.0;
+  //
+  // DEFAULT IS NOW 200 GeV, changed 2026-08-26 -- m_jj replaces |Deta| as the
+  // topology requirement, for the reasons tabulated above.
+  //
+  // 200 is a deliberately CONSERVATIVE baseline, not the purity optimum: the
+  // same diagnostic puts the peak nearer 600-800 GeV on VBF/dijet. It is set
+  // low so the baseline costs little efficiency, and left tunable via
+  // --vbs-mjj= so a study that wants the purer working point can ask for it
+  // without a rebuild. Anything above ~2 TeV degrades again (a far-forward
+  // pileup jet manufactures a large mass).
+  const  double VBS_JET_MJJ_DEFAULT = 200.0;
   inline double VBS_JET_MJJ          = VBS_JET_MJJ_DEFAULT;
   const double MIN_JET_PT         = 30.0;  // self explanatory
   const double MAX_VTX_DZ         = 2.0;   // max error for reco HS vertex z

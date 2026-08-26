@@ -66,10 +66,12 @@ nshards                  = 4
 # file. seltag is that tag INCLUDING its trailing underscore.
 #
 #   selargs                          seltag
-#   (empty)                          (empty)
-#   --vbs-deta=0                     deta0p0_
-#   --vbs-mjj=200                    mjj200p0_
-#   --vbs-deta=0 --vbs-mjj=200       deta0p0_mjj200p0_
+#   (empty)  [= no |Deta|, mjj>=200]  (empty)
+#   --vbs-mjj=500                     mjj500p0_
+#   --vbs-deta=3 --vbs-mjj=0          deta3p0_mjj0p0_   <- the PRE-2026-08-26
+#                                                          default; every result
+#                                                          in CLAUDE.md predating
+#                                                          that was made this way
 #
 # Verify before submitting -- `condor_submit -dump` prints the expanded
 # transfer_output_files, and running the executable locally with the same

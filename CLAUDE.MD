@@ -358,6 +358,8 @@ IDEAL_TRACK_RES       = 1.0   // ps — flat per-track resolution for ideal scen
 PASS_SIGMA            = 60.0  // ps — ±window for "Core Fraction" efficiency oracle
 TRUTH_PULL_CUT        = 3.0   // σ — |pull| threshold for oracle timing purity gates
 WAVES_DR_FLOOR        = 0.05  // minimum ΔR for the WAVeS 1/ΔR weight (prevents divergence)
+VBS_JET_D_ETA         = 0.0   // NO |Deta| requirement (was 3.0 before 2026-08-26)
+VBS_JET_MJJ           = 200.0 // GeV — m_jj now carries the topology cut (was 0)
 MAX_NSIGMA            = 3.0   // z0-significance track-to-vertex association (incumbent)
 Z0_VAR_INFLATION      = 1.15² // covariance underestimates true z0 resolution by ~15%
 DZ0_PARA_SCALE_CLUSTER= 1.4   // multiple of getNewDzpara used when --dzpara is passed
@@ -660,15 +662,14 @@ must name that same file:
 
 | `selargs` | `seltag` (note trailing `_`) |
 |---|---|
-| *(empty)* | *(empty)* |
-| `--vbs-deta=0` | `deta0p0_` |
-| `--vbs-mjj=200` | `mjj200p0_` |
-| `--vbs-deta=0 --vbs-mjj=200` | `deta0p0_mjj200p0_` |
+| *(empty)* — no \|Deta\|, m_jj >= 200 | *(empty)* |
+| `--vbs-mjj=500` | `mjj500p0_` |
+| `--vbs-deta=3 --vbs-mjj=0` (pre-2026-08-26 default) | `deta3p0_mjj0p0_` |
 
 ```bash
-condor_submit -a sample=zjets -a nshards=32 \
-              -a 'selargs=--vbs-deta=0 --vbs-mjj=200' \
-              -a seltag=deta0p0_mjj200p0_ clustering_hist.sub
+condor_submit -a sample=zjets -a nshards=12 \
+              -a 'selargs=--vbs-mjj=500' \
+              -a seltag=mjj500p0_ clustering_hist.sub
 ```
 
 A mismatch is not silent — the job completes and then goes on hold failing to
@@ -790,6 +791,27 @@ Key structures and entry points:
 - **`AnalysisObj`/`PlotObj::saveTo`/`loadFrom`** (adjacent to `mergeFrom`/`plotPostProcessing`): round-trip the raw, event-loop-filled histograms through `src/histogram_io.h`'s `HistWriter`/`HistReader`. Mirror `mergeFrom`'s exact member list by construction — if a new histogram member is added to `AnalysisObj`, add it to `mergeFrom`, `saveTo`, and `loadFrom` together. See "Histogramming vs. Plotting Split" above for the full design.
 
 ## Physics Findings
+
+> ### ⚠ Selection change, 2026-08-26
+> The default VBS selection changed from **|Deta| >= 3, m_jj >= 0** to
+> **no |Deta|, m_jj >= 200 GeV** (`VBS_JET_D_ETA_DEFAULT` /
+> `VBS_JET_MJJ_DEFAULT`). |Deta| was measured purity-*negative* on Z+jets
+> (2.69% -> 2.51%) and dijet (40.1% -> 35.0%) and neutral on VBF, while m_jj
+> is at-least-as-good everywhere — see the constants' comments for the
+> `vbs_mjj_diag` numbers behind the swap.
+>
+> **Every result below this banner was produced under the OLD default**, except
+> where a section states its own selection. They are not directly comparable
+> with anything produced after the change, and the z-association study in
+> particular (`share/docs/Z_ASSOCIATION_STUDY.md`) is entirely pre-change.
+> Re-run before quoting a number against new output.
+>
+> Reproducing a pre-change result now needs `--vbs-deta=3 --vbs-mjj=0`, which
+> tags its output `deta3p0_mjj0p0_`. Histogram files written from 2026-08-26
+> carry `meta_vbs_deta`/`meta_vbs_mjj`, and the `*_plot` stages abort on a
+> mismatch (`HistReader::CheckSelection`); files older than that cannot be
+> checked and produce a warning instead — those are exactly the ones whose
+> untagged name no longer implies their selection.
 
 Results as of 2026-08-20, from `rpt_v5` (grid samples, |Deta| >= 0 and
 m_jj >= 500 GeV) and `failure_decomposition` (local VBF). Numbers are pileup

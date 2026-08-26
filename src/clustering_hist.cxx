@@ -342,7 +342,7 @@ auto main(int argc, char** argv) -> int {
   writer.WriteScalar("meta_n_rej_basic_cuts",   static_cast<Long64_t>(nRejBasicCuts));
   writer.WriteScalar("meta_n_rej_jetpt_cut",    static_cast<Long64_t>(nRejJetPtCut));
   writer.WriteScalar("meta_n_rej_other",        static_cast<Long64_t>(nRejOther));
-  writer.WriteRunMeta(MyUtl::ENERGY_LABEL, nEventsProcessed);
+  writer.WriteRunMeta(MyUtl::ENERGY_LABEL, nEventsProcessed, MyUtl::VBS_JET_D_ETA, MyUtl::VBS_JET_MJJ);
   writer.Close();
   std::cout << "Wrote histograms to " << histPath << '\n';
   phase.mark("histograms written");

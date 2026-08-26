@@ -211,7 +211,7 @@ int main(int argc, char* argv[]) {
   writer.WriteScalar("meta_n_accepted",     merged.nAccepted);
   writer.WriteScalar("meta_n_fwd_avail",    merged.nFwdAvail);
   writer.WriteScalar("meta_n_fwd_avail_hs", merged.nFwdAvailHS);
-  writer.WriteRunMeta(MyUtl::ENERGY_LABEL, nEventsProcessed);
+  writer.WriteRunMeta(MyUtl::ENERGY_LABEL, nEventsProcessed, MyUtl::VBS_JET_D_ETA, MyUtl::VBS_JET_MJJ);
   writer.Close();
   std::cout << "Wrote histograms to " << histPath << '\n';
 
