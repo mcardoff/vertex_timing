@@ -70,10 +70,12 @@
 #include <iostream>
 #include <numeric>
 #include <ostream>
+#include <string>
 #include <utility>
 #include <vector>
 #include <map>
 #include <unordered_map>
+#include <unordered_set>
 #include <memory>
 
 #endif // CLUSTERING_INCLUDES_H

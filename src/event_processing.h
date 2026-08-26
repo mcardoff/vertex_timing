@@ -90,6 +90,30 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
+  // 2a. passTrackVertexAssociation — explicit-rule overload
+  //   Same test as above, but the rule comes from the AssocRule value rather
+  //   than the USE_DZ_PARA / MAX_NSIGMA globals, so several rules can be
+  //   evaluated against one event in a single pass. See AssocRule in
+  //   clustering_constants.h for why that matters.
+  //   The globals are deliberately NOT consulted here -- an executable that
+  //   passes an AssocRule has already said which rule it wants.
+  // ---------------------------------------------------------------------------
+  bool passTrackVertexAssociation(
+    int trackIdx, int vertexIdx,
+    BranchPointerWrapper *branch,
+    const AssocRule& rule
+  ) {
+    double dz = std::abs(branch->trackZ0[trackIdx] - branch->recoVtxZ[vertexIdx]);
+
+    if (rule.kind == AssocRule::Kind::DZ_PARA)
+      return dz / getNewDzpara(branch->trackEta[trackIdx], branch->trackPt[trackIdx])
+             < rule.cut;
+
+    // Vertex z variance treated as zero, matching the global-rule path above.
+    return dz / std::sqrt(Z0_VAR_INFLATION * branch->trackVarZ0[trackIdx]) < rule.cut;
+  }
+
+  // ---------------------------------------------------------------------------
   // 2b. Cluster::calculateTime — out-of-line implementation
   //   Defined here (after passTrackVertexAssociation) to avoid circular includes:
   //   clustering_structs.h cannot include event_processing.h.
@@ -233,6 +257,32 @@ namespace MyUtl {
   //   In processEventData this is first called at 3σ to collect statistics,
   //   then the list is filtered down to MAX_NSIGMA for the clustering step.
   // ---------------------------------------------------------------------------
+  //   The kinematic half of the selection (η window, pT window, quality flag)
+  //   is factored into passTrackKinematics so that the significance-cut and
+  //   AssocRule overloads below cannot drift apart: only the association test
+  //   differs between them.
+  inline bool passTrackKinematics(
+      size_t trk, BranchPointerWrapper *branch,
+      double minTrkPt, double maxTrkPt
+    ) {
+    double
+      trkEta = branch->trackEta[trk],
+      trkPt  = branch->trackPt[trk],
+      trkQuality = branch->trackQuality[trk];
+
+    if (std::abs(trkEta) < MIN_HGTD_ETA or
+        std::abs(trkEta) > MAX_HGTD_ETA)
+      return false;
+
+    if (trkPt < minTrkPt or trkPt > maxTrkPt)
+      return false;
+
+    if (not trkQuality)
+      return false;
+
+    return true;
+  }
+
   std::vector<int> getAssociatedTracks(
       BranchPointerWrapper *branch,
       double minTrkPt, double maxTrkPt,
@@ -241,22 +291,80 @@ namespace MyUtl {
     std::vector<int> goodTracks;
 
     for (size_t trk = 0; trk < branch->trackZ0.GetSize(); ++trk) {
-      double
-	trkEta = branch->trackEta[trk],
-	trkPt  = branch->trackPt[trk],
-	trkQuality = branch->trackQuality[trk];
-
-      if (std::abs(trkEta) < MIN_HGTD_ETA or
-	  std::abs(trkEta) > MAX_HGTD_ETA)
-        continue;
-
-      if (trkPt < minTrkPt or trkPt > maxTrkPt)
-	continue;
-
-      if (not trkQuality)
+      if (not passTrackKinematics(trk, branch, minTrkPt, maxTrkPt))
 	continue;
 
       if (passTrackVertexAssociation(trk, 0, branch, significanceCut))
+	goodTracks.push_back(trk);
+    }
+
+    return goodTracks;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 3b. forwardJetGhostTracks
+  //   Union of the ghost-associated track indices over every qualifying
+  //   forward jet (same jet definition WAVeS uses: pT > MIN_JET_PT,
+  //   MIN_ABS_ETA_JET < |eta| < MAX_ABS_ETA_JET, not lepton-overlap removed).
+  //
+  //   Ghost association is a purely ANGULAR construct: tracks enter the jet
+  //   clustering as infinitesimally-soft four-vectors at their perigee
+  //   direction, and whichever jet ends up containing the ghost owns the
+  //   track. No z0, no vertex, no timing information goes into it -- which is
+  //   why it is a candidate for widening a z-association (it is independent
+  //   of it) and also why it cannot substitute for one.
+  //
+  //   Measured to be numerically equivalent to filterTracksInJets at
+  //   dR < 0.4 on the local VBF sample (1,142,857 vs 1,139,170 tracks), so
+  //   the two are interchangeable in practice; this uses the production's own
+  //   association rather than a geometric proxy.
+  // ---------------------------------------------------------------------------
+  std::unordered_set<int> forwardJetGhostTracks(BranchPointerWrapper *branch) {
+    std::unordered_set<int> ghost;
+    const int N_JETS = (int)branch->topoJetPt.GetSize();
+    for (int j = 0; j < N_JETS; ++j) {
+      if (branch->isJetRemoved(j)) continue;
+      if (branch->topoJetPt[j] < MIN_JET_PT) continue;
+      double absEta = std::abs(branch->topoJetEta[j]);
+      if (absEta < MIN_ABS_ETA_JET || absEta > MAX_ABS_ETA_JET) continue;
+      for (int idx : branch->topoJetGhostTrackIdx[j]) ghost.insert(idx);
+    }
+    return ghost;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 4a. getAssociatedTracks — explicit-rule overload
+  //   Selects from the FULL track array under `rule`, rather than narrowing an
+  //   already-selected list. That distinction is load-bearing for the
+  //   association study: a DZ_PARA rule is not a subset of a significance cut
+  //   (at |eta| ~ 3.8 getNewDzpara is looser than 3σ for some tracks, tighter
+  //   for others), so filtering the counting list would silently intersect
+  //   every parameterized rule with "significance < 3.0" and understate it.
+  // ---------------------------------------------------------------------------
+  //   rule.orGhost widens the result to the UNION with ghost association (see
+  //   AssocRule in clustering_constants.h for why that is applied here rather
+  //   than per-track). The kinematic pre-selection still applies first, so a
+  //   ghost track outside HGTD acceptance or the pT window is not smuggled in
+  //   -- it could never carry a time anyway.
+  std::vector<int> getAssociatedTracks(
+      BranchPointerWrapper *branch,
+      double minTrkPt, double maxTrkPt,
+      const AssocRule& rule
+    ) {
+    std::vector<int> goodTracks;
+
+    // Built once per call, not per track: it needs a scan over the jets and
+    // their ghost lists, which is O(jets x ghosts) and would dominate
+    // otherwise. Empty (and untouched) unless the rule actually asks for it.
+    std::unordered_set<int> ghost;
+    if (rule.orGhost) ghost = forwardJetGhostTracks(branch);
+
+    for (size_t trk = 0; trk < branch->trackZ0.GetSize(); ++trk) {
+      if (not passTrackKinematics(trk, branch, minTrkPt, maxTrkPt))
+	continue;
+
+      if (passTrackVertexAssociation(trk, 0, branch, rule) ||
+          (rule.orGhost && ghost.count((int)trk)))
 	goodTracks.push_back(trk);
     }
 
@@ -450,11 +558,19 @@ namespace MyUtl {
     double clusQuality   =  0.0;
   };
 
+  //   assoc — optional explicit track-to-vertex association rule. nullptr
+  //           (the default) reproduces the historical behaviour exactly: the
+  //           USE_DZ_PARA / MAX_NSIGMA globals decide, and the clustering list
+  //           is the counting list narrowed in place. When non-null the rule
+  //           applies to the CLUSTERING list only -- the counting scan stays
+  //           pinned at COUNTING_NSIGMA so that EventCounts, and therefore
+  //           every plot x-axis, is common across rules (see AssocRule).
   EventResult processEventData(
     BranchPointerWrapper *branch,
     bool useSmearedTimes,
     bool checkValidTimes,
-    std::map<Score,AnalysisObj>& analyses
+    std::map<Score,AnalysisObj>& analyses,
+    const AssocRule* assoc = nullptr
   ) {
     // ── A. Event selection ──────────────────────────────────────────────────
     // Lepton–jet overlap removal (Z+jets only): rebuild the removed-jet mask for
@@ -480,7 +596,15 @@ namespace MyUtl {
     // ── B. Track selection ──────────────────────────────────────────────────
     // Scan once at 3σ so counting statistics include slightly-displaced tracks,
     // then optionally tighten to MAX_NSIGMA for the clustering step.
-    std::vector<int> tracks = getAssociatedTracks(branch, MIN_TRACK_PT, MAX_TRACK_PT, 3.0);
+    // The counting scan goes through the AssocRule overload when a rule is
+    // active, NOT the global-consulting one at the same 3.0 -- the two would
+    // agree today only because the study never sets USE_DZ_PARA, and the whole
+    // point of the counting scan under a rule sweep is that it is pinned.
+    static const AssocRule COUNTING_RULE{AssocRule::Kind::SIGNIFICANCE, COUNTING_NSIGMA,
+                                         "counting", "z_{0} signif. < 3.0"};
+    std::vector<int> tracks =
+      assoc ? getAssociatedTracks(branch, MIN_TRACK_PT, MAX_TRACK_PT, COUNTING_RULE)
+            : getAssociatedTracks(branch, MIN_TRACK_PT, MAX_TRACK_PT, 3.0);
 
     // ── C. Per-event counts ─────────────────────────────────────────────────
     EventCounts ev(branch, tracks, checkValidTimes);
@@ -492,7 +616,14 @@ namespace MyUtl {
       std::cout << "nForwardTrack_PU = " << ev.nForwardTrackPU << '\n';
     }
 
-    if (MAX_NSIGMA != 3.0)
+    // Under an explicit rule the clustering list is re-selected from the full
+    // track array (see getAssociatedTracks's AssocRule overload) instead of
+    // narrowed, since a parameterized rule need not be a subset of the
+    // counting scan. `ev` above is already built, so replacing `tracks` here
+    // leaves every x-axis on the pinned counting definition.
+    if (assoc)
+      tracks = getAssociatedTracks(branch, MIN_TRACK_PT, MAX_TRACK_PT, *assoc);
+    else if (MAX_NSIGMA != 3.0)
       tracks.erase(std::remove_if(tracks.begin(), tracks.end(),
         [&](int trk) {
           return !passTrackVertexAssociation(trk, 0, branch, MAX_NSIGMA);

@@ -219,6 +219,58 @@ namespace MyUtl {
   // afterwards, so it is safe under TTreeProcessorMT. Default false means every
   // executable that does not parse the flag is bit-for-bit unchanged.
   inline bool USE_DZ_PARA = false;
+
+  // ── AssocRule: one track-to-vertex association rule, made explicit ────────
+  // USE_DZ_PARA / MAX_NSIGMA above are process-wide globals: a run picks one
+  // rule and every event uses it. That is fine for production, but it makes
+  // comparing rules a matter of re-running the whole event loop once per rule
+  // -- 52 GB of local VBF ntuple per pass -- and the passes then disagree on
+  // which EVENTS they saw as well as which tracks, so a difference cannot be
+  // attributed to the association alone.
+  //
+  // AssocRule carries the same two pieces of information (which rule, what
+  // cut) as an explicit value instead, so several rules can be evaluated
+  // side by side against the SAME event in a single loop. See
+  // util/assoc_study_hist.cxx, the only current consumer.
+  //
+  // The globals stay the default everywhere: the AssocRule overloads of
+  // passTrackVertexAssociation / getAssociatedTracks and the optional
+  // `assoc` argument to processEventData are all additive, so any executable
+  // that does not pass one is bit-for-bit unchanged.
+  struct AssocRule {
+    enum class Kind {
+      SIGNIFICANCE,  // |z0 - z_vtx| / sqrt(Z0_VAR_INFLATION * var_z0) < cut
+      DZ_PARA        // |z0 - z_vtx| / getNewDzpara(eta, pT)           < cut
+    };
+    Kind        kind = Kind::SIGNIFICANCE;
+    double      cut  = MAX_NSIGMA;
+    std::string tag;    // filename-safe, e.g. "signif25" / "dzpara14"
+    std::string label;  // human/TLatex label, e.g. "z_{0} signif. < 2.5"
+
+    // Union with ghost association: when true the rule accepts a track if it
+    // passes the z-test above OR is ghost-associated to a qualifying forward
+    // jet. The premise is that a track can carry hard-scatter information the
+    // z-cut misses -- so widen the list rather than tighten it.
+    //
+    // Unlike `kind`/`cut` this is a property of the SET, not of a single
+    // track: deciding it needs the event's jets, so it is applied by
+    // getAssociatedTracks (which builds the ghost set once per event) and NOT
+    // by passTrackVertexAssociation, which stays a pure per-track z-test.
+    // Anything reproducing a rule's track list must therefore go through
+    // getAssociatedTracks rather than calling the per-track function in a loop.
+    bool        orGhost = false;
+  };
+
+  // Counting-scan association, held FIXED across every AssocRule under study.
+  // processEventData already separates the two uses of the track list (see its
+  // step B): the counting scan feeds EventCounts -- n forward tracks, n HS, n
+  // PU, PU fraction -- which become the x-AXES of every efficiency/resolution
+  // plot, while the clustering list is what t0 is actually built from. Letting
+  // the association move the x-axis as well as the algorithm would mean the
+  // "n_hs_tracks = 3" bin holds a different set of events for every rule, and
+  // no per-bin difference could be attributed to the association. Pinning the
+  // counting scan here keeps the binning common so the comparison is paired.
+  const double COUNTING_NSIGMA = 3.0;
   // ITERATIVE_SPLIT tunables (inline so diagnostics can sweep them).
   inline double T_PULL_SPLIT_THRESHOLD = 1.5;  // split clusters whose t-pull RMS exceeds this
   inline double DIST_CUT_SPLIT         = 2.0;  // tighter cut used when re-clustering after split
