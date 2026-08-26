@@ -14,9 +14,10 @@ passing selection) · **Executables:** `util/assoc_study_hist.cxx` +
 
 | | recommendation |
 |---|---|
-| **TRKPTZ** | **Switch.** The incumbent `significance < 3.0` is the second-worst of the eleven rules tested. `getNewDzpara × 1.0` gives **−1.58 ps core σ (15.95 → 14.37, −9.9%)** and **+0.92 %pt core fraction (90.38 → 91.30)**. |
+| **TRKPTZ** | **Switch.** The incumbent `significance < 3.0` is the second-worst of the eleven z-only rules tested. `getNewDzpara × 1.0` gives **−1.58 ps core σ (15.95 → 14.37, −9.9%)** and **+0.92 %pt core fraction (90.38 → 91.30)**. |
 | **WAVeS** | **Leave it.** Every rule is within ±0.1 %pt of the incumbent at the loose end, and tightening actively *hurts* (`dzpara × 0.6`: +1.86 ps, −1.83 %pt). |
 | **One rule for both** | **`getNewDzpara × 1.2`** — TRKPTZ −1.32 ps / +0.92 %pt, WAVeS +0.13 ps / +0.10 %pt. Effectively the TRKPTZ optimum at no cost to WAVeS. |
+| **Union with ghost association** | **No.** Costs **20–24 %pt of core fraction** for both scores. It is a selection failure, not a resolution one — see [Union with ghost association](#union-with-ghost-association). |
 
 **The cheapest version of this result needs no code change at all.** The
 existing `--dzpara` flag already runs `getNewDzpara × 1.4`
@@ -39,15 +40,22 @@ Two results worth carrying forward beyond the choice of cut:
 
 ## What was measured
 
-Two rule families, scanned rather than sampled at one point each:
+Two rule families, scanned rather than sampled at one point each, plus a
+union variant of each:
 
 | family | test | scanned over |
 |---|---|---|
 | `SIGNIFICANCE` | \|z0 − z_vtx\| / sqrt(1.15² · var_z0) < N | N = 3.0, 2.5, 2.0, 1.5 |
 | `DZ_PARA` | \|z0 − z_vtx\| / getNewDzpara(η, pT) < S | S = 0.6, 0.8, 1.0, 1.2, 1.4, 1.6, 2.0 |
+| `orGhost` | *either* of the above **OR** ghost-associated to a forward jet | applied to `signif < 3.0` and `dzpara × 1.0` |
 
 `significance < 3.0` is the incumbent (`MAX_NSIGMA`). `getNewDzpara × 1.4` is
 the reference R_pT study's working point and what `--dzpara` currently does.
+
+The union rules go the opposite direction from everything else here — they
+*widen* the track list rather than tighten it. The premise being tested is
+that ghost association picks up tracks carrying hard-scatter information the
+z-cut misses, since it is derived independently of z.
 
 Both families are scanned because the two rules differ in **two** ways at once
 — functional form *and* how tight they happen to be at their nominal points. A
@@ -111,9 +119,17 @@ pT/quality-selected tracks in accepted events: 22,140,807 available, of which
 | dzpara × 1.4 *(`--dzpara`)* | 1,446,455 | 553,016 | 893,439 | 38.23% | 88.83% |
 | dzpara × 1.6 | 1,579,495 | 563,559 | 1,015,936 | 35.68% | 90.52% |
 | dzpara × 2.0 | 1,835,583 | 576,097 | 1,259,486 | 31.38% | 92.54% |
+| signif < 3.0 ∪ ghost | 2,608,257 | 593,186 | 2,015,071 | 22.74% | 95.28% |
+| dzpara × 1.0 ∪ ghost | 2,020,571 | 557,966 | 1,462,605 | 27.61% | 89.62% |
 
 Note how weak the incumbent is as a pileup filter: **68% of the tracks t0 is
 currently built from are pileup.**
+
+Track counts alone are a poor guide here, though — purity measures where a
+track *came from*, not whether its time is wrong (the same warning the
+codebase carries about ranking selection oracles by cluster purity). The
+union rows look merely diluted by this table; what they actually do is in
+[Union with ghost association](#union-with-ghost-association) below.
 
 ---
 
@@ -138,6 +154,8 @@ three forward HS tracks.
 | dzpara × 1.4 | 14.92 ± 0.08 | 91.14 ± 0.13 | 17.01 | 26.58 |
 | dzpara × 1.6 | 15.29 ± 0.08 | 90.93 ± 0.13 | 17.31 | 27.33 |
 | dzpara × 2.0 | 16.13 ± 0.09 | 89.99 ± 0.14 | 17.90 | 28.98 |
+| signif < 3.0 ∪ ghost | 16.89 ± 0.11 | **66.85 ± 0.22** | 18.51 | 32.12 |
+| dzpara × 1.0 ∪ ghost | 15.39 ± 0.09 | **68.47 ± 0.21** | 17.32 | 27.22 |
 
 Both families improve as they tighten and then turn over — significance at
 about 2.0, the parameterization at 1.0. There is a genuine optimum, and the
@@ -162,10 +180,15 @@ says the failures are.
 | dzpara × 1.4 | 15.00 ± 0.07 | 91.77 ± 0.13 | 16.58 | 22.27 |
 | dzpara × 1.6 | **14.95 ± 0.08** | 91.77 ± 0.13 | 16.54 | 22.19 |
 | dzpara × 2.0 | 14.95 ± 0.08 | 91.52 ± 0.13 | 16.58 | 22.32 |
+| signif < 3.0 ∪ ghost | 17.72 ± 0.10 | **72.36 ± 0.21** | 18.89 | 29.35 |
+| dzpara × 1.0 ∪ ghost | 17.54 ± 0.10 | **72.98 ± 0.20** | 18.66 | 28.17 |
 
-Flat to within ±0.1 %pt across the loose half of the scan, and monotonically
-worse once either family tightens past ~1.2. WAVeS has nothing to gain here and
-something to lose.
+Flat to within ±0.1 %pt across the loose half of the z-only scan, and
+monotonically worse once either family tightens past ~1.2. WAVeS has nothing
+to gain there and something to lose.
+
+The union rows are the exception to WAVeS's indifference — the only change in
+this whole study that moves it, and it moves it as hard as TRKPTZ.
 
 ### Why WAVeS does not care
 
@@ -181,6 +204,92 @@ future selector that recomputes its time from a track subset should be expected
 to behave the same way, and should be tuned against a loose association.
 
 ---
+
+## Union with ghost association
+
+The idea: ghost association is derived independently of z, so it might pick up
+tracks that carry hard-scatter information but fail the z-cut. OR it in and
+build t0 from the larger list.
+
+**It costs 20–24 points of core fraction.** For both scores.
+
+| rule | TRKPTZ σ [ps] | TRKPTZ core frac | WAVeS σ [ps] | WAVeS core frac |
+|---|---:|---:|---:|---:|
+| signif < 3.0 | 15.95 | 90.38% | 14.99 | 91.76% |
+| **signif < 3.0 ∪ ghost** | 16.89 | **66.85%** | 17.72 | **72.36%** |
+| dzpara × 1.0 | 14.37 | 91.30% | 15.34 | 91.80% |
+| **dzpara × 1.0 ∪ ghost** | 15.39 | **68.47%** | 17.54 | **72.98%** |
+
+### It is a selection failure, not a resolution one
+
+Note the shape of the damage: **core σ moves by ~1 ps while core fraction
+falls by 23 points.** When the algorithm picks the right cluster the time is
+still nearly as good as before; it just picks the wrong cluster far more often.
+
+The differential view makes this unambiguous. Core fraction vs n forward HS
+tracks, TRKPTZ:
+
+| rule | 3 | 5 | 8 | 12 | 16 | ≥20 |
+|---|---:|---:|---:|---:|---:|---:|
+| signif < 3.0 | 73.5 | 86.0 | 94.3 | 98.1 | 99.5 | **99.9** |
+| dzpara × 1.0 | 74.9 | 87.2 | 95.0 | 98.1 | 99.6 | **99.9** |
+| signif < 3.0 ∪ ghost | 49.0 | 58.0 | 69.3 | 74.9 | 79.7 | **83.8** |
+| dzpara × 1.0 ∪ ghost | 52.1 | 59.4 | 70.8 | 75.7 | 81.6 | **83.7** |
+
+Every z-only rule saturates at ~99.9% once there are enough hard-scatter
+tracks to determine the vertex time. **The union never saturates** — it
+plateaus around 84%, so even in the most track-rich events it picks the wrong
+cluster one time in six. WAVeS behaves identically, plateauing at 86% against
+99.4%. That is not a resolution or a low-statistics effect; it is the
+selection being handed decoys it cannot reject at any multiplicity.
+
+### Why: the added tracks are time-random, and that is the problem
+
+From `util/scratch/ghost_assoc_diag.cxx`, over tracks in HGTD acceptance with
+a valid HGTD time, Δt = t_track − t_truthHSvtx:
+
+| set (pileup tracks) | n/evt | mean \|Δt\| | median \|Δt\| | RMS |
+|---|---:|---:|---:|---:|
+| **what the union adds** (G \ dzpara × 1.0) | 13.02 | **224 ps** | 180 ps | 294 ps |
+| already accepted by dzpara × 1.0 | 10.48 | 214 ps | 171 ps | 283 ps |
+| every timed track in acceptance | 340.82 | 229 ps | 186 ps | 298 ps |
+
+The added pileup is **time-random**: 224 ps mean is indistinguishable from the
+229 ps of a track drawn at random from the event. So the tracks are *not*
+sitting on top of the hard-scatter cluster and dragging its time — which is
+why core σ barely moves.
+
+Instead they build **decoy clusters**. They are time-random but they are inside
+forward jets by construction, so they carry real pT and cluster at
+plausible-looking times, and the selection then has many more candidates to
+choose between. The project's failure decomposition already identifies
+selection as the dominant loss channel (26.5% of failures, against 3.1% for
+misclustering); the union feeds exactly that channel.
+
+Two secondary effects, for completeness:
+
+- 24% of the added pileup tracks *do* land inside the clustering window
+  (\|Δt\|/σ_track < `DIST_CUT_CONE`), taking the pileup fraction of the tracks
+  actually inside the HS cluster from 29% to 44% (dzpara × 1.0 base). That is
+  real contamination, but it is symmetric in Δt, so it inflates variance
+  rather than biasing — consistent with the small σ shift.
+- **WAVeS is hit at least as hard as TRKPTZ**, despite being immune to every
+  z-only change. The mechanism is specific: the added tracks are jet-proximate
+  by definition, which is precisely what the WAVeS score up-weights. The decoy
+  clusters are maximally attractive to it.
+
+### Where this leaves the idea
+
+The premise is sound — ghost association *is* independent of z — but the
+information it adds is angular, not temporal, and t0 reconstruction is
+bottlenecked on selection, not on having more tracks. A union hands the
+selection more ways to be wrong.
+
+Also worth knowing before reaching for ghost association again: it is
+numerically the same as the ΔR < 0.4 cone the code already has
+(`filterTracksInJets`) — 1,142,857 tracks at 24.44% HS purity versus 1,139,170
+at 24.54% on this sample. So it is not new information relative to what WAVeS
+already uses for its in-jet time refinement.
 
 ## Shape vs. tightness
 
@@ -320,4 +429,11 @@ block containing every number in this document.
 
 Rules are declared in one place, `assocRules()` in
 `util/assoc_study_common.h` — adding or moving a working point is a one-line
-edit plus a re-run of the hist stage.
+edit plus a re-run of the hist stage. Set `orGhost` on a rule to union it with
+ghost association; that is a set-level property applied by
+`getAssociatedTracks`, not by the per-track `passTrackVertexAssociation`, so
+anything reproducing a rule's track list must go through the former.
+
+The track-level Δt numbers quoted in the union section come from
+`util/scratch/ghost_assoc_diag.cxx` (build line in its header; `util/scratch`
+is gitignored, so it is not tracked).

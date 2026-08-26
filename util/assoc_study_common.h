@@ -86,6 +86,29 @@ inline const std::vector<AssocRule>& assocRules() {
     { AssocRule::Kind::DZ_PARA,      1.4, "dzpara14", "|#Deltaz_{0}|/#deltaz(#eta,p_{T}) < 1.4" },
     { AssocRule::Kind::DZ_PARA,      1.6, "dzpara16", "|#Deltaz_{0}|/#deltaz(#eta,p_{T}) < 1.6" },
     { AssocRule::Kind::DZ_PARA,      2.0, "dzpara20", "|#Deltaz_{0}|/#deltaz(#eta,p_{T}) < 2.0" },
+
+    // Union with ghost association: accept a track if it passes the z-test OR
+    // is ghost-associated to a qualifying forward jet. Tests the premise that
+    // ghost association picks up tracks carrying hard-scatter information the
+    // z-cut misses -- a WIDER list, not a tighter one, and so the opposite
+    // direction from everything above.
+    //
+    // Two base rules: the incumbent, and the best single rule for TRKPTZ, so
+    // the union can be read against both a loose and a tight starting point.
+    //
+    // What the track-level numbers say to expect (util/scratch/
+    // ghost_assoc_diag.cxx): the added tracks are essentially time-random --
+    // mean |Delta t| to the truth HS vertex of 224 ps against 229 ps for a
+    // track picked at random from the event -- so most of them cannot be
+    // absorbed into the HS cluster and instead form their own. But 24% of
+    // them do land inside the clustering window, which takes the pileup
+    // fraction of the tracks actually inside the HS cluster from 29% to 44%
+    // (dzpara 1.0 base). Whether that costs core fraction is what these rows
+    // measure; a track-level projection cannot answer it.
+    { AssocRule::Kind::SIGNIFICANCE, 3.0, "signif30ghost",
+      "|#Deltaz_{0}|/#sigma_{z_{0}} < 3.0 #cup ghost", true },
+    { AssocRule::Kind::DZ_PARA,      1.0, "dzpara10ghost",
+      "|#Deltaz_{0}|/#deltaz(#eta,p_{T}) < 1.0 #cup ghost", true },
   };
   return rules;
 }
@@ -98,7 +121,7 @@ inline std::string ruleAscii(const AssocRule& r) {
     std::snprintf(buf, sizeof buf, "signif < %.1f", r.cut);
   else
     std::snprintf(buf, sizeof buf, "dzpara x %.1f", r.cut);
-  return buf;
+  return std::string(buf) + (r.orGhost ? " OR ghost" : "");
 }
 
 // The two selection scores reported for every rule. TRKPTZ is the baseline

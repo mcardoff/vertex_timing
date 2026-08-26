@@ -246,6 +246,19 @@ namespace MyUtl {
     double      cut  = MAX_NSIGMA;
     std::string tag;    // filename-safe, e.g. "signif25" / "dzpara14"
     std::string label;  // human/TLatex label, e.g. "z_{0} signif. < 2.5"
+
+    // Union with ghost association: when true the rule accepts a track if it
+    // passes the z-test above OR is ghost-associated to a qualifying forward
+    // jet. The premise is that a track can carry hard-scatter information the
+    // z-cut misses -- so widen the list rather than tighten it.
+    //
+    // Unlike `kind`/`cut` this is a property of the SET, not of a single
+    // track: deciding it needs the event's jets, so it is applied by
+    // getAssociatedTracks (which builds the ghost set once per event) and NOT
+    // by passTrackVertexAssociation, which stays a pure per-track z-test.
+    // Anything reproducing a rule's track list must therefore go through
+    // getAssociatedTracks rather than calling the per-track function in a loop.
+    bool        orGhost = false;
   };
 
   // Counting-scan association, held FIXED across every AssocRule under study.

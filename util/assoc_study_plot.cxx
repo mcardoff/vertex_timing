@@ -302,7 +302,7 @@ int main(int argc, char** argv) {
   std::cout << "\n--- TRACK ACCOUNTING (forward, pT/quality-selected) ---\n"
             << "available: " << nFwdAvail << " tracks, of which "
             << nFwdAvailHS << " truth-HS\n\n"
-            << std::left << std::setw(16) << "rule"
+            << std::left << std::setw(24) << "rule"
             << std::right << std::setw(13) << "kept"
             << std::setw(13) << "HS kept"
             << std::setw(13) << "PU kept"
@@ -312,7 +312,7 @@ int main(int argc, char** argv) {
   for (size_t i = 0; i < rules.size(); ++i) {
     double pur = nKept[i]    > 0 ? 100.0 * nKeptHS[i] / nKept[i]    : 0.0;
     double rec = nFwdAvailHS > 0 ? 100.0 * nKeptHS[i] / nFwdAvailHS : 0.0;
-    std::cout << std::left << std::setw(16) << ruleAscii(rules[i])
+    std::cout << std::left << std::setw(24) << ruleAscii(rules[i])
               << std::right << std::setw(13) << nKept[i]
               << std::setw(13) << nKeptHS[i]
               << std::setw(13) << nKeptPU[i]
@@ -324,7 +324,7 @@ int main(int argc, char** argv) {
   // --- Inclusive metrics, per score ---
   for (size_t si = 0; si < scores.size(); ++si) {
     std::cout << "\n--- INCLUSIVE:  " << scores[si].toStringShort() << " ---\n"
-              << std::left << std::setw(16) << "rule"
+              << std::left << std::setw(24) << "rule"
               << std::right << std::setw(16) << "core sigma[ps]"
               << std::setw(16) << "core frac[%]"
               << std::setw(14) << "truncRMS[ps]"
@@ -336,7 +336,7 @@ int main(int argc, char** argv) {
       std::ostringstream sig, cf;
       sig << std::fixed << std::setprecision(2) << s.sigma << " +/- " << s.sigmaErr;
       cf  << std::fixed << std::setprecision(2) << s.coreFrac << " +/- " << s.coreFracErr;
-      std::cout << std::left << std::setw(16) << ruleAscii(rules[i])
+      std::cout << std::left << std::setw(24) << ruleAscii(rules[i])
                 << std::right << std::setw(16) << sig.str()
                 << std::setw(16) << cf.str()
                 << std::fixed << std::setprecision(2)
@@ -350,7 +350,7 @@ int main(int argc, char** argv) {
     for (size_t i = 1; i < rules.size(); ++i) {
       double dS = sums[i][si].sigma    - sums[0][si].sigma;
       double dF = sums[i][si].coreFrac - sums[0][si].coreFrac;
-      std::cout << "    " << std::left << std::setw(16) << ruleAscii(rules[i])
+      std::cout << "    " << std::left << std::setw(24) << ruleAscii(rules[i])
                 << std::right << std::showpos << std::fixed << std::setprecision(2)
                 << std::setw(9) << dS << " ps"
                 << std::setw(9) << dF << " %pt" << std::noshowpos << '\n';
@@ -375,30 +375,30 @@ int main(int argc, char** argv) {
       // ---- core sigma vs variable ----
       std::cout << "\n--- CORE SIGMA [ps] vs " << v.xtitle
                 << "   (" << sc.toStringShort() << ") ---\n"
-                << std::left << std::setw(16) << "rule";
+                << std::left << std::setw(24) << "rule";
       for (int b = 1; b <= nb; ++b) {
         std::ostringstream lab;
         int lo = (int)std::lround(ref->params->sigmaDist->GetBinLowEdge(b) + 0.5);
         lab << (b == nb ? ">=" : "") << lo;
         std::cout << std::right << std::setw(9) << lab.str();
       }
-      std::cout << '\n' << std::string(16 + 9 * nb, '-') << '\n';
+      std::cout << '\n' << std::string(24 + 9 * nb, '-') << '\n';
 
       // Denominator per bin, printed once per table. The counting scan is
       // pinned, so this row is identical for every rule -- which is the point:
       // it shows where a per-bin difference between rules can be believed and
       // where it is a handful of events talking.
-      std::cout << std::left << std::setw(16) << "  [N events]" << std::right;
+      std::cout << std::left << std::setw(24) << "  [N events]" << std::right;
       for (int b = 1; b <= nb; ++b)
         std::cout << std::setw(9) << (Long64_t)ref->effTotal->GetBinContent(b);
-      std::cout << '\n' << std::string(16 + 9 * nb, '-') << '\n';
+      std::cout << '\n' << std::string(24 + 9 * nb, '-') << '\n';
 
       std::vector<TH1D*> sigCurves, cfCurves;
       std::vector<std::string> labels;
       for (size_t i = 0; i < rules.size(); ++i) {
         PlotObj* p = maps[i].at(sc).get(v.key).get();
         TH1D* sd = p->params->sigmaDist;
-        std::cout << std::left << std::setw(16) << ruleAscii(rules[i]) << std::right;
+        std::cout << std::left << std::setw(24) << ruleAscii(rules[i]) << std::right;
         for (int b = 1; b <= nb; ++b) {
           double val = sd->GetBinContent(b);
           if (val == 0.0) std::cout << std::setw(9) << "--";
@@ -423,21 +423,21 @@ int main(int argc, char** argv) {
       // ---- core fraction vs variable ----
       std::cout << "\n--- CORE FRACTION [%] vs " << v.xtitle
                 << "   (" << sc.toStringShort() << ") ---\n"
-                << std::left << std::setw(16) << "rule";
+                << std::left << std::setw(24) << "rule";
       for (int b = 1; b <= nb; ++b) {
         std::ostringstream lab;
         int lo = (int)std::lround(ref->effTotal->GetBinLowEdge(b) + 0.5);
         lab << (b == nb ? ">=" : "") << lo;
         std::cout << std::right << std::setw(9) << lab.str();
       }
-      std::cout << '\n' << std::string(16 + 9 * nb, '-') << '\n';
-      std::cout << std::left << std::setw(16) << "  [N events]" << std::right;
+      std::cout << '\n' << std::string(24 + 9 * nb, '-') << '\n';
+      std::cout << std::left << std::setw(24) << "  [N events]" << std::right;
       for (int b = 1; b <= nb; ++b)
         std::cout << std::setw(9) << (Long64_t)ref->effTotal->GetBinContent(b);
-      std::cout << '\n' << std::string(16 + 9 * nb, '-') << '\n';
+      std::cout << '\n' << std::string(24 + 9 * nb, '-') << '\n';
       for (size_t i = 0; i < rules.size(); ++i) {
         PlotObj* p = maps[i].at(sc).get(v.key).get();
-        std::cout << std::left << std::setw(16) << ruleAscii(rules[i]) << std::right;
+        std::cout << std::left << std::setw(24) << ruleAscii(rules[i]) << std::right;
         for (int b = 1; b <= nb; ++b) {
           if (p->effTotal->GetBinContent(b) <= 0.0) std::cout << std::setw(9) << "--";
           else std::cout << std::fixed << std::setprecision(1)
@@ -455,24 +455,43 @@ int main(int argc, char** argv) {
       // curve among eleven. Third page pairs the incumbent against the best
       // point of each family (best = highest inclusive core fraction for THIS
       // score, computed once from the inclusive table above).
-      auto pageIdx = [&](AssocRule::Kind k) {
+      // Grouping keys on (kind, orGhost), not kind alone: a union rule shares
+      // its base kind with the pure z-rules but is answering a different
+      // question -- widen the list rather than tighten it -- so it belongs on
+      // its own page next to the base rules it is built from, not buried in
+      // an ordered tightening sequence it does not belong to.
+      auto pageIdx = [&](AssocRule::Kind k, bool ghost) {
         std::vector<size_t> v2;
         for (size_t i = 0; i < rules.size(); ++i)
-          if (rules[i].kind == k) v2.push_back(i);
+          if (rules[i].kind == k && rules[i].orGhost == ghost) v2.push_back(i);
+        return v2;
+      };
+      auto unionPage = [&]() {
+        std::vector<size_t> v2;
+        // Each union rule preceded by the base rule it widens, so the cost of
+        // the union is readable off the page without cross-referencing.
+        for (size_t i = 0; i < rules.size(); ++i)
+          if (rules[i].orGhost) {
+            for (size_t b = 0; b < rules.size(); ++b)
+              if (!rules[b].orGhost && rules[b].kind == rules[i].kind &&
+                  rules[b].cut == rules[i].cut) v2.push_back(b);
+            v2.push_back(i);
+          }
         return v2;
       };
       auto bestOf = [&](AssocRule::Kind k) {
         size_t best = 0; double bestCF = -1.0;
         for (size_t i = 0; i < rules.size(); ++i)
-          if (rules[i].kind == k && sums[i][si].coreFrac > bestCF) {
+          if (rules[i].kind == k && !rules[i].orGhost && sums[i][si].coreFrac > bestCF) {
             bestCF = sums[i][si].coreFrac; best = i;
           }
         return best;
       };
       struct PageSpec { std::string title; std::vector<size_t> idx; };
       std::vector<PageSpec> pages = {
-        { "z_{0}-significance family",  pageIdx(AssocRule::Kind::SIGNIFICANCE) },
-        { "parameterisation family",    pageIdx(AssocRule::Kind::DZ_PARA)      },
+        { "z_{0}-significance family",  pageIdx(AssocRule::Kind::SIGNIFICANCE, false) },
+        { "parameterisation family",    pageIdx(AssocRule::Kind::DZ_PARA,      false) },
+        { "union with ghost assoc.",    unionPage()                                   },
         { "incumbent vs. best of each",
           { 0, bestOf(AssocRule::Kind::SIGNIFICANCE), bestOf(AssocRule::Kind::DZ_PARA) } },
       };
@@ -528,15 +547,20 @@ int main(int argc, char** argv) {
       TString::Format("assoc_dt_shape_%s.pdf", sc.toStringShort()).Data()).c_str();
     const double yHi = 1.35 * curvesMax(curves);
     canvas->Print(fname + "[");
-    for (auto kind : { AssocRule::Kind::SIGNIFICANCE, AssocRule::Kind::DZ_PARA }) {
+    struct ShapePage { AssocRule::Kind kind; bool ghost; const char* title; };
+    for (auto pg : { ShapePage{AssocRule::Kind::SIGNIFICANCE, false, "z_{0}-significance family"},
+                     ShapePage{AssocRule::Kind::DZ_PARA,      false, "parameterisation family"},
+                     ShapePage{AssocRule::Kind::SIGNIFICANCE, true,  "union with ghost assoc."},
+                     ShapePage{AssocRule::Kind::DZ_PARA,      true,  "union with ghost assoc."} }) {
       std::vector<TH1D*> sub;
       std::vector<std::string> subLabels;
       for (size_t i = 0; i < rules.size(); ++i)
-        if (rules[i].kind == kind) { sub.push_back(curves[i]); subLabels.push_back(labels[i]); }
+        if (rules[i].kind == pg.kind && rules[i].orGhost == pg.ghost) {
+          sub.push_back(curves[i]); subLabels.push_back(labels[i]);
+        }
+      if (sub.empty()) continue;
       overlayPage(fname, canvas, sub, subLabels, "", "#Delta t [ps]", "Normalised Entries",
-                  -200.0, 200.0, 0.0, yHi, sc.toStringShort(),
-                  kind == AssocRule::Kind::SIGNIFICANCE ? "z_{0}-significance family"
-                                                        : "parameterisation family");
+                  -200.0, 200.0, 0.0, yHi, sc.toStringShort(), pg.title);
     }
     canvas->Print(fname + "]");
   }

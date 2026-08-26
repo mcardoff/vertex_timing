@@ -302,6 +302,37 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
+  // 3b. forwardJetGhostTracks
+  //   Union of the ghost-associated track indices over every qualifying
+  //   forward jet (same jet definition WAVeS uses: pT > MIN_JET_PT,
+  //   MIN_ABS_ETA_JET < |eta| < MAX_ABS_ETA_JET, not lepton-overlap removed).
+  //
+  //   Ghost association is a purely ANGULAR construct: tracks enter the jet
+  //   clustering as infinitesimally-soft four-vectors at their perigee
+  //   direction, and whichever jet ends up containing the ghost owns the
+  //   track. No z0, no vertex, no timing information goes into it -- which is
+  //   why it is a candidate for widening a z-association (it is independent
+  //   of it) and also why it cannot substitute for one.
+  //
+  //   Measured to be numerically equivalent to filterTracksInJets at
+  //   dR < 0.4 on the local VBF sample (1,142,857 vs 1,139,170 tracks), so
+  //   the two are interchangeable in practice; this uses the production's own
+  //   association rather than a geometric proxy.
+  // ---------------------------------------------------------------------------
+  std::unordered_set<int> forwardJetGhostTracks(BranchPointerWrapper *branch) {
+    std::unordered_set<int> ghost;
+    const int N_JETS = (int)branch->topoJetPt.GetSize();
+    for (int j = 0; j < N_JETS; ++j) {
+      if (branch->isJetRemoved(j)) continue;
+      if (branch->topoJetPt[j] < MIN_JET_PT) continue;
+      double absEta = std::abs(branch->topoJetEta[j]);
+      if (absEta < MIN_ABS_ETA_JET || absEta > MAX_ABS_ETA_JET) continue;
+      for (int idx : branch->topoJetGhostTrackIdx[j]) ghost.insert(idx);
+    }
+    return ghost;
+  }
+
+  // ---------------------------------------------------------------------------
   // 4a. getAssociatedTracks — explicit-rule overload
   //   Selects from the FULL track array under `rule`, rather than narrowing an
   //   already-selected list. That distinction is load-bearing for the
@@ -310,6 +341,11 @@ namespace MyUtl {
   //   for others), so filtering the counting list would silently intersect
   //   every parameterized rule with "significance < 3.0" and understate it.
   // ---------------------------------------------------------------------------
+  //   rule.orGhost widens the result to the UNION with ghost association (see
+  //   AssocRule in clustering_constants.h for why that is applied here rather
+  //   than per-track). The kinematic pre-selection still applies first, so a
+  //   ghost track outside HGTD acceptance or the pT window is not smuggled in
+  //   -- it could never carry a time anyway.
   std::vector<int> getAssociatedTracks(
       BranchPointerWrapper *branch,
       double minTrkPt, double maxTrkPt,
@@ -317,11 +353,18 @@ namespace MyUtl {
     ) {
     std::vector<int> goodTracks;
 
+    // Built once per call, not per track: it needs a scan over the jets and
+    // their ghost lists, which is O(jets x ghosts) and would dominate
+    // otherwise. Empty (and untouched) unless the rule actually asks for it.
+    std::unordered_set<int> ghost;
+    if (rule.orGhost) ghost = forwardJetGhostTracks(branch);
+
     for (size_t trk = 0; trk < branch->trackZ0.GetSize(); ++trk) {
       if (not passTrackKinematics(trk, branch, minTrkPt, maxTrkPt))
 	continue;
 
-      if (passTrackVertexAssociation(trk, 0, branch, rule))
+      if (passTrackVertexAssociation(trk, 0, branch, rule) ||
+          (rule.orGhost && ghost.count((int)trk)))
 	goodTracks.push_back(trk);
     }
 

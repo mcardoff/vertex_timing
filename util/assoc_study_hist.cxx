@@ -156,15 +156,21 @@ int main(int argc, char* argv[]) {
       // here rather than returned from processEventData: it is study-specific
       // bookkeeping, and keeping it local means EventResult -- shared by every
       // other executable -- does not grow fields nothing else reads.
+      //
+      // The per-rule lists come from getAssociatedTracks, NOT from calling
+      // passTrackVertexAssociation in a loop: a rule with orGhost set is a
+      // set-level property that the per-track function does not implement
+      // (see AssocRule), so the loop form would silently report the z-only
+      // list while the clustering ran on the union.
       for (size_t trk = 0; trk < branch.trackZ0.GetSize(); ++trk) {
         if (!passTrackKinematics(trk, &branch, MIN_TRACK_PT, MAX_TRACK_PT)) continue;
-        const bool isHS = (branch.trackToTruthvtx[trk] == 0);
         ++st->nFwdAvail;
-        if (isHS) ++st->nFwdAvailHS;
-        for (size_t i = 0; i < rules.size(); ++i) {
-          if (!passTrackVertexAssociation((int)trk, 0, &branch, rules[i])) continue;
+        if (branch.trackToTruthvtx[trk] == 0) ++st->nFwdAvailHS;
+      }
+      for (size_t i = 0; i < rules.size(); ++i) {
+        for (int trk : getAssociatedTracks(&branch, MIN_TRACK_PT, MAX_TRACK_PT, rules[i])) {
           ++st->nKept[i];
-          (isHS ? st->nKeptHS[i] : st->nKeptPU[i])++;
+          (branch.trackToTruthvtx[trk] == 0 ? st->nKeptHS[i] : st->nKeptPU[i])++;
         }
       }
     }

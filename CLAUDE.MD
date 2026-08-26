@@ -378,6 +378,15 @@ COUNTING_NSIGMA       = 3.0   // association PINNED for the EventCounts scan und
   default) reproduces the global-driven behaviour exactly, so every executable
   that does not pass one is bit-for-bit unchanged. Only
   `util/assoc_study_hist.cxx` uses it today.
+- `AssocRule::orGhost` — unions the rule with ghost association (accept a
+  track if it passes the z-test OR is ghost-associated to a qualifying forward
+  jet, via `forwardJetGhostTracks`). **This is a SET-level property, not a
+  per-track one**: it needs the event's jets, so it is applied inside
+  `getAssociatedTracks` and is *not* implemented by
+  `passTrackVertexAssociation`. Anything reproducing a rule's track list must
+  therefore call `getAssociatedTracks` rather than looping the per-track
+  function, or it will silently get the z-only list. (Studied and rejected on
+  physics grounds — see Physics Findings.)
 
 The kinematic half of the track selection (η window, pT window, quality flag)
 lives in `passTrackKinematics` so the two `getAssociatedTracks` overloads
@@ -799,6 +808,33 @@ worth **+5.6 points of recall at higher purity**, and TRKPTZ gains 0.5 ps and
 covariance that does not capture the η dependence of the true z0 spread, and
 `Z0_VAR_INFLATION = 1.15²` is independent evidence it is mis-estimated — a
 single global factor cannot repair an η-dependent mis-modelling.
+
+**Union with ghost association: tested and rejected.** The idea was that ghost
+association, being derived independently of z, might recover HS tracks the
+z-cut misses. OR-ing it in costs **20–24 %pt of core fraction** for BOTH
+scores (TRKPTZ 91.30 → 68.47, WAVeS 91.80 → 72.98, on a `dzpara × 1.0` base).
+
+The failure mode is worth remembering because it is not the obvious one.
+**Core σ barely moves (~1 ps) while core fraction collapses** — so the added
+tracks are not dragging the HS cluster's time, they are causing the wrong
+cluster to be *selected*. Confirmed differentially: every z-only rule
+saturates at ~99.9% core fraction once there are ≥20 forward HS tracks, while
+the union plateaus at **84%** and never saturates. It picks wrong one time in
+six even in the most track-rich events.
+
+Why: the added pileup is **time-random** (mean |Δt| to the truth HS vertex of
+224 ps, against 229 ps for a track drawn at random from the event — measured
+in `util/scratch/ghost_assoc_diag.cxx`), but sits inside forward jets and so
+carries real pT. It builds *decoy clusters* rather than poisoning the HS one,
+feeding the selection channel that the failure decomposition already names as
+dominant. WAVeS is hit as hard as TRKPTZ here despite being immune to every
+z-only change, because jet-proximate tracks are exactly what its score
+up-weights.
+
+Also established while testing this: **ghost association is numerically the
+same as `filterTracksInJets` at ΔR < 0.4** (1,142,857 tracks / 24.44% HS vs
+1,139,170 / 24.54%), so it is not new information relative to what WAVeS
+already uses.
 
 **Not yet acted on.** `MAX_NSIGMA` is unchanged: this has only been run on the
 local VBF sample. Z+jets in particular should be checked first, since Athena
