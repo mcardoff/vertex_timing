@@ -43,6 +43,11 @@ vertex_timing/
 │   ├── rpt_v5_hist.cxx           # Histogramming stage: event loop only, writes <sample-prefixed>_rpt_v5_hist.root
 │   ├── rpt_v5_plot.cxx           # Plotting stage: ROC/console-summary/PDF from that file, no ntuple access
 │   ├── rpt_v5.cxx                # Legacy monolithic executable; retained only as validation ground truth
+│   ├── assoc_study_common.h      # Shared by assoc_study_hist.cxx/assoc_study_plot.cxx: assocRules() rule
+│   │                             #   list, buildAssocMap, scalar-key naming
+│   ├── assoc_study_hist.cxx      # Histogramming stage of the z-association study: one event loop, every
+│   │                             #   AssocRule evaluated against the same event
+│   ├── assoc_study_plot.cxx      # Report stage: console tables + CSV block + PDFs, no ntuple access
 │   ├── maxpt_jet_test.cxx        # A/B/C test of the MAX_TRACK_PT cap vs per-event leading-jet pT
 │   ├── track_dt.cxx              # Inclusive per-track HGTD-time-vs-truth-particle-time residual
 │   └── sweep_utilities.h         # Shared helpers for parameter-sweep executables (no sweep .cxx files currently present)
@@ -164,6 +169,29 @@ primary workflow.
   `clustering_dt`'s event/track selection exactly. Produces training data for
   a possible future DNN, but no model currently consumes it in `src/` — see
   Machine Learning Model section.
+
+### z-Association Study
+- **assoc_study_hist.cxx** / **assoc_study_plot.cxx** (`util/`): Compares the
+  two track-to-vertex z-association rules (z0-significance cut vs. the
+  `getNewDzpara` parameterization) by measuring the vertex t0 each produces,
+  for both `TRKPTZ` and `WAVES`. Reports inclusive core σ and core fraction,
+  plus both as a function of n forward HS tracks and n forward jets, plus
+  track-level accounting (kept / HS purity / HS recall). Same hist/plot split
+  as the primary analyses; the rule list lives in `assocRules()`
+  (`util/assoc_study_common.h`). Full write-up and results:
+  `share/docs/Z_ASSOCIATION_STUDY.md`; headline findings in Physics Findings
+  below.
+
+  All rules are evaluated against the SAME event in one pass, which is what
+  makes the comparison paired. Two structural points make that work:
+  - The counting scan stays pinned at `COUNTING_NSIGMA` (3.0) for every rule,
+    so `EventCounts` — and therefore every plot x-axis — is common. Otherwise
+    the "n_hs_tracks = 3" bin would hold a different set of events per rule.
+  - Under a rule the clustering list is **re-selected from the full track
+    array**, not narrowed from the counting list: a parameterized rule is not
+    a subset of a significance cut (`getNewDzpara` is looser than 3σ for some
+    (η, pT) and tighter for others), so narrowing would silently intersect
+    every parameterized rule with `significance < 3.0`.
 
 ### Utilities
 - **maxpt_jet_test.cxx** (`util/`): Diagnostic comparing WAVeS/TRKPTZ pass
@@ -330,7 +358,34 @@ IDEAL_TRACK_RES       = 1.0   // ps — flat per-track resolution for ideal scen
 PASS_SIGMA            = 60.0  // ps — ±window for "Core Fraction" efficiency oracle
 TRUTH_PULL_CUT        = 3.0   // σ — |pull| threshold for oracle timing purity gates
 WAVES_DR_FLOOR        = 0.05  // minimum ΔR for the WAVeS 1/ΔR weight (prevents divergence)
+MAX_NSIGMA            = 3.0   // z0-significance track-to-vertex association (incumbent)
+Z0_VAR_INFLATION      = 1.15² // covariance underestimates true z0 resolution by ~15%
+DZ0_PARA_SCALE_CLUSTER= 1.4   // multiple of getNewDzpara used when --dzpara is passed
+COUNTING_NSIGMA       = 3.0   // association PINNED for the EventCounts scan under an AssocRule
 ```
+
+**Track-to-vertex association.** Three ways to express it, all in
+`clustering_constants.h`:
+- `MAX_NSIGMA` — the incumbent z0-significance cut.
+- `USE_DZ_PARA` (runtime, from `--dzpara`) — swaps in `getNewDzpara ×
+  DZ0_PARA_SCALE_CLUSTER` instead; the caller's significance argument is then
+  ignored, since the two rules are not on a common scale.
+- `struct AssocRule` — the same information as an explicit *value* (kind +
+  cut), so several rules can be evaluated against one event in a single pass.
+  `passTrackVertexAssociation` / `getAssociatedTracks` have AssocRule
+  overloads that deliberately do NOT consult the globals, and
+  `processEventData` takes an optional `assoc` argument. `nullptr` (the
+  default) reproduces the global-driven behaviour exactly, so every executable
+  that does not pass one is bit-for-bit unchanged. Only
+  `util/assoc_study_hist.cxx` uses it today.
+
+The kinematic half of the track selection (η window, pT window, quality flag)
+lives in `passTrackKinematics` so the two `getAssociatedTracks` overloads
+cannot drift apart — only the association test differs between them.
+
+The z-association study (see below) found the incumbent `MAX_NSIGMA = 3.0` is
+**not** the best choice for TRKPTZ. It has not been changed, because the study
+has so far only been run on the local VBF sample.
 
 RpT-specific, from `util/rpt_v5_hist.cxx`:
 ```cpp
@@ -486,6 +541,13 @@ cd build && ./rpt_v5_hist && ./rpt_v5_plot
 # Iterate on rpt_v5's plotting only (e.g. tuning the harmonized ROC window's
 # roc_xmin_default/roc_xmax_default)
 cd build && ./rpt_v5_plot
+
+# z-association study (11 rules in one pass), two-step. ~35 s + ~15 s on the
+# full local VBF sample; add --sample=<name> to both stages for a grid sample.
+cd build && ./assoc_study_hist --threads=8 && ./assoc_study_plot
+
+# Iterate on the study's report/plots only (rules unchanged)
+cd build && ./assoc_study_plot
 
 # Rebuild after header change
 cd build && make
@@ -688,6 +750,60 @@ what a Gaussian pull cannot handle.
 Z+jets is limited by t0 AVAILABILITY, not by the algorithm: Athena produces a
 valid vertex time for 80.1% of VBF events, 73.6% of dijet, and **16.5%** of
 Z+jets.
+
+### The z-association is mistuned for TRKPTZ, and irrelevant for WAVeS
+
+From `assoc_study_hist`/`assoc_study_plot`, local VBF, 47,535 selected events,
+11 association rules evaluated against the same events (2026-08-26). Full
+write-up: `share/docs/Z_ASSOCIATION_STUDY.md`.
+
+The incumbent `significance < 3.0` keeps a track list that is **68% pileup**,
+and it is the second-worst of the eleven rules for TRKPTZ:
+
+| score | best rule | vs. incumbent |
+|---|---|---|
+| TRKPTZ | `getNewDzpara × 1.0` | **−1.58 ps core σ** (15.95 → 14.37), **+0.92 %pt core fraction** (90.38 → 91.30) |
+| WAVeS  | `getNewDzpara × 1.2` | +0.13 ps, +0.10 %pt — i.e. nothing |
+
+Both families improve as they tighten and then turn over (significance at
+~2.0, the parameterization at ~1.0), so there is a real optimum and the
+incumbent is not near it. Simply passing the existing `--dzpara` flag
+(`getNewDzpara × 1.4`) already captures ~3/4 of the gain with no code change.
+The TRKPTZ gain is concentrated at low multiplicity — σ(nHS≤5) improves
+29.3 → 25.3 ps (−13%), which is exactly where the failure decomposition says
+the failures live.
+
+**The two scores want opposite things, for a mechanical reason.**
+`Cluster::calculateTime` recomputes the WAVeS time from only the tracks within
+ΔR < 0.4 of a forward jet, and that in-jet filter already does the
+pileup-shedding a tighter z-association would do. The two mechanisms are
+redundant, so tightening can only cost WAVeS hard-scatter tracks — and it does,
+monotonically (`dzpara × 0.6`: +1.86 ps, −1.83 %pt, and worse at *every*
+multiplicity, not just sparse events). Expect any future selector that
+recomputes its time from a track subset to behave the same way, and to want a
+LOOSE association.
+
+**~59% of WAVeS's advantage over TRKPTZ is just the z-association.** The
+core-fraction gap is 1.38 %pt at the incumbent rule but 0.56 %pt when each
+score gets its own best rule. On core σ the ordering inverts outright: TRKPTZ
+at `dzpara × 1.0` (14.37 ps) beats WAVeS at any rule (best 14.95 ps). WAVeS's
+residual edge is in core FRACTION, not core width — i.e. it suppresses gross
+misassignment, consistent with the failure decomposition, not resolution.
+
+**The parameterization is a better shape, not merely a tighter cut.** Compared
+at matched track purity the two families separate, and the gap widens the
+tighter the working point: at ~31.5% purity the parameterization is worth +1.0
+points of HS recall and the two perform identically; at ~43.7% purity it is
+worth **+5.6 points of recall at higher purity**, and TRKPTZ gains 0.5 ps and
+0.6 %pt from the shape alone. Likely cause: `sqrt(var_z0)` is a per-track
+covariance that does not capture the η dependence of the true z0 spread, and
+`Z0_VAR_INFLATION = 1.15²` is independent evidence it is mis-estimated — a
+single global factor cannot repair an η-dependent mis-modelling.
+
+**Not yet acted on.** `MAX_NSIGMA` is unchanged: this has only been run on the
+local VBF sample. Z+jets in particular should be checked first, since Athena
+produces a valid vertex time for only 16.5% of its events. Rerunning is cheap
+(~35 s hist + ~15 s plot on the full local sample; condor via `--sample=`).
 
 ### Reference-study replication
 

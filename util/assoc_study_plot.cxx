@@ -430,7 +430,7 @@ int main(int argc, char** argv) {
         lab << (b == nb ? ">=" : "") << lo;
         std::cout << std::right << std::setw(9) << lab.str();
       }
-      std::cout << '\n';
+      std::cout << '\n' << std::string(16 + 9 * nb, '-') << '\n';
       std::cout << std::left << std::setw(16) << "  [N events]" << std::right;
       for (int b = 1; b <= nb; ++b)
         std::cout << std::setw(9) << (Long64_t)ref->effTotal->GetBinContent(b);
