@@ -591,7 +591,33 @@ cd ../build
 ./rpt_v5_plot --sample=<sample>
 ```
 
-Logs land in `condor/logs/clustering_hist_<sample>.<ClusterId>.<ProcId>.{out,err,log}` (prefixed `rpt_v5_hist_` for the rpt_v5_hist cluster).
+Logs land in `condor/logs/clustering_hist_<sample>.<ClusterId>.<ProcId>.{out,err,log}` (prefixed `rpt_v5_hist_` for the rpt_v5_hist cluster). `stream_output`/`stream_error` are **on**, so `.out`/`.err` are written back to the submit node as the job runs rather than only on exit — without that, `condor_tail` mid-job shows only whatever happened to be flushed.
+
+### Job cost: where the time actually goes
+
+Measured from the three-sample `rpt_v5_hist` clusters of 2026-07-03 (`condor/logs/`, three repeats each):
+
+| sample | files | events | wall | CPU | wall/event |
+|---|---:|---:|---:|---:|---:|
+| vbf   | 1002 |   499,100 |  24.9 min | 12.2 min | 2.99 ms |
+| dijet | 1414 |   699,500 |  25.2 min |  8.4 min | 2.16 ms |
+| zjets | 2005 | 8,084,000 | 183.3 min | 108.0 min | 1.36 ms |
+
+**Z+jets is not inefficient — it is 16.2x larger than vbf** (both DSIDs, Zee+Zmumu). Per event it is the *fastest* of the three. File count is not a driver either: dijet has 1.4x vbf's files and 1.4x its events at the same wall time.
+
+**Startup dead time is the real inefficiency, and it is not proportional to anything.** From the condor `.log` image-size timeline (memory sits at ~60 MB with ROOT loaded and nothing allocated, then jumps to ~500 MB when the worker threads book their histograms):
+
+| sample | run 1 | run 2 | run 3 |
+|---|---|---|---|
+| vbf   | 20.2 min |  5.1 min | 15.2 min |
+| dijet | 10.2 min | 20.2 min | 10.1 min |
+| zjets | 30.2 min | 25.2 min | 20.2 min |
+
+That is 5–30 min, varying **4x run-to-run on the same sample** — filesystem contention, not a per-sample property. It is 15–20% of a zjets job but **40–80% of a vbf or dijet job**. Sampled at condor's 5-minute granularity, so ±5 min.
+
+Mechanism: `TChain::Add` is lazy (opens nothing), but `TChain::GetEntries()` opens **every file** in the chain to sum entry counts — 0.3–1.2 s per file on `/data` against 4.3 ms on local SSD. That call has been removed from `setupChain` (the "did we find files?" question is answered by `GetListOfFiles()->GetEntries()` with no I/O) and from the `*_hist` progress denominators, leaving only `TTreeProcessorMT`'s own unavoidable pass. **Do not reintroduce it** — see the note on `setupChain` in `src/event_processing.h`.
+
+The remaining dead time is the ATLAS/cvmfs `lsetup` in `run_analysis.sh`, which now prints `[job t+NNNNs]` stamps around itself so setup and analysis are separately attributable; the executables print `[t+NNN.N s]` phase marks (`MyUtl::PhaseTimer`). Both flush immediately — a block-buffered stdout with no flushes is why a working job looked hung under `condor_tail`, which is what sent an earlier investigation after "file loading" in the first place.
 
 **Caveat:** the build uses `-march=native` (see Compiler Flags above), tuned to whichever machine ran `make`. If execute hosts have a different CPU microarchitecture than the build host, jobs can crash with an "Illegal instruction" (SIGILL) rather than a normal error.
 

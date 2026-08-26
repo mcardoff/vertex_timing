@@ -20,6 +20,9 @@
 #include <map>
 #include <sstream>
 #include <string>
+#include <cstdio>
+#include <unistd.h>
+#include <chrono>
 #include <thread>
 
 namespace MyUtl {
@@ -297,6 +300,47 @@ namespace MyUtl {
   inline std::string selectionTagged(const std::string& baseName) {
     return SELECTION_TAG.empty() ? baseName : SELECTION_TAG + "_" + baseName;
   }
+
+  // True when stdout is a terminal. Progress output that overwrites its own
+  // line with '\r' is right for a terminal and wrong for a condor log, where
+  // it collapses the whole run into one unreadable line; callers branch on
+  // this rather than emitting terminal control characters into a file.
+  inline const bool STDOUT_IS_TTY = isatty(fileno(stdout)) != 0;
+
+  // ---------------------------------------------------------------------------
+  // PhaseTimer
+  //   Prints "[t+SSS.S s] <label>" for each milestone of a long-running job,
+  //   flushed immediately.
+  //
+  //   Both halves matter on condor. The timestamps make the pre-event-loop
+  //   cost attributable instead of guessable -- the startup dead time on the
+  //   AF has been measured at 5-30 minutes and varies ~4x run-to-run on the
+  //   same sample, so it has to be measured per run, not assumed. And the
+  //   flush matters because a redirected stdout is block-buffered: without it
+  //   a `condor_tail` of a job that is genuinely working shows nothing at
+  //   all, which is indistinguishable from a hang.
+  // ---------------------------------------------------------------------------
+  class PhaseTimer {
+  public:
+    PhaseTimer() : start_(std::chrono::steady_clock::now()) {}
+    // Composed into one string and written with a single insertion: mark() is
+    // called from TTreeProcessorMT worker threads as well as main, and
+    // streaming several fragments would let two threads interleave mid-line.
+    void mark(const std::string& label) const {
+      double t = std::chrono::duration<double>(
+                   std::chrono::steady_clock::now() - start_).count();
+      std::ostringstream os;
+      os << "[t+" << std::fixed << std::setprecision(1) << std::setw(7)
+         << t << " s] " << label << '\n';
+      std::cout << os.str() << std::flush;
+    }
+    double elapsed() const {
+      return std::chrono::duration<double>(
+               std::chrono::steady_clock::now() - start_).count();
+    }
+  private:
+    std::chrono::steady_clock::time_point start_;
+  };
 
   inline std::string histFilePath(const std::string& baseName) {
     const std::string base = selectionTagged(baseName);

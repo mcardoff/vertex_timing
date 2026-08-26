@@ -30,8 +30,22 @@ namespace MyUtl {
   //   sub-directory is descended one level (files inside it are added; its
   //   own sub-directories are skipped) rather than being skipped outright,
   //   since some samples (e.g. the highstats VBF H->Invisible ntuples) store
-  //   their ROOT files one directory deeper than the usual flat layout. Exits
-  //   with an error message if no ROOT files are found anywhere.
+  //   their ROOT files one directory deeper than the usual flat layout.
+  //   Aborts if no ROOT files are found anywhere.
+  //
+  //   DO NOT reintroduce a chain.GetEntries() check here. TChain::Add is lazy
+  //   -- it records a path and opens nothing -- but GetEntries() has to open
+  //   EVERY file in the chain and read its tree header to sum the counts. On
+  //   the UChicago AF's /data that costs 0.3-1.2 s per file (measured from
+  //   condor image-size timelines; local SSD is 4.3 ms), so the check alone
+  //   was 5-30 minutes of dead time per job -- and it was asking a question
+  //   ("did we find any files?") that GetListOfFiles answers with no I/O at
+  //   all. TTreeProcessorMT then makes its own unavoidable pass over the
+  //   files for cluster boundaries, so this was a second full pass on top.
+  //
+  //   That dead time is also what a `condor_tail` mid-job looks "frozen" in:
+  //   the process sits at ~60 MB with ROOT loaded and no output for the
+  //   duration, before the worker threads allocate their histograms.
   // ---------------------------------------------------------------------------
   void setupChain(
     TChain &chain, const char* ntupleDir
@@ -49,10 +63,18 @@ namespace MyUtl {
       chain.Add(entry.path().c_str());
     }
 
-    if (chain.GetEntries() == 0) {
+    // Counts what Add() recorded, NOT what the files contain -- no file is
+    // opened. Previously this was `chain.GetEntries() == 0`, which also only
+    // ever needed to distinguish zero from non-zero.
+    const int nFiles = chain.GetListOfFiles() ? chain.GetListOfFiles()->GetEntries() : 0;
+    if (nFiles == 0) {
+      // Was a bare `return`, which left the caller running on an empty chain
+      // after printing to stderr -- a silent no-op run rather than a failure.
       std::cerr << "No ROOT files found in directory: " << ntupleDir << "\n";
-      return;
+      std::exit(1);
     }
+    std::cout << "[chain] " << nFiles << " files added from " << ntupleDir
+              << " (entry counts deferred)" << std::endl;
   }
 
   // ---------------------------------------------------------------------------

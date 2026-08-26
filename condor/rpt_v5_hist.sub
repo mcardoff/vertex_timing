@@ -63,6 +63,16 @@ transfer_output_remaps   = "$(sample)_rpt_v5_hist.root=$(sample)/$(sample)_rpt_v
 
 getenv                   = True
 
+# Write .out/.err back to the submit node AS THEY ARE PRODUCED, rather than
+# only on exit (condor's default). Without this a `condor_tail` mid-job shows
+# whatever happened to be flushed, which for a job whose startup is minutes of
+# silent file I/O is indistinguishable from a hang -- and that misread is what
+# sent a performance investigation after "file loading" when the executables
+# simply were not reporting. Cheap now that the event loop emits one progress
+# line per 100k events instead of overwriting a single line every 5k.
+stream_output            = True
+stream_error             = True
+
 # CERN-style job-length hint; harmless no-op on pools that don't read it,
 # remove if your condor pool doesn't recognize +JobFlavour.
 +JobFlavour              = "tomorrow"

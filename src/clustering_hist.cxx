@@ -90,6 +90,13 @@ auto main(int argc, char** argv) -> int {
   // gDirectory name collision across threads.
   TH1::AddDirectory(kFALSE);
 
+  // Phase timestamps, flushed as they happen. On condor the pre-event-loop
+  // cost has been measured at 5-30 minutes and varies ~4x run-to-run on the
+  // same sample, so it has to be attributed per run rather than assumed --
+  // and a block-buffered stdout with no flushes is why a working job looks
+  // hung under condor_tail. See MyUtl::PhaseTimer.
+  MyUtl::PhaseTimer phase;
+
   // --- Sample selection (--sample=vbf|zjets|dijet; default: local VBF ntuple) ---
   auto sample = MyUtl::resolveSample(argc, argv);
   MyUtl::resolveSelection(argc, argv);  // --vbs-deta=<x>; sets SELECTION_TAG
@@ -116,6 +123,7 @@ auto main(int argc, char** argv) -> int {
   // --- Data source ---
   TChain chain("ntuple");
   setupChain(chain, sample.ntupleDir.c_str());
+  phase.mark("chain built");
   ROOT::EnableImplicitMT(nThreads);
 
   gErrorIgnoreLevel = kFatal;
@@ -165,19 +173,24 @@ auto main(int argc, char** argv) -> int {
   std::atomic<Long64_t> progressCounter{0};
 
   // --- Event loop ---
-  std::cout << "Starting Event Loop\n";
-  const Long64_t N_EVENT = chain.GetEntries();
-
   // Optional --max-events=<N> cap for quick local checks (see resolveMaxEvents
   // in sample_config.h). -1 means unlimited -- every existing invocation
   // without the flag is unaffected. progressDenom is just for the progress
   // print below; the actual stopping condition is the per-event check inside
   // the loop, keyed off the same shared progressCounter every worker thread
   // increments, so all threads converge on the cap together.
-  const Long64_t maxEvents    = MyUtl::resolveMaxEvents(argc, argv);
-  const Long64_t progressDenom = (maxEvents > 0) ? std::min(maxEvents, N_EVENT) : N_EVENT;
+  //
+  // Deliberately NOT chain.GetEntries(): that opens every file in the chain to
+  // sum entry counts, which on the AF's /data costs 0.3-1.2 s per file and so
+  // 5-30 minutes of dead time before the loop starts (see setupChain's note).
+  // TTreeProcessorMT makes its own pass over the files anyway, so paying for
+  // this one bought nothing but a percentage in the progress line. Without a
+  // cap the denominator is simply unknown and progress prints as a bare count.
+  const Long64_t maxEvents     = MyUtl::resolveMaxEvents(argc, argv);
+  const Long64_t progressDenom = (maxEvents > 0) ? maxEvents : -1;
   if (maxEvents > 0)
     std::cout << "Restricting to first " << progressDenom << " events (--max-events)\n";
+  phase.mark("starting event loop");
 
   ROOT::TTreeProcessorMT proc(chain, nThreads);
   proc.Process([&](TTreeReader& reader) {
@@ -209,8 +222,18 @@ auto main(int argc, char** argv) -> int {
       // the same check within their own next iteration, so overshoot across
       // threads is bounded by ~nThreads events, not the whole remaining tree.
       if (maxEvents > 0 && n > maxEvents) break;
-      if (n % 5000 == 0)
-        std::cout << "Progress: " << n << "/" << progressDenom << "\r" << std::flush;
+      // '\r' only when stdout is a terminal. Under condor stdout is a file, and
+      // overwriting one line there produced a single unreadable mega-line and
+      // no sense of rate; a periodic newline-terminated count is what makes
+      // `condor_tail` useful. Rarer than the terminal update for the same
+      // reason -- one line per 100k events, not per 5k.
+      if (n % 5000 == 0) {
+        if (MyUtl::STDOUT_IS_TTY)
+          std::cout << "Progress: " << n << (progressDenom > 0
+                       ? "/" + std::to_string(progressDenom) : "") << "\r" << std::flush;
+        else if (n % 100000 == 0)
+          phase.mark("processed " + std::to_string(n) + " events");
+      }
 
       // HGTD timing scenario (the only scenario currently active)
       auto resHGTD = processEventData(&branch, false, true, *tlMap);
@@ -261,6 +284,7 @@ auto main(int argc, char** argv) -> int {
     }
   });
   std::cout << "\n";
+  phase.mark("event loop done");
 
   // --- Merge per-thread analysis maps into one ---
   std::map<Score, AnalysisObj> mapHGTD;
@@ -320,6 +344,7 @@ auto main(int argc, char** argv) -> int {
   writer.WriteRunMeta(MyUtl::ENERGY_LABEL, nEventsProcessed);
   writer.Close();
   std::cout << "Wrote histograms to " << histPath << '\n';
+  phase.mark("histograms written");
 
   // --- Print event display commands (toggle PRINT_EVENT_DISPLAYS above) ---
   printEventDisplays("HGTD times: TRKPTZ passes, TEST_MISAS fails (misassignment)", evtDisplayHGTD    );

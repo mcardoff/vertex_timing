@@ -76,6 +76,8 @@ int main(int argc, char* argv[]) {
   // race on gDirectory's global registry. Same requirement as clustering_hist.
   TH1::AddDirectory(kFALSE);
 
+  MyUtl::PhaseTimer phase;   // see src/clustering_hist.cxx for why
+
   auto sample = MyUtl::resolveSample(argc, argv);
   MyUtl::resolveSelection(argc, argv);
   MyUtl::ENERGY_LABEL    = sample.energyLabel;
@@ -93,7 +95,7 @@ int main(int argc, char* argv[]) {
   std::cout << "[assoc-study] comparing " << rules.size()
             << " track-to-vertex association rules in one pass:\n";
   for (const auto& r : rules)
-    std::cout << "    " << std::left << std::setw(10) << r.tag
+    std::cout << "    " << std::left << std::setw(16) << r.tag
               << ruleAscii(r) << '\n';
   std::cout << "[assoc-study] counting scan pinned at z0 significance < "
             << COUNTING_NSIGMA
@@ -104,6 +106,7 @@ int main(int argc, char* argv[]) {
 
   TChain chain("ntuple");
   setupChain(chain, sample.ntupleDir.c_str());
+  phase.mark("chain built");
   ROOT::EnableImplicitMT(nThreads);
   gErrorIgnoreLevel = kFatal;
 
@@ -117,11 +120,13 @@ int main(int argc, char* argv[]) {
 
   std::atomic<Long64_t> progressCounter{0};
 
-  const Long64_t N_EVENT       = chain.GetEntries();
-  const Long64_t progressDenom = (maxEvents > 0) ? std::min(maxEvents, N_EVENT) : N_EVENT;
+  // NOT chain.GetEntries(): it opens every file in the chain (0.3-1.2 s each
+  // on the AF's /data) purely to compute a progress denominator, and
+  // TTreeProcessorMT makes its own pass regardless. See setupChain's note.
+  const Long64_t progressDenom = (maxEvents > 0) ? maxEvents : -1;
   if (maxEvents > 0)
     std::cout << "Restricting to first " << progressDenom << " events (--max-events)\n";
-  std::cout << "Starting Event Loop over " << N_EVENT << " events\n";
+  phase.mark("starting event loop");
 
   ROOT::TTreeProcessorMT proc(chain, nThreads);
   proc.Process([&](TTreeReader& reader) {
@@ -137,8 +142,13 @@ int main(int argc, char* argv[]) {
     while (reader.Next()) {
       Long64_t n = ++progressCounter;
       if (maxEvents > 0 && n > maxEvents) break;
-      if (n % 5000 == 0)
-        std::cout << "Progress: " << n << "/" << progressDenom << "\r" << std::flush;
+      if (n % 5000 == 0) {
+        if (MyUtl::STDOUT_IS_TTY)
+          std::cout << "Progress: " << n << (progressDenom > 0
+                       ? "/" + std::to_string(progressDenom) : "") << "\r" << std::flush;
+        else if (n % 100000 == 0)
+          phase.mark("processed " + std::to_string(n) + " events");
+      }
 
       // Process the SAME event once per rule. Event selection (step A of
       // processEventData) happens before any track is looked at and does not
@@ -176,6 +186,7 @@ int main(int argc, char* argv[]) {
     }
   });
   std::cout << "\nFINISHED PROCESSING\n";
+  phase.mark("event loop done");
 
   // --- Merge per-thread state ---
   ThreadState merged;

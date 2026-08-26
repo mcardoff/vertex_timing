@@ -81,6 +81,16 @@ done
 # --vbs-* flag in the same submission.
 set --
 
+# Elapsed-seconds stamps around each phase. The ATLAS/cvmfs setup below and
+# the analysis itself are charged to the same job, and separating them is the
+# only way to attribute a slow job: startup dead time has been measured at
+# 5-30 minutes and varies ~4x run-to-run on the SAME sample, which no
+# per-sample property explains. Without these stamps the only evidence
+# available was condor's 5-minute image-size sampling in the .log file.
+T0=$SECONDS
+stamp() { printf '[job t+%4ds] %s\n' "$((SECONDS - T0))" "$1"; }
+stamp "job start on $(hostname -s)"
+
 # ATLAS/LCG environment (provides ROOT + Boost via cvmfs). atlasLocalSetup.sh
 # / lsetup reference unset variables internally (e.g. ALRB_frontlineSite) and
 # aren't `set -e`/`set -u` safe, so relax those flags around them.
@@ -88,6 +98,7 @@ set +eu
 source "${ATLAS_LOCAL_ROOT_BASE}/user/atlasLocalSetup.sh"
 lsetup "root 6.38.04-x86_64-el9-gcc15-opt"   # match the version used to build
 set -euo pipefail
+stamp "ATLAS/cvmfs environment ready" 
 
 SAMPLE_ARG=""
 if [ "${SAMPLE}" != "default" ]; then
@@ -104,5 +115,6 @@ if [ -n "${MAX_EVENTS}" ]; then
   MAX_EVENTS_ARG="--max-events=${MAX_EVENTS}"
 fi
 
-echo "running: ./${EXECUTABLE} ${SAMPLE_ARG} ${THREADS_ARG} ${MAX_EVENTS_ARG} ${EXTRA_ARGS[*]:-}"
+stamp "running: ./${EXECUTABLE} ${SAMPLE_ARG} ${THREADS_ARG} ${MAX_EVENTS_ARG} ${EXTRA_ARGS[*]:-}"
 ./"${EXECUTABLE}" ${SAMPLE_ARG} ${THREADS_ARG} ${MAX_EVENTS_ARG} ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
+stamp "analysis exited" 
