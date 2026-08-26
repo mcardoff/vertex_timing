@@ -597,7 +597,7 @@ Logs land in `condor/logs/clustering_hist_<sample>.<ClusterId>.<ProcId>.{out,err
 
 ### Job cost: where the time actually goes
 
-Measured from the three-sample `rpt_v5_hist` clusters of 2026-07-03 (`condor/logs/`, three repeats each):
+Measured from the three-sample `rpt_v5_hist` clusters of 2026-07-03 (`condor/logs/`, three repeats each). **The event counts here are stale — see the 2026-08-26 table below for current values.** Kept because the *wall/CPU* analysis that motivated the sharding work is still the record of how the problem was found:
 
 | sample | files | events | wall | CPU | wall/event |
 |---|---:|---:|---:|---:|---:|
@@ -692,7 +692,40 @@ The sort in `setupChain` is load-bearing, not tidiness: `directory_iterator` ord
 
 **`hadd` will not do this job.** It merges anything with a `Merge()` method and keeps the **first occurrence** of everything else. Every scalar `HistWriter` emits is a `TParameter` — event counts, rejection tallies, the pT accumulators `rpt_v5_plot` turns into untimed-fraction percentages — and `TParameter` has no `Merge()`. `hadd` would produce histograms summed over N shards alongside one shard's event counts, silently. `util/hist_merge.cxx` sums them explicitly, and refuses (rather than dropping) any key type it does not recognise.
 
-**First real grid run** (cluster 2928803, 2026-08-26, zjets `clustering_hist`,
+**Full three-sample run at the new default selection** (clusters 2928810–15,
+2026-08-26 09:20 CST, both `clustering_hist` and `rpt_v5_hist`): **40/40 jobs
+completed, none held.** These are the current numbers — the 2026-07-03 table
+below them is superseded for vbf and zjets.
+
+| sample | files | events | accepted | shards | wall | loop/shard | cvmfs |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| vbf   | 1001 | **1,464,400** | 630,720 (43.1%) | 4  | 21.5 min | 1092 s | 52 s |
+| dijet | 1400 |   699,500     | 105,137 (15.0%) | 4  | 14.0 min |  781 s | 54 s |
+| zjets | 2000 | **2,000,000** |  64,950 ( 3.2%) | 12 | 13.7 min |  759 s | 50 s |
+
+**Every event count in the older table was wrong except dijet's.** vbf is
+~2.9x larger than recorded (1.46M vs 499k) and zjets ~4x smaller (2.0M vs
+8.08M) — the datasets were re-made after the July baseline. Re-measure rather
+than trusting any recorded count; one `--max-events=1` run prints
+`[chain] N files` and the sample's total.
+
+**Rebalance shards accordingly**: aim for **shards ≈ events / 150,000**, which
+puts every job near 10 min. On the counts above that is vbf 8–10 (not 4),
+dijet 5–6, zjets 13–16. There is a ~50 s cvmfs floor per job, so splitting
+below ~5 min of work per shard buys little.
+
+A useful accident: zjets accepted **64,950** in this 12-shard default run and
+**64,950** in the earlier 32-shard run that requested `--vbs-deta=0
+--vbs-mjj=200` explicitly. Exact agreement confirms both that sharding is
+invariant on real grid data at a different shard count, and that the new
+default is precisely the selection that run asked for.
+
+**Merging: glob on the shard count, not on `shard*`.** `condor/zjets/` now
+holds both the 32-shard and 12-shard sets (44 files); `*clustering_hist.shard*.root`
+matches both and would double-count every event. Use
+`*clustering_hist.shard*of12.root`.
+
+**First sharded grid run** (cluster 2928803, zjets `clustering_hist`,
 32 shards, `--vbs-deta=0 --vbs-mjj=200`): **32/32 shards completed, none held**,
 end-to-end **5.3 min**. Per shard: cvmfs setup 49 s mean / 58 s max, `[chain]`
 build **0.1 s for 63 files**, event loop 257 s mean / 265 s max.
