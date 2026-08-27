@@ -142,7 +142,12 @@ def main():
     g = scored.groupby(tds.EVT, sort=False)
     for c in members:
         scored[f"r_{c}"] = g[c].rank(pct=True)
-        mu_ = g[c].transform("mean"); sd_ = g[c].transform("std").replace(0, 1.0)
+        # A single-cluster event has std = NaN (ddof=1 over one value), not 0, so
+        # replace(0, ...) alone leaves it NaN, the whole group becomes NaN, and
+        # idxmax returns NaN rather than a row label. Such an event is trivially
+        # its own argmax, so any finite constant is correct; 1.0 makes z = 0.
+        mu_ = g[c].transform("mean")
+        sd_ = g[c].transform("std").replace(0, 1.0).fillna(1.0)
         scored[f"z_{c}"] = (scored[c] - mu_) / sd_
     scored["ens_rank"] = scored[[f"r_{c}" for c in members]].mean(axis=1)
     scored["ens_zsum"] = scored[[f"z_{c}" for c in members]].mean(axis=1)

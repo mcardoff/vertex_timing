@@ -42,6 +42,58 @@ with room to improve.
 behaviour, on a sample whose forward jets are scarce for a different reason than
 Z+jets'.
 
+## Run-to-run variance, decomposed (2026-08-27)
+
+Every remaining study compares runs, so this is the band any claimed effect must
+clear. Measured on canonical, 15 epochs, four runs per row.
+
+| variance source | vbf | zjets | dijet | ttbar |
+|---|---:|---:|---:|---:|
+| infrastructure — 4x identical seed | **0.000** | **0.000** | **0.000** | **0.000** |
+| init only — one split, 4 init seeds | 0.3 | 0.5 | 0.5 | 0.2 |
+| split + init — 4 seeds | 1.2 | **1.9** | 0.6 | 0.6 |
+
+**Condor is bit-deterministic**: four runs at one seed agree to every printed
+digit. So there is no infrastructure noise to budget for at all.
+
+**The variance is dominated by the SPLIT, not the init** — which events land in
+train versus test matters several times more than where the optimiser starts.
+That has two consequences:
+
+- The learning curve (item 5) must run at several SPLIT seeds per fraction. A
+  single-seed curve on Z+jets would be reading steps of ~1 point against a
+  1.9-point band. Three seeds put the error on the mean near 0.55, so a ~1.1
+  point step becomes resolvable.
+- **Seed ensembling is structurally unable to help here, and measured null.**
+  Members must share a split or member B trains on member A's test events, so an
+  ensemble can only exploit init variance — the small term. Four members gave
+  -0.0 / +0.1 / +0.0 / +0.1 against the best single member. The premise (large
+  usable variance) was real, but it lives in the axis ensembling cannot touch
+  without leaking. Exploiting it would need split-bagging with a held-out fold
+  none of the members saw, which costs test statistics; not pursued.
+
+## Epoch selection: fixed, and worth real points
+
+Validation core fraction was selecting the epoch and is unreliable — on VBF it
+collapsed to 17.6% and DEGRADED with training while the same weights scored
+91.7% on test. The slice is sound: its oracle matches test's to 0.2 points and
+TRKPTZ pushed through the identical tensor scores 90.0%. The fault is in the
+argmax-of-model-scores step on that slice, and the ROOT CAUSE REMAINS OPEN — a
+control column now prints TRKPTZ through every tensor so a recurrence is caught
+immediately.
+
+Selection now uses validation LOSS, which is the training objective itself,
+reads the whole score distribution rather than only its argmax, and moves
+smoothly. Same seed, same config, same machine:
+
+| selection | epoch | vbf | zjets | dijet | ttbar |
+|---|---:|---:|---:|---:|---:|
+| val macro (old) | 1 | 91.7 | 65.4 | 89.2 | 89.8 |
+| **val loss (new)** | 5 | **92.8** | **67.0** | **89.9** | **90.2** |
+
+Better on every sample. Core fraction is still reported per epoch, because the
+two disagreeing is the signature of the open bug.
+
 Items 3, 4 and 8 needed no change: the label was already `|Δt| < 60 ps`, the
 metric was already core fraction, and the μ=0 exclusion went in with the
 group-key fix. They are listed because *verifying* them was part of the plan,
