@@ -26,7 +26,7 @@
 #   condor_submit -a sample=vbf          -a nshards=10 export_training_data_sharded.sub
 #   condor_submit -a sample=zjets        -a nshards=4  export_training_data_sharded.sub
 #   condor_submit -a sample=dijet        -a nshards=5  export_training_data_sharded.sub
-#   condor_submit -a sample=ttbar        -a nshards=8  export_training_data_sharded.sub
+#   condor_submit -a sample=ttbar        -a nshards=20 export_training_data_sharded.sub
 #   condor_submit -a sample=vbf_mu0      -a nshards=16 export_training_data_sharded.sub
 #   condor_submit -a sample=zeejets_mu0  -a nshards=4  export_training_data_sharded.sub
 #   condor_submit -a sample=ttbar_mu0    -a nshards=16 export_training_data_sharded.sub
@@ -37,10 +37,16 @@
 # ttbar_mu0 4.93M, zeejets_mu0 1.05M). There is a ~50 s cvmfs floor per job, so
 # splitting below ~5 min of work per shard buys little.
 #
-# ttbar (mu=200) has NEVER been run here -- it did not exist when the other
-# counts were taken. Size its shards from its own first run rather than
-# trusting the 8 above: one `--max-events=1` run prints "[chain] N files" and
-# the sample total.
+# ttbar (mu=200) has NEVER been run here, so its 20 is an ESTIMATE, not a
+# measurement. On-disk size per event is strikingly uniform across the three
+# measured mu=200 samples -- dijet 200 GB / 699,500 ev, vbf 418 GB / 1,464,400,
+# zjets 571 GB / 2,000,000, i.e. 0.2854-0.2859 MB/ev -- and ttbar is 797 GB over
+# 1000 files, which puts it near 2.8M events and so at ~19 shards.
+#
+# Treat that as a starting point: ttbar at mu=200 has a busier final state than
+# any of the three, so its bytes/event could well run higher and its event count
+# lower. Confirm from its own first run, where the "[chain] N files added" line
+# and the run's event total give it for free.
 #
 # MERGE WITH hadd, NOT util/hist_merge:
 #   cd ..
