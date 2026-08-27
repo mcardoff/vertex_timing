@@ -12,11 +12,16 @@
 //   selects it only ~62% of the time. The gap is a SELECTION problem, so this
 //   exporter dumps the raw ingredients for a learned selector.
 //
-//   Output: one ROOT file per sample containing two TTrees
+//   Output: one ROOT file per sample containing three TTrees
 //     clusters : one row per cluster  (fixed-width features -> GBDT ranking)
 //     tracks   : one row per track    (enables a per-track P(HS) model, whose
 //                aggregate Sum pT*P(HS) is the learned form of what WAVeS
 //                hard-codes as pT_jet/dR)
+//     jets     : one row per forward jet. Jets previously reached a model only
+//                through per-track association (dr_nearest_fwdjet, ...) and
+//                event-level scalars (lead_jet_pt, n_forward_jets); as their own
+//                token sequence a set/attention model can attend over them
+//                directly, which no per-track summary can express.
 //
 //   ROOT rather than CSV/parquet: the track tree is ~9M rows across samples
 //   (~2.7 GB as CSV, ~350 MB compressed); ROOT is already linked here, whereas
@@ -31,7 +36,34 @@
 //   |delta_t| < 60 ps = "good"). Event SELECTION here uses reco quantities only,
 //   so the training population is reproducible at inference time.
 //
-//   Usage:  ./export_training_data [--sample=vbf|zjets|dijet] [--max-events=N]
+//   EVENT IDENTITY - the grouping key is (sample_id, file_idx, event_num)
+//   ------------------------------------------------------------------------
+//   Every model here is a RANKER over the candidate clusters of ONE event, so a
+//   grouping key that collides silently merges two events' candidates into one
+//   ranking group. That is a training bug with no symptom: the rows are all
+//   individually valid.
+//
+//   `event_num` is therefore the entry number WITHIN ITS FILE, and `file_idx`
+//   is that file's position in the sample's sorted file list. Both are exact in
+//   float32 (file counts are ~1e3, per-file entries ~1e3-1e4, against float's
+//   2^24 integer ceiling). The previous key was the chain-global entry number
+//   alone, which is only unique while a sample is exported by a single
+//   unsharded process -- under --file-shard each shard builds its own chain and
+//   restarts that counter at 0, so merging shards aliased shard 0's event 0
+//   onto shard 1's.
+//
+//   `file_idx` is the index in the FULL sorted list, not in this shard's chain,
+//   so it is shard-count invariant: the same event gets the same key whether the
+//   sample was exported in 1 job or 12.
+//
+//   Usage:  ./export_training_data [--sample=<name>] [--max-events=N]
+//                                  [--file-shard=<i>/<N>]
+//                                  [--vbs-deta=<x>] [--vbs-mjj=<x>]
+//
+//   Sharding: --file-shard=<i>/<N> restricts the process to files i, i+N, ... of
+//   the sorted list and tags the output name, exactly as clustering_hist does.
+//   Merge the shards with `hadd`, NOT with util/hist_merge -- see the note at
+//   the bottom of this file.
 // ---------------------------------------------------------------------------
 
 #include <fstream>
@@ -136,7 +168,9 @@ float rms(const std::vector<float>& v) {
 // not care, and it keeps the schema uniform for uproot -> pandas).
 struct ClusterRow {
   // --- bookkeeping -------------------------------------------------------
-  float event_num, cluster_idx, sample_id, weight;
+  // (sample_id, file_idx, event_num) is the ranking group key -- see the
+  // EVENT IDENTITY note at the top of this file.
+  float event_num, file_idx, cluster_idx, sample_id, weight;
   // --- Tier 0: original cluster features ---------------------------------
   float cluster_time, delta_z, delta_z_resunits, cluster_z_sigma;
   float cluster_d0, cluster_d0_sigma, cluster_qOverP, cluster_qOverP_sigma;
@@ -184,7 +218,7 @@ struct ClusterRow {
 };
 
 struct TrackRow {
-  float event_num, cluster_idx, track_idx, sample_id;
+  float event_num, file_idx, cluster_idx, track_idx, sample_id;
   float pt, eta, phi, theta, z0, d0, qOverP;
   float sigma_z0, sigma_d0, sigma_qOverP;
   float time, timeRes, time_valid;
@@ -194,6 +228,22 @@ struct TrackRow {
   float is_lepton;
   float cluster_time, cluster_delta_z;   // context, so track rows stand alone
   float truth_is_hs;                     // LABEL for the per-track P(HS) model
+  // Supervision, never an input: is the track's nearest forward jet matched to
+  // a truth HS jet? Distinguishes "this track sits in a real HS jet" from "this
+  // track sits in a pileup jet that happens to be forward" -- which the
+  // canonical-selection measurement (results/baseline_deta0p0_mjj500p0.md) shows
+  // is the majority case on Z+jets, where ~94% of the forward dijet is pileup.
+  float truth_nearest_fwdjet_is_hs;
+};
+
+// One row per FORWARD jet (the same qualifying band WAVeS uses). Written so a
+// set/attention model can treat jets as their own token sequence.
+struct JetRow {
+  float event_num, file_idx, jet_idx, sample_id;
+  float pt, eta, phi, abs_eta;
+  float n_ghost_tracks, sumpt_ghost;      // ghost tracks that survived selection
+  float n_sel_tracks_dr04, sumpt_dr04;    // selected tracks within dR < 0.4
+  float truth_is_hs;                      // matched to a truth HS jet
 };
 
 }  // namespace
@@ -210,17 +260,17 @@ auto main(int argc, char** argv) -> int {
   MyUtl::ENERGY_LABEL = cfg.energyLabel;
   MyUtl::OVERLAP_REMOVAL = cfg.overlapRemoval;
   const Long64_t maxEvents = MyUtl::resolveMaxEvents(argc, argv);
+  MyUtl::FILE_SHARD = MyUtl::resolveShard(argc, argv);
+  const MyUtl::Shard shard = MyUtl::FILE_SHARD;
 
   // Numeric sample tag travels with every row so concatenated files still group
-  // correctly: the ranking group key is (sample_id, event_num), since event_num
-  // restarts at 0 for each sample's run.
-  const float sampleId =
-      cfg.sampleName == "vbf"   ? 0.f :
-      cfg.sampleName == "zjets" ? 1.f :
-      cfg.sampleName == "dijet" ? 2.f : 3.f;   // 3 = local/default
+  // correctly. The map lives in sample_config.h beside the registry so a newly
+  // registered sample cannot silently alias onto an existing id -- see the
+  // sampleId() comment there for the bug that motivated moving it.
+  const float sampleId = (float)MyUtl::sampleId(cfg.sampleName);
 
   TChain chain("ntuple");
-  setupChain(chain, cfg.ntupleDir.c_str());
+  setupChain(chain, cfg.ntupleDir.c_str(), shard);
   TTreeReader reader(&chain);
   BranchPointerWrapper branch(reader);
 
@@ -242,12 +292,16 @@ auto main(int argc, char** argv) -> int {
 
   auto* clusterTree = new TTree("clusters", "one row per cluster");
   auto* trackTree   = new TTree("tracks",   "one row per track");
+  auto* jetTree     = new TTree("jets",     "one row per forward jet");
   ClusterRow C{};
   TrackRow   T{};
+  JetRow     J{};
   auto BC = [&](const char* n, float* p) { clusterTree->Branch(n, p, Form("%s/F", n)); };
   auto BT = [&](const char* n, float* p) { trackTree  ->Branch(n, p, Form("%s/F", n)); };
+  auto BJ = [&](const char* n, float* p) { jetTree    ->Branch(n, p, Form("%s/F", n)); };
 
-  BC("event_num",&C.event_num); BC("cluster_idx",&C.cluster_idx);
+  BC("event_num",&C.event_num); BC("file_idx",&C.file_idx);
+  BC("cluster_idx",&C.cluster_idx);
   BC("sample_id",&C.sample_id); BC("weight",&C.weight);
   BC("cluster_time",&C.cluster_time); BC("delta_z",&C.delta_z);
   BC("delta_z_resunits",&C.delta_z_resunits); BC("cluster_z_sigma",&C.cluster_z_sigma);
@@ -301,7 +355,8 @@ auto main(int argc, char** argv) -> int {
   BC("truth_purity",&C.truth_purity); BC("truth_n_hs_tracks",&C.truth_n_hs_tracks);
   BC("truth_hs_frac_tracks",&C.truth_hs_frac_tracks);
 
-  BT("event_num",&T.event_num); BT("cluster_idx",&T.cluster_idx);
+  BT("event_num",&T.event_num); BT("file_idx",&T.file_idx);
+  BT("cluster_idx",&T.cluster_idx);
   BT("track_idx",&T.track_idx); BT("sample_id",&T.sample_id);
   BT("pt",&T.pt); BT("eta",&T.eta); BT("phi",&T.phi); BT("theta",&T.theta);
   BT("z0",&T.z0); BT("d0",&T.d0); BT("qOverP",&T.qOverP);
@@ -316,18 +371,48 @@ auto main(int argc, char** argv) -> int {
   BT("is_lepton",&T.is_lepton);
   BT("cluster_time",&T.cluster_time); BT("cluster_delta_z",&T.cluster_delta_z);
   BT("truth_is_hs",&T.truth_is_hs);
+  BT("truth_nearest_fwdjet_is_hs",&T.truth_nearest_fwdjet_is_hs);
 
-  const Long64_t nTotal = chain.GetEntries();
-  const Long64_t nLoop  = (maxEvents > 0 && maxEvents < nTotal) ? maxEvents : nTotal;
-  Long64_t nPassEvent = 0, nClusterRows = 0, nTrackRows = 0;
+  BJ("event_num",&J.event_num); BJ("file_idx",&J.file_idx);
+  BJ("jet_idx",&J.jet_idx);     BJ("sample_id",&J.sample_id);
+  BJ("pt",&J.pt); BJ("eta",&J.eta); BJ("phi",&J.phi); BJ("abs_eta",&J.abs_eta);
+  BJ("n_ghost_tracks",&J.n_ghost_tracks); BJ("sumpt_ghost",&J.sumpt_ghost);
+  BJ("n_sel_tracks_dr04",&J.n_sel_tracks_dr04); BJ("sumpt_dr04",&J.sumpt_dr04);
+  BJ("truth_is_hs",&J.truth_is_hs);
+
+  // NO chain.GetEntries() here. It is not a cheap accessor: it opens EVERY file
+  // in the chain to sum tree headers, which costs 0.3-1.2 s per file on the AF's
+  // /data and was measured at 5-30 minutes of pre-loop dead time per condor job.
+  // See the setupChain comment in src/event_processing.h -- the same call was
+  // removed from clustering_hist/rpt_v5_hist for exactly this reason, and this
+  // exporter was the last place still paying it. Progress therefore prints a
+  // running count with no denominator, as the *_hist executables do.
+  Long64_t nPassEvent = 0, nClusterRows = 0, nTrackRows = 0, nJetRows = 0;
+  Long64_t nSeen = 0;
   std::cout << "Sample '" << (cfg.sampleName.empty() ? "local" : cfg.sampleName)
-            << "' -- exporting over " << nLoop << " / " << nTotal << " events\n";
+            << "' (id " << (int)sampleId << ")"
+            << (shard.given ? " shard " + std::to_string(shard.index) + "/" +
+                              std::to_string(shard.count) : "")
+            << " -- exporting\n" << std::flush;
 
   while (reader.Next()) {
-    const Long64_t evtNum = chain.GetReadEntry();
-    if (maxEvents > 0 && evtNum >= maxEvents) break;
-    if ((evtNum + 1) % 20000 == 0)
-      std::cout << "Progress: " << evtNum + 1 << " / " << nLoop << "\r" << std::flush;
+    // Entry number WITHIN THE CURRENT FILE, paired with that file's index in the
+    // sample's full sorted list. A TChain-bound sequential TTreeReader's
+    // GetReadEntry() is chain-global, so the per-file entry needs the chain
+    // offset subtracted -- and GetTreeNumber() counts position within THIS
+    // process's chain, which under sharding holds only files
+    // shard.index, shard.index + count, ... of the global list.
+    const Long64_t evtNum = chain.GetReadEntry() - chain.GetChainOffset();
+    const int fileIdx = shard.active()
+        ? shard.index + chain.GetTreeNumber() * shard.count
+        : chain.GetTreeNumber();
+
+    // Caps events PER SHARD, not per sample -- this is a local smoke-test knob,
+    // so an N-shard run with --max-events=M exports up to N*M events.
+    if (maxEvents > 0 && nSeen >= maxEvents) break;
+    ++nSeen;
+    if (nSeen % 20000 == 0)
+      std::cout << "Progress: " << nSeen << " events read\r" << std::flush;
 
     // ---- Event selection: RECO ONLY --------------------------------------
     // Mirrors processEventData's reco cuts so the training population is
@@ -396,7 +481,8 @@ auto main(int argc, char** argv) -> int {
       // ranking label; the candidate set must match what the selector sees.
 
       ClusterRow R{};
-      R.event_num = (float)evtNum; R.cluster_idx = (float)ci;
+      R.event_num = (float)evtNum; R.file_idx = (float)fileIdx;
+      R.cluster_idx = (float)ci;
       R.sample_id = sampleId;      R.weight = *branch.weight;
 
       const double tClus = cl.values.at(0);
@@ -608,7 +694,8 @@ auto main(int argc, char** argv) -> int {
       for (size_t k = 0; k < cl.trackIndices.size(); ++k) {
         const int trk = cl.trackIndices[k];
         T = TrackRow{};
-        T.event_num = (float)evtNum; T.cluster_idx = (float)ci;
+        T.event_num = (float)evtNum; T.file_idx = (float)fileIdx;
+        T.cluster_idx = (float)ci;
         T.track_idx = (float)trk;    T.sample_id = sampleId;
         T.pt = branch.trackPt[trk];  T.eta = branch.trackEta[trk];
         T.phi = branch.trackPhi[trk];T.theta = branch.trackTheta[trk];
@@ -628,6 +715,8 @@ auto main(int argc, char** argv) -> int {
         const NearJet nj = nearestForwardJet(trk, &branch);
         T.dr_nearest_fwdjet = nj.idx >= 0 ? (float)nj.dr : NaNf;
         T.pt_nearest_fwdjet = nj.idx >= 0 ? (float)nj.pt : NaNf;
+        T.truth_nearest_fwdjet_is_hs =
+            nj.idx >= 0 ? (branch.isJetTruthHS(nj.idx) ? 1.f : 0.f) : NaNf;
         T.is_ghost_of_nearest = 0.f;
         if (nj.idx >= 0) {
           const auto& gh = branch.topoJetGhostTrackIdx[nj.idx];
@@ -642,20 +731,68 @@ auto main(int argc, char** argv) -> int {
         ++nTrackRows;
       }
     }
+
+    // ---- Per-forward-jet rows ---------------------------------------------
+    // Same qualifying band as nearestForwardJet / WAVeS, so a jet token and the
+    // per-track jet association describe the same object set.
+    for (int j = 0; j < (int)branch.topoJetPt.GetSize(); ++j) {
+      if (branch.isJetRemoved(j)) continue;
+      const double jp = branch.topoJetPt[j];
+      const double je = branch.topoJetEta[j];
+      if (jp < MIN_JET_PT) continue;
+      if (std::abs(je) < MIN_ABS_ETA_JET || std::abs(je) > MAX_ABS_ETA_JET) continue;
+
+      J = JetRow{};
+      J.event_num = (float)evtNum; J.file_idx = (float)fileIdx;
+      J.jet_idx = (float)j;        J.sample_id = sampleId;
+      J.pt = (float)jp; J.eta = (float)je; J.phi = (float)branch.topoJetPhi[j];
+      J.abs_eta = (float)std::abs(je);
+
+      // Ghost tracks are intersected with the event's SELECTED track list: a
+      // model can only ever see selected tracks, so an unrestricted ghost count
+      // would be a jet feature with no counterpart among the track tokens.
+      const auto& gh = branch.topoJetGhostTrackIdx[j];
+      double nGh = 0, sumGh = 0, nDr = 0, sumDr = 0;
+      for (int t : tracks) {
+        if (std::find(gh.begin(), gh.end(), t) != gh.end()) {
+          nGh += 1; sumGh += branch.trackPt[t];
+        }
+        const double deta = je - branch.trackEta[t];
+        const double dphi = TVector2::Phi_mpi_pi(branch.topoJetPhi[j] - branch.trackPhi[t]);
+        if (std::hypot(deta, dphi) < 0.4) { nDr += 1; sumDr += branch.trackPt[t]; }
+      }
+      J.n_ghost_tracks = (float)nGh;    J.sumpt_ghost = (float)sumGh;
+      J.n_sel_tracks_dr04 = (float)nDr; J.sumpt_dr04 = (float)sumDr;
+      J.truth_is_hs = branch.isJetTruthHS(j) ? 1.f : 0.f;
+      jetTree->Fill();
+      ++nJetRows;
+    }
   }
 
   out->cd();
   clusterTree->Write();
   trackTree->Write();
+  jetTree->Write();
   out->Close();
 
   std::cout << "\n\n=== EXPORT SUMMARY ===\n"
-            << "  sample          : " << (cfg.sampleName.empty() ? "local" : cfg.sampleName) << '\n'
+            << "  sample          : " << (cfg.sampleName.empty() ? "local" : cfg.sampleName)
+            << "  (id " << (int)sampleId << ")\n"
+            << "  shard           : "
+            << (shard.given ? std::to_string(shard.index) + "/" + std::to_string(shard.count)
+                            : std::string("none (all files)")) << '\n'
+            << "  events read     : " << nSeen        << '\n'
             << "  events passing  : " << nPassEvent   << '\n'
             << "  cluster rows    : " << nClusterRows << '\n'
             << "  track rows      : " << nTrackRows   << '\n'
+            << "  jet rows        : " << nJetRows     << '\n'
             << "  output          : " << outPath      << '\n'
             << "\n  Reminder: truth_* columns and delta_t are NOT model inputs.\n"
-            << "  Group key for ranking is (sample_id, event_num).\n";
+            << "  Group key for ranking is (sample_id, file_idx, event_num).\n"
+            << "\n  Merge shards with `hadd`, NOT util/hist_merge: this file holds\n"
+            << "  only TTrees, which hadd merges correctly by concatenating rows.\n"
+            << "  hist_merge exists for the *_hist outputs, whose TParameter\n"
+            << "  scalars hadd would silently take from the first input only --\n"
+            << "  there are no such scalars here.\n";
   return 0;
 }
