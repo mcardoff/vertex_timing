@@ -35,7 +35,7 @@ vertex_timing/
 │                                 #   only as the validation ground truth for the split above, see Main Executables
 ├── util/                          # Diagnostic / report / ML-data-export executables
 │   ├── failure_decomposition.cxx # Per-event principal-cause failure classification (see section below)
-│   ├── export_training_data.cxx  # Exports per-cluster CSV rows (8 features + purity/labels) for future DNN retraining
+│   ├── export_training_data.cxx  # Cluster-selection ML export: clusters/tracks/jets TTrees, shardable (see ML Data Export)
 │   ├── generate_rpt.cxx          # RpT-style timing/discrimination report (older version)
 │   ├── rpt_v2.cxx .. rpt_v4.cxx  # RpT discrimination study iterations
 │   ├── rpt_v5_common.h           # Shared by rpt_v5_hist.cxx/rpt_v5_plot.cxx: Scenario struct, RpT histogram
@@ -164,11 +164,32 @@ primary workflow.
   split pair is the primary workflow going forward.
 
 ### ML Data Export
-- **export_training_data.cxx** (`util/`): Exports one CSV row per
-  cluster/passing event (8 features + purity/labels) mirroring
-  `clustering_dt`'s event/track selection exactly. Produces training data for
-  a possible future DNN, but no model currently consumes it in `src/` — see
-  Machine Learning Model section.
+- **export_training_data.cxx** (`util/`): Exports the cluster-SELECTION
+  training data as a ROOT file holding **three** TTrees — `clusters` (one row
+  per candidate cluster, ~96 columns), `tracks` (one row per track, ~31), and
+  `jets` (one row per forward jet, 13). Event selection is reco-only, so the
+  training population is reproducible at inference time. Every truth-derived
+  column is `truth_`-prefixed and must be held out of the model inputs;
+  `delta_t` (cluster time − truth HS time) is the target.
+
+  **Group key is `(sample_id, file_idx, event_num)`.** Each model here ranks
+  the candidates of ONE event, so a colliding key silently merges two events'
+  candidates into one ranking group — a training bug with no symptom, since
+  every row is individually valid. `event_num` is the entry within its file
+  and `file_idx` is that file's index in the sample's **full sorted list**, so
+  the key is shard-count invariant. Two prior bugs this fixes: the sample tag
+  was a hardcoded `vbf?0:zjets?1:dijet?2:3` ladder that collapsed all five
+  later-registered samples onto id 3 (it now comes from `MyUtl::sampleId()`
+  beside the registry, append-only), and `event_num` was the chain-global
+  entry number, which restarts at 0 in every shard.
+
+  Supports `--file-shard=<i>/<N>`; **merge the shards with `hadd`, not
+  `hist_merge`** — the inverse of the rule for the `*_hist` outputs, because
+  this file holds only TTrees (which `hadd` concatenates correctly) and none
+  of the `TParameter` scalars that make `hadd` wrong there. Validated on the
+  local 33-file VBF sample: a 4-way sharded run, `hadd`'d, is bit-identical to
+  the unsharded run in all three trees with row counts summing exactly.
+  Submit template: `condor/export_training_data_sharded.sub`.
 
 ### z-Association Study
 - **assoc_study_hist.cxx** / **assoc_study_plot.cxx** (`util/`): Compares the
@@ -519,9 +540,9 @@ the TRKPTZ baseline. What remains from the prior ML effort:
   pipeline) and `share/docs/ML_MODEL_INTEGRATION.md` /
   `ONNX_INTEGRATION_GUIDE.md` document that pipeline for reference, but it
   has no active consumer.
-- `util/export_training_data.cxx` still exports per-cluster training CSVs
-  (8 features, purity/labels) mirroring the current `clustering_dt`
-  selection, in case retraining is picked back up later.
+- `util/export_training_data.cxx` is the ACTIVE exporter for the current
+  cluster-selection ML effort (see ML Data Export above) — unrelated to the
+  8-feature DNN artifacts described here.
 - `src/clustering_structs.h`'s `Cluster::calcFeatures()` still computes and
   normalises the same 8-feature vector (used historically as DNN input); its
   `rawDeltaZ`/`rawDeltaZResunits` outputs are reused by `updateScores` for

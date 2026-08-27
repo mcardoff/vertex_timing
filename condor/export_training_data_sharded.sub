@@ -1,0 +1,139 @@
+# ---------------------------------------------------------------------------
+# export_training_data_sharded.sub — condor submit template: one SAMPLE per
+# submit, split into $(nshards) parallel shard jobs.
+#
+# Supersedes export_training_data.sub and export_new_samples.sub, which each
+# queued one unsharded job per sample. Those remain for reference; this is the
+# template to use. The difference that matters is not only speed: the exporter
+# used to call chain.GetEntries() before its event loop, which opens EVERY file
+# in the chain (0.3-1.2 s per file on the AF's /data) purely to print a progress
+# denominator. That was 5-30 minutes of dead time per job and is now removed, so
+# sharding attacks what is left -- the event loop itself.
+#
+# Exports the per-cluster, per-track and per-forward-jet training data for the
+# cluster-SELECTION ML study. Each shard writes
+#   <sample>/<sample>_<seltag>training.shard<i>of<N>.root
+# holding three TTrees: clusters, tracks, jets.
+#
+# Setup (once):
+#   cd build && cmake .. && make export_training_data   # build BEFORE submitting
+#   chmod +x condor/run_analysis.sh
+#
+# Submit -- one condor_submit per sample, from inside condor/ so the relative
+# paths below resolve. Shard counts track EVENT count, not file count:
+#
+#   cd condor
+#   condor_submit -a sample=vbf          -a nshards=10 export_training_data_sharded.sub
+#   condor_submit -a sample=zjets        -a nshards=4  export_training_data_sharded.sub
+#   condor_submit -a sample=dijet        -a nshards=5  export_training_data_sharded.sub
+#   condor_submit -a sample=ttbar        -a nshards=8  export_training_data_sharded.sub
+#   condor_submit -a sample=vbf_mu0      -a nshards=16 export_training_data_sharded.sub
+#   condor_submit -a sample=zeejets_mu0  -a nshards=4  export_training_data_sharded.sub
+#   condor_submit -a sample=ttbar_mu0    -a nshards=16 export_training_data_sharded.sub
+#
+# Those counts follow CLAUDE.md's "shards ~ events / 150,000" rule against the
+# event totals measured on 2026-08-26 (vbf 1.46M, dijet 0.70M, zjets 2.0M) and
+# the mu=0 totals in results/baseline_deta0p0_mjj500p0.md (vbf_mu0 4.75M,
+# ttbar_mu0 4.93M, zeejets_mu0 1.05M). There is a ~50 s cvmfs floor per job, so
+# splitting below ~5 min of work per shard buys little.
+#
+# ttbar (mu=200) has NEVER been run here -- it did not exist when the other
+# counts were taken. Size its shards from its own first run rather than
+# trusting the 8 above: one `--max-events=1` run prints "[chain] N files" and
+# the sample total.
+#
+# MERGE WITH hadd, NOT util/hist_merge:
+#   cd ..
+#   hadd -f condor/vbf/vbf_training.root condor/vbf/vbf_training.shard*of10.root
+#
+# That is the opposite of the rule for clustering_hist/rpt_v5_hist, and the
+# reason is the file contents. hist_merge exists because those files carry
+# TParameter scalars (event counts, pT accumulators) which have no Merge()
+# method, so hadd would keep the FIRST input's copy and silently pair
+# N-shard-summed histograms with one shard's event count. This file holds only
+# TTrees, which hadd merges correctly by concatenating rows -- and hist_merge
+# would refuse them, since it recognises histograms and scalars only.
+#
+# Glob on the shard COUNT (shard*of10), not on shard*: a directory that has
+# been exported at two different shard counts holds both sets, and shard*
+# matches both and double-counts every event.
+#
+# Validated on the local 33-file VBF sample: a 4-way sharded run hadd'd back
+# together is bit-identical to the unsharded run in all three trees (96/96,
+# 31/31, 13/13 columns), with event/row counts summing exactly.
+# ---------------------------------------------------------------------------
+universe                 = vanilla
+executable               = run_analysis.sh
+
+sample                   = vbf
+nshards                  = 4
+
+# Non-default VBS selection (resolveSelection in src/sample_config.h). These
+# two MUST agree: selargs changes the cuts, and the executable stamps a
+# matching SELECTION_TAG onto the output FILENAME so a loosened run cannot
+# overwrite the standard one. transfer_output_files has to name that same file.
+# seltag is that tag INCLUDING its trailing underscore.
+#
+#   selargs                          seltag
+#   (empty)  [= no |Deta|, mjj>=200]  (empty)
+#   --vbs-mjj=500                     mjj500p0_
+#   --vbs-deta=3 --vbs-mjj=0          deta3p0_mjj0p0_
+#
+# THE CANONICAL SELECTION FOR THIS STUDY IS --vbs-mjj=500, so the defaults
+# below are NOT empty. results/baseline_deta0p0_mjj500p0.md is the baseline
+# every model here is measured against, and it was taken at that selection; an
+# export at the default mjj>=200 would train across a different fiducial region
+# than the baseline it is compared to. Override both to change it.
+selargs                  = --vbs-mjj=500
+seltag                   = mjj500p0_
+
+arguments                = export_training_data $(sample) --file-shard=$(ProcId)/$(nshards) $(selargs)
+
+should_transfer_files    = YES
+when_to_transfer_output  = ON_EXIT
+transfer_input_files     = ../build/export_training_data
+transfer_output_files    = $(sample)/$(sample)_$(seltag)training.shard$(ProcId)of$(nshards).root
+# Same remap rationale as clustering_hist.sub: condor flattens a nested
+# transfer_output_files path to its basename when staging back, so the remap is
+# what makes the file land under $(sample)/ on the submit side. The LHS must be
+# a BARE FILENAME -- per condor_submit(1), "You cannot specify directories to
+# be remapped" -- while directories are allowed on the RHS and are created as
+# needed.
+#
+# Note the executable calls histFilePath("training.root") with the UNPREFIXED
+# base name; histFilePath() adds the "<sample>_" prefix, the selection tag and
+# the shard tag itself. Passing an already-prefixed name would produce
+# vbf/vbf_vbf_training.root and this remap would silently match nothing.
+transfer_output_remaps   = "$(sample)_$(seltag)training.shard$(ProcId)of$(nshards).root=$(sample)/$(sample)_$(seltag)training.shard$(ProcId)of$(nshards).root"
+
+getenv                   = True
+
+# Write .out/.err back as they are produced rather than only on exit, so
+# condor_tail on a running job shows real progress. Same rationale as
+# clustering_hist.sub.
+stream_output            = True
+stream_error             = True
+
++JobFlavour              = "tomorrow"
+
+# Sequential TTreeReader loop -- this executable has no TTreeProcessorMT, so
+# there is nothing to parallelize within a job and request_cpus stays at 1.
+# Parallelism here comes from sharding across jobs instead. (That is also why
+# no <threads> positional argument is passed above.)
+#
+# Memory/disk are above the clustering_hist values because this writes TTrees
+# rather than histograms: the per-track tree dominates at ~29 rows per passing
+# event, and ROOT buffers baskets for ~140 branches across three trees before
+# flushing. Sharding divides the per-job output size by $(nshards), so these
+# are generous for a sharded run and sized for the nshards=1 fallback.
+request_cpus             = 1
+request_memory           = 6GB
+request_disk             = 24GB
+
+output = logs/export_$(sample).$(ClusterId).$(ProcId).out
+error  = logs/export_$(sample).$(ClusterId).$(ProcId).err
+log    = logs/export_$(sample).$(ClusterId).$(ProcId).log
+
+# $(ProcId) is the shard index: this runs ProcId 0..nshards-1, which
+# --file-shard consumes directly.
+queue $(nshards)

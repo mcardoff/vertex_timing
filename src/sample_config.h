@@ -84,8 +84,7 @@ namespace MyUtl {
   //                              against the combined sample would confound
   //                              pileup with channel mix, so "zeejets" below
   //                              points at the 601189 subdirectory alone.
-  //   ttbar_mu0   601229 r15697  has no mu=200 counterpart yet; the ttbar
-  //                              directory exists but is empty.
+  //   ttbar_mu0   601229 r15697  pairs with "ttbar" (601229 r15700).
   inline SampleConfig resolveSample(int argc, char** argv) {
     static const std::map<std::string, SampleConfig> registry = {
       {"vbf",   {"/data/mcardiff/exotic_superntuples/highstats_vbf/",
@@ -133,6 +132,14 @@ namespace MyUtl {
       {"ttbar_mu0",   {"/data/mcardiff/exotic_superntuples/ttbar_mu0/",
                        "#sqrt{s} = 14 TeV, #mu = 0, t#bar{t} (1 lep)",
                        "ttbar_mu0", "ttbar_mu0", false}},
+
+      // ---- mu = 200 partner for ttbar_mu0 (601229 r15700) ------------------
+      // overlapRemoval stays false for the same reason as ttbar_mu0 above: the
+      // flag currently also switches on passLeptonSelection, whose OS-SF PAIR
+      // requirement would reject every SingleLep event.
+      {"ttbar",       {"/data/mcardiff/exotic_superntuples/ttbar/",
+                       "#sqrt{s} = 14 TeV, HL-LHC, t#bar{t} (1 lep)",
+                       "ttbar", "ttbar", false}},
     };
 
     const std::string prefix = "--sample=";
@@ -143,13 +150,55 @@ namespace MyUtl {
       auto it = registry.find(name);
       if (it == registry.end()) {
         std::cerr << "Unknown --sample value '" << name
-                  << "'. Valid options: vbf, zjets, zeejets, dijet, vbf_mu0, zeejets_mu0, ttbar_mu0.\n";
+                  << "'. Valid options: vbf, zjets, zeejets, dijet, ttbar, "
+                     "vbf_mu0, zeejets_mu0, ttbar_mu0.\n";
         std::exit(1);
       }
       return it->second;
     }
 
     return {"/Users/mcard/project/ntuple-hgtd/", "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv.", "../figs", "", false};
+  }
+
+  // ---------------------------------------------------------------------------
+  // sampleId
+  //   Stable small integer per sample, for datasets that carry a numeric sample
+  //   tag in every row (util/export_training_data.cxx) rather than relying on
+  //   the file they came from. Once several samples are concatenated, the row's
+  //   grouping key includes this, so the mapping must be STABLE ACROSS RELEASES:
+  //   only ever append. Renumbering silently re-labels every dataset already on
+  //   disk, and nothing downstream can detect it.
+  //
+  //   This deliberately lives beside the registry rather than in the exporter.
+  //   The exporter previously carried its own
+  //     name == "vbf" ? 0 : name == "zjets" ? 1 : name == "dijet" ? 2 : 3
+  //   ladder, which silently collapsed every sample added since -- ttbar,
+  //   ttbar_mu0, vbf_mu0, zeejets, zeejets_mu0 -- onto the single id 3. Because
+  //   the ranking group key is (sample_id, file_idx, event_num), that merged
+  //   unrelated events from five different samples into shared candidate groups.
+  //   Keeping the map next to the registry is what makes a newly registered
+  //   sample fail loudly (below) instead of aliasing onto an existing id.
+  // ---------------------------------------------------------------------------
+  inline int sampleId(const std::string& name) {
+    static const std::map<std::string, int> ids = {
+      {"",            -1},   // local/default run
+      {"vbf",          0},
+      {"zjets",        1},
+      {"dijet",        2},
+      {"zeejets",      3},
+      {"vbf_mu0",      4},
+      {"zeejets_mu0",  5},
+      {"ttbar_mu0",    6},
+      {"ttbar",        7},
+    };
+    auto it = ids.find(name);
+    if (it == ids.end()) {
+      std::cerr << "sampleId: no id registered for sample '" << name
+                << "'. Append one to the map in src/sample_config.h -- do NOT "
+                   "renumber the existing entries.\n";
+      std::exit(1);
+    }
+    return it->second;
   }
 
   // ---------------------------------------------------------------------------
