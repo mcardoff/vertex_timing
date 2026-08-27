@@ -692,6 +692,8 @@ The sort in `setupChain` is load-bearing, not tidiness: `directory_iterator` ord
 
 **`hadd` will not do this job.** It merges anything with a `Merge()` method and keeps the **first occurrence** of everything else. Every scalar `HistWriter` emits is a `TParameter` — event counts, rejection tallies, the pT accumulators `rpt_v5_plot` turns into untimed-fraction percentages — and `TParameter` has no `Merge()`. `hadd` would produce histograms summed over N shards alongside one shard's event counts, silently. `util/hist_merge.cxx` sums them explicitly, and refuses (rather than dropping) any key type it does not recognise.
 
+**Not every scalar is additive, though.** `meta_vbs_*` describe the RUN rather than accumulate during it, so `hist_merge` treats them like `meta_energy_label`: must agree across inputs, kept once. Summing them is not merely meaningless — m_jj = 200 in every shard summed to 2400 over 12 shards, which then tripped `HistReader::CheckSelection` and made every merged file unreadable by the plot stage. (Found exactly that way on the first three-sample run, by `CheckSelection` itself.) The `meta_vbs_` prefix IS the rule, so a future selection constant gets the right behaviour by being named that way.
+
 **Full three-sample run at the new default selection** (clusters 2928810–15,
 2026-08-26 09:20 CST, both `clustering_hist` and `rpt_v5_hist`): **40/40 jobs
 completed, none held.** These are the current numbers — the 2026-07-03 table
