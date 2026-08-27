@@ -12,8 +12,8 @@ banner explaining why they are not directly comparable).
 | 2 | Freeze the Deep Sets architecture | **done** — it is the default in `train_deepsets.py` |
 | 3 | 60 ps timing criterion as the selection target | **done** — was already the label |
 | 4 | Core fraction at 60 ps as the primary metric | **done** — was already the metric |
-| 5 | Z+jets learning curve | code ready, `condor/train_learning_curve.sub` |
-| 6 | Add μ=200 ttbar, test topology transfer | export running; `condor/train_transfer.sub` |
+| 5 | Z+jets learning curve | **done** — flat; Z+jets is not data-limited |
+| 6 | Add μ=200 ttbar, test topology transfer | **done** — transfers; ttbar is the best single source |
 | 7 | Deep Sets vs XGBoost error correlation | code ready, `python/compare_models.py` |
 | 8 | μ=0 samples as control/floor, not training data | **done** — excluded from `SAMPLES` |
 | 9 | Reopen architecture only on a concrete reason | **done** — encoded in `parse_args` |
@@ -41,6 +41,62 @@ with room to improve.
 (86.3 vs 87.0). ttbar is a third independent confirmation of the topology-bound
 behaviour, on a sample whose forward jets are scarce for a different reason than
 Z+jets'.
+
+## Item 5 — Z+jets is NOT data-limited (2026-08-27)
+
+Five fractions of the Z+jets training quota, three split seeds each, everything
+else fixed. Read against events ACTUALLY fitted, not the requested fraction.
+
+| zjets events fitted | zjets core fraction |
+|---:|---:|
+| 4,688 | 66.7 ± 0.8 |
+| 9,375 | 66.8 ± 0.6 |
+| 18,750 | 66.9 ± 0.7 |
+| 25,589 | 66.7 ± 0.8 |
+
+**Flat. 5.5x the Z+jets training data moves core fraction by 0.2 points inside a
+±0.8 band.** The other three samples are equally flat (vbf 92.0–92.5, dijet
+89.8–89.9, ttbar 90.2–90.3).
+
+This is a decisive negative and it closes a question that has been open since the
+last round. More Z+jets MC would not help; the sample was never
+statistics-starved, it is information-starved. The 66.7 → 92.6 gap to the oracle
+has to come from new information, which is consistent with the earlier
+decomposition putting the residual in TIME QUALITY rather than track identity.
+
+It also means the `novbs` loose export is not valuable as *more Z+jets events* —
+its +157% is real but buys nothing here. Its value, if any, is as a different
+fiducial region, not a bigger one.
+
+The 0.75 and 1.0 points are the same measurement: Z+jets exhausts at 25,589
+fitted events, below the 28,125 that 0.75 requests, so both cap there. The
+tested range is genuinely 4,688 → 25,589.
+
+## Item 6 — the learned selector transfers; ttbar is the best single source
+
+Rows are the sample FIT on; columns are evaluated on. Three split seeds per row.
+
+| train on | vbf | zjets | dijet | ttbar |
+|---|---:|---:|---:|---:|
+| **ttbar** | **92.4 ± 0.1** | **66.7 ± 0.5** | **89.9 ± 0.0** | **90.4 ± 0.1** |
+| dijet | 92.0 ± 0.5 | 66.2 ± 0.5 | 89.7 ± 0.0 | 90.1 ± 0.1 |
+| vbf | 92.4 ± 0.4 | 65.1 ± 1.3 | 89.3 ± 0.4 | 89.8 ± 0.4 |
+| zjets | 89.6 ± 0.3 | 66.5 ± 0.6 | 89.3 ± 0.1 | 89.6 ± 0.2 |
+| *TRKPTZ* | *90.4* | *61.2* | *86.6* | *87.0* |
+
+**15 of 16 cells beat TRKPTZ.** The single exception is zjets → vbf (89.6 against
+90.4) — a model trained only on the sample whose forward jets are mostly pileup
+does not quite carry to the sample whose forward jets are the signal.
+
+**ttbar-trained is best or tied-best in every column**, including Z+jets, where
+it beats the vbf-trained model by 1.6 points. Against the pooled all-four model
+measured over four seeds (vbf 92.2, zjets 67.1, dijet 89.9, ttbar 90.3), training
+on ttbar ALONE is statistically indistinguishable from training on everything.
+
+That is the practical finding for cluster selection across samples: ttbar is a
+sufficient training topology on its own, and VBF is the *worst* choice of single
+source for Z+jets — the same directional story as WAVeS being topology-bound,
+now measured for the learned selector.
 
 ## Run-to-run variance, decomposed (2026-08-27)
 
