@@ -591,12 +591,24 @@ def main():
     log("\nlambda scan (val macro):  "
         + "   ".join(f"{k.split('lam=')[1]}: {r['val_macro']:.3f}" for k, r in results.items()))
     import statistics as _st
-    noise = max(_st.pstdev([h["macro"] for h in r["history"]][-8:])
-                for r in results.values() if len(r["history"]) >= 3)
     zero = next((k for k in results if k.endswith("lam=0")), None)
     if zero is not None:
         nz = {k: v for k, v in results.items() if k != zero}
         if nz:
+            # Computed HERE, not above, for two reasons. It is only meaningful
+            # when there is a non-zero lambda to compare against -- and with the
+            # frozen default (--lambdas 0) there never is, so computing it
+            # unconditionally crashed every single-lambda run on an empty max().
+            #
+            # The default is +inf, not 0: with fewer than 3 epochs there is no
+            # noise estimate, and the honest response to "I cannot measure the
+            # noise" is to refuse to declare a winner, which +inf does by making
+            # every margin fall inside it. Defaulting to 0 would do the opposite
+            # and wave through any margin at all -- reintroducing exactly the
+            # +0.006-against-0.05-sd mistake this block exists to prevent.
+            noise = max((_st.pstdev([h["macro"] for h in r["history"]][-8:])
+                         for r in results.values() if len(r["history"]) >= 3),
+                        default=float("inf"))
             top = max(nz, key=lambda k: nz[k]["val_macro"])
             margin = nz[top]["val_macro"] - results[zero]["val_macro"]
             log(f"  epoch-to-epoch noise (sd of last 8): {noise:.3f}   "
