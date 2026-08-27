@@ -12,15 +12,24 @@ trained directly on WHICH CLUSTER TO PICK -- a multi-positive listwise softmax
 over the event's clusters, where every cluster inside PASS_PS counts as correct,
 so the loss is the physics metric rather than a proxy for it.
 
-Optionally adds an auxiliary per-track head:
+THE ARCHITECTURE IS FROZEN. Capacity, pooling form, the auxiliary head and the
+feature sets were all scanned and all came back null or negative; the only thing
+that ever moved the number was the training objective above. The defaults in
+parse_args() ARE that frozen configuration -- see the block there for the
+evidence, and reopen a lever only with a concrete reason from a study.
+
+An auxiliary per-track head is still available:
 
   loss = listwise_CE(selection) + lam * BCE(phi_aux(track), truth_is_hs)
 
-lam is SCANNED (default includes 0) rather than set. Adding information has
-repeatedly hurt in this study, and truth_is_hs is a demonstrably imperfect
-target: a *perfect* per-track tagger under pT pooling caps at 80.2% against a
-92.2% oracle. lam=0 reproduces the plain model exactly, so it is the internal
-control and the worst case is "0 wins".
+but --lambdas now defaults to "0" (head OFF) rather than to a scan. The scan is
+what a previous run mistook for a win, on a +0.006 margin against a 0.05
+within-run sd. truth_is_hs is also a demonstrably imperfect target: a *perfect*
+per-track tagger under pT pooling caps at 80.2% against a 92.2% oracle.
+
+Two study knobs that do NOT change the model:
+  --train-samples   fit on a subset, evaluate on all -> topology transfer matrix
+  --sample-frac     scale one sample's train quota   -> learning curve
 
 Writes <out>/results.json (all metrics, per lambda, per sample) and
 <out>/best_model.pt. Nothing is selected on the test set: the epoch and the
@@ -112,29 +121,59 @@ def read_tree(path, tree, cols):
 
 
 # ------------------------------------------------------------------ data ----
+# Which export a --selection maps to, most-preferred first. The tag is part of
+# the exported FILENAME (see MyUtl::resolveSelection), so the selection a run
+# trained on is recoverable from the file it read rather than from memory.
+#
+#   canonical  --vbs-mjj=500     the analysis definition every baseline in
+#                                results/baseline_deta0p0_mjj500p0.md is quoted at
+#   loose      --vbs-deta=-1     VBS candidate-PAIR requirement dropped entirely;
+#                                the wider population, for the data-limitation study
+#
+# "deta0p0" and the untagged name are LEGACY fallbacks: deta0p0 was an earlier
+# loosening attempt that only dropped the |Deta| magnitude and left the pair
+# requirement standing (worth +4% on Z+jets, not the several-fold intended), and
+# an untagged file predates the selection being tagged at all. Both are kept so
+# old exports still load, and both are labelled as such in the log -- mixing one
+# into a canonical comparison is the mistake this labelling exists to prevent.
+SELECTION_TAGS = {
+    "canonical": ("mjj500p0",),
+    "loose":     ("novbs",),
+}
+LEGACY_TAGS = ("deta0p0",)
+
+
 def find_files(input_dir, selection):
-    """<s>_deta0p0_training.root when loose (falling back per sample), else <s>_training.root."""
-    tags, out = ("novbs", "mjj500p0", "deta0p0"), {}
+    """Locate one export per sample for the requested selection."""
+    want = SELECTION_TAGS[selection]
+    out, stale = {}, []
     for s in SAMPLES:
-        cand = []
-        if selection == "loose":
-            # novbs is the current loose export; deta0p0 is the earlier attempt
-            # that only dropped the Deta magnitude and kept the pair requirement.
-            cand += [f"{s}_{t}_training.root" for t in tags]
-        cand += [f"{s}_training.root"]
-        for base in cand:
+        cand  = [(f"{s}_{t}_training.root", t, False) for t in want]
+        cand += [(f"{s}_{t}_training.root", t, True) for t in LEGACY_TAGS]
+        cand += [(f"{s}_training.root", "untagged", True)]
+        for base, which, is_legacy in cand:
             hit = (glob.glob(os.path.join(input_dir, base))
                    or glob.glob(os.path.join(input_dir, s, base)))
             if hit:
                 out[s] = os.path.abspath(hit[0])
-                which = next((t for t in tags if t in base), "tight")
-                log(f"  {s:6s} [{which:7s}] -> {out[s]}")
+                if is_legacy:
+                    stale.append(f"{s} ({which})")
+                log(f"  {s:12s} [{which:9s}{'!' if is_legacy else ' '}] -> {out[s]}")
                 break
     if not out:
         hit = glob.glob(os.path.join(input_dir, "training.root"))
         if hit:
             out["local"] = os.path.abspath(hit[0])
-            log(f"  {'local':6s} [tight ] -> {out['local']}")
+            log(f"  {'local':12s} [{'untagged':9s}!] -> {out['local']}")
+            stale.append("local (untagged)")
+    if stale:
+        # Loud, but not fatal: a legacy file is usable, it just is not the
+        # selection asked for, so any number from it is not comparable with the
+        # baseline. Silently mixing fiducial regions is the failure this catches.
+        log(f"\n  !! {len(stale)} sample(s) fell back to a NON-'{selection}' export: "
+            + ", ".join(stale))
+        log("     Their events are from a different fiducial region. Re-export "
+            "before quoting these against results/baseline_deta0p0_mjj500p0.md.")
     return out
 
 
@@ -232,16 +271,22 @@ def iter_tracks(path, cols, step):
 def stream_tracks(paths, fold, per_sample_train, per_sample_test, step):
     """Per-sample quotas, NOT a global cap. A global cap filled sequentially reads the
     first file only and silently trains on one topology -- that bug appeared three
-    separate times in this study before it was caught."""
+    separate times in this study before it was caught.
+
+    per_sample_train is a dict {sample: cap}; a cap of 0 streams that sample's TEST
+    events but fits on none of it, which is what --train-samples uses to build a
+    transfer matrix in a single pass. per_sample_test may be an int (same for all)."""
     keep_tr, keep_te = [], []
     for name, path in paths.items():
+        cap_tr = per_sample_train[name] if isinstance(per_sample_train, dict) else per_sample_train
+        cap_te = per_sample_test[name] if isinstance(per_sample_test, dict) else per_sample_test
         ntr = nte = 0
         for b in iter_tracks(path, sorted(set(TRACK_FEATURES + KEY + [TRACK_LABEL])),
                              step):
             b = b.assign(fold=fold.reindex(pd.MultiIndex.from_arrays(
                 [b[c] for c in EVT])).to_numpy())
             for is_tr in (True, False):
-                cap = per_sample_train if is_tr else per_sample_test
+                cap = cap_tr if is_tr else cap_te
                 got = ntr if is_tr else nte
                 if got >= cap:
                     continue
@@ -255,11 +300,15 @@ def stream_tracks(paths, fold, per_sample_train, per_sample_test, step):
                     ntr += len(ev)
                 else:
                     nte += len(ev)
-            if ntr >= per_sample_train and nte >= per_sample_test:
+            if ntr >= cap_tr and nte >= cap_te:
                 break
-        log(f"  {name:6s} train {ntr:>7,} ev   test {nte:>7,} ev"
-            + ("" if ntr >= per_sample_train else "   (all available)"))
-    return (pd.concat(keep_tr, ignore_index=True),
+        note = ""
+        if cap_tr == 0:
+            note = "   (eval only)"
+        elif ntr < cap_tr:
+            note = "   (all available)"
+        log(f"  {name:12s} train {ntr:>7,} ev   test {nte:>7,} ev" + note)
+    return (pd.concat(keep_tr, ignore_index=True) if keep_tr else None,
             pd.concat(keep_te, ignore_index=True))
 
 
@@ -367,9 +416,27 @@ def main():
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--input-dir", required=True, help="directory holding *_training.root")
     p.add_argument("--out", required=True, help="output directory for results.json / best_model.pt")
-    p.add_argument("--selection", choices=["tight", "loose"], default="loose")
+    p.add_argument("--selection", choices=["canonical", "loose"], default="canonical")
+    # ---- THE ARCHITECTURE IS FROZEN ------------------------------------------
+    # These four defaults ARE the frozen configuration -- run 1's 24k-parameter
+    # model. The search that closed is documented in results/README.md; briefly,
+    # four levers were scanned and every one came back null or negative:
+    #   capacity   5.7x parameters (hidden/embed 256/128) scored 0.2 LOWER on all
+    #              three samples, and cost 44 s/epoch against 25.
+    #   pooling    gated vs sum: +0.1 on zjets, i.e. inside run-to-run noise.
+    #   aux head   a per-track truth_is_hs head, lambda scanned: within noise every
+    #              time. Hence --lambdas defaults to "0" (head OFF), not a scan --
+    #              the scan is what a previous run mistook for a +0.006 win against
+    #              a 0.05 within-run sd.
+    #   features   cluster features and per-track tagger features, both null.
+    # The ONLY change that ever moved the number was the training objective
+    # (multi-positive listwise), which is not a flag -- it is the loss.
+    #
+    # Reopen one of these only with a concrete reason from a study, not on spec.
+    # Overriding a default here is how you run that test; leaving them alone is
+    # how you reproduce the frozen model.
     p.add_argument("--pools", default="sum", help="comma-separated: sum,gate")
-    p.add_argument("--lambdas", default="0,0.1,0.3,1.0",
+    p.add_argument("--lambdas", default="0",
                    help="auxiliary-head weights to scan; KEEP 0 as the control")
     p.add_argument("--train-events", type=int, default=150_000, help="total, split per sample")
     p.add_argument("--test-events", type=int, default=100_000)
@@ -382,6 +449,25 @@ def main():
                    help="train-fold events >= this are the validation slice")
     p.add_argument("--step", default="300 MB", help="uproot.iterate batch size")
     p.add_argument("--seed", type=int, default=0)
+
+    # ---- study knobs (do not change the model) -------------------------------
+    # --train-samples: fit on a SUBSET, evaluate on everything. This is the
+    # topology-transfer test: `--train-samples vbf` then reading the zjets column
+    # of the per-sample table answers "does a selector learned on VBF transfer to
+    # a sample where the forward jets are mostly pileup?" -- the question WAVeS
+    # fails (+0.7 vbf, -1.9 zjets). Excluded samples still stream their TEST
+    # events, so every column of the transfer matrix is filled from one run.
+    p.add_argument("--train-samples", default="",
+                   help="comma-separated subset to FIT on (default: all found). "
+                        "Test/eval always covers every sample loaded.")
+    # --sample-frac: scale one sample's training quota, for a learning curve.
+    # `--sample-frac zjets=0.25` fits on a quarter of the Z+jets training events
+    # with everything else unchanged. Repeat at 0.25/0.5/1.0 and the slope says
+    # whether Z+jets is data-limited -- it contributed every one of its available
+    # train-fold events in the last run, and the canonical selection cut it to
+    # ~36.5k, so this is the question that decides whether more MC would help.
+    p.add_argument("--sample-frac", default="",
+                   help="comma-separated <sample>=<frac>, e.g. zjets=0.25")
     args = p.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
@@ -414,12 +500,48 @@ def main():
         log(f"  {nm:6s} TRKPTZ {ref[nm]['TRKPTZ']:5.1f}%   WAVeS {ref[nm]['WAVeS']:5.1f}%"
             f"   oracle {ref[nm]['oracle']:5.1f}%")
 
+    # ---- per-sample training quotas ------------------------------------------
+    # --train-samples zeroes the excluded samples' TRAIN quota while leaving their
+    # TEST quota intact, so one pass fills every column of a transfer matrix.
+    # --sample-frac scales one sample's quota for the learning curve.
+    train_on = ([s.strip() for s in args.train_samples.split(",") if s.strip()]
+                or list(files))
+    unknown = [s for s in train_on if s not in files]
+    if unknown:
+        sys.exit(f"FATAL: --train-samples names {unknown}; loaded samples are {list(files)}")
+    fracs = {}
+    for tok in filter(None, (t.strip() for t in args.sample_frac.split(","))):
+        k, _, v = tok.partition("=")
+        k = k.strip()
+        if k not in files:
+            sys.exit(f"FATAL: --sample-frac names '{k}'; loaded samples are {list(files)}")
+        if k not in train_on:
+            sys.exit(f"FATAL: --sample-frac scales '{k}', which --train-samples excludes")
+        fracs[k] = float(v)
+
+    # The budget is divided over the samples actually being FIT on, not over every
+    # sample loaded -- otherwise excluding a sample would silently shrink the
+    # training set instead of just changing its composition, and a transfer run
+    # would be confounded by having less data as well as different data.
+    base = args.train_events // max(1, len(train_on))
+    per_train = {s: (int(round(base * fracs.get(s, 1.0))) if s in train_on else 0)
+                 for s in files}
+    per_test = args.test_events // max(1, len(files))
+
+    log(f"\ntrain on: {', '.join(train_on)}"
+        + (f"   (eval-only: {', '.join(s for s in files if s not in train_on)})"
+           if len(train_on) < len(files) else ""))
+    if fracs:
+        log("sample-frac: " + ", ".join(f"{k}={v:g}" for k, v in fracs.items()))
+
     log("\nstreaming tracks:")
-    n_s = max(1, len(files))
-    TR_T, TE_T = stream_tracks(files, fold,
-                               args.train_events // n_s, args.test_events // n_s, args.step)
-    if TR_T["sample_id"].nunique() != len(files):
-        sys.exit("FATAL: not every sample reached the track training set -- quota logic broke")
+    TR_T, TE_T = stream_tracks(files, fold, per_train, per_test, args.step)
+    if TR_T is None:
+        sys.exit("FATAL: --train-samples left nothing to fit on")
+    got = TR_T["sample_id"].map(SAMPLE_NAME).nunique()
+    if got != len(train_on):
+        sys.exit(f"FATAL: {got} of {len(train_on)} requested train samples reached the "
+                 "track training set -- quota logic broke")
 
     # Model selection needs its own split; picking the epoch on TEST would be peeking.
     FIT_T = TR_T[TR_T.fold < args.val_lo]
@@ -488,8 +610,21 @@ def main():
                 log(f"  -> {top} clears the noise floor: truth_is_hs shapes phi usefully")
     log(f"\nselected: {best_key}  (val macro {best_macro:.3f})")
 
+    # The learning curve's x-axis must be the events ACTUALLY fitted on, not the
+    # requested fraction. Z+jets is the sample the curve is about and it is the
+    # one that runs out: it contributed every available train-fold event in the
+    # last run, so --sample-frac=1.0 can silently mean "all there was". Plotting
+    # against the request would then show a flat top that is a quota artefact
+    # rather than saturation -- the exact thing the study is trying to measure.
+    fitted = (TR_T.assign(_n=TR_T["sample_id"].map(SAMPLE_NAME))
+                  .groupby("_n")[EVT].apply(lambda d: len(d.drop_duplicates()))
+                  .to_dict())
+    log("\ntrain events actually fitted: "
+        + ", ".join(f"{k} {v:,}" for k, v in sorted(fitted.items())))
+
     with open(os.path.join(args.out, "results.json"), "w") as fh:
         json.dump({"args": vars(args), "reference": ref, "results": results,
+                   "train_events_fitted": fitted,
                    "selected": best_key, "selected_val_macro": best_macro}, fh, indent=2)
     torch.save({"state_dict": best_net.state_dict(), "key": best_key,
                 "mu": mu.to_dict(), "sd": sd.to_dict(), "na_cols": na_cols,

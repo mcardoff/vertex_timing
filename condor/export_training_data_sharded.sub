@@ -24,12 +24,22 @@
 #
 #   cd condor
 #   condor_submit -a sample=vbf          -a nshards=10 export_training_data_sharded.sub
-#   condor_submit -a sample=zjets        -a nshards=4  export_training_data_sharded.sub
+#   condor_submit -a sample=zjets        -a nshards=13 export_training_data_sharded.sub
 #   condor_submit -a sample=dijet        -a nshards=5  export_training_data_sharded.sub
 #   condor_submit -a sample=ttbar        -a nshards=20 export_training_data_sharded.sub
-#   condor_submit -a sample=vbf_mu0      -a nshards=16 export_training_data_sharded.sub
+#   condor_submit -a sample=vbf_mu0      -a nshards=12 export_training_data_sharded.sub
 #   condor_submit -a sample=zeejets_mu0  -a nshards=4  export_training_data_sharded.sub
-#   condor_submit -a sample=ttbar_mu0    -a nshards=16 export_training_data_sharded.sub
+#   condor_submit -a sample=ttbar_mu0    -a nshards=12 export_training_data_sharded.sub
+#
+# SHARD COUNTS TRACK EVENTS *READ*, NOT EVENTS ACCEPTED. The event loop runs over
+# every event in the sample and only then applies the selection, so a sample with
+# a 1.5% acceptance costs the same per shard as one with 20%. An earlier version
+# of this list sized Z+jets from its accepted count and asked for 4 shards where
+# its 2.0M read events want 13.
+#
+# The mu=0 samples are the exception to the events/150k rule: with no pileup they
+# carry ~30x less data per event (0.0095 MB/ev against 0.285), so a shard gets
+# through far more of them per unit time. 12 for the ~4.8M-event ones is ample.
 #
 # Those counts follow CLAUDE.md's "shards ~ events / 150,000" rule against the
 # event totals measured on 2026-08-26 (vbf 1.46M, dijet 0.70M, zjets 2.0M) and
