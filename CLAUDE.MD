@@ -1070,8 +1070,31 @@ Four things worth keeping:
   [0.2,0.6] all within 0.1 %pt of the peak), so the exact values are not
   critical.
 
+**The gain is NOT a strict improvement**, and that is the deciding fact. Per
+event, comparing production (alpha=1.5, beta=0) against (0.75, 0.30):
+
+| arm | region | gained | lost | net | churn | gain:loss |
+|---|---|---:|---:|---:|---:|---:|
+| TRKPTZ | all | 661 | **357** | +0.63 %pt | 2.11 %pt | 1.85 |
+| TRKPTZ | nHS<=5 | 359 | **192** | +1.40 %pt | 4.63 %pt | 1.87 |
+| WAVeS | all | 310 | 356 | −0.10 %pt | 1.38 %pt | 0.87 |
+
+"gained" = failed production, passes the challenger; "lost" = the reverse;
+"churn" = (gained+lost)/N, i.e. how many events the change TOUCHES at all.
+
+So ~2 events are gained for every 1 lost: **357 events that pass today would
+start failing**. The net is statistically solid (+0.63 +/- 0.07 %pt, 9.5 sigma;
+low-multiplicity +1.40 +/- 0.20, 7.1 sigma) and sign-stable across an even/odd
+split-half (+0.75 vs +0.51, consistent within ~2 sigma), so this is a real
+effect, not noise. But it is a REWEIGHTING, and a reweighting necessarily
+reorders clusters in both directions -- a strict subset is not an achievable
+outcome for one, so the question is only whether ~1.9:1 is a good enough trade
+to be worth disturbing 2% of events. On one sample, for a score that is not the
+production selector, it is not.
+
 **Not adopted.** +0.6 %pt on a score that is not the production selector, when
-+0.92 %pt from the z-association was already judged not worth adopting. Kept in
++0.92 %pt from the z-association was already judged not worth adopting -- and
+that +0.6 %pt is a net of 661 wins against 357 losses, not a free gain. Kept in
 the tree as `Score::TRKPTZ_DZP` / `WAVES_DZP` (cluster-level) and `*_DZPT`
 (per-track), all four unemplaced by default, so re-measuring costs one line in
 `buildAnalysisMap`. `DZ_ALPHA_MM` / `DZ_ALPHA_RES` / `DZ_BETA_RES` name what

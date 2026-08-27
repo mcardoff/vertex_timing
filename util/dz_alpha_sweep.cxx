@@ -143,6 +143,26 @@ int main(int argc, char** argv) {
     return (((size_t)arm * nAL + ia) * nBE + ib) * N_REGION + r; };
   std::vector<Long64_t> nEvt(N_REGION, 0);
 
+  // ── Migration bookkeeping ────────────────────────────────────────────────
+  // A net +X %pt can be a pure gain or a large two-way churn that happens to
+  // net positive; only the second is fragile. Tally the 2x2 for the production
+  // cell against one challenger cell, per event, so gained and lost are
+  // separately visible. Also split the sample in half (even/odd events) so the
+  // net can be checked for stability rather than assumed.
+  auto findCell = [](const std::vector<double>& v, double x) {
+    for (int i = 0; i < (int)v.size(); ++i) if (std::abs(v[i] - x) < 1e-9) return i;
+    return -1; };
+  const int iaProd = findCell(AL, 1.50), ibProd = findCell(BE, 0.00);
+  const int iaNew  = findCell(AL, 0.75), ibNew  = findCell(BE, 0.30);
+  if (iaProd < 0 || ibProd < 0 || iaNew < 0 || ibNew < 0) {
+    std::cerr << "migration cells are not on the grid\n"; return 1; }
+  // mig[arm][region][passedProduction][passedChallenger]
+  std::vector<Long64_t> mig((size_t)N_ARM * N_REGION * 4, 0);
+  auto MIG = [&](int arm, int r, int p, int q) {
+    return (((size_t)arm * N_REGION + r) * 2 + p) * 2 + q; };
+  std::vector<Long64_t> half((size_t)N_ARM * 2 * 2, 0);   // [arm][half][prod|new]
+  std::vector<Long64_t> halfN(2, 0);
+
   TChain chain("ntuple");
   setupChain(chain, sample.ntupleDir.c_str());
   TTreeReader reader(&chain);
@@ -207,8 +227,11 @@ int main(int argc, char** argv) {
     const int    region = (ev.nForwardTrackHS <= HS_SPLIT) ? R_LOW : R_HIGH;
     ++nEvt[R_ALL]; ++nEvt[region];
 
+    const int hlf = (int)(seen % 2);
+    ++halfN[hlf];
     for (int arm = 0; arm < N_ARM; ++arm) {
       const bool wavesArm = (arm >= W_RES_CLUS);
+      bool passProd = false, passNew = false;
       for (int ia = 0; ia < nAL; ++ia)
         for (int ib = 0; ib < nBE; ++ib) {
           int best = 0; double bestS = -1.0;
@@ -221,11 +244,18 @@ int main(int argc, char** argv) {
             double s = armScore(ci[k], eff, AL[ia], BE[ib]);
             if (s > bestS) { bestS = s; best = (int)k; }
           }
-          if (std::abs(ci[best].time - tTruth) < PASS_SIGMA) {
+          const bool passed = std::abs(ci[best].time - tTruth) < PASS_SIGMA;
+          if (passed) {
             ++nPass[IDX(arm, ia, ib, R_ALL)];
             ++nPass[IDX(arm, ia, ib, region)];
           }
+          if (ia == iaProd && ib == ibProd) passProd = passed;
+          if (ia == iaNew  && ib == ibNew ) passNew  = passed;
         }
+      ++mig[MIG(arm, R_ALL,  passProd, passNew)];
+      ++mig[MIG(arm, region, passProd, passNew)];
+      if (passProd) ++half[((size_t)arm * 2 + hlf) * 2 + 0];
+      if (passNew)  ++half[((size_t)arm * 2 + hlf) * 2 + 1];
     }
   }
   phase.mark("event loop done");
@@ -234,10 +264,6 @@ int main(int argc, char** argv) {
 
   auto CF = [&](int arm, int ia, int ib, int r) {
     return nEvt[r] ? 100.0 * nPass[IDX(arm, ia, ib, r)] / nEvt[r] : 0.0; };
-  // Production cell: alpha = 1.5, beta = 0.
-  int iaProd = 0, ibProd = 0;
-  for (int i = 0; i < nAL; ++i) if (std::abs(AL[i] - 1.5) < 1e-9) iaProd = i;
-
   for (int r = 0; r < N_REGION; ++r) {
     const double prodTrk = CF(A_RES_TRK, iaProd, ibProd, r);
     const double prodWav = CF(W_RES_TRK, iaProd, ibProd, r);
@@ -273,6 +299,45 @@ int main(int argc, char** argv) {
         std::cout << std::setw(7) << std::setprecision(2) << CF(A_RES_TRK, ia, ib, r);
       std::cout << "\n";
     }
+  }
+
+  std::cout << "\n=== MIGRATION: production (a=1.50, b=0.00) -> challenger (a=0.75, b=0.30) ===\n"
+            << "  Is the gain a pure addition, or a two-way churn that nets positive?\n\n"
+            << std::left << std::setw(18) << "arm" << std::setw(10) << "region"
+            << std::right << std::setw(9) << "gained" << std::setw(9) << "lost"
+            << std::setw(9) << "net" << std::setw(11) << "net %pt"
+            << std::setw(12) << "churn %pt" << std::setw(10) << "gain:loss" << "\n"
+            << std::string(88, '-') << "\n";
+  for (int arm = 0; arm < N_ARM; ++arm)
+    for (int r = 0; r < N_REGION; ++r) {
+      const Long64_t gained = mig[MIG(arm, r, 0, 1)];   // failed prod, passes new
+      const Long64_t lost   = mig[MIG(arm, r, 1, 0)];   // passed prod, fails new
+      const double   denom  = nEvt[r] ? (double)nEvt[r] : 1.0;
+      std::cout << std::left << std::setw(18) << ARM_NAME[arm] << std::setw(10) << REGION_NAME[r]
+                << std::right << std::setw(9) << gained << std::setw(9) << lost
+                << std::setw(9) << (gained - lost)
+                << std::fixed << std::setprecision(2)
+                << std::setw(10) << std::showpos << 100.0 * (gained - lost) / denom << std::noshowpos
+                << std::setw(12) << 100.0 * (gained + lost) / denom
+                << std::setw(10) << (lost ? (double)gained / lost : 0.0) << "\n";
+    }
+  std::cout << "\n  gained = failed production, passes challenger.  lost = the reverse.\n"
+               "  churn  = (gained+lost)/N: how many events the change TOUCHES at all.\n"
+               "  A strict improvement would have lost = 0.\n";
+
+  std::cout << "\n=== SPLIT-HALF STABILITY (even vs odd events) ===\n"
+            << std::left << std::setw(18) << "arm"
+            << std::right << std::setw(14) << "net %pt (even)"
+            << std::setw(14) << "net %pt (odd)" << "\n" << std::string(46, '-') << "\n";
+  for (int arm = 0; arm < N_ARM; ++arm) {
+    std::cout << std::left << std::setw(18) << ARM_NAME[arm] << std::right << std::fixed
+              << std::setprecision(2) << std::showpos;
+    for (int hh = 0; hh < 2; ++hh) {
+      double pr = halfN[hh] ? 100.0 * half[((size_t)arm * 2 + hh) * 2 + 0] / halfN[hh] : 0.0;
+      double nw = halfN[hh] ? 100.0 * half[((size_t)arm * 2 + hh) * 2 + 1] / halfN[hh] : 0.0;
+      std::cout << std::setw(14) << (nw - pr);
+    }
+    std::cout << std::noshowpos << "\n";
   }
 
   std::cout << "\nCSV|region,arm,alpha,beta,core_frac_pct,n_events\n";
