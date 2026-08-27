@@ -449,6 +449,21 @@ def main():
                    help="train-fold events >= this are the validation slice")
     p.add_argument("--step", default="300 MB", help="uproot.iterate batch size")
     p.add_argument("--seed", type=int, default=0)
+    # torch's intra-op thread count. Left at 0 (torch's own default) unless set.
+    #
+    # This is a REPRODUCIBILITY knob, not a speed one. torch parallelises its
+    # reductions across threads, and the order a reduction is summed in changes
+    # its last bits -- so the same seed on the same data gives bitwise different
+    # results at different thread counts. A condor run at request_cpus=4 and a
+    # rerun on a busy login node diverged from epoch 1 (loss 0.4345 vs 0.4242)
+    # for exactly this reason, and the two disagreed by 18 points on one sample's
+    # validation number.
+    #
+    # Set it equal to request_cpus in the submit files. Two runs then differ only
+    # by what you meant to change, which is what makes a learning curve or a
+    # transfer matrix readable at all.
+    p.add_argument("--torch-threads", type=int, default=0,
+                   help="torch.set_num_threads(); 0 = leave torch's default")
 
     # ---- study knobs (do not change the model) -------------------------------
     # --train-samples: fit on a SUBSET, evaluate on everything. This is the
@@ -471,6 +486,11 @@ def main():
     args = p.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
+    if args.torch_threads > 0:
+        torch.set_num_threads(args.torch_threads)
+    log(f"torch threads: {torch.get_num_threads()}"
+        + ("" if args.torch_threads > 0 else "  (DEFAULT -- runs are not comparable "
+                                             "across machines; see --torch-threads)"))
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log(f"torch {torch.__version__}   device {dev}"
         + (f" ({torch.cuda.get_device_name(0)})" if dev.type == "cuda" else ""))
