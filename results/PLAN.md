@@ -8,7 +8,7 @@ banner explaining why they are not directly comparable).
 
 | # | Item | State |
 |---|------|-------|
-| 1 | Re-export / retrain at the canonical selection | exports **running** (14 clusters, 152 jobs) |
+| 1 | Re-export / retrain at the canonical selection | exported + merged + staged; training **running** (cluster 2936092) |
 | 2 | Freeze the Deep Sets architecture | **done** — it is the default in `train_deepsets.py` |
 | 3 | 60 ps timing criterion as the selection target | **done** — was already the label |
 | 4 | Core fraction at 60 ps as the primary metric | **done** — was already the metric |
@@ -17,6 +17,30 @@ banner explaining why they are not directly comparable).
 | 7 | Deep Sets vs XGBoost error correlation | code ready, `python/compare_models.py` |
 | 8 | μ=0 samples as control/floor, not training data | **done** — excluded from `SAMPLES` |
 | 9 | Reopen architecture only on a concrete reason | **done** — encoded in `parse_args` |
+
+## First canonical-selection baselines (2026-08-27)
+
+Reference selectors on the test fold of the re-exported canonical samples. These
+are the numbers every later result is measured against, and the first ones taken
+at `--vbs-mjj=500` on data carrying the `file_idx` group key.
+
+| sample | events | TRKPTZ | WAVeS | oracle | headroom |
+|---|---:|---:|---:|---:|---:|
+| vbf   | 519,115 | 90.4% | 91.1% | 98.3% | 7.9 |
+| **zjets** | 36,531 | **61.2%** | 59.4% | **92.6%** | **31.4** |
+| dijet | 80,383 | 86.6% | 86.2% | 97.7% | 11.1 |
+| ttbar | 561,745 | 87.0% | 86.3% | 98.0% | 11.0 |
+
+**Z+jets is still the headroom sample, by a wide margin.** ttbar was a candidate
+to displace it — it has 15x the events — but at 11.0 points of headroom it
+behaves like dijet, not like Z+jets. So the learning curve (item 5) stays on
+Z+jets, and ttbar's value is as a transfer topology (item 6), not as the sample
+with room to improve.
+
+**WAVeS trails TRKPTZ on every sample except VBF**, now including ttbar
+(86.3 vs 87.0). ttbar is a third independent confirmation of the topology-bound
+behaviour, on a sample whose forward jets are scarce for a different reason than
+Z+jets'.
 
 Items 3, 4 and 8 needed no change: the label was already `|Δt| < 60 ps`, the
 metric was already core fraction, and the μ=0 exclusion went in with the
