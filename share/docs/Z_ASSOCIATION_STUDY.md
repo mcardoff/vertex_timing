@@ -8,6 +8,14 @@ t0 is built from. Which one produces a better t0?
 passing selection) · **Executables:** `util/assoc_study_hist.cxx` +
 `util/assoc_study_plot.cxx`
 
+> **Selection:** every number here was produced at the VBS selection that was
+> default *before* 2026-08-26 — **|Deta| >= 3, m_jj >= 0**. The default has
+> since changed to **no |Deta|, m_jj >= 200 GeV**, so reproducing these tables
+> now requires `--vbs-deta=3 --vbs-mjj=0`. The conclusions concern the
+> track-to-vertex association and are not expected to hinge on the VBS
+> topology cut, but that has not been checked — the pending Z+jets run should
+> be done at one selection and stated explicitly.
+
 ---
 
 ## Verdict

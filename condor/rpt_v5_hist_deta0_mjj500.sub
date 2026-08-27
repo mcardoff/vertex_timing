@@ -1,4 +1,10 @@
 # ---------------------------------------------------------------------------
+# TAG CHANGED 2026-08-26: --vbs-deta=0 is now the DEFAULT, so it no longer
+# contributes a "deta0p0" component. The output tag is now "mjj500p0" alone.
+# Filenames below were updated to match; the old paths in any notes or
+# scripts that reference this run will not resolve.
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # rpt_v5_hist_deta0_mjj500.sub — rpt_v5_hist on a tightened, analysis-level
 # VBS event selection: |Deta| requirement OFF, m_jj >= 500 GeV.
 #
@@ -25,7 +31,7 @@
 # cut -- so check the region yields rpt_v5_plot prints before reading its ROC.
 #
 # Output names are tagged by resolveSelection(), so these land as
-# <sample>/<sample>_deta0p0_mjj500p0_rpt_v5_hist.root and CANNOT overwrite the
+# <sample>/<sample>_mjj500p0_rpt_v5_hist.root and CANNOT overwrite the
 # standard rpt_v5_hist run. rpt_v5_plot needs the matching
 # --vbs-deta=0 --vbs-mjj=500 (or an explicit --hist-file=) to find them.
 #
@@ -43,14 +49,14 @@ arguments                = rpt_v5_hist $(sample) 4 --vbs-deta=0 --vbs-mjj=500
 should_transfer_files    = YES
 when_to_transfer_output  = ON_EXIT
 transfer_input_files     = ../build/rpt_v5_hist
-transfer_output_files    = $(sample)/$(sample)_deta0p0_mjj500p0_rpt_v5_hist.root
+transfer_output_files    = $(sample)/$(sample)_mjj500p0_rpt_v5_hist.root
 
 # Same remap rationale as rpt_v5_hist.sub: condor flattens a nested
 # transfer_output_files path to its basename when staging back, so the remap is
 # what makes the file land under $(sample)/ on the submit side. The LHS must be
 # a BARE FILENAME -- per condor_submit(1), "You cannot specify directories to be
 # remapped" -- while directories are allowed on the RHS and created as needed.
-transfer_output_remaps   = "$(sample)_deta0p0_mjj500p0_rpt_v5_hist.root=$(sample)/$(sample)_deta0p0_mjj500p0_rpt_v5_hist.root"
+transfer_output_remaps   = "$(sample)_mjj500p0_rpt_v5_hist.root=$(sample)/$(sample)_mjj500p0_rpt_v5_hist.root"
 
 getenv                   = True
 

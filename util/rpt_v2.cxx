@@ -39,6 +39,7 @@
 #include "clustering_structs.h"
 #include "clustering_functions.h"
 #include "event_processing.h"
+#include "sample_config.h"
 
 #define debug false
 
@@ -92,12 +93,19 @@ static double computeRpT(BranchPointerWrapper* b,
   return sumpt / j_pt;
 }
 
-int main() {
+int main(int argc, char** argv) {
+  // Selection knobs (--vbs-deta= / --vbs-mjj=). Called even though this
+  // executable has no selection-specific behaviour of its own: without it the
+  // VBS defaults still apply via passJetPtCut, so the run silently inherits
+  // whatever they currently are, with no way to pin them and no record in the
+  // output of which was used. The defaults moved on 2026-08-26.
+  MyUtl::resolveSelection(argc, argv);
+
   SetAtlasStyle();
   gStyle->SetOptStat(0);
 
   TChain chain("ntuple");
-  setupChain(chain, "../../ntuple-hgtd/");
+  setupChain(chain, MyUtl::resolveSample(argc, argv).ntupleDir.c_str());
   if (chain.GetEntries() == 0) {
     std::cerr << "No ROOT files found.  Aborting.\n";
     return 1;

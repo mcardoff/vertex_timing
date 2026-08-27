@@ -42,6 +42,7 @@ auto main(int argc, char** argv) -> int {
   std::map<Score, AnalysisObj> mapHGTD = buildAnalysisMap(Scenario::HGTD);
   {
     MyUtl::HistReader reader(histFile);
+    reader.CheckSelection(MyUtl::VBS_JET_D_ETA, MyUtl::VBS_JET_MJJ);
     for (auto& [score, analysis] : mapHGTD) analysis.loadFrom(reader);
   }
 

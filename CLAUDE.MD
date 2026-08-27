@@ -358,6 +358,8 @@ IDEAL_TRACK_RES       = 1.0   // ps — flat per-track resolution for ideal scen
 PASS_SIGMA            = 60.0  // ps — ±window for "Core Fraction" efficiency oracle
 TRUTH_PULL_CUT        = 3.0   // σ — |pull| threshold for oracle timing purity gates
 WAVES_DR_FLOOR        = 0.05  // minimum ΔR for the WAVeS 1/ΔR weight (prevents divergence)
+VBS_JET_D_ETA         = 0.0   // NO |Deta| requirement (was 3.0 before 2026-08-26)
+VBS_JET_MJJ           = 200.0 // GeV — m_jj now carries the topology cut (was 0)
 MAX_NSIGMA            = 3.0   // z0-significance track-to-vertex association (incumbent)
 Z0_VAR_INFLATION      = 1.15² // covariance underestimates true z0 resolution by ~15%
 DZ0_PARA_SCALE_CLUSTER= 1.4   // multiple of getNewDzpara used when --dzpara is passed
@@ -595,7 +597,7 @@ Logs land in `condor/logs/clustering_hist_<sample>.<ClusterId>.<ProcId>.{out,err
 
 ### Job cost: where the time actually goes
 
-Measured from the three-sample `rpt_v5_hist` clusters of 2026-07-03 (`condor/logs/`, three repeats each):
+Measured from the three-sample `rpt_v5_hist` clusters of 2026-07-03 (`condor/logs/`, three repeats each). **The event counts here are stale — see the 2026-08-26 table below for current values.** Kept because the *wall/CPU* analysis that motivated the sharding work is still the record of how the problem was found:
 
 | sample | files | events | wall | CPU | wall/event |
 |---|---:|---:|---:|---:|---:|
@@ -660,15 +662,14 @@ must name that same file:
 
 | `selargs` | `seltag` (note trailing `_`) |
 |---|---|
-| *(empty)* | *(empty)* |
-| `--vbs-deta=0` | `deta0p0_` |
-| `--vbs-mjj=200` | `mjj200p0_` |
-| `--vbs-deta=0 --vbs-mjj=200` | `deta0p0_mjj200p0_` |
+| *(empty)* — no \|Deta\|, m_jj >= 200 | *(empty)* |
+| `--vbs-mjj=500` | `mjj500p0_` |
+| `--vbs-deta=3 --vbs-mjj=0` (pre-2026-08-26 default) | `deta3p0_mjj0p0_` |
 
 ```bash
-condor_submit -a sample=zjets -a nshards=32 \
-              -a 'selargs=--vbs-deta=0 --vbs-mjj=200' \
-              -a seltag=deta0p0_mjj200p0_ clustering_hist.sub
+condor_submit -a sample=zjets -a nshards=12 \
+              -a 'selargs=--vbs-mjj=500' \
+              -a seltag=mjj500p0_ clustering_hist.sub
 ```
 
 A mismatch is not silent — the job completes and then goes on hold failing to
@@ -691,7 +692,42 @@ The sort in `setupChain` is load-bearing, not tidiness: `directory_iterator` ord
 
 **`hadd` will not do this job.** It merges anything with a `Merge()` method and keeps the **first occurrence** of everything else. Every scalar `HistWriter` emits is a `TParameter` — event counts, rejection tallies, the pT accumulators `rpt_v5_plot` turns into untimed-fraction percentages — and `TParameter` has no `Merge()`. `hadd` would produce histograms summed over N shards alongside one shard's event counts, silently. `util/hist_merge.cxx` sums them explicitly, and refuses (rather than dropping) any key type it does not recognise.
 
-**First real grid run** (cluster 2928803, 2026-08-26, zjets `clustering_hist`,
+**Not every scalar is additive, though.** `meta_vbs_*` describe the RUN rather than accumulate during it, so `hist_merge` treats them like `meta_energy_label`: must agree across inputs, kept once. Summing them is not merely meaningless — m_jj = 200 in every shard summed to 2400 over 12 shards, which then tripped `HistReader::CheckSelection` and made every merged file unreadable by the plot stage. (Found exactly that way on the first three-sample run, by `CheckSelection` itself.) The `meta_vbs_` prefix IS the rule, so a future selection constant gets the right behaviour by being named that way.
+
+**Full three-sample run at the new default selection** (clusters 2928810–15,
+2026-08-26 09:20 CST, both `clustering_hist` and `rpt_v5_hist`): **40/40 jobs
+completed, none held.** These are the current numbers — the 2026-07-03 table
+below them is superseded for vbf and zjets.
+
+| sample | files | events | accepted | shards | wall | loop/shard | cvmfs |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| vbf   | 1001 | **1,464,400** | 630,720 (43.1%) | 4  | 21.5 min | 1092 s | 52 s |
+| dijet | 1400 |   699,500     | 105,137 (15.0%) | 4  | 14.0 min |  781 s | 54 s |
+| zjets | 2000 | **2,000,000** |  64,950 ( 3.2%) | 12 | 13.7 min |  759 s | 50 s |
+
+**Every event count in the older table was wrong except dijet's.** vbf is
+~2.9x larger than recorded (1.46M vs 499k) and zjets ~4x smaller (2.0M vs
+8.08M) — the datasets were re-made after the July baseline. Re-measure rather
+than trusting any recorded count; one `--max-events=1` run prints
+`[chain] N files` and the sample's total.
+
+**Rebalance shards accordingly**: aim for **shards ≈ events / 150,000**, which
+puts every job near 10 min. On the counts above that is vbf 8–10 (not 4),
+dijet 5–6, zjets 13–16. There is a ~50 s cvmfs floor per job, so splitting
+below ~5 min of work per shard buys little.
+
+A useful accident: zjets accepted **64,950** in this 12-shard default run and
+**64,950** in the earlier 32-shard run that requested `--vbs-deta=0
+--vbs-mjj=200` explicitly. Exact agreement confirms both that sharding is
+invariant on real grid data at a different shard count, and that the new
+default is precisely the selection that run asked for.
+
+**Merging: glob on the shard count, not on `shard*`.** `condor/zjets/` now
+holds both the 32-shard and 12-shard sets (44 files); `*clustering_hist.shard*.root`
+matches both and would double-count every event. Use
+`*clustering_hist.shard*of12.root`.
+
+**First sharded grid run** (cluster 2928803, zjets `clustering_hist`,
 32 shards, `--vbs-deta=0 --vbs-mjj=200`): **32/32 shards completed, none held**,
 end-to-end **5.3 min**. Per shard: cvmfs setup 49 s mean / 58 s max, `[chain]`
 build **0.1 s for 63 files**, event loop 257 s mean / 265 s max.
@@ -790,6 +826,27 @@ Key structures and entry points:
 - **`AnalysisObj`/`PlotObj::saveTo`/`loadFrom`** (adjacent to `mergeFrom`/`plotPostProcessing`): round-trip the raw, event-loop-filled histograms through `src/histogram_io.h`'s `HistWriter`/`HistReader`. Mirror `mergeFrom`'s exact member list by construction — if a new histogram member is added to `AnalysisObj`, add it to `mergeFrom`, `saveTo`, and `loadFrom` together. See "Histogramming vs. Plotting Split" above for the full design.
 
 ## Physics Findings
+
+> ### ⚠ Selection change, 2026-08-26
+> The default VBS selection changed from **|Deta| >= 3, m_jj >= 0** to
+> **no |Deta|, m_jj >= 200 GeV** (`VBS_JET_D_ETA_DEFAULT` /
+> `VBS_JET_MJJ_DEFAULT`). |Deta| was measured purity-*negative* on Z+jets
+> (2.69% -> 2.51%) and dijet (40.1% -> 35.0%) and neutral on VBF, while m_jj
+> is at-least-as-good everywhere — see the constants' comments for the
+> `vbs_mjj_diag` numbers behind the swap.
+>
+> **Every result below this banner was produced under the OLD default**, except
+> where a section states its own selection. They are not directly comparable
+> with anything produced after the change, and the z-association study in
+> particular (`share/docs/Z_ASSOCIATION_STUDY.md`) is entirely pre-change.
+> Re-run before quoting a number against new output.
+>
+> Reproducing a pre-change result now needs `--vbs-deta=3 --vbs-mjj=0`, which
+> tags its output `deta3p0_mjj0p0_`. Histogram files written from 2026-08-26
+> carry `meta_vbs_deta`/`meta_vbs_mjj`, and the `*_plot` stages abort on a
+> mismatch (`HistReader::CheckSelection`); files older than that cannot be
+> checked and produce a warning instead — those are exactly the ones whose
+> untagged name no longer implies their selection.
 
 Results as of 2026-08-20, from `rpt_v5` (grid samples, |Deta| >= 0 and
 m_jj >= 500 GeV) and `failure_decomposition` (local VBF). Numbers are pileup

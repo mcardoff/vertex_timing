@@ -64,7 +64,7 @@ namespace MyUtl {
   // decide whether output file names get a sample prefix.
   inline std::string SAMPLE_NAME  = "";
 
-  // Non-default selection marker, e.g. "deta0p0". Empty for the standard
+  // Non-default selection marker, e.g. "deta3p0". Empty for the standard
   // selection, so every existing output path is byte-identical to before.
   // Set by resolveSelection() and woven into histFilePath()/plotFilePath() so a
   // loosened run cannot silently overwrite the standard one's outputs.
@@ -155,17 +155,21 @@ namespace MyUtl {
   // ---------------------------------------------------------------------------
   // resolveSelection
   //   Optional selection overrides for the VBS candidate-pair cuts:
-  //     --vbs-deta=<x>  VBS_JET_D_ETA (default 3.0); pass 0 to disable while
-  //                     keeping the >=1 forward jet requirement, i.e. "still a
+  //     --vbs-deta=<x>  VBS_JET_D_ETA (default 0 since 2026-08-26, i.e. no
+  //                     |Deta| requirement). The >=1 forward jet requirement in
+  //                     passJetPtCut is unaffected, so the default is "still a
   //                     forward-jet event, but not forced into a VBS topology".
-  //     --vbs-mjj=<x>   VBS_JET_MJJ (default 0, a no-op).
+  //     --vbs-mjj=<x>   VBS_JET_MJJ (default 200 GeV since 2026-08-26 -- m_jj
+  //                     now carries the topology requirement in place of
+  //                     |Deta|; see clustering_constants.h for the measurements
+  //                     behind that swap).
   //   Independent knobs, not alternatives -- passJetPtCut requires both. See
   //   the comments on VBS_JET_D_ETA / VBS_JET_MJJ in clustering_constants.h
   //   for why each needs to be measurable/settable rather than assumed.
   //
   //   Each sets a SELECTION_TAG component whenever its value differs from its
   //   default, joined with '_' if both are non-default, so a loosened run
-  //   writes e.g. <sample>_deta0p0_mjj200p0_<name>.root instead of colliding
+  //   writes e.g. <sample>_deta3p0_mjj0p0_<name>.root instead of colliding
   //   with the standard <sample>_<name>.root. Neither flag given => no tag =>
   //   every existing path unchanged.
   //

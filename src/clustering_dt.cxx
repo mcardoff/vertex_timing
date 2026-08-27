@@ -172,6 +172,12 @@ auto main(int argc, char** argv) -> int {
 
   // --- Sample selection (--sample=vbf|zjets|dijet; default: local VBF ntuple) ---
   auto sample = MyUtl::resolveSample(argc, argv);
+  // Selection knobs (--vbs-deta= / --vbs-mjj=). Called even though this
+  // executable has no selection-specific behaviour of its own: without it
+  // the VBS defaults still apply via passJetPtCut, so the run silently
+  // inherits whatever they currently are with no way to pin them and no
+  // record of which was used. The defaults moved on 2026-08-26.
+  MyUtl::resolveSelection(argc, argv);
   MyUtl::ENERGY_LABEL = sample.energyLabel;
   MyUtl::OUTPUT_DIR   = sample.outputDir;
   for (const char* sub : {"comparisons", "inclusive", "fullplots", "diagnostics"})

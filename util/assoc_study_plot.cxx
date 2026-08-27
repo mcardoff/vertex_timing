@@ -264,6 +264,7 @@ int main(int argc, char** argv) {
   Long64_t nAccepted = 0, nFwdAvail = 0, nFwdAvailHS = 0;
   {
     MyUtl::HistReader reader(histFile);
+    reader.CheckSelection(MyUtl::VBS_JET_D_ETA, MyUtl::VBS_JET_MJJ);
     MyUtl::ENERGY_LABEL = reader.ReadEnergyLabel();
     for (auto& m : maps)
       for (auto& [score, analysis] : m) analysis.loadFrom(reader);
