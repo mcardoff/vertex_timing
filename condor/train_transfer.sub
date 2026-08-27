@@ -37,12 +37,12 @@ executable              = run_training.sh
 
 INPUT_DIR = /data/mcardiff/training
 SELECTION = canonical
-TAG       = tx_$(SELECTION)_$(trainon)
+TAG       = tx_$(SELECTION)_$(trainon)_s$(seed)
 
 # The model is FROZEN -- no architecture flags. --train-samples changes only
 # which samples contribute gradient; every sample still streams its test events,
 # so every column of the matrix is filled from this one pass.
-arguments = train_deepsets.py $(INPUT_DIR) runs/$(TAG) --selection $(SELECTION) --train-samples $(trainon) --epochs 15
+arguments = train_deepsets.py $(INPUT_DIR) runs/$(TAG) --selection $(SELECTION) --train-samples $(trainon) --epochs 15 --seed $(seed) --torch-threads 4
 
 should_transfer_files   = YES
 when_to_transfer_output = ON_EXIT
@@ -75,9 +75,20 @@ log    = logs/train_$(TAG).$(ClusterId).$(ProcId).log
 # `queue ... from (...)` on COMMAS, so a multi-sample list like "vbf,dijet"
 # would be torn into two columns and silently mis-bound. A leave-one-out row
 # needs its own submit file with the list written as a literal in `arguments`.
-queue trainon from (
-  vbf
-  zjets
-  dijet
-  ttbar
+# Three split seeds per row, for the same reason as the learning curve: an
+# off-diagonal that beats TRKPTZ by a point is not a transfer result if the
+# split-to-split band is 1.9 points on the sample in question. Average the three.
+queue trainon,seed from (
+  vbf,   0
+  vbf,   1
+  vbf,   2
+  zjets, 0
+  zjets, 1
+  zjets, 2
+  dijet, 0
+  dijet, 1
+  dijet, 2
+  ttbar, 0
+  ttbar, 1
+  ttbar, 2
 )

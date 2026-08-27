@@ -34,13 +34,13 @@ executable              = run_training.sh
 
 INPUT_DIR = /data/mcardiff/training
 SELECTION = canonical
-TAG       = lc_$(SELECTION)_zjets$(fracname)
+TAG       = lc_$(SELECTION)_zjets$(fracname)_s$(seed)
 
 # The model is FROZEN -- no architecture flags here. --sample-frac scales only
 # the Z+jets training quota; every other sample keeps its full share, so the
 # curve isolates one sample's statistics rather than shrinking the whole
 # training set.
-arguments = train_deepsets.py $(INPUT_DIR) runs/$(TAG) --selection $(SELECTION) --sample-frac zjets=$(frac) --epochs 15
+arguments = train_deepsets.py $(INPUT_DIR) runs/$(TAG) --selection $(SELECTION) --sample-frac zjets=$(frac) --epochs 15 --seed $(seed) --torch-threads 4
 
 should_transfer_files   = YES
 when_to_transfer_output = ON_EXIT
@@ -81,10 +81,29 @@ log    = logs/train_$(TAG).$(ClusterId).$(ProcId).log
 #
 # 1.0 is included as the control -- it must reproduce the plain canonical run,
 # and if it does not, the --sample-frac plumbing is what is wrong, not the data.
-queue frac,fracname from (
-  0.125, 012
-  0.25,  025
-  0.5,   050
-  0.75,  075
-  1.0,   100
+# THREE SPLIT SEEDS PER FRACTION, not one. The measured split+init spread on
+# Z+jets is 1.9 points (results/PLAN.md), and the steps this curve is trying to
+# resolve are around a point -- a single-seed curve would be mostly noise dressed
+# as a trend. Three seeds put the standard error on each point near 0.55, so
+# average the three and plot that, with the spread as the error bar.
+#
+# Read the x-axis off train_events_fitted in results.json, never off frac: Z+jets
+# runs out before its quota, so a requested 1.0 can silently mean "all there was"
+# and the curve would show a flat top that is an artefact rather than saturation.
+queue frac,fracname,seed from (
+  0.125, 012, 0
+  0.125, 012, 1
+  0.125, 012, 2
+  0.25,  025, 0
+  0.25,  025, 1
+  0.25,  025, 2
+  0.5,   050, 0
+  0.5,   050, 1
+  0.5,   050, 2
+  0.75,  075, 0
+  0.75,  075, 1
+  0.75,  075, 2
+  1.0,   100, 0
+  1.0,   100, 1
+  1.0,   100, 2
 )
