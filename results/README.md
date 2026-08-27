@@ -1,5 +1,27 @@
 # Cluster-selection / vertex-timing ML results
 
+> ### ⚠ Every number below is at a SUPERSEDED selection
+>
+> These runs predate the 2026-08-26 selection change, and the canonical
+> selection for this study is now `--vbs-deta=0 --vbs-mjj=500`. Nothing here has
+> been re-measured against it.
+>
+> `results/baseline_deta0p0_mjj500p0.md` supersedes this file — but only for the
+> hand-designed scores (TRKPTZ, WAVeS, HGTD). The ML rows, the oracle ceilings
+> and the gap decomposition are all still on the old fiducial region, so the ML
+> numbers and the baseline numbers here **cannot be read side by side**.
+>
+> This is not a rounding concern. At the canonical selection Z+jets accepts
+> **36,531 events against the 67,074 these models trained on** — and Z+jets was
+> already contributing every one of its available train-fold events, which is
+> what makes "is Z+jets data-limited?" the decisive open question rather than a
+> cheap one. Re-export, then re-measure, before quoting any of this.
+>
+> The structural findings — that the problem is selection rather than
+> clustering, that the objective is the only lever that ever moved the number,
+> that six other levers were null, and the methodology notes at the bottom — are
+> not selection-dependent and still hold.
+
 State of the work as of the last condor runs. Raw metrics are in the `.json`
 files here (per lambda, per sample, plus the full epoch history); the code is
 `python/train_deepsets.py` and `python/train_transformer.py`, driven by
