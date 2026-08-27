@@ -58,7 +58,16 @@ getenv                  = True
 request_cpus            = 4
 request_memory          = 16GB
 request_disk            = 8GB
-request_gpus            = 0
+# A GPU cluster is available on this pool, so this is 1 rather than 0. Note the
+# standing caveat: a GPU request that cannot match sits idle forever, so if these
+# stop starting, drop it back to 0. run_training.sh already selects the CUDA LCG
+# view automatically when the slot actually has a GPU, so nothing else changes.
+#
+# BE HONEST ABOUT WHAT THIS BUYS. The last 15-epoch run spent ~120 s in epochs
+# (8 s each) inside a ~10 min job -- the other ~8 min was streaming GB-scale ROOT
+# files, which a GPU does not touch. Expect a small win now, and a real one only
+# if --train-events or --epochs go up substantially.
+request_gpus            = 1
 
 output = logs/train_$(TAG).$(ClusterId).$(ProcId).out
 error  = logs/train_$(TAG).$(ClusterId).$(ProcId).err

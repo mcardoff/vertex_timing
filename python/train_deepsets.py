@@ -561,6 +561,23 @@ def main():
     TST = make_tensors(TE_T, mu, sd, na_cols, labels, dev)
     sp = spans(FIT)
 
+    # Composition of each tensor, per sample. The epoch is selected on VAL macro,
+    # so a VAL slice that is not comparable to TEST silently corrupts that choice
+    # -- and a per-sample val/test difference is invisible in the macro. The
+    # oracle column is the tell: it is a property of the EVENTS alone, so if VAL
+    # and TEST disagree there, the slices differ in what is even achievable and
+    # no model number between them is comparable.
+    log("\ntensor composition (oracle = ceiling, depends only on the events):")
+    log(f"  {'':6s} {'':>18s} {'FIT':>22s} {'VAL':>22s} {'TEST':>22s}")
+    for sid in sorted(set(FIT["m"]["sample_id"]) | set(TST["m"]["sample_id"])):
+        cells = []
+        for d in (FIT, VAL, TST):
+            sub = d["m"][d["m"]["sample_id"] == sid]
+            nev = sub.groupby(EVT, sort=False).ngroups
+            orc = 100.0 * sub.groupby(EVT, sort=False)["within60"].max().mean() if nev else float("nan")
+            cells.append(f"{nev:>9,} ev  orc {orc:5.1f}%")
+        log(f"  {SAMPLE_NAME.get(sid, str(sid)):24s}" + " ".join(cells))
+
     results, nets, best_key, best_macro, best_net = {}, {}, None, -1.0, None
     for pool in args.pools.split(","):
         for lam in [float(x) for x in args.lambdas.split(",")]:
