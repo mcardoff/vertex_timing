@@ -45,10 +45,29 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 PASS_PS = 60.0                                   # PASS_SIGMA in clustering_constants.h
-EVT     = ["sample_id", "event_num"]
-KEY     = ["sample_id", "event_num", "cluster_idx"]
-SAMPLES = ["vbf", "zjets", "dijet"]
-SAMPLE_NAME = {0.0: "vbf", 1.0: "zjets", 2.0: "dijet", 3.0: "local"}
+# The event key gained file_idx when the exporter learned --file-shard. Each shard
+# builds its own TChain and restarts event_num at 0, so (sample_id, event_num)
+# stops identifying an event the moment shards are hadd'd together -- it silently
+# merges unrelated events into one listwise group, and every row still looks valid.
+# file_idx is the file's index in the sample's FULL sorted list, so the key is
+# invariant under shard count. See util/export_training_data.cxx.
+EVT     = ["sample_id", "file_idx", "event_num"]
+KEY     = EVT + ["cluster_idx"]
+
+# TRAINING samples: mu = 200 only. The mu=0 samples (vbf_mu0, zeejets_mu0,
+# ttbar_mu0) are deliberately NOT here. results/baseline_deta0p0_mjj500p0.md
+# measures every method at ~99.9% core fraction at mu=0 on every process: one
+# vertex means one cluster and a trivial label, so they contribute essentially no
+# gradient while diluting the mix with free wins. They are floor/control
+# MEASUREMENTS, not training data -- which is where this problem differs from the
+# HGTD track-vertex-association BDT, which does train on mu=0 usefully.
+SAMPLES = ["vbf", "zjets", "dijet", "ttbar", "zeejets"]
+
+# Must match MyUtl::sampleId() in src/sample_config.h, which is append-only.
+# Renumbering there silently relabels every dataset already on disk.
+SAMPLE_NAME = {-1.0: "local", 0.0: "vbf", 1.0: "zjets", 2.0: "dijet",
+               3.0: "zeejets", 4.0: "vbf_mu0", 5.0: "zeejets_mu0",
+               6.0: "ttbar_mu0", 7.0: "ttbar"}
 
 TRACK_LABEL    = "truth_is_hs"
 TRACK_FEATURES = ["pt", "eta", "theta", "z0", "d0", "qOverP",
@@ -71,10 +90,31 @@ def log(msg):
     print(msg, flush=True)                       # condor logs are read while running
 
 
+def read_tree(path, tree, cols):
+    """Read `cols`, tolerating exports that predate file_idx joining the event key.
+
+    A pre-fix file is always a single unsharded export, where event_num was the
+    chain-global entry number and so already unique on its own. Substituting a
+    constant 0 therefore makes the three-column key exactly equivalent to the old
+    two-column one FOR THAT FILE, and keeps the duplicate guard meaningful. Any
+    other missing column is fatal -- silently dropping a feature would change what
+    the model trains on without changing anything visible."""
+    t = uproot.open(path)[tree]
+    have = set(t.keys())
+    missing = [c for c in cols if c not in have]
+    if [c for c in missing if c != "file_idx"]:
+        sys.exit(f"FATAL: {path}:{tree} missing {[c for c in missing if c != 'file_idx']}")
+    d = t.arrays([c for c in cols if c in have], library="pd")
+    if "file_idx" in missing:
+        log(f"    note: {os.path.basename(path)} predates file_idx; assuming unsharded")
+        d["file_idx"] = np.float32(0)
+    return d
+
+
 # ------------------------------------------------------------------ data ----
 def find_files(input_dir, selection):
     """<s>_deta0p0_training.root when loose (falling back per sample), else <s>_training.root."""
-    tags, out = ("novbs", "deta0p0"), {}
+    tags, out = ("novbs", "mjj500p0", "deta0p0"), {}
     for s in SAMPLES:
         cand = []
         if selection == "loose":
@@ -101,7 +141,7 @@ def find_files(input_dir, selection):
 def load_clusters(files):
     parts = []
     for name, path in files.items():
-        d = uproot.open(path)["clusters"].arrays(CLUSTER_COLS, library="pd")
+        d = read_tree(path, "clusters", CLUSTER_COLS)
         log(f"  {name:6s} {len(d):>9,} clusters  {d.groupby(EVT).ngroups:>8,} events")
         parts.append(d)
     df = pd.concat(parts, ignore_index=True)
@@ -173,6 +213,22 @@ def listwise_ce(scores, eidx, pos, nev):
 
 
 # ------------------------------------------------------------------ prep ----
+
+def iter_tracks(path, cols, step):
+    """uproot.iterate over the tracks tree, with the same pre-file_idx tolerance
+    as read_tree -- otherwise an old export would load its clusters fine and then
+    fail here, which is a worse failure than not supporting it at all."""
+    have = set(uproot.open(path)["tracks"].keys())
+    want = [c for c in cols if c in have]
+    # The ":tracks" object path is appended HERE, not by the caller: a bare
+    # filename is now ambiguous to uproot.iterate, since the export carries three
+    # TTrees (clusters, tracks, jets) rather than two.
+    for b in uproot.iterate({path: "tracks"}, want, library="pd", step_size=step):
+        if "file_idx" not in have:
+            b = b.assign(file_idx=np.float32(0))
+        yield b
+
+
 def stream_tracks(paths, fold, per_sample_train, per_sample_test, step):
     """Per-sample quotas, NOT a global cap. A global cap filled sequentially reads the
     first file only and silently trains on one topology -- that bug appeared three
@@ -180,10 +236,10 @@ def stream_tracks(paths, fold, per_sample_train, per_sample_test, step):
     keep_tr, keep_te = [], []
     for name, path in paths.items():
         ntr = nte = 0
-        for b in uproot.iterate(path, sorted(set(TRACK_FEATURES + KEY + [TRACK_LABEL])),
-                                library="pd", step_size=step):
+        for b in iter_tracks(path, sorted(set(TRACK_FEATURES + KEY + [TRACK_LABEL])),
+                             step):
             b = b.assign(fold=fold.reindex(pd.MultiIndex.from_arrays(
-                [b["sample_id"], b["event_num"]])).to_numpy())
+                [b[c] for c in EVT])).to_numpy())
             for is_tr in (True, False):
                 cap = per_sample_train if is_tr else per_sample_test
                 got = ntr if is_tr else nte
@@ -360,7 +416,7 @@ def main():
 
     log("\nstreaming tracks:")
     n_s = max(1, len(files))
-    TR_T, TE_T = stream_tracks({k: f"{v}:tracks" for k, v in files.items()}, fold,
+    TR_T, TE_T = stream_tracks(files, fold,
                                args.train_events // n_s, args.test_events // n_s, args.step)
     if TR_T["sample_id"].nunique() != len(files):
         sys.exit("FATAL: not every sample reached the track training set -- quota logic broke")
