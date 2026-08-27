@@ -17,6 +17,8 @@
 // Types handled:
 //   TH1 and everything deriving from it (TH1D/TH2D/TProfile/TProfile2D) -> Add
 //   TParameter<Long64_t> / TParameter<Double_t>                          -> sum
+//   meta_vbs_* (any type)                                                -> must
+//        agree; kept once. See isRunConstant below.
 //   TObjString (meta_energy_label)                                       -> must
 //        agree across inputs; kept once. A disagreement means the shards came
 //        from different samples, which is a merge that should fail loudly.
@@ -38,6 +40,7 @@
 #include <TError.h>
 
 #include <iostream>
+#include <cmath>
 #include <map>
 #include <memory>
 #include <string>
@@ -47,13 +50,28 @@ namespace {
 
 // Everything read out of a shard file, keyed by name, detached from any TFile
 // so it survives that file being closed.
+// Scalars that describe the RUN rather than accumulate during it. Summing
+// them is not merely meaningless, it is actively harmful: meta_vbs_mjj is
+// 200 in every shard, and summing it over 12 shards produced 2400, which then
+// tripped HistReader::CheckSelection and made every merged file unreadable by
+// the plot stage. Found exactly that way on the first three-sample grid run.
+//
+// The prefix is the rule, so a future selection constant gets the right
+// behaviour by being named meta_vbs_*. Anything else is assumed additive --
+// which is correct for every other scalar HistWriter emits (event counts,
+// rejection tallies, pT accumulators the plot stages divide by each other).
+inline bool isRunConstant(const std::string& name) {
+  return name.rfind("meta_vbs_", 0) == 0;
+}
+
 struct Merged {
   std::map<std::string, TH1*>                    hists;
   std::map<std::string, Long64_t>                longs;
   std::map<std::string, Double_t>                doubles;
+  std::map<std::string, Double_t>                consts;  // meta_vbs_*: agree, keep once
   std::map<std::string, std::string>             strings;
   std::vector<std::string>                       order;   // first-seen order
-  std::map<std::string, char>                    kind;    // 'h','l','d','s'
+  std::map<std::string, char>                    kind;    // 'h','l','d','c','s'
 
   void note(const std::string& n, char k) {
     if (!kind.count(n)) { order.push_back(n); kind[n] = k; }
@@ -86,6 +104,22 @@ bool absorb(const std::string& path, Merged& m, bool first) {
                     << " (binning mismatch?)\n";
           return false;
         }
+      }
+    } else if (isRunConstant(name)) {
+      // Checked before the additive branches so it cannot fall through to a sum.
+      double v = 0.0;
+      if (auto* cd = dynamic_cast<TParameter<Double_t>*>(obj.get()))      v = cd->GetVal();
+      else if (auto* cl = dynamic_cast<TParameter<Long64_t>*>(obj.get())) v = (double)cl->GetVal();
+      else { std::cerr << "hist_merge: '" << name << "' matches the run-constant "
+                          "prefix but is a " << obj->ClassName() << ".\n"; return false; }
+      m.note(name, 'c');
+      auto it = m.consts.find(name);
+      if (it == m.consts.end()) m.consts[name] = v;
+      else if (std::abs(it->second - v) > 1e-9) {
+        std::cerr << "hist_merge: '" << name << "' differs between inputs ("
+                  << it->second << " vs " << v << " in " << path << ").\n"
+                  << "Refusing to merge shards produced with different selections.\n";
+        return false;
       }
     } else if (auto* pl = dynamic_cast<TParameter<Long64_t>*>(obj.get())) {
       m.note(name, 'l');
@@ -146,6 +180,7 @@ int main(int argc, char** argv) {
       case 'h': m.hists[name]->Write(name.c_str());                          ++nH; break;
       case 'l': TParameter<Long64_t>(name.c_str(), m.longs[name]).Write();   ++nS; break;
       case 'd': TParameter<Double_t>(name.c_str(), m.doubles[name]).Write(); ++nS; break;
+      case 'c': TParameter<Double_t>(name.c_str(), m.consts[name]).Write();  ++nS; break;
       case 's': TObjString(m.strings[name].c_str()).Write(name.c_str());     ++nS; break;
     }
   }
