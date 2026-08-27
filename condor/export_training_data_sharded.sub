@@ -84,6 +84,19 @@ nshards                  = 4
 #   (empty)  [= no |Deta|, mjj>=200]  (empty)
 #   --vbs-mjj=500                     mjj500p0_
 #   --vbs-deta=3 --vbs-mjj=0          deta3p0_mjj0p0_
+#   --vbs-deta=-1  [the LOOSE one]    novbs_
+#
+# A NEGATIVE --vbs-deta is a third mode, not a smaller threshold: it drops the
+# VBS candidate-PAIR requirement outright, so an event with no
+# opposite-hemisphere jet pair is kept. No combination of the two thresholds
+# expresses that -- the pair's |Deta| and m_jj keep a -1 sentinel when no pair
+# exists, so both fail any >= 0 test. It is tagged "novbs" alone, with no m_jj
+# component, because naming a cut that is not being applied would describe a
+# selection that does not exist.
+#
+# This is the only way to widen the Z+jets training population meaningfully
+# (--vbs-deta=0 was measured worth +4%), which makes it the export to run for
+# the "is Z+jets data-limited?" question -- see results/README.md.
 #
 # THE CANONICAL SELECTION FOR THIS STUDY IS --vbs-mjj=500, so the defaults
 # below are NOT empty. results/baseline_deta0p0_mjj500p0.md is the baseline

@@ -380,6 +380,8 @@ PASS_SIGMA            = 60.0  // ps — ±window for "Core Fraction" efficiency 
 TRUTH_PULL_CUT        = 3.0   // σ — |pull| threshold for oracle timing purity gates
 WAVES_DR_FLOOR        = 0.05  // minimum ΔR for the WAVeS 1/ΔR weight (prevents divergence)
 VBS_JET_D_ETA         = 0.0   // NO |Deta| requirement (was 3.0 before 2026-08-26)
+                              //   NEGATIVE (--vbs-deta=-1) drops the VBS PAIR
+                              //   requirement itself; see the novbs note below
 VBS_JET_MJJ           = 200.0 // GeV — m_jj now carries the topology cut (was 0)
 MAX_NSIGMA            = 3.0   // z0-significance track-to-vertex association (incumbent)
 Z0_VAR_INFLATION      = 1.15² // covariance underestimates true z0 resolution by ~15%
@@ -686,6 +688,24 @@ must name that same file:
 | *(empty)* — no \|Deta\|, m_jj >= 200 | *(empty)* |
 | `--vbs-mjj=500` | `mjj500p0_` |
 | `--vbs-deta=3 --vbs-mjj=0` (pre-2026-08-26 default) | `deta3p0_mjj0p0_` |
+| `--vbs-deta=-1` — VBS **pair** requirement dropped | `novbs_` |
+
+**A negative `--vbs-deta` is a third mode, not a smaller threshold.** It drops
+the VBS candidate-*pair* requirement outright, keeping events with no
+opposite-hemisphere jet pair. No combination of the two thresholds expresses
+this: `calcBestVbsPair` leaves both `dEta` and `mjj` at their `-1` sentinel when
+no pair exists, so each fails any `>= 0` test — lowering a threshold relaxes only
+that quantity's *magnitude* cut while the pair requirement survives. Setting
+`--vbs-deta=0` was measured worth **+4% on Z+jets** (67,074 → 69,745) where
+dropping the pair requirement was expected to be worth several-fold; the loose
+mode is +13% on local VBF (48,314 → 54,659).
+
+`passJetPtCut` bypasses the m_jj test as well as the |Δη| one in this mode —
+bypassing only |Δη| would let the default `m_jj >= 200` reject every no-pair
+event on its own, reproducing the original bug exactly. Tagged `novbs` alone,
+with no m_jj component, since naming a cut that is not applied would describe a
+selection that does not exist. `--vbs-mjj` still rejects negatives; there is
+deliberately one flag for disabling the pair, not two.
 
 ```bash
 condor_submit -a sample=zjets -a nshards=12 \
