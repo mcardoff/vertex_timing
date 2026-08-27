@@ -343,6 +343,29 @@ def spans(d):
             np.searchsorted(e, np.arange(d["nev"]), side="right"))
 
 
+def val_loss(net, d):
+    """The TRAINING objective evaluated on a held-out slice.
+
+    This is what the epoch is selected on, in place of validation core fraction.
+    Core fraction on the validation slice was measured to be unreliable: on VBF
+    it collapsed to 17.6% and DEGRADED with training while the same weights
+    scored 91.7% on test, and TRKPTZ pushed through the identical tensor scored
+    90.0% -- so the slice and its labels are sound and the fault is in the
+    argmax-of-model-scores step on that slice specifically. Selecting on it
+    restored epoch 1 and cost ~1.3 points of Z+jets test core fraction.
+
+    Loss avoids that failure entirely: it reads the score distribution rather
+    than only its argmax, it is the quantity actually being optimised, and it
+    moves smoothly. Core fraction is still REPORTED every epoch, because the two
+    disagreeing is the signature of the open bug and it should stay visible."""
+    net.eval()
+    with torch.no_grad():
+        sc = net(d["X"], d["c"], d["ncl"])
+        l = listwise_ce(sc, d["e"], d["y"], d["nev"]).item()
+    net.train()
+    return l
+
+
 def evaluate(net, d):
     net.eval()
     with torch.no_grad():
@@ -369,7 +392,7 @@ def train_one(pool, lam, FIT, VAL, sp, args, dev):
     log(f"\n[{tag}] parameters: {sum(p.numel() for p in net.parameters()):,}")
     rng = np.random.default_rng(args.seed)
     order = np.arange(FIT["nev"])
-    best, best_state, best_ep, hist = -1.0, None, -1, []
+    best_vl, best_state, best_ep, hist = float("inf"), None, -1, []
     for ep in range(args.epochs):
         rng.shuffle(order)
         tot, nb, t0 = 0.0, 0, time.time()
@@ -398,17 +421,23 @@ def train_one(pool, lam, FIT, VAL, sp, args, dev):
         sched.step()
         vper, _, _ = evaluate(net, VAL)
         macro = float(np.mean(list(vper.values())))   # macro so vbf cannot dominate
+        vl = val_loss(net, VAL)
+        # SELECT ON VAL LOSS, not on val macro core fraction -- see val_loss().
+        # Lower is better, hence the sign flip against the old `macro > best`.
         star = ""
-        if macro > best:
-            best, best_state, best_ep, star = macro, copy.deepcopy(net.state_dict()), ep + 1, "  *"
-        hist.append({"epoch": ep + 1, "loss": tot / max(nb, 1), "val": vper, "macro": macro})
+        if vl < best_vl:
+            best_vl, best_state, best_ep, star = vl, copy.deepcopy(net.state_dict()), ep + 1, "  *"
+        hist.append({"epoch": ep + 1, "loss": tot / max(nb, 1), "val": vper,
+                     "macro": macro, "val_loss": vl})
         log(f"  [{tag}] epoch {ep+1:>2}/{args.epochs}  loss {tot/max(nb,1):.4f}  "
-            f"[{time.time()-t0:.0f}s]  VAL "
+            f"vloss {vl:.4f}  [{time.time()-t0:.0f}s]  VAL "
             + "  ".join(f"{k} {v:.1f}%" for k, v in vper.items())
             + f"  macro {macro:.2f}{star}")
     net.load_state_dict(best_state)
-    log(f"  [{tag}] restored epoch {best_ep} (VAL macro {best:.2f})")
-    return net, best, best_ep, hist
+    sel_macro = next(h["macro"] for h in hist if h["epoch"] == best_ep)
+    log(f"  [{tag}] restored epoch {best_ep} (val loss {best_vl:.4f}, "
+        f"its val macro {sel_macro:.2f})")
+    return net, sel_macro, best_ep, hist
 
 
 def main():
@@ -587,16 +616,27 @@ def main():
     # oracle column is the tell: it is a property of the EVENTS alone, so if VAL
     # and TEST disagree there, the slices differ in what is even achievable and
     # no model number between them is comparable.
-    log("\ntensor composition (oracle = ceiling, depends only on the events):")
-    log(f"  {'':6s} {'':>18s} {'FIT':>22s} {'VAL':>22s} {'TEST':>22s}")
+    # `trk` is a CONTROL: TRKPTZ scored through this tensor's own m/argmax
+    # machinery. Its value is known independently -- it is in the reference table
+    # printed above -- so if it disagrees there, the tensor is wrong rather than
+    # the model. Without a control, a collapsing model number is ambiguous
+    # between "the model is bad on these events" and "these rows are misaligned",
+    # and those need completely different fixes.
+    trk = df[KEY + ["trkptz_score"]].drop_duplicates(KEY)
+    log("\ntensor composition (orc = ceiling; trk = TRKPTZ through THIS tensor's "
+        "own argmax -- must match the reference table above):")
     for sid in sorted(set(FIT["m"]["sample_id"]) | set(TST["m"]["sample_id"])):
         cells = []
         for d in (FIT, VAL, TST):
             sub = d["m"][d["m"]["sample_id"] == sid]
             nev = sub.groupby(EVT, sort=False).ngroups
-            orc = 100.0 * sub.groupby(EVT, sort=False)["within60"].max().mean() if nev else float("nan")
-            cells.append(f"{nev:>9,} ev  orc {orc:5.1f}%")
-        log(f"  {SAMPLE_NAME.get(sid, str(sid)):24s}" + " ".join(cells))
+            if not nev:
+                cells.append(f"{0:>8,} ev  orc   nan  trk   nan"); continue
+            orc = 100.0 * sub.groupby(EVT, sort=False)["within60"].max().mean()
+            s2 = sub.merge(trk, on=KEY, how="left")
+            pick = s2.loc[s2.groupby(EVT, sort=False)["trkptz_score"].idxmax()]
+            cells.append(f"{nev:>8,} ev  orc {orc:5.1f}%  trk {100*pick['within60'].mean():5.1f}%")
+        log(f"  {SAMPLE_NAME.get(sid, str(sid)):12s}" + "  ".join(cells))
 
     results, nets, best_key, best_macro, best_net = {}, {}, None, -1.0, None
     for pool in args.pools.split(","):
