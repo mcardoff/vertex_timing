@@ -26,10 +26,15 @@ INPUT_DIR = /data/mcardiff/training
 TAG       = $(selection)
 
 # One row per configuration; add rows to the queue block to scan more.
-# NOTE the lambda list is a LITERAL here, not a queue variable: condor splits
+# --lambdas is no longer passed at all: the auxiliary head is OFF in the frozen
+# configuration (train_deepsets.py's parse_args carries the evidence), so the
+# default of "0" is what we want and naming it here would only invite drift.
+#
+# Kept as a warning for anything that DOES need a list: condor splits
 # `queue ... from (...)` rows on COMMAS, so a comma-containing value like
-# "0,0.1,0.3,1.0" would be torn into separate columns and silently mis-bound.
-arguments = train_deepsets.py $(INPUT_DIR) runs/$(TAG) --selection $(selection) --lambdas 0,0.1,0.3,1.0 --epochs 15
+# "0,0.1,0.3,1.0" is torn into separate columns and silently mis-bound. Pass such
+# a value as a literal in `arguments`, never as a queue variable.
+arguments = train_deepsets.py $(INPUT_DIR) runs/$(TAG) --selection $(selection) --epochs 15
 
 should_transfer_files   = YES
 when_to_transfer_output = ON_EXIT
@@ -59,9 +64,9 @@ output = logs/train_$(TAG).$(ClusterId).$(ProcId).out
 error  = logs/train_$(TAG).$(ClusterId).$(ProcId).err
 log    = logs/train_$(TAG).$(ClusterId).$(ProcId).log
 
-# The lambda scan is done INSIDE one job (it shares the expensive data prep),
-# so one row per selection is enough. Add (tight, ...) to compare selections.
-# The lambda scan happens INSIDE one job (it shares the expensive data prep), so
-# one row per selection is enough. Add `loose` once the novbs re-export exists --
-# the current *_deta0p0_* file is the superseded attempt that only gained 4%.
-queue selection in (tight)
+# One row per selection. Both exports now exist:
+#   canonical  --vbs-mjj=500   the analysis definition the baseline is quoted at
+#   loose      --vbs-deta=-1   VBS pair requirement dropped; the wider population
+# Run canonical for any number that will be compared against
+# results/baseline_deta0p0_mjj500p0.md, and loose for the data-limitation study.
+queue selection in (canonical, loose)

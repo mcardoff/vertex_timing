@@ -1,0 +1,81 @@
+# ---------------------------------------------------------------------------
+# train_learning_curve.sub — item 5: is Z+jets data-limited?
+#
+# Z+jets is the only sample with real headroom (TRKPTZ ~62% against a ~92%
+# cluster oracle), and it is the one that runs out of events: it contributed
+# EVERY available train-fold event in the last run, and the canonical selection
+# cut its accepted total to ~36.5k. So "would more Z+jets MC help?" is not a
+# tuning question -- it decides whether the next effort goes into generating
+# events or into modelling.
+#
+# Each job trains the frozen model on a different fraction of the Z+jets
+# training quota, with every other sample held fixed. The slope of core fraction
+# against events actually fitted is the answer:
+#
+#   still climbing at 1.0  -> more Z+jets MC is the highest-value next step,
+#                             and the loose (novbs) export is the cheap way to
+#                             get some of it without generating anything
+#   flat well before 1.0   -> Z+jets is NOT data-limited; the ~24 remaining
+#                             points need new information, not more events
+#
+# READ THE CURVE OFF train_events_fitted IN results.json, NOT off the requested
+# fraction. A sample that has run out returns fewer events than asked for, so a
+# curve plotted against the request shows a flat top that is a quota artefact
+# rather than saturation -- which is precisely the thing being measured.
+#
+# Stage the merged exports first (see train_deepsets.sub):
+#   mkdir -p /data/mcardiff/training
+#   cp ~/project/vertex_timing/condor/*/*_training.root /data/mcardiff/training/
+#
+#   cd condor && condor_submit train_learning_curve.sub && condor_q
+# ---------------------------------------------------------------------------
+universe                = vanilla
+executable              = run_training.sh
+
+INPUT_DIR = /data/mcardiff/training
+SELECTION = canonical
+TAG       = lc_$(SELECTION)_zjets$(fracname)
+
+# The model is FROZEN -- no architecture flags here. --sample-frac scales only
+# the Z+jets training quota; every other sample keeps its full share, so the
+# curve isolates one sample's statistics rather than shrinking the whole
+# training set.
+arguments = train_deepsets.py $(INPUT_DIR) runs/$(TAG) --selection $(SELECTION) --sample-frac zjets=$(frac) --epochs 15
+
+should_transfer_files   = YES
+when_to_transfer_output = ON_EXIT
+transfer_input_files    = ../python/train_deepsets.py
+transfer_output_files   = runs/$(TAG)
+# LHS must be a bare name -- condor_submit(1): "You cannot specify directories
+# to be remapped."
+transfer_output_remaps  = "$(TAG)=runs/$(TAG)"
+
+getenv                  = True
++JobFlavour             = "tomorrow"
+
+request_cpus            = 4
+request_memory          = 16GB
+request_disk            = 8GB
+request_gpus            = 0
+
+output = logs/train_$(TAG).$(ClusterId).$(ProcId).out
+error  = logs/train_$(TAG).$(ClusterId).$(ProcId).err
+log    = logs/train_$(TAG).$(ClusterId).$(ProcId).log
+
+# fracname carries a filename-safe spelling of frac, because a "." in an output
+# directory name is legal but makes the runs/ listing hard to read and the tag
+# ambiguous against the shard tags used elsewhere.
+#
+# Five points rather than three: the interesting shape is the KNEE, and with
+# three points a curve that flattens between 0.5 and 1.0 is indistinguishable
+# from one that flattened at 0.3.
+#
+# 1.0 is included as the control -- it must reproduce the plain canonical run,
+# and if it does not, the --sample-frac plumbing is what is wrong, not the data.
+queue frac,fracname from (
+  0.125, 012
+  0.25,  025
+  0.5,   050
+  0.75,  075
+  1.0,   100
+)
