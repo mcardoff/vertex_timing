@@ -382,7 +382,11 @@ def evaluate(net, d):
 
 
 def train_one(pool, lam, FIT, VAL, sp, args, dev):
-    torch.manual_seed(args.seed)
+    # init_seed, NOT seed: --seed fixes the event SPLIT, --init-seed fixes the
+    # weights and the batch order. Keeping them separate is what makes an
+    # ensemble honest -- members must share one split, or member B has trained on
+    # events that are in member A's test fold and the combined number is leaked.
+    torch.manual_seed(args.init_seed)
     net = DeepSets(FIT["X"].shape[1], args.hidden, args.embed, pool, aux=lam > 0).to(dev)
     opt = torch.optim.Adam(net.parameters(), lr=args.lr)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs,
@@ -390,7 +394,7 @@ def train_one(pool, lam, FIT, VAL, sp, args, dev):
     CS, CE, ES, EE = sp
     tag = f"{pool} lam={lam:g}"
     log(f"\n[{tag}] parameters: {sum(p.numel() for p in net.parameters()):,}")
-    rng = np.random.default_rng(args.seed)
+    rng = np.random.default_rng(args.init_seed)
     order = np.arange(FIT["nev"])
     best_vl, best_state, best_ep, hist = float("inf"), None, -1, []
     for ep in range(args.epochs):
@@ -477,7 +481,15 @@ def main():
     p.add_argument("--val-lo", type=float, default=0.60,
                    help="train-fold events >= this are the validation slice")
     p.add_argument("--step", default="300 MB", help="uproot.iterate batch size")
-    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--seed", type=int, default=0,
+                   help="fixes the EVENT SPLIT. Ensemble members must share this.")
+    # Separated from --seed so several models can be trained on ONE split and
+    # then combined. The measured seed-to-seed spread is 2.4 points on Z+jets
+    # (65.1-67.5 over four seeds) against an infrastructure floor of exactly 0 --
+    # that much variance between equivalent models is precisely the condition
+    # under which averaging their scores buys real accuracy.
+    p.add_argument("--init-seed", type=int, default=None,
+                   help="fixes WEIGHTS and batch order; defaults to --seed")
     # torch's intra-op thread count. Left at 0 (torch's own default) unless set.
     #
     # This is a REPRODUCIBILITY knob, not a speed one. torch parallelises its
@@ -514,6 +526,8 @@ def main():
                    help="comma-separated <sample>=<frac>, e.g. zjets=0.25")
     args = p.parse_args()
 
+    if args.init_seed is None:
+        args.init_seed = args.seed
     os.makedirs(args.out, exist_ok=True)
     if args.torch_threads > 0:
         torch.set_num_threads(args.torch_threads)
