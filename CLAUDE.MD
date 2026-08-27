@@ -1025,6 +1025,58 @@ local VBF sample. Z+jets in particular should be checked first, since Athena
 produces a valid vertex time for only 16.5% of its events. Rerunning is cheap
 (~35 s hist + ~15 s plot on the full local sample; condor via `--sample=`).
 
+### The score's z-term: resolution weighting helps TRKPTZ, not WAVeS
+
+From `util/dz_alpha_sweep.cxx` + `clustering_hist`, local VBF at the current
+default selection (2026-08-27). Both selection scores multiply their pT sum by
+`exp(-alpha*|dz_cluster|)` with dz in raw **millimetres** — one absolute
+e-folding length at every eta, though the true z0 spread runs from ~31 um at
+eta = 0 to ~4.4 mm at eta = 3.8.
+
+The change tested adds a **second, per-track factor** `exp(-beta*deltaz(eta,pT))`
+using `getNewDzpara`. It is a *confidence* weight, not a displacement one: the
+association admits a track when `|dz|/sigma_z0 < MAX_NSIGMA`, so a large-sigma
+track passes over a wider window in z and is weaker evidence that the cluster
+is the hard-scatter vertex. `beta = 0` reproduces production exactly.
+
+| score | production | best (alpha, beta) | gain |
+|---|---:|---|---:|
+| TRKPTZ | 93.0% | (0.75, 0.30) | **+0.6 %pt** |
+| WAVeS  | 94.1% | — | **−0.1 %pt** |
+
+Inclusive core fraction. The TRKPTZ gain concentrates where the failure
+decomposition says the failures live: **+1.76 %pt at nHS <= 5**, and 8–11%
+fewer failures in the nHS = 3/4/5 bins. Core sigma is flat to +/-0.1 ps for
+every arm at every coefficient — this moves *which cluster is chosen*, not how
+well its time is measured.
+
+Four things worth keeping:
+
+- **WAVeS is immune again, and this time slightly negative.** The same pattern
+  as the z-association study. Measured with the REAL in-jet time refinement
+  (`Cluster::calculateTime`'s WAVeS branch, which the new arms were added to) —
+  a sweep that omits it flatters WAVeS's response by ~1 %pt and cannot see this.
+- **WAVeS still wins outright** (94.1% vs an improved TRKPTZ's 93.6%), so this
+  does not change which score to use. What it does is close ~55% of WAVeS's
+  remaining lead over TRKPTZ (1.1 -> 0.5 %pt) — the same shape of result as
+  "~59% of WAVeS's advantage is just the z-association".
+- **Per-track and per-cluster are indistinguishable** (93.6% vs 93.6%). The
+  cluster-level form, one `exp(-beta*sigma_eff)` factor on the whole sum, is as
+  good as weighting each track and is simpler.
+- **The production alpha = 1.5 is past its own optimum.** The peak is at
+  0.75–1.0; retuning alpha alone is worth +0.19 %pt. `util/scratch/trkptz_alpha_sweep.cxx`
+  flagged in its own header that 1.5 "has never been evaluated" — it now has
+  been. The 2D optimum is a broad plateau (alpha in [0.5,1.25] x beta in
+  [0.2,0.6] all within 0.1 %pt of the peak), so the exact values are not
+  critical.
+
+**Not adopted.** +0.6 %pt on a score that is not the production selector, when
++0.92 %pt from the z-association was already judged not worth adopting. Kept in
+the tree as `Score::TRKPTZ_DZP` / `WAVES_DZP` (cluster-level) and `*_DZPT`
+(per-track), all four unemplaced by default, so re-measuring costs one line in
+`buildAnalysisMap`. `DZ_ALPHA_MM` / `DZ_ALPHA_RES` / `DZ_BETA_RES` name what
+used to be a bare `1.5` repeated at three sites.
+
 ### Reference-study replication
 
 Central region at the reference configuration (`util/myJet_ana_fr.C`, present

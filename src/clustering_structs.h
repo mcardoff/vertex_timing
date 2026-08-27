@@ -788,6 +788,37 @@ namespace MyUtl {
     //              otherwise a precision-weighted average over track z₀ is
     //              computed on the fly.
     // -----------------------------------------------------------------------
+    // -----------------------------------------------------------------------
+    // clusterDzPara
+    //   pT-weighted mean of getNewDzpara(eta_i, pT_i) over the cluster's
+    //   constituent tracks -- the cluster-level z-resolution scale used by the
+    //   *_DZP score arms to turn a raw-mm |dz| into resolution units.
+    //
+    //   pT-weighted, and NOT the inverse-variance combination used for
+    //   clusterZSigma in calcFeatures, deliberately: that one shrinks as
+    //   1/sqrt(N), which would make the z-penalty depend on cluster
+    //   multiplicity as much as on resolution. This is an average width, not a
+    //   combined uncertainty, so it stays put as a cluster gains tracks.
+    //
+    //   getNewDzpara is only valid forward (it returns ~31 um at eta = 0, far
+    //   tighter than ITk delivers). That holds here because getAssociatedTracks
+    //   applies the HGTD eta window before anything else, so every track in
+    //   any cluster is already forward. If that ever changes, this breaks
+    //   silently -- see the note on getNewDzpara in clustering_constants.h.
+    //
+    //   Returns a positive width in mm; falls back to 1.0 mm if the cluster
+    //   somehow carries no pT, so callers never divide by zero.
+    // -----------------------------------------------------------------------
+    double clusterDzPara(BranchPointerWrapper *branch) const {
+      double num = 0.0, den = 0.0;
+      for (int idx : this->trackIndices) {
+        double pt = branch->trackPt[idx];
+        num += pt * getNewDzpara(branch->trackEta[idx], pt);
+        den += pt;
+      }
+      return (den > 0.0 && num > 0.0) ? num / den : 1.0;
+    }
+
     void updateScores(
       BranchPointerWrapper *branch
     ) {
@@ -796,27 +827,74 @@ namespace MyUtl {
       // deltaZ avoids a second precision-weighted z-average pass over tracks.
       auto [features, rawDeltaZ, rawDeltaZResunits] = this->calcFeatures(branch);
 
-      // TRKPTZ: score = TRKPT × exp(−1.5 · |Δz|)
+      // TRKPTZ: score = TRKPT × exp(−DZ_ALPHA_MM · |Δz|), Δz in raw mm.
+      double dzMm;
       if (this->values.size() > 1) {
         // Clustering was done with z₀ as a second dimension: use that value.
-        double dz = std::abs(this->values.at(1) - branch->recoVtxZ[0]);
-        this->scores[Score::TRKPTZ.id] =
-          this->scores.at(Score::TRKPT.id) * std::exp(-1.5 * dz);
+        dzMm = std::abs(this->values.at(1) - branch->recoVtxZ[0]);
       } else {
         // Common case (usez0=false): reuse deltaZ already computed by calcFeatures.
-        this->scores[Score::TRKPTZ.id] =
-          this->scores.at(Score::TRKPT.id) * std::exp(-1.5 * std::abs(rawDeltaZ));
+        dzMm = std::abs(rawDeltaZ);
+      }
+      this->scores[Score::TRKPTZ.id] =
+        this->scores.at(Score::TRKPT.id) * std::exp(-DZ_ALPHA_MM * dzMm);
+
+      // ── Resolution-confidence arms ────────────────────────────────────
+      // These replace the |Δz| penalty with a penalty on the track's EXPECTED
+      // z0 spread, exp(−α·δz(η,pT)), carrying no Δz at all.
+      //
+      // The motivation is a selection effect in the association, not a
+      // displacement measurement. getAssociatedTracks admits a track when
+      // |Δz|/σ_z0 < MAX_NSIGMA, so a track with a large σ passes that cut over
+      // a correspondingly wider window in z -- and is that much more likely to
+      // be a pileup track that happened to fall inside it. δz(η,pT) is the
+      // expected width of that window, so exp(−α·δz) down-weights precisely
+      // the tracks whose presence in the cluster is weakest evidence that the
+      // cluster belongs to the hard-scatter vertex. The measured Δz is not
+      // used again because the association cut has already spent it.
+      //
+      // This factor SUPPLEMENTS the displacement penalty, it does not replace
+      // it. δz depends only on (η, pT) -- a 6th-order polynomial in |η| with
+      // pT-binned coefficients, with nothing about the event in it -- so on its
+      // own it is a static per-track weight carrying no vertex information at
+      // all, unable to tell a cluster at Δz = 0 from one 5 mm away. Both arms
+      // therefore keep exp(−DZ_ALPHA_MM·|Δz_clus|) and multiply the new
+      // confidence factor on top. DZ_BETA_RES = 0 recovers the production
+      // score exactly, which makes it its own null hypothesis.
+      //
+      // The two arms differ only in where the average is taken:
+
+      // TRKPTZ_DZP: cluster-level. One penalty from the pT-weighted mean δz.
+      const double sigmaEff = this->clusterDzPara(branch);
+      this->scores[Score::TRKPTZ_DZP.id] =
+        this->scores.at(Score::TRKPT.id)
+        * std::exp(-DZ_BETA_RES * sigmaEff) * std::exp(-DZ_ALPHA_RES * dzMm);
+
+      // TRKPTZ_DZPT: per-track. Each track carries its own confidence weight,
+      // so a cluster of well-measured tracks outranks an equal-pT cluster of
+      // poorly-measured ones even when both sit at the same Δz. The cached
+      // TRKPT scalar cannot be reused -- it is accumulated during merging and
+      // retains no per-track breakdown -- so the sum is rebuilt here.
+      {
+        double dzptSum = 0.0;
+        for (int idx : this->trackIndices) {
+          double pt = branch->trackPt[idx];
+          dzptSum += pt * std::exp(-DZ_BETA_RES
+                                   * getNewDzpara(branch->trackEta[idx], pt));
+        }
+        this->scores[Score::TRKPTZ_DZPT.id] = dzptSum * std::exp(-DZ_ALPHA_RES * dzMm);
       }
 
       // WAVES: WAVeS-style score — Σ_i pT_i × pT_jet(i) / max(ΔR_i, DR_FLOOR)
-      // multiplied by exp(−1.5|Δz_cluster|), where Δz is the pT-weighted cluster z centroid
+      // multiplied by exp(−DZ_ALPHA_MM|Δz_cluster|), where Δz is the inverse-variance-weighted cluster z centroid
       // minus the reco vertex z.  The cluster-level z-term is more effective than per-track
       // z-pull weighting because it averages over track-by-track z noise.
       // Linear pT (not squared) so a couple of high-pT time-misassigned tracks can't
       // outvote a larger time-coherent cluster.
       // Falls back to TRKPTZ if no qualifying forward jets exist.
       {
-        double wavesSum = 0.0;
+        double wavesSum = 0.0;   // plain: z-penalty applied once, after the loop
+        double wavesSumDzpt = 0.0;  // per-track: z-penalty applied inside the loop
         for (int idx : this->trackIndices) {
           double trkEta  = branch->trackEta[idx];
           double trkPhi  = branch->trackPhi[idx];
@@ -836,14 +914,32 @@ namespace MyUtl {
             if (dr < minDR) { minDR = dr; nearJetPt = jPt; }
           }
           if (nearJetPt <= 0.0) continue;
-          wavesSum += trkPt * nearJetPt
-                      / std::max(minDR, WAVES_DR_FLOOR);
+          const double jetWeight = trkPt * nearJetPt
+                                   / std::max(minDR, WAVES_DR_FLOOR);
+          wavesSum += jetWeight;
+          // WAVES_DZPT: same jet-proximity weight, each track additionally
+          // carrying its own resolution-confidence factor (see the TRKPTZ arms
+          // above for why δz and not |Δz|/δz).
+          wavesSumDzpt += jetWeight * std::exp(-DZ_BETA_RES
+                                               * getNewDzpara(trkEta, trkPt));
         }
-        if (wavesSum > 0.0)
+        // Each arm keeps the original fall-back: with no qualifying forward
+        // jets there is no jet-proximity information, so defer to the
+        // correspondingly-weighted TRKPTZ arm rather than scoring zero.
+        if (wavesSum > 0.0) {
           this->scores[Score::WAVES.id] =
-              wavesSum * std::exp(-1.5 * std::abs(rawDeltaZ));
-        else
-          this->scores[Score::WAVES.id] = this->scores.at(Score::TRKPTZ.id);
+              wavesSum * std::exp(-DZ_ALPHA_MM * std::abs(rawDeltaZ));
+          this->scores[Score::WAVES_DZP.id] =
+              wavesSum * std::exp(-DZ_BETA_RES * sigmaEff)
+                       * std::exp(-DZ_ALPHA_RES * std::abs(rawDeltaZ));
+        } else {
+          this->scores[Score::WAVES.id]     = this->scores.at(Score::TRKPTZ.id);
+          this->scores[Score::WAVES_DZP.id] = this->scores.at(Score::TRKPTZ_DZP.id);
+        }
+        this->scores[Score::WAVES_DZPT.id] =
+            (wavesSumDzpt > 0.0)
+              ? wavesSumDzpt * std::exp(-DZ_ALPHA_RES * std::abs(rawDeltaZ))
+              : this->scores.at(Score::TRKPTZ_DZPT.id);
       }
 
       // JET_T_REFINED: dedicated collection (jet-filtered tracks at 2σ iterative);

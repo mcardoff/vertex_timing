@@ -64,6 +64,7 @@ add_executable(ttreemt_prototype util/ttreemt_prototype.cxx)
 add_executable(assoc_study_hist util/assoc_study_hist.cxx)
 add_executable(assoc_study_plot util/assoc_study_plot.cxx)
 add_executable(hist_merge util/hist_merge.cxx)
+add_executable(dz_alpha_sweep util/dz_alpha_sweep.cxx)
 
 # Specify the include directories for your header files
 foreach(_tgt
@@ -87,6 +88,7 @@ foreach(_tgt
     assoc_study_hist
     assoc_study_plot
     hist_merge
+    dz_alpha_sweep
 )
     target_include_directories(${_tgt}
         PRIVATE

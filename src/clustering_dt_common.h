@@ -55,6 +55,15 @@ inline auto buildAnalysisMap(
   // with the algorithm held fixed.
   m.emplace(Score::VBF_R1,      AnalysisObj(label, Score::VBF_R1));
   m.emplace(Score::VBF_R2,      AnalysisObj(label, Score::VBF_R2));
+  // Resolution-confidence arms: identical to TRKPTZ / WAVeS except that the
+  // z-term gains a per-track exp(-beta*deltaz) confidence factor and uses its
+  // own displacement coefficient. Read against TRKPTZ / WAVES in the same run.
+  // Measured 2026-08-27 and NOT adopted -- see CLAUDE.md's Physics Findings.
+  // Uncomment to re-measure; the scores themselves stay live in updateScores.
+  // m.emplace(Score::TRKPTZ_DZP,  AnalysisObj(label, Score::TRKPTZ_DZP));
+  // m.emplace(Score::TRKPTZ_DZPT, AnalysisObj(label, Score::TRKPTZ_DZPT));
+  // m.emplace(Score::WAVES_DZP,   AnalysisObj(label, Score::WAVES_DZP));
+  // m.emplace(Score::WAVES_DZPT,  AnalysisObj(label, Score::WAVES_DZPT));
 
   // Scores active only in the real-HGTD scenario
   if (scenario == Scenario::HGTD) {

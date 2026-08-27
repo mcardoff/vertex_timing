@@ -244,6 +244,38 @@ namespace MyUtl {
   // executable that does not parse the flag is bit-for-bit unchanged.
   inline bool USE_DZ_PARA = false;
 
+  // ── Cluster-selection z-penalty: exp(-alpha * |dz|) ──────────────────────
+  // Both TRKPTZ and WAVeS multiply their pT sum by a z-penalty. The
+  // coefficient used to be a bare 1.5 repeated at three sites in
+  // Cluster::updateScores; it is named here so it can be swept without a
+  // rebuild (inline, set once before the worker threads start -- same pattern
+  // as USE_DZ_PARA above).
+  //
+  // TWO constants because the two arms are not on a common scale:
+  //   DZ_ALPHA_MM   multiplies |dz| in MILLIMETRES, so it carries units of
+  //                 mm^-1 -- 1.5 is an e-folding length of 0.667 mm, applied
+  //                 identically at every eta despite the true z0 spread
+  //                 running from ~31 um at eta=0 to ~4.4 mm at eta=3.8.
+  //   DZ_BETA_RES   multiplies a track's EXPECTED z0 spread deltaz(eta,pT),
+  //                 also in mm, in a SECOND factor that supplements the
+  //                 displacement penalty rather than replacing it:
+  //                     sum_i pT_i*exp(-beta*deltaz_i) * exp(-alpha*|dz_clus|)
+  //                 beta = 0 recovers the production score exactly, so it is
+  //                 its own null hypothesis.
+  //
+  // 1.5 is the production value and, per util/scratch/trkptz_alpha_sweep.cxx's
+  // own header, has never actually been evaluated -- so it is a starting point,
+  // not a validated optimum. util/dz_alpha_sweep.cxx sweeps both.
+  inline double DZ_ALPHA_MM   = 1.5;
+  inline double DZ_BETA_RES   = 0.30;
+  // Displacement coefficient for the RES arms only. Separate from
+  // DZ_ALPHA_MM so the production TRKPTZ/WAVeS scores stay exactly as they
+  // are and can be compared against these in the same run. 0.75/0.30 is the
+  // centre of the broad plateau found by util/dz_alpha_sweep.cxx on local VBF
+  // (alpha in [0.5,1.25] x beta in [0.2,0.6] all within 0.1 %pt of the peak),
+  // not a sharp optimum -- the exact values are not critical.
+  inline double DZ_ALPHA_RES  = 0.75;
+
   // ── AssocRule: one track-to-vertex association rule, made explicit ────────
   // USE_DZ_PARA / MAX_NSIGMA above are process-wide globals: a run picks one
   // rule and every event uses it. That is fine for production, but it makes
@@ -483,6 +515,12 @@ namespace MyUtl {
     static const Score WAVES_MISAS;
     static const Score VBF_R1;
     static const Score VBF_R2;
+    // Resolution-normalised z-penalty variants of TRKPTZ / WAVeS -- see the
+    // definitions below for what each arm does.
+    static const Score TRKPTZ_DZP;
+    static const Score WAVES_DZP;
+    static const Score TRKPTZ_DZPT;
+    static const Score WAVES_DZPT;
   };
 
   inline const std::string STR_TRKPTZ = "#Sigma p_{T}e^{-|#Delta z|}";
@@ -544,6 +582,44 @@ namespace MyUtl {
                                        -1.0, ClusteringMethod::ITERATIVE, false,
                                        TrackFilterType::ALL, VbsRegion::R2 };
 
+  // ── Resolution-normalised z-penalty arms ─────────────────────────────────
+  // TRKPTZ and WAVeS both weight by exp(-DZ_ALPHA_MM * |dz|) with dz in raw
+  // millimetres -- one absolute e-folding length for every track, at every
+  // eta. getNewDzpara(eta, pT) is exactly the eta/pT dependence that is
+  // missing. These four arms replace the raw-mm |dz| with a normalised one,
+  // in two different ways, for each of the two scores:
+  //
+  //   *_DZP   PER-CLUSTER. exp(-alpha * |dz_clus| / sigma_eff), where
+  //           sigma_eff is the pT-weighted mean of getNewDzpara over the
+  //           cluster's tracks (Cluster::clusterDzPara). The exponential
+  //           still factors out of the pT sum, so only the UNITS of dz
+  //           change -- the smallest possible change to the score's shape.
+  //
+  //           sigma_eff is deliberately multiplicity-independent. The
+  //           already-computed rawDeltaZResunits normalises by the cluster's
+  //           own combined sigma_z = 1/sqrt(sum 1/var_i), which shrinks as
+  //           1/sqrt(N) and would entangle the z-penalty with cluster size.
+  //
+  //   *_DZPT  PER-TRACK. The exponential moves INSIDE the sum, each track
+  //           weighted by its own resolution:
+  //             sum_i w_i * exp(-alpha * |z0_i - z_vtx| / deltaz(eta_i, pT_i))
+  //           so a forward low-pT track (large deltaz) is penalised less than
+  //           a central high-pT one at the same physical dz.
+  //
+  //           NOTE: per-track z-weighting was tried once before and reverted
+  //           (see memory/waves-implementation.md: 1/|zpull|^2 -> 91.84%,
+  //           exp(-|zpull|) -> 93.11%, against a 96.4% cluster-level
+  //           baseline). That used the COVARIANCE pull, dz/sqrt(var_z0) --
+  //           precisely the normaliser the z-association study showed
+  //           mis-models the eta dependence (it is worth up to +5.6 points of
+  //           HS recall at matched purity to use the parameterisation
+  //           instead). That is why this arm is worth one more look; if it
+  //           fails again, record it and close the question.
+  inline const Score Score::TRKPTZ_DZP  = { 24, STR_TRKPTZ + " [#deltaz-norm.]",        "TRKPTZ_DZP",  false, false, -1.f };
+  inline const Score Score::WAVES_DZP   = { 25, "WAVeS Score [#deltaz-norm.]",          "WAVES_DZP",   false, false, -1.f };
+  inline const Score Score::TRKPTZ_DZPT = { 26, STR_TRKPTZ + " [per-trk #deltaz]",      "TRKPTZ_DZPT", false, false, -1.f };
+  inline const Score Score::WAVES_DZPT  = { 27, "WAVeS Score [per-trk #deltaz]",        "WAVES_DZPT",  false, false, -1.f };
+
   // Scores with a dedicated collection (distCut ≥ 0 → buildsCollection() = true)
   inline const Score Score::CONE       = {  7, "Cone"                       , "CONE",     true , false, -1.f, DIST_CUT_CONE, ClusteringMethod::CONE };
   inline const Score Score::FILTJET    = {  9, "Filter Tracks in Jets"      , "FILTJET",  true , false, -1.f, DIST_CUT_CONE, ClusteringMethod::CONE, false, TrackFilterType::JET };
@@ -555,6 +631,7 @@ namespace MyUtl {
     Score::CONE_BDT, Score::TEST_MISAS, Score::TEST_HS,
     Score::WAVES,    Score::JET_T_REFINED, Score::WAVES_MISCL, Score::WAVES_MISAS,
     Score::VBF_R1,   Score::VBF_R2,
+    Score::TRKPTZ_DZP, Score::WAVES_DZP, Score::TRKPTZ_DZPT, Score::WAVES_DZPT,
   };
 
   // ---------------------------------------------------------------------------

@@ -181,7 +181,11 @@ namespace MyUtl {
     // WAVES_MISCL / WAVES_MISAS share this path so the oracle rows report the same
     // time as the WAVES row they gate.
     if (score == Score::WAVES || score == Score::WAVES_MISCL || score == Score::WAVES_MISAS ||
-        score == Score::VBF_R1 || score == Score::VBF_R2) {
+        score == Score::VBF_R1 || score == Score::VBF_R2 ||
+        // The resolution-weighted WAVeS arms differ from WAVES only in how the
+        // cluster is SELECTED; the time must be built the same way or the
+        // comparison measures the time treatment rather than the selection.
+        score == Score::WAVES_DZP || score == Score::WAVES_DZPT) {
       // Collect (eta, phi) of qualifying forward reco jets — no truth matching
       std::vector<std::pair<double,double>> hsJets;
       const int nJets = (int)branch->topoJetPt.GetSize();
