@@ -120,6 +120,35 @@ namespace MyUtl {
     std::unique_ptr<TTreeReaderArray<char>> trackLeptonID;
     std::vector<char> removedJet;
 
+    // ---- Extended branches, bound only when EXTENDED_BRANCHES is set -------
+    // The vertex fit's OWN track-to-vertex assignment and per-track fit weight,
+    // plus Athena's per-vertex SumPt^2 and the truth vertex labels. This is
+    // strictly better information than any z-distance proxy: measured on local
+    // VBF in the forward region, tracks the fit puts on vertex 0 are 58.0%
+    // truly hard-scatter against ~32% for the incumbent z-significance cut, and
+    // tracks it puts on a pileup vertex are 98.5% truly pileup. It separates
+    // where |dz| cannot -- at ~110 reco vertices per event the nearest pileup
+    // vertex sits 0.024 mm from the primary.
+    std::unique_ptr<TTreeReaderArray<int>>   trackRecoVtxIdx;
+    std::unique_ptr<TTreeReaderArray<float>> trackRecoVtxWeight;
+    std::unique_ptr<TTreeReaderArray<float>> recoVtxSumPt2;
+    std::unique_ptr<TTreeReaderArray<bool>>  recoVtxIsHS;   // TRUTH
+    std::unique_ptr<TTreeReaderArray<bool>>  recoVtxIsPU;   // TRUTH
+    // Track fit quality and silicon hit content, beyond the single
+    // Track_quality flag the analysis currently uses.
+    std::unique_ptr<TTreeReaderArray<float>> trackChi2, trackNdof;
+    std::unique_ptr<TTreeReaderArray<unsigned char>>
+        trackNPixHits, trackNPixHoles, trackNPixShared, trackNPixSplit,
+        trackNSctHits, trackNSctHoles, trackNSctShared,
+        trackNInnerHits, trackNNextInnerHits;
+    std::unique_ptr<TTreeReaderArray<float>>
+        trackBtagD0, trackBtagD0Unc, trackBtagZ0Sin, trackBtagZ0SinUnc;
+    // Off-diagonal covariances involving z0. The analysis uses only the
+    // diagonal var_z0; these carry the correlations that a proper z0
+    // uncertainty at a displaced vertex would need.
+    std::unique_ptr<TTreeReaderArray<float>>
+        trackCovD0Z0, trackCovZ0Theta, trackCovZ0Phi0, trackCovZ0Qp;
+
   BranchPointerWrapper(TTreeReader& r)
     : reader (r),
       weight (r, "weight"),
@@ -152,7 +181,62 @@ namespace MyUtl {
       // so other samples' readers never register a branch their ntuples lack.
       if (OVERLAP_REMOVAL)
         trackLeptonID = std::make_unique<TTreeReaderArray<char>>(r, "Track_leptonID");
+      if (EXTENDED_BRANCHES) {
+        // Bind only branches the sample actually has -- productions differ,
+        // and Track_btagIp_* is absent from every grid sample.
+        auto F = [&r](const char* n) -> std::unique_ptr<TTreeReaderArray<float>> {
+          return hasBranch(n) ? std::make_unique<TTreeReaderArray<float>>(r, n)
+                              : nullptr; };
+        auto U = [&r](const char* n) -> std::unique_ptr<TTreeReaderArray<unsigned char>> {
+          return hasBranch(n) ? std::make_unique<TTreeReaderArray<unsigned char>>(r, n)
+                              : nullptr; };
+        if (hasBranch("Track_recoVtx_idx"))
+          trackRecoVtxIdx  = std::make_unique<TTreeReaderArray<int>>(r, "Track_recoVtx_idx");
+        trackRecoVtxWeight = F("Track_recoVtx_weight");
+        recoVtxSumPt2      = F("RecoVtx_sumPt2");
+        if (hasBranch("RecoVtx_isHS"))
+          recoVtxIsHS      = std::make_unique<TTreeReaderArray<bool>>(r, "RecoVtx_isHS");
+        if (hasBranch("RecoVtx_isPU"))
+          recoVtxIsPU      = std::make_unique<TTreeReaderArray<bool>>(r, "RecoVtx_isPU");
+        trackChi2          = F("Track_chi2");
+        trackNdof          = F("Track_ndof");
+        trackNPixHits      = U("Track_numberOfPixelHits");
+        trackNPixHoles     = U("Track_numberOfPixelHoles");
+        trackNPixShared    = U("Track_numberOfPixelSharedHits");
+        trackNPixSplit     = U("Track_numberOfPixelSplitHits");
+        trackNSctHits      = U("Track_numberOfSCTHits");
+        trackNSctHoles     = U("Track_numberOfSCTHoles");
+        trackNSctShared    = U("Track_numberOfSCTSharedHits");
+        trackNInnerHits    = U("Track_numberOfInnermostPixelLayerHits");
+        trackNNextInnerHits= U("Track_numberOfNextToInnermostPixelLayerHits");
+        trackBtagD0        = F("Track_btagIp_d0");
+        trackBtagD0Unc     = F("Track_btagIp_d0Uncertainty");
+        trackBtagZ0Sin     = F("Track_btagIp_z0SinTheta");
+        trackBtagZ0SinUnc  = F("Track_btagIp_z0SinThetaUncertainty");
+        trackCovD0Z0       = F("Track_cov_d0z0");
+        trackCovZ0Theta    = F("Track_cov_z0theta");
+        trackCovZ0Phi0     = F("Track_cov_z0phi0");
+        trackCovZ0Qp       = F("Track_cov_z0qOverP");
+      }
     }
+
+    // -----------------------------------------------------------------------
+    // Extended-branch accessors. Each returns a NaN/sentinel when the branch is
+    // not bound, so a caller never has to test EXTENDED_BRANCHES itself and a
+    // run without it produces missing values rather than a crash.
+    // -----------------------------------------------------------------------
+    int   recoVtxOf(int t) const {
+      return trackRecoVtxIdx && t < (int)trackRecoVtxIdx->GetSize()
+             ? (*trackRecoVtxIdx)[t] : -999; }
+    float recoVtxWeightOf(int t) const {
+      return trackRecoVtxWeight && t < (int)trackRecoVtxWeight->GetSize()
+             ? (*trackRecoVtxWeight)[t] : std::numeric_limits<float>::quiet_NaN(); }
+    float vtxSumPt2(int v) const {
+      return recoVtxSumPt2 && v >= 0 && v < (int)recoVtxSumPt2->GetSize()
+             ? (*recoVtxSumPt2)[v] : std::numeric_limits<float>::quiet_NaN(); }
+    bool  vtxIsHS(int v) const {
+      return recoVtxIsHS && v >= 0 && v < (int)recoVtxIsHS->GetSize()
+             ? (*recoVtxIsHS)[v] : false; }
 
     // -----------------------------------------------------------------------
     // leptonPdg

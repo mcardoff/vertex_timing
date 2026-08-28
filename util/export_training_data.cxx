@@ -72,6 +72,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numeric>
+#include <unordered_map>
 #include <vector>
 
 #include <TChain.h>
@@ -386,6 +387,19 @@ struct ClusterRow {
   // the primary? This is the standard algorithms' HS-vertex-selection
   // efficiency on our samples, which is a result in its own right.
   float evt_sumpt2_picks_pv, evt_waves_picks_pv;
+  // ---- Vertex-fit assignment (Track_recoVtx_idx) ------------------------
+  // What the vertex fit itself thinks these tracks belong to. Not a z proxy:
+  // the fit uses full parameters and covariances, so it still separates where
+  // |dz| is saturated by pileup density.
+  float frac_trk_on_pv, sumpt_frac_on_pv, frac_trk_on_pu_vtx, frac_trk_unassigned;
+  float n_distinct_vtx, dominant_vtx_frac, dominant_vtx_is_pv;
+  float dominant_vtx_sumpt2, dominant_vtx_sumpt2_frac, dominant_vtx_sumpt2_rank;
+  float mean_vtx_weight, sumpt_weighted_vtx_weight;
+  float truth_dominant_vtx_is_hs;      // TRUTH (RecoVtx_isHS), diagnostics only
+  // ---- Track quality, aggregated over the cluster -----------------------
+  float mean_chi2_ndf, max_chi2_ndf, mean_n_pix_hits, mean_n_sct_hits;
+  float mean_n_si_holes, frac_trk_with_shared_hits, mean_n_innermost_hits;
+  float mean_btag_d0_sig, mean_btag_z0sin_sig;
   float pv_pu_dz_ratio;          // |dz to PV| / |dz to nearest PU vtx|
   // --- Tier D: HGTD detector quality -------------------------------------
   // mean_nhgtd_primary is written under the TRUTH prefix: Track_nHGTDPrimaryHits
@@ -465,6 +479,14 @@ struct TrackRow {
   // request; conditioned on delta_z it behaves like a restatement of it.
   float cluster_nearest_vtx_waves_rank, cluster_nearest_vtx_waves_frac;
   float cluster_closest_vtx_is_pv;
+  // ---- vertex-fit assignment, per track ---------------------------------
+  float on_pv, on_pu_vtx, vtx_unassigned, vtx_weight, vtx_sumpt2_frac;
+  // ---- track fit quality, per track -------------------------------------
+  float chi2_ndf, n_pix_hits, n_sct_hits, n_si_holes, n_shared_hits,
+        n_innermost_hits, btag_d0_sig, btag_z0sin_sig;
+  // ---- broadcast cluster-level vertex-fit context ------------------------
+  float cluster_frac_trk_on_pv, cluster_dominant_vtx_is_pv,
+        cluster_dominant_vtx_sumpt2_frac;
   float truth_is_hs;                     // LABEL for the per-track P(HS) model
   // Supervision, never an input: is the track's nearest forward jet matched to
   // a truth HS jet? Distinguishes "this track sits in a real HS jet" from "this
@@ -508,7 +530,25 @@ auto main(int argc, char** argv) -> int {
   const float sampleId = (float)MyUtl::sampleId(cfg.sampleName);
 
   TChain chain("ntuple");
+  // Bind the vertex-fit and track-quality branches. MUST precede the
+  // BranchPointerWrapper below: the constructor reads this flag to decide what
+  // to bind, so setting it afterwards silently leaves every extended branch
+  // unbound and every derived column at its NaN/zero sentinel.
+  MyUtl::EXTENDED_BRANCHES = true;
+
   setupChain(chain, cfg.ntupleDir.c_str(), shard);
+  // Record what this sample actually carries, so the wrapper binds only real
+  // branches. The productions are NOT uniform: local VBF has 241 branches, the
+  // grid samples 183-195, and Track_btagIp_* is missing from every grid sample.
+  if (auto* fl = chain.GetListOfFiles(); fl && fl->GetEntries() > 0) {
+    std::unique_ptr<TFile> f0(TFile::Open(fl->At(0)->GetTitle()));
+    if (f0 && !f0->IsZombie())
+      if (auto* t0 = f0->Get<TTree>("ntuple"))
+        for (auto* o : *t0->GetListOfBranches())
+          MyUtl::AVAILABLE_BRANCHES.insert(o->GetName());
+  }
+  std::cout << "[branches] sample carries " << MyUtl::AVAILABLE_BRANCHES.size()
+            << " branches\n";
   TTreeReader reader(&chain);
   BranchPointerWrapper branch(reader);
 
@@ -583,6 +623,26 @@ auto main(int argc, char** argv) -> int {
   BC("nearest_vtx_is_waves_max",&C.nearest_vtx_is_waves_max);
   BC("evt_sumpt2_picks_pv",&C.evt_sumpt2_picks_pv);
   BC("evt_waves_picks_pv",&C.evt_waves_picks_pv);
+  BC("frac_trk_on_pv",&C.frac_trk_on_pv);
+  BC("sumpt_frac_on_pv",&C.sumpt_frac_on_pv);
+  BC("frac_trk_on_pu_vtx",&C.frac_trk_on_pu_vtx);
+  BC("frac_trk_unassigned",&C.frac_trk_unassigned);
+  BC("n_distinct_vtx",&C.n_distinct_vtx);
+  BC("dominant_vtx_frac",&C.dominant_vtx_frac);
+  BC("dominant_vtx_is_pv",&C.dominant_vtx_is_pv);
+  BC("dominant_vtx_sumpt2",&C.dominant_vtx_sumpt2);
+  BC("dominant_vtx_sumpt2_frac",&C.dominant_vtx_sumpt2_frac);
+  BC("dominant_vtx_sumpt2_rank",&C.dominant_vtx_sumpt2_rank);
+  BC("mean_vtx_weight",&C.mean_vtx_weight);
+  BC("sumpt_weighted_vtx_weight",&C.sumpt_weighted_vtx_weight);
+  BC("truth_dominant_vtx_is_hs",&C.truth_dominant_vtx_is_hs);
+  BC("mean_chi2_ndf",&C.mean_chi2_ndf); BC("max_chi2_ndf",&C.max_chi2_ndf);
+  BC("mean_n_pix_hits",&C.mean_n_pix_hits); BC("mean_n_sct_hits",&C.mean_n_sct_hits);
+  BC("mean_n_si_holes",&C.mean_n_si_holes);
+  BC("frac_trk_with_shared_hits",&C.frac_trk_with_shared_hits);
+  BC("mean_n_innermost_hits",&C.mean_n_innermost_hits);
+  BC("mean_btag_d0_sig",&C.mean_btag_d0_sig);
+  BC("mean_btag_z0sin_sig",&C.mean_btag_z0sin_sig);
   BC("pv_pu_dz_ratio",&C.pv_pu_dz_ratio);
   BC("mean_nhgtd",&C.mean_nhgtd); BC("min_nhgtd",&C.min_nhgtd);
   BC("max_nhgtd",&C.max_nhgtd); BC("truth_mean_nhgtd_primary",&C.mean_nhgtd_primary);
@@ -647,6 +707,17 @@ auto main(int argc, char** argv) -> int {
   BT("cluster_nearest_vtx_waves_rank",&T.cluster_nearest_vtx_waves_rank);
   BT("cluster_nearest_vtx_waves_frac",&T.cluster_nearest_vtx_waves_frac);
   BT("cluster_closest_vtx_is_pv",&T.cluster_closest_vtx_is_pv);
+  BT("on_pv",&T.on_pv); BT("on_pu_vtx",&T.on_pu_vtx);
+  BT("vtx_unassigned",&T.vtx_unassigned); BT("vtx_weight",&T.vtx_weight);
+  BT("vtx_sumpt2_frac",&T.vtx_sumpt2_frac);
+  BT("chi2_ndf",&T.chi2_ndf);
+  BT("n_pix_hits",&T.n_pix_hits); BT("n_sct_hits",&T.n_sct_hits);
+  BT("n_si_holes",&T.n_si_holes); BT("n_shared_hits",&T.n_shared_hits);
+  BT("n_innermost_hits",&T.n_innermost_hits);
+  BT("btag_d0_sig",&T.btag_d0_sig); BT("btag_z0sin_sig",&T.btag_z0sin_sig);
+  BT("cluster_frac_trk_on_pv",&T.cluster_frac_trk_on_pv);
+  BT("cluster_dominant_vtx_is_pv",&T.cluster_dominant_vtx_is_pv);
+  BT("cluster_dominant_vtx_sumpt2_frac",&T.cluster_dominant_vtx_sumpt2_frac);
   BT("truth_is_hs",&T.truth_is_hs);
   BT("truth_nearest_fwdjet_is_hs",&T.truth_nearest_fwdjet_is_hs);
 
@@ -960,6 +1031,100 @@ auto main(int argc, char** argv) -> int {
             cw += std::pow(ptt, 4) / 0.01;
         }
         R.clus_waves_canonical = (float)cw;
+
+        // ---- vertex-fit assignment over this cluster's tracks -------------
+        {
+          std::unordered_map<int,double> ptByVtx;   // vertex -> summed pT
+          std::unordered_map<int,int>    nByVtx;
+          double sPV = 0.0, sAll = 0.0, wSum = 0.0, wPtSum = 0.0;
+          int nPV = 0, nPU = 0, nUn = 0, nW = 0;
+          for (int t : cl.trackIndices) {
+            const int    vi = branch.recoVtxOf(t);
+            const double pt = branch.trackPt[t];
+            sAll += pt;
+            if (vi == 0)      { ++nPV; sPV += pt; }
+            else if (vi > 0)  { ++nPU; }
+            else              { ++nUn; }
+            if (vi >= 0) { ptByVtx[vi] += pt; nByVtx[vi] += 1; }
+            const float w = branch.recoVtxWeightOf(t);
+            if (!std::isnan(w)) { wSum += w; wPtSum += w * pt; ++nW; }
+          }
+          const double nT = (double)cl.trackIndices.size();
+          R.frac_trk_on_pv       = (float)(nPV / nT);
+          R.frac_trk_on_pu_vtx   = (float)(nPU / nT);
+          R.frac_trk_unassigned  = (float)(nUn / nT);
+          R.sumpt_frac_on_pv     = sAll > 0 ? (float)(sPV / sAll) : NaNf;
+          R.n_distinct_vtx       = (float)ptByVtx.size();
+          R.mean_vtx_weight      = nW ? (float)(wSum / nW) : NaNf;
+          R.sumpt_weighted_vtx_weight = sAll > 0 ? (float)(wPtSum / sAll) : NaNf;
+          // The cluster's DOMINANT vertex is the one holding the most of its pT
+          // -- a pT-weighted vote, not a track count, so one high-pT track is
+          // not outvoted by a handful of soft ones.
+          int dom = -1; double domPt = -1.0;
+          for (const auto& kv : ptByVtx)
+            if (kv.second > domPt) { domPt = kv.second; dom = kv.first; }
+          if (dom >= 0) {
+            R.dominant_vtx_frac   = sAll > 0 ? (float)(domPt / sAll) : NaNf;
+            R.dominant_vtx_is_pv  = (dom == 0) ? 1.f : 0.f;
+            R.dominant_vtx_sumpt2 = branch.vtxSumPt2(dom);
+            R.truth_dominant_vtx_is_hs = branch.vtxIsHS(dom) ? 1.f : 0.f;
+            if (branch.recoVtxSumPt2) {
+              const int nv = (int)branch.recoVtxSumPt2->GetSize();
+              double mx = 0.0; int rank = 0;
+              for (int v = 0; v < nv; ++v) {
+                const double sv = (*branch.recoVtxSumPt2)[v];
+                mx = std::max(mx, sv);
+                if (sv > R.dominant_vtx_sumpt2) ++rank;
+              }
+              R.dominant_vtx_sumpt2_frac = mx > 0 ? (float)(R.dominant_vtx_sumpt2 / mx) : NaNf;
+              R.dominant_vtx_sumpt2_rank = (float)rank;
+            }
+          } else {
+            R.dominant_vtx_frac = R.dominant_vtx_is_pv = NaNf;
+            R.dominant_vtx_sumpt2 = R.dominant_vtx_sumpt2_frac = NaNf;
+            R.dominant_vtx_sumpt2_rank = R.truth_dominant_vtx_is_hs = NaNf;
+          }
+        }
+
+        // ---- track fit quality, aggregated ---------------------------------
+        {
+          double c2=0, c2mx=0, pix=0, sct=0, hol=0, inn=0, d0s=0, z0s=0;
+          int nc=0, nh=0, nsh=0, nd=0, nz=0;
+          for (int t : cl.trackIndices) {
+            if (branch.trackChi2 && branch.trackNdof
+                && t < (int)branch.trackNdof->GetSize()
+                && (*branch.trackNdof)[t] > 0) {
+              const double r = (*branch.trackChi2)[t] / (*branch.trackNdof)[t];
+              c2 += r; c2mx = std::max(c2mx, r); ++nc;
+            }
+            auto U = [&](const std::unique_ptr<TTreeReaderArray<unsigned char>>& a) {
+              return (a && t < (int)a->GetSize()) ? (double)(*a)[t] : 0.0; };
+            pix += U(branch.trackNPixHits);  sct += U(branch.trackNSctHits);
+            hol += U(branch.trackNPixHoles) + U(branch.trackNSctHoles);
+            inn += U(branch.trackNInnerHits);
+            if (U(branch.trackNPixShared) + U(branch.trackNSctShared) > 0) ++nsh;
+            ++nh;
+            if (branch.trackBtagD0 && branch.trackBtagD0Unc
+                && t < (int)branch.trackBtagD0Unc->GetSize()
+                && (*branch.trackBtagD0Unc)[t] > 0) {
+              d0s += std::abs((*branch.trackBtagD0)[t]) / (*branch.trackBtagD0Unc)[t]; ++nd;
+            }
+            if (branch.trackBtagZ0Sin && branch.trackBtagZ0SinUnc
+                && t < (int)branch.trackBtagZ0SinUnc->GetSize()
+                && (*branch.trackBtagZ0SinUnc)[t] > 0) {
+              z0s += std::abs((*branch.trackBtagZ0Sin)[t]) / (*branch.trackBtagZ0SinUnc)[t]; ++nz;
+            }
+          }
+          R.mean_chi2_ndf   = nc ? (float)(c2/nc) : NaNf;
+          R.max_chi2_ndf    = nc ? (float)c2mx    : NaNf;
+          R.mean_n_pix_hits = nh ? (float)(pix/nh) : NaNf;
+          R.mean_n_sct_hits = nh ? (float)(sct/nh) : NaNf;
+          R.mean_n_si_holes = nh ? (float)(hol/nh) : NaNf;
+          R.mean_n_innermost_hits = nh ? (float)(inn/nh) : NaNf;
+          R.frac_trk_with_shared_hits = nh ? (float)((double)nsh/nh) : NaNf;
+          R.mean_btag_d0_sig    = nd ? (float)(d0s/nd) : NaNf;
+          R.mean_btag_z0sin_sig = nz ? (float)(z0s/nz) : NaNf;
+        }
       }
       R.delta_z_resunits = (float)(R.delta_z / clusZSig);
       R.cluster_d0 = (float)(dnum/dden);       R.cluster_d0_sigma = (float)(1.0/std::sqrt(dden));
@@ -1166,6 +1331,46 @@ auto main(int argc, char** argv) -> int {
         T.cluster_nearest_vtx_waves_rank = cvNvRank;
         T.cluster_nearest_vtx_waves_frac = cvNvFrac;
         T.cluster_closest_vtx_is_pv = cvr.closestIsPV;
+        {
+          const int vi = branch.recoVtxOf(trk);
+          T.on_pv           = (vi == 0) ? 1.f : 0.f;
+          T.on_pu_vtx       = (vi >  0) ? 1.f : 0.f;
+          T.vtx_unassigned  = (vi <  0) ? 1.f : 0.f;
+          T.vtx_weight      = branch.recoVtxWeightOf(trk);
+          T.vtx_sumpt2_frac = NaNf;
+          if (vi >= 0 && branch.recoVtxSumPt2) {
+            double mx = 0.0;
+            for (int v = 0; v < (int)branch.recoVtxSumPt2->GetSize(); ++v)
+              mx = std::max(mx, (double)(*branch.recoVtxSumPt2)[v]);
+            if (mx > 0) T.vtx_sumpt2_frac = (float)(branch.vtxSumPt2(vi) / mx);
+          }
+          auto U = [&](const std::unique_ptr<TTreeReaderArray<unsigned char>>& a) {
+            return (a && trk < (int)a->GetSize()) ? (float)(*a)[trk] : NaNf; };
+          T.chi2_ndf = (branch.trackChi2 && branch.trackNdof
+                        && trk < (int)branch.trackNdof->GetSize()
+                        && (*branch.trackNdof)[trk] > 0)
+                       ? (float)((*branch.trackChi2)[trk] / (*branch.trackNdof)[trk]) : NaNf;
+          T.n_pix_hits = U(branch.trackNPixHits);
+          T.n_sct_hits = U(branch.trackNSctHits);
+          const float ph = U(branch.trackNPixHoles), sh = U(branch.trackNSctHoles);
+          T.n_si_holes = (std::isnan(ph)||std::isnan(sh)) ? NaNf : ph + sh;
+          const float ps = U(branch.trackNPixShared), ss = U(branch.trackNSctShared);
+          T.n_shared_hits = (std::isnan(ps)||std::isnan(ss)) ? NaNf : ps + ss;
+          T.n_innermost_hits = U(branch.trackNInnerHits);
+          T.btag_d0_sig = (branch.trackBtagD0 && branch.trackBtagD0Unc
+                           && trk < (int)branch.trackBtagD0Unc->GetSize()
+                           && (*branch.trackBtagD0Unc)[trk] > 0)
+                          ? (float)(std::abs((*branch.trackBtagD0)[trk])
+                                    / (*branch.trackBtagD0Unc)[trk]) : NaNf;
+          T.btag_z0sin_sig = (branch.trackBtagZ0Sin && branch.trackBtagZ0SinUnc
+                              && trk < (int)branch.trackBtagZ0SinUnc->GetSize()
+                              && (*branch.trackBtagZ0SinUnc)[trk] > 0)
+                             ? (float)(std::abs((*branch.trackBtagZ0Sin)[trk])
+                                       / (*branch.trackBtagZ0SinUnc)[trk]) : NaNf;
+          T.cluster_frac_trk_on_pv           = rows[ci].frac_trk_on_pv;
+          T.cluster_dominant_vtx_is_pv       = rows[ci].dominant_vtx_is_pv;
+          T.cluster_dominant_vtx_sumpt2_frac = rows[ci].dominant_vtx_sumpt2_frac;
+        }
         T.truth_is_hs = (branch.trackToTruthvtx[trk] == 0) ? 1.f : 0.f;
         trackTree->Fill();
         ++nTrackRows;

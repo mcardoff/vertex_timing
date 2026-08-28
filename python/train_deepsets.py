@@ -103,7 +103,20 @@ TRACK_FEATURES = ["pt", "eta", "theta", "z0", "d0", "qOverP",
                   "cluster_closest_vtx_is_pv",
                   # Jet association independent of the forward band, and
                   # leave-one-out time stability (studies E and in/out-of-jet).
-                  "is_in_any_jet", "dr_nearest_anyjet", "loo_pull"]
+                  "is_in_any_jet", "dr_nearest_anyjet", "loo_pull",
+                  # The vertex fit's OWN assignment (Track_recoVtx_idx) and
+                  # Athena's per-vertex SumPt^2. Unlike every other vertex
+                  # feature tried, these survive the conditional test uniformly:
+                  # dominant_vtx_is_pv lifts 2.2-3.7x in EVERY |dz| bin, because
+                  # the fit uses full parameters and covariances rather than a z
+                  # distance, and so still separates where z is saturated.
+                  "on_pv", "on_pu_vtx", "vtx_unassigned", "vtx_weight",
+                  "vtx_sumpt2_frac", "cluster_frac_trk_on_pv",
+                  "cluster_dominant_vtx_is_pv", "cluster_dominant_vtx_sumpt2_frac",
+                  # Track fit quality beyond the single Track_quality flag.
+                  "chi2_ndf", "n_pix_hits", "n_sct_hits", "n_si_holes",
+                  "n_shared_hits", "n_innermost_hits", "btag_d0_sig",
+                  "btag_z0sin_sig"]
 # Truth can never be an input. TRACK_FEATURES is an allowlist, but assert anyway --
 # nHGTDPrimaryHits is truth (Athena's per-hit m_isprime) and was worth ~14 points on
 # Z+jets the one time it leaked in.

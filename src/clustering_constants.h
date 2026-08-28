@@ -122,6 +122,28 @@ namespace MyUtl {
   // pileup jet manufactures a large mass).
   const  double VBS_JET_MJJ_DEFAULT = 200.0;
   inline double VBS_JET_MJJ          = VBS_JET_MJJ_DEFAULT;
+  // Bind the extended track-quality and vertex-fit branches (Track_recoVtx_idx,
+  // Track_chi2, the pixel/SCT hit counts, ...). OFF by default and set true only
+  // by util/export_training_data: those branches are not needed by the
+  // clustering or RpT analyses, and binding a branch a sample does not carry
+  // makes TTreeReader fail at read time. Keeping it opt-in means a sample
+  // missing them breaks only the exporter, not every executable.
+  inline bool EXTENDED_BRANCHES = false;
+
+  // Branch names present in the sample being read. Populated once by the
+  // caller (see export_training_data) from the first file of the chain;
+  // EMPTY means "assume everything is present", so nothing that does not
+  // populate it changes behaviour.
+  //
+  // This is not defensive programming for its own sake: the productions differ.
+  // The local VBF ntuple carries 241 branches, the grid samples 183-195, and
+  // Track_btagIp_* is absent from EVERY grid sample. Binding it unconditionally
+  // fails at read time, which would have taken out all 152 export jobs.
+  inline std::set<std::string> AVAILABLE_BRANCHES;
+  inline bool hasBranch(const char* n) {
+    return AVAILABLE_BRANCHES.empty() || AVAILABLE_BRANCHES.count(n) > 0;
+  }
+
   const double MIN_JET_PT         = 30.0;  // self explanatory
   const double MAX_VTX_DZ         = 2.0;   // max error for reco HS vertex z
   const double MIN_HGTD_ETA       = 2.38;  // HGTD Min eta
