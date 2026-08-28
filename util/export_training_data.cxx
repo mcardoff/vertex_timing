@@ -125,6 +125,37 @@ float median(std::vector<float> v) {
   return (n % 2) ? v[n / 2] : 0.5f * (v[n / 2 - 1] + v[n / 2]);
 }
 
+// Precision-weighted sums over a cluster's TIMED tracks: W = SUM 1/sigma^2 and
+// WT = SUM t/sigma^2. The cluster time is WT/W, so leave-one-out follows in
+// closed form and needs no refit.
+struct TimeSums { double W = 0.0, WT = 0.0; int n = 0; };
+
+TimeSums timeSums(const Cluster& cl, BranchPointerWrapper* b) {
+  TimeSums s;
+  for (size_t k = 0; k < cl.trackIndices.size(); ++k) {
+    const int trk = cl.trackIndices[k];
+    const double sig = b->trackTimeRes[trk];
+    if (b->trackTimeValid[trk] == 0 || sig <= 0.0) continue;
+    const double w = 1.0 / (sig * sig);
+    s.W += w; s.WT += w * cl.allTimes[k]; ++s.n;
+  }
+  return s;
+}
+
+// Cluster time with track k removed, minus the full cluster time. NaN when k has
+// no usable time, or when it is the ONLY timed track -- removing it would leave
+// the mean undefined rather than merely shifted, and reporting 0 there would
+// read as "perfectly robust" when it is the opposite.
+float looShift(const TimeSums& s, const Cluster& cl, BranchPointerWrapper* b, size_t k) {
+  const int trk = cl.trackIndices[k];
+  const double sig = b->trackTimeRes[trk];
+  if (b->trackTimeValid[trk] == 0 || sig <= 0.0 || s.n < 2) return NaNf;
+  const double w = 1.0 / (sig * sig);
+  const double Wm = s.W - w;
+  if (Wm <= 0.0) return NaNf;
+  return (float)(s.WT / s.W - (s.WT - w * cl.allTimes[k]) / Wm);
+}
+
 float rms(const std::vector<float>& v) {
   if (v.size() < 2) return 0.f;
   const float m = std::accumulate(v.begin(), v.end(), 0.f) / v.size();
@@ -149,6 +180,16 @@ struct ClusterRow {
   float sumpt2, maxpt, pt_2nd, pt_3rd, lead_pt_frac, meanpt, medianpt;
   float n_pt_gt2, n_pt_gt5;
   // --- Tier B: timing coherence ------------------------------------------
+  // LEAVE-ONE-OUT stability. The cluster time is a precision-weighted mean, so
+  // dropping one track has a closed form -- no refit needed:
+  //     t_-i = (SUM w_j t_j - w_i t_i) / (SUM w_j - w_i),  w = 1/sigma_t^2
+  // The shift t - t_-i measures how much one track is dragging the answer. A
+  // large max shift means the time rests on a single measurement, which is what
+  // an outlier, a bad hit, or a mis-associated HGTD time looks like from the
+  // reco side. Distinct from time_chi2_ndf: chi2 asks whether the tracks AGREE,
+  // leave-one-out asks whether the answer is ROBUST, and a two-track cluster can
+  // have a perfect chi2 while resting entirely on one track.
+  float max_abs_loo_shift, mean_abs_loo_shift, loo_shift_lead_pt;
   float time_chi2_ndf, max_abs_tpull, n_tpull_gt2, time_spread;
   float min_timeRes, median_timeRes, max_timeRes;
   float n_valid_time, frac_valid_time, sumpt_valid_time;
@@ -194,6 +235,10 @@ struct TrackRow {
   float time, timeRes, time_valid;
   float quality, nhgtd_hits, nhgtd_primary;  // nhgtd_primary -> truth_ branch (MC-only)
   float z0_pull_pv, t_pull_cluster;
+  // How far the cluster time moves when THIS track is removed, and that shift in
+  // units of the cluster's own time uncertainty. NaN when the track has no valid
+  // time, or when it is the only timed track (removing it leaves nothing).
+  float loo_shift, loo_pull;
   float dr_nearest_fwdjet, pt_nearest_fwdjet, is_ghost_of_nearest;
   float is_lepton;
   float cluster_time, cluster_delta_z;   // context, so track rows stand alone
@@ -283,6 +328,9 @@ auto main(int argc, char** argv) -> int {
   BC("pt_3rd",&C.pt_3rd); BC("lead_pt_frac",&C.lead_pt_frac);
   BC("meanpt",&C.meanpt); BC("medianpt",&C.medianpt);
   BC("n_pt_gt2",&C.n_pt_gt2); BC("n_pt_gt5",&C.n_pt_gt5);
+  BC("max_abs_loo_shift",&C.max_abs_loo_shift);
+  BC("mean_abs_loo_shift",&C.mean_abs_loo_shift);
+  BC("loo_shift_lead_pt",&C.loo_shift_lead_pt);
   BC("time_chi2_ndf",&C.time_chi2_ndf); BC("max_abs_tpull",&C.max_abs_tpull);
   BC("n_tpull_gt2",&C.n_tpull_gt2); BC("time_spread",&C.time_spread);
   BC("min_timeRes",&C.min_timeRes); BC("median_timeRes",&C.median_timeRes);
@@ -335,6 +383,7 @@ auto main(int argc, char** argv) -> int {
   BT("quality",&T.quality); BT("nhgtd_hits",&T.nhgtd_hits);
   BT("truth_nhgtd_primary",&T.nhgtd_primary);
   BT("z0_pull_pv",&T.z0_pull_pv); BT("t_pull_cluster",&T.t_pull_cluster);
+  BT("loo_shift",&T.loo_shift); BT("loo_pull",&T.loo_pull);
   BT("dr_nearest_fwdjet",&T.dr_nearest_fwdjet);
   BT("pt_nearest_fwdjet",&T.pt_nearest_fwdjet);
   BT("is_ghost_of_nearest",&T.is_ghost_of_nearest);
@@ -526,6 +575,23 @@ auto main(int argc, char** argv) -> int {
         if (branch.trackToTruthvtx[trk] == 0) ++nHsTracks;
       }
 
+      // Leave-one-out summary for this cluster.
+      {
+        const TimeSums ts = timeSums(cl, &branch);
+        double mx = 0.0, sum = 0.0; int cnt = 0; double leadPtSeen = -1.0;
+        float leadShift = NaNf;
+        for (size_t k = 0; k < cl.trackIndices.size(); ++k) {
+          const float sh = looShift(ts, cl, &branch, k);
+          if (std::isnan(sh)) continue;
+          mx = std::max(mx, (double)std::abs(sh)); sum += std::abs(sh); ++cnt;
+          const double pt_k = branch.trackPt[cl.trackIndices[k]];
+          if (pt_k > leadPtSeen) { leadPtSeen = pt_k; leadShift = sh; }
+        }
+        R.max_abs_loo_shift  = cnt ? (float)mx : NaNf;
+        R.mean_abs_loo_shift = cnt ? (float)(sum / cnt) : NaNf;
+        R.loo_shift_lead_pt  = leadShift;
+      }
+
       const int n = (int)cl.trackIndices.size();
       const double clusZ = znum/zden, clusZSig = 1.0/std::sqrt(zden);
       R.delta_z = (float)(clusZ - vtxZ);
@@ -661,6 +727,8 @@ auto main(int argc, char** argv) -> int {
                                         zd += 1.0/branch.trackVarZ0[t]; }
         return zn/zd;
       }();
+      const TimeSums ts = timeSums(cl, &branch);
+      const double clusTSig = ts.W > 0.0 ? 1.0 / std::sqrt(ts.W) : -1.0;
       for (size_t k = 0; k < cl.trackIndices.size(); ++k) {
         const int trk = cl.trackIndices[k];
         T = TrackRow{};
@@ -694,6 +762,9 @@ auto main(int argc, char** argv) -> int {
               (std::find(gh.begin(), gh.end(), trk) != gh.end()) ? 1.f : 0.f;
         }
         T.is_lepton = (branch.trackLeptonID && branch.isGoodLepton(trk)) ? 1.f : 0.f;
+        T.loo_shift = looShift(ts, cl, &branch, k);
+        T.loo_pull = (std::isnan(T.loo_shift) || clusTSig <= 0.0)
+                     ? NaNf : (float)(T.loo_shift / clusTSig);
         T.cluster_time = (float)tClus;
         T.cluster_delta_z = (float)(clusZ - vtxZ);
         T.truth_is_hs = (branch.trackToTruthvtx[trk] == 0) ? 1.f : 0.f;
