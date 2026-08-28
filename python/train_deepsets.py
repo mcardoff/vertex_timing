@@ -541,12 +541,29 @@ def main():
     # whether Z+jets is data-limited -- it contributed every one of its available
     # train-fold events in the last run, and the canonical selection cut it to
     # ~36.5k, so this is the question that decides whether more MC would help.
+    p.add_argument("--drop-features", default="",
+                   help="comma-separated TRACK_FEATURES to remove before "
+                        "training. The A/B knob for a feature ablation: run "
+                        "once with the list and once without, same --seed, so "
+                        "the split is identical and only the inputs differ.")
     p.add_argument("--sample-frac", default="",
                    help="comma-separated <sample>=<frac>, e.g. zjets=0.25")
     args = p.parse_args()
 
     if args.init_seed is None:
         args.init_seed = args.seed
+
+    # Applied before anything reads TRACK_FEATURES, so the dropped columns are
+    # never loaded, normalised, or written into the checkpoint's feature list.
+    if args.drop_features:
+        global TRACK_FEATURES
+        drop = [f.strip() for f in args.drop_features.split(",") if f.strip()]
+        unknown = [f for f in drop if f not in TRACK_FEATURES]
+        if unknown:
+            sys.exit(f"FATAL: --drop-features names features that are not in "
+                     f"TRACK_FEATURES: {unknown}")
+        TRACK_FEATURES = [f for f in TRACK_FEATURES if f not in drop]
+        log(f"dropped {len(drop)} feature(s); {len(TRACK_FEATURES)} remain")
     os.makedirs(args.out, exist_ok=True)
     if args.torch_threads > 0:
         torch.set_num_threads(args.torch_threads)
