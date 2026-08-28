@@ -148,6 +148,93 @@ struct VtxRel {
   float n1 = 0, n2 = 0;   // PU vertices within 1 mm / 2 mm
 };
 
+// ---------------------------------------------------------------------------
+// Canonical hard-scatter VERTEX-SELECTION scores, per reconstructed vertex.
+//
+// These are the two scores the experiment actually uses to pick the HS vertex,
+// reproduced here as published rather than as this codebase's variants:
+//
+//   SumPt2(V)  = SUM pT^2                                  over V's tracks
+//   WAVeS(V)   = SUM w_jet + SUM_mu w_mu + SUM_e w_e       over V's tracks
+//     w_jet = (pT^track)^2 (pT^jet)^2 / dR(track, jet)
+//     w_mu  = (pT^mu)^4 / 0.01,   w_e = (pT^e)^4 / 0.01
+//
+// NOTE how far this is from Score::WAVES in clustering_structs.h, which is a
+// DIFFERENT score that happens to share the name. Ours uses pT^1 for both track
+// and jet, floors dR at WAVES_DR_FLOOR, multiplies by exp(-1.5|dz|), carries no
+// lepton term, and considers only qualifying FORWARD jets. Reporting ours as
+// "WAVeS" against the literature would be wrong, which is why this exists.
+//
+// TRACK-TO-VERTEX ASSIGNMENT IS AN APPROXIMATION AND MUST BE READ AS ONE. The
+// ntuple carries RecoVtx_z but no reco track-to-vertex association (only
+// Track_truthVtx_idx, which is truth and therefore unusable here), so each
+// track is assigned to the vertex it is most compatible with in z0
+// significance. A real vertex fit's track list is not identical to that. The
+// scores are therefore a faithful reproduction of the FORMULAS on an
+// approximate track partition, not a reproduction of the experiment's numbers.
+//
+// The published w_jet has a bare 1/dR and no floor; a track collinear with a
+// jet axis would diverge. DR_EPS guards that, and nDrBelowFloor counts how
+// often dR lands under WAVES_DR_FLOOR so the guard's influence is measurable
+// rather than assumed.
+// ---------------------------------------------------------------------------
+struct VtxScores {
+  std::vector<double> sumpt2, waves;
+  int    argmaxSumpt2 = -1, argmaxWaves = -1;
+  long   nDrBelowFloor = 0, nTracksUsed = 0;
+};
+
+VtxScores computeVertexScores(BranchPointerWrapper* b) {
+  constexpr double DR_EPS = 1e-3;
+  const int nv = (int)b->recoVtxZ.GetSize();
+  const int nt = (int)b->trackZ0.GetSize();
+  VtxScores v;
+  v.sumpt2.assign(nv, 0.0);
+  v.waves.assign(nv, 0.0);
+  if (nv == 0) return v;
+
+  for (int t = 0; t < nt; ++t) {
+    const double pt = b->trackPt[t];
+    if (pt <= 0.0) continue;
+    // Assign to the most z0-compatible vertex. sigma_z0 is per track, so this
+    // is a significance and not a bare distance -- a badly measured track is
+    // correctly allowed to belong to a vertex further away in mm.
+    const double sz = std::sqrt(b->trackVarZ0[t]);
+    if (!(sz > 0.0)) continue;
+    int best = -1; double bestSig = 1e18;
+    for (int j = 0; j < nv; ++j) {
+      const double sig = std::abs(b->trackZ0[t] - b->recoVtxZ[j]) / sz;
+      if (sig < bestSig) { bestSig = sig; best = j; }
+    }
+    if (best < 0) continue;
+    ++v.nTracksUsed;
+    v.sumpt2[best] += pt * pt;
+
+    const NearJet nj = nearestAnyJet(t, b);
+    if (nj.idx >= 0) {
+      if (nj.dr < WAVES_DR_FLOOR) ++v.nDrBelowFloor;
+      v.waves[best] += pt * pt * nj.pt * nj.pt / std::max(nj.dr, DR_EPS);
+    }
+    // Leptons enter as an ADDITIONAL term, not instead of the jet term: the
+    // published sum is over tracks PLUS over identified muons and electrons.
+    // w_mu and w_e are the same function of pT, so no flavour split is needed
+    // numerically -- leptonPdg would give it if that ever changes.
+    if (b->trackLeptonID && t < (int)b->trackLeptonID->GetSize() && b->isGoodLepton(t))
+      v.waves[best] += std::pow(pt, 4) / 0.01;
+  }
+  v.argmaxSumpt2 = (int)(std::max_element(v.sumpt2.begin(), v.sumpt2.end()) - v.sumpt2.begin());
+  v.argmaxWaves  = (int)(std::max_element(v.waves.begin(),  v.waves.end())  - v.waves.begin());
+  return v;
+}
+
+// Rank of index `i` in `x` by descending value: 0 means nothing scores higher.
+int descRank(const std::vector<double>& x, int i) {
+  if (i < 0 || i >= (int)x.size()) return -1;
+  int r = 0;
+  for (size_t k = 0; k < x.size(); ++k) if (x[k] > x[i]) ++r;
+  return r;
+}
+
 VtxRel vertexRelation(double z, BranchPointerWrapper* b) {
   VtxRel v;
   const int nv = (int)b->recoVtxZ.GetSize();
@@ -267,6 +354,25 @@ struct ClusterRow {
   float closest_vtx_is_pv;       // 1 if the nearest reco vertex of all is index 0
   float n_pu_vtx_within_1mm, n_pu_vtx_within_2mm;
   float local_vtx_density;       // reco vertices per mm within +-2 mm of clusterZ
+  // Canonical HS vertex-selection scores (see computeVertexScores). Two
+  // families, answering different questions:
+  //   clus_*        the published formulas applied to THIS cluster's tracks,
+  //                 i.e. "how would the standard scores rank this candidate".
+  //                 SumPt2 of the cluster is already exported as `sumpt2`.
+  //   nearest_vtx_* the scores of the reconstructed vertex nearest this
+  //                 cluster in z, i.e. "does this cluster sit on a vertex that
+  //                 the standard selection thinks looks like a hard scatter".
+  // The _frac forms are the score divided by the event's maximum, which is what
+  // the model gets: raw values are GeV^4 and span many orders of magnitude.
+  float clus_waves_canonical;
+  float nearest_vtx_sumpt2, nearest_vtx_waves;
+  float nearest_vtx_sumpt2_frac, nearest_vtx_waves_frac;
+  float nearest_vtx_sumpt2_rank, nearest_vtx_waves_rank;
+  float nearest_vtx_is_sumpt2_max, nearest_vtx_is_waves_max;
+  // Event-level, repeated on every cluster row: does each canonical score pick
+  // the primary? This is the standard algorithms' HS-vertex-selection
+  // efficiency on our samples, which is a result in its own right.
+  float evt_sumpt2_picks_pv, evt_waves_picks_pv;
   float pv_pu_dz_ratio;          // |dz to PV| / |dz to nearest PU vtx|
   // --- Tier D: HGTD detector quality -------------------------------------
   // mean_nhgtd_primary is written under the TRUTH prefix: Track_nHGTDPrimaryHits
@@ -339,6 +445,13 @@ struct TrackRow {
   // broadcast -- conditioned on delta_z its lift collapses to ~1.2 and inverts
   // at large |delta_z|, so it restates delta_z rather than adding to it.
   float cluster_dz_to_nearest_pu_vtx, cluster_pv_pu_dz_ratio;
+  // Broadcast canonical vertex-selection context. The RANK is the one that
+  // earns its place: conditioned on |delta_z| it lifts 2.01x in the |dz|<0.1mm
+  // bin, exactly where pv_pu_dz_ratio is flat (0.99x), so the two cover
+  // opposite ends of the displacement range. closest_vtx_is_pv is included by
+  // request; conditioned on delta_z it behaves like a restatement of it.
+  float cluster_nearest_vtx_waves_rank, cluster_nearest_vtx_waves_frac;
+  float cluster_closest_vtx_is_pv;
   float truth_is_hs;                     // LABEL for the per-track P(HS) model
   // Supervision, never an input: is the track's nearest forward jet matched to
   // a truth HS jet? Distinguishes "this track sits in a real HS jet" from "this
@@ -446,6 +559,17 @@ auto main(int argc, char** argv) -> int {
   BC("n_pu_vtx_within_1mm",&C.n_pu_vtx_within_1mm);
   BC("n_pu_vtx_within_2mm",&C.n_pu_vtx_within_2mm);
   BC("local_vtx_density",&C.local_vtx_density);
+  BC("clus_waves_canonical",&C.clus_waves_canonical);
+  BC("nearest_vtx_sumpt2",&C.nearest_vtx_sumpt2);
+  BC("nearest_vtx_waves",&C.nearest_vtx_waves);
+  BC("nearest_vtx_sumpt2_frac",&C.nearest_vtx_sumpt2_frac);
+  BC("nearest_vtx_waves_frac",&C.nearest_vtx_waves_frac);
+  BC("nearest_vtx_sumpt2_rank",&C.nearest_vtx_sumpt2_rank);
+  BC("nearest_vtx_waves_rank",&C.nearest_vtx_waves_rank);
+  BC("nearest_vtx_is_sumpt2_max",&C.nearest_vtx_is_sumpt2_max);
+  BC("nearest_vtx_is_waves_max",&C.nearest_vtx_is_waves_max);
+  BC("evt_sumpt2_picks_pv",&C.evt_sumpt2_picks_pv);
+  BC("evt_waves_picks_pv",&C.evt_waves_picks_pv);
   BC("pv_pu_dz_ratio",&C.pv_pu_dz_ratio);
   BC("mean_nhgtd",&C.mean_nhgtd); BC("min_nhgtd",&C.min_nhgtd);
   BC("max_nhgtd",&C.max_nhgtd); BC("truth_mean_nhgtd_primary",&C.mean_nhgtd_primary);
@@ -507,6 +631,9 @@ auto main(int argc, char** argv) -> int {
   BT("cluster_time",&T.cluster_time); BT("cluster_delta_z",&T.cluster_delta_z);
   BT("cluster_dz_to_nearest_pu_vtx",&T.cluster_dz_to_nearest_pu_vtx);
   BT("cluster_pv_pu_dz_ratio",&T.cluster_pv_pu_dz_ratio);
+  BT("cluster_nearest_vtx_waves_rank",&T.cluster_nearest_vtx_waves_rank);
+  BT("cluster_nearest_vtx_waves_frac",&T.cluster_nearest_vtx_waves_frac);
+  BT("cluster_closest_vtx_is_pv",&T.cluster_closest_vtx_is_pv);
   BT("truth_is_hs",&T.truth_is_hs);
   BT("truth_nearest_fwdjet_is_hs",&T.truth_nearest_fwdjet_is_hs);
 
@@ -610,6 +737,12 @@ auto main(int argc, char** argv) -> int {
     // ---- Per-cluster features --------------------------------------------
     std::vector<ClusterRow> rows;
     rows.reserve(clusters.size());
+    // Once per event: the canonical HS vertex-selection scores for EVERY
+    // reconstructed vertex. Hoisted because it is O(n_track x n_vertex) and
+    // does not depend on the cluster.
+    const VtxScores vsc = computeVertexScores(&branch);
+    const double maxSumpt2 = vsc.argmaxSumpt2 >= 0 ? vsc.sumpt2[vsc.argmaxSumpt2] : 0.0;
+    const double maxWaves  = vsc.argmaxWaves  >= 0 ? vsc.waves [vsc.argmaxWaves ] : 0.0;
     for (size_t ci = 0; ci < clusters.size(); ++ci) {
       const Cluster& cl = clusters[ci];
       if (cl.values.empty() || cl.trackIndices.empty()) continue;
@@ -772,6 +905,48 @@ auto main(int argc, char** argv) -> int {
         }
         R.truth_dz_to_nearest_vtx  = bt < 1e8 ? (float)bt : NaNf;
         R.truth_local_vtx_density  = (float)(dsum / 4.0);
+
+        // Canonical scores of the reco vertex nearest this cluster in z. The
+        // _frac forms are what the model sees; raw GeV^4 spans decades.
+        int nv_i = -1; double nv_d = 1e18;
+        for (int j = 0; j < (int)branch.recoVtxZ.GetSize(); ++j) {
+          const double d = std::abs(clusZ - branch.recoVtxZ[j]);
+          if (d < nv_d) { nv_d = d; nv_i = j; }
+        }
+        if (nv_i >= 0) {
+          R.nearest_vtx_sumpt2 = (float)vsc.sumpt2[nv_i];
+          R.nearest_vtx_waves  = (float)vsc.waves [nv_i];
+          R.nearest_vtx_sumpt2_frac = maxSumpt2 > 0.0
+                                      ? (float)(vsc.sumpt2[nv_i] / maxSumpt2) : NaNf;
+          R.nearest_vtx_waves_frac  = maxWaves  > 0.0
+                                      ? (float)(vsc.waves [nv_i] / maxWaves ) : NaNf;
+          R.nearest_vtx_sumpt2_rank = (float)descRank(vsc.sumpt2, nv_i);
+          R.nearest_vtx_waves_rank  = (float)descRank(vsc.waves,  nv_i);
+          R.nearest_vtx_is_sumpt2_max = (nv_i == vsc.argmaxSumpt2) ? 1.f : 0.f;
+          R.nearest_vtx_is_waves_max  = (nv_i == vsc.argmaxWaves ) ? 1.f : 0.f;
+        } else {
+          R.nearest_vtx_sumpt2 = R.nearest_vtx_waves = NaNf;
+          R.nearest_vtx_sumpt2_frac = R.nearest_vtx_waves_frac = NaNf;
+          R.nearest_vtx_sumpt2_rank = R.nearest_vtx_waves_rank = NaNf;
+          R.nearest_vtx_is_sumpt2_max = R.nearest_vtx_is_waves_max = NaNf;
+        }
+        // Vertex 0 is the primary by construction, so "picks the PV" is the
+        // canonical algorithm getting the HS vertex right on this event.
+        R.evt_sumpt2_picks_pv = (vsc.argmaxSumpt2 == 0) ? 1.f : 0.f;
+        R.evt_waves_picks_pv  = (vsc.argmaxWaves  == 0) ? 1.f : 0.f;
+
+        // The published WAVeS formula applied to THIS cluster's own tracks.
+        double cw = 0.0;
+        for (int t : cl.trackIndices) {
+          const double ptt = branch.trackPt[t];
+          const NearJet nj = nearestAnyJet(t, &branch);
+          if (nj.idx >= 0)
+            cw += ptt * ptt * nj.pt * nj.pt / std::max(nj.dr, 1e-3);
+          if (branch.trackLeptonID && t < (int)branch.trackLeptonID->GetSize()
+              && branch.isGoodLepton(t))
+            cw += std::pow(ptt, 4) / 0.01;
+        }
+        R.clus_waves_canonical = (float)cw;
       }
       R.delta_z_resunits = (float)(R.delta_z / clusZSig);
       R.cluster_d0 = (float)(dnum/dden);       R.cluster_d0_sigma = (float)(1.0/std::sqrt(dden));
@@ -912,6 +1087,18 @@ auto main(int argc, char** argv) -> int {
       const VtxRel cvr = vertexRelation(clusZ, &branch);
       const float cvrRatio = (std::isnan(cvr.dzPU) || cvr.dzPU <= 0.0)
                              ? NaNf : (float)(std::abs(clusZ - vtxZ) / cvr.dzPU);
+      float cvNvRank = NaNf, cvNvFrac = NaNf;
+      {
+        int nvi = -1; double nvd = 1e18;
+        for (int j = 0; j < (int)branch.recoVtxZ.GetSize(); ++j) {
+          const double d = std::abs(clusZ - branch.recoVtxZ[j]);
+          if (d < nvd) { nvd = d; nvi = j; }
+        }
+        if (nvi >= 0) {
+          cvNvRank = (float)descRank(vsc.waves, nvi);
+          cvNvFrac = maxWaves > 0.0 ? (float)(vsc.waves[nvi] / maxWaves) : NaNf;
+        }
+      }
       for (size_t k = 0; k < cl.trackIndices.size(); ++k) {
         const int trk = cl.trackIndices[k];
         T = TrackRow{};
@@ -963,6 +1150,9 @@ auto main(int argc, char** argv) -> int {
         T.cluster_delta_z = (float)(clusZ - vtxZ);
         T.cluster_dz_to_nearest_pu_vtx = cvr.dzPU;
         T.cluster_pv_pu_dz_ratio = cvrRatio;
+        T.cluster_nearest_vtx_waves_rank = cvNvRank;
+        T.cluster_nearest_vtx_waves_frac = cvNvFrac;
+        T.cluster_closest_vtx_is_pv = cvr.closestIsPV;
         T.truth_is_hs = (branch.trackToTruthvtx[trk] == 0) ? 1.f : 0.f;
         trackTree->Fill();
         ++nTrackRows;

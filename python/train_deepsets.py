@@ -96,6 +96,11 @@ TRACK_FEATURES = ["pt", "eta", "theta", "z0", "d0", "qOverP",
                   # delta_z rather than new information.
                   "dz_to_nearest_pu_vtx_trk", "closer_to_pu_than_pv",
                   "cluster_dz_to_nearest_pu_vtx", "cluster_pv_pu_dz_ratio",
+                  # Canonical HS vertex-selection context. The rank is
+                  # complementary to pv_pu_dz_ratio rather than redundant with
+                  # it: 2.01x lift at |dz|<0.1mm where the ratio is flat.
+                  "cluster_nearest_vtx_waves_rank", "cluster_nearest_vtx_waves_frac",
+                  "cluster_closest_vtx_is_pv",
                   # Jet association independent of the forward band, and
                   # leave-one-out time stability (studies E and in/out-of-jet).
                   "is_in_any_jet", "dr_nearest_anyjet", "loo_pull"]
