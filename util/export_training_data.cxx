@@ -140,6 +140,31 @@ NearJet nearestAnyJet(int trk, BranchPointerWrapper* b) {
   return nj;
 }
 
+// Relation of a z position to the reconstructed vertex collection. Index 0 is
+// the primary by construction; everything else is a reconstructed pileup vertex.
+struct VtxRel {
+  float dzPU = NaNf;      // to the nearest PU vertex
+  float closestIsPV = 0;  // nearest vertex OF ALL is the primary
+  float n1 = 0, n2 = 0;   // PU vertices within 1 mm / 2 mm
+};
+
+VtxRel vertexRelation(double z, BranchPointerWrapper* b) {
+  VtxRel v;
+  const int nv = (int)b->recoVtxZ.GetSize();
+  double bestPU = 1e9, bestAll = 1e9; int bestAllIdx = -1;
+  for (int i = 0; i < nv; ++i) {
+    const double d = std::abs(z - b->recoVtxZ[i]);
+    if (d < bestAll) { bestAll = d; bestAllIdx = i; }
+    if (i == 0) continue;                       // index 0 is the primary
+    if (d < bestPU) bestPU = d;
+    if (d < 1.0) v.n1 += 1;
+    if (d < 2.0) v.n2 += 1;
+  }
+  if (bestPU < 1e8) v.dzPU = (float)bestPU;
+  v.closestIsPV = (bestAllIdx == 0) ? 1.f : 0.f;
+  return v;
+}
+
 float median(std::vector<float> v) {
   if (v.empty()) return NaNf;
   std::sort(v.begin(), v.end());
@@ -227,6 +252,22 @@ struct ClusterRow {
   float n_valid_time, frac_valid_time, sumpt_valid_time;
   // --- Tier C: z compatibility with the reco PV --------------------------
   float z_chi2_ndf, max_abs_zpull, n_zpull_gt3, z_spread, median_z0_pull;
+  // --- Tier C2: RELATION TO THE OTHER RECO VERTICES ----------------------
+  // RecoVtx_z is a full array and until now only index 0 (the primary) was ever
+  // read; every pileup vertex ITk reconstructed was discarded. That is the
+  // information these features recover, and it targets the measured failure mode
+  // directly: the model picks large pileup clusters, and a pileup cluster sits
+  // at a z where ITk has ALREADY reconstructed a pileup vertex. "Is there a
+  // reconstructed PU vertex sitting on top of me" is a reco-only question that
+  // no existing feature asks.
+  //
+  // Modelled on the official-ntuple variables cluster_closest_vx_is_pvx,
+  // cluster_distance_pu_vx, cluster_n_pu_vertices and local_vx_density.
+  float dz_to_nearest_pu_vtx;    // |clusterZ - nearest PU (index>0) reco vertex|
+  float closest_vtx_is_pv;       // 1 if the nearest reco vertex of all is index 0
+  float n_pu_vtx_within_1mm, n_pu_vtx_within_2mm;
+  float local_vtx_density;       // reco vertices per mm within +-2 mm of clusterZ
+  float pv_pu_dz_ratio;          // |dz to PV| / |dz to nearest PU vtx|
   // --- Tier D: HGTD detector quality -------------------------------------
   // mean_nhgtd_primary is written under the TRUTH prefix: Track_nHGTDPrimaryHits
   // is built in Athena from per-hit m_isprime ("keep which of the hits associated
@@ -259,6 +300,8 @@ struct ClusterRow {
   // never model inputs -- they exist to answer "which half was right", which is
   // the diagnostic the split was proposed to settle.
   float truth_dt_in_jet, truth_dt_out_jet;
+  // Truth-vertex analogues, diagnostics only -- never inputs.
+  float truth_dz_to_nearest_vtx, truth_local_vtx_density;
   float truth_purity;            // HS pT fraction of the cluster
   float truth_n_hs_tracks;       // HS tracks in this cluster
   float truth_hs_frac_tracks;    // HS track fraction
@@ -280,9 +323,22 @@ struct TrackRow {
   // them -- so without this the pooling model cannot tell "outside every jet"
   // from "outside the forward jets but inside a central one".
   float dr_nearest_anyjet, pt_nearest_anyjet, is_in_any_jet;
+  // Per-track distance to the nearest PILEUP reco vertex, and whether that is
+  // closer than the primary. Deep Sets pools tracks, so giving it the relation
+  // per track lets it learn "this cluster is built from tracks that each belong
+  // to a reconstructed pileup vertex" -- which is what a pileup cluster IS.
+  float dz_to_nearest_pu_vtx_trk, closer_to_pu_than_pv;
   float dr_nearest_fwdjet, pt_nearest_fwdjet, is_ghost_of_nearest;
   float is_lepton;
   float cluster_time, cluster_delta_z;   // context, so track rows stand alone
+  // Broadcast copies of the cluster-level vertex relation. Deep Sets only ever
+  // sees track rows, so a cluster-level feature that is not broadcast here is
+  // invisible to it. These two are the ones that survived the conditional test:
+  // binned in |delta_z|, the PU-vertex ratio still lifts discrimination
+  // 1.78-2.34x in the displaced bins. closest_vtx_is_pv is deliberately NOT
+  // broadcast -- conditioned on delta_z its lift collapses to ~1.2 and inverts
+  // at large |delta_z|, so it restates delta_z rather than adding to it.
+  float cluster_dz_to_nearest_pu_vtx, cluster_pv_pu_dz_ratio;
   float truth_is_hs;                     // LABEL for the per-track P(HS) model
   // Supervision, never an input: is the track's nearest forward jet matched to
   // a truth HS jet? Distinguishes "this track sits in a real HS jet" from "this
@@ -385,6 +441,12 @@ auto main(int argc, char** argv) -> int {
   BC("z_chi2_ndf",&C.z_chi2_ndf); BC("max_abs_zpull",&C.max_abs_zpull);
   BC("n_zpull_gt3",&C.n_zpull_gt3); BC("z_spread",&C.z_spread);
   BC("median_z0_pull",&C.median_z0_pull);
+  BC("dz_to_nearest_pu_vtx",&C.dz_to_nearest_pu_vtx);
+  BC("closest_vtx_is_pv",&C.closest_vtx_is_pv);
+  BC("n_pu_vtx_within_1mm",&C.n_pu_vtx_within_1mm);
+  BC("n_pu_vtx_within_2mm",&C.n_pu_vtx_within_2mm);
+  BC("local_vtx_density",&C.local_vtx_density);
+  BC("pv_pu_dz_ratio",&C.pv_pu_dz_ratio);
   BC("mean_nhgtd",&C.mean_nhgtd); BC("min_nhgtd",&C.min_nhgtd);
   BC("max_nhgtd",&C.max_nhgtd); BC("truth_mean_nhgtd_primary",&C.mean_nhgtd_primary);
   BC("frac_nhgtd_ge2",&C.frac_nhgtd_ge2); BC("sumpt_w_nhgtd",&C.sumpt_w_nhgtd);
@@ -417,6 +479,8 @@ auto main(int argc, char** argv) -> int {
   BC("hgtd_time_res",&C.hgtd_time_res); BC("dt_cluster_to_hgtd",&C.dt_cluster_to_hgtd);
   BC("delta_t",&C.delta_t);
   BC("truth_dt_in_jet",&C.truth_dt_in_jet); BC("truth_dt_out_jet",&C.truth_dt_out_jet);
+  BC("truth_dz_to_nearest_vtx",&C.truth_dz_to_nearest_vtx);
+  BC("truth_local_vtx_density",&C.truth_local_vtx_density);
   BC("truth_purity",&C.truth_purity); BC("truth_n_hs_tracks",&C.truth_n_hs_tracks);
   BC("truth_hs_frac_tracks",&C.truth_hs_frac_tracks);
 
@@ -431,6 +495,8 @@ auto main(int argc, char** argv) -> int {
   BT("truth_nhgtd_primary",&T.nhgtd_primary);
   BT("z0_pull_pv",&T.z0_pull_pv); BT("t_pull_cluster",&T.t_pull_cluster);
   BT("loo_shift",&T.loo_shift); BT("loo_pull",&T.loo_pull);
+  BT("dz_to_nearest_pu_vtx_trk",&T.dz_to_nearest_pu_vtx_trk);
+  BT("closer_to_pu_than_pv",&T.closer_to_pu_than_pv);
   BT("dr_nearest_anyjet",&T.dr_nearest_anyjet);
   BT("pt_nearest_anyjet",&T.pt_nearest_anyjet);
   BT("is_in_any_jet",&T.is_in_any_jet);
@@ -439,6 +505,8 @@ auto main(int argc, char** argv) -> int {
   BT("is_ghost_of_nearest",&T.is_ghost_of_nearest);
   BT("is_lepton",&T.is_lepton);
   BT("cluster_time",&T.cluster_time); BT("cluster_delta_z",&T.cluster_delta_z);
+  BT("cluster_dz_to_nearest_pu_vtx",&T.cluster_dz_to_nearest_pu_vtx);
+  BT("cluster_pv_pu_dz_ratio",&T.cluster_pv_pu_dz_ratio);
   BT("truth_is_hs",&T.truth_is_hs);
   BT("truth_nearest_fwdjet_is_hs",&T.truth_nearest_fwdjet_is_hs);
 
@@ -682,6 +750,29 @@ auto main(int argc, char** argv) -> int {
       const double clusZ = znum/zden, clusZSig = 1.0/std::sqrt(zden);
       R.delta_z = (float)(clusZ - vtxZ);
       R.cluster_z_sigma = (float)clusZSig;
+      {
+        const VtxRel vr = vertexRelation(clusZ, &branch);
+        R.dz_to_nearest_pu_vtx = vr.dzPU;
+        R.closest_vtx_is_pv    = vr.closestIsPV;
+        R.n_pu_vtx_within_1mm  = vr.n1;
+        R.n_pu_vtx_within_2mm  = vr.n2;
+        // vertices per mm over the +-2 mm window (the +1 counts the PV itself
+        // when it falls inside, so a lone cluster far from everything reads 0).
+        R.local_vtx_density    = (float)((vr.n2 + (std::abs(clusZ - vtxZ) < 2.0 ? 1 : 0)) / 4.0);
+        // >1 means the cluster sits closer to a pileup vertex than to the PV,
+        // which is the compact statement of "this is a pileup cluster". NaN
+        // rather than a huge number when there is no PU vertex to compare to.
+        R.pv_pu_dz_ratio = (std::isnan(vr.dzPU) || vr.dzPU <= 0.0)
+                           ? NaNf : (float)(std::abs(clusZ - vtxZ) / vr.dzPU);
+        double bt = 1e9, dsum = 0;
+        for (int tv = 0; tv < (int)branch.truthVtxZ.GetSize(); ++tv) {
+          const double d = std::abs(clusZ - branch.truthVtxZ[tv]);
+          bt = std::min(bt, d);
+          if (d < 2.0) dsum += 1;
+        }
+        R.truth_dz_to_nearest_vtx  = bt < 1e8 ? (float)bt : NaNf;
+        R.truth_local_vtx_density  = (float)(dsum / 4.0);
+      }
       R.delta_z_resunits = (float)(R.delta_z / clusZSig);
       R.cluster_d0 = (float)(dnum/dden);       R.cluster_d0_sigma = (float)(1.0/std::sqrt(dden));
       R.cluster_qOverP = (float)(qnum/qden);   R.cluster_qOverP_sigma = (float)(1.0/std::sqrt(qden));
@@ -815,6 +906,12 @@ auto main(int argc, char** argv) -> int {
       }();
       const TimeSums ts = timeSums(cl, &branch);
       const double clusTSig = ts.W > 0.0 ? 1.0 / std::sqrt(ts.W) : -1.0;
+      // Hoisted: this is a scan over the event's reco vertices and does not
+      // depend on k, so computing it inside the track loop would repeat it once
+      // per constituent track.
+      const VtxRel cvr = vertexRelation(clusZ, &branch);
+      const float cvrRatio = (std::isnan(cvr.dzPU) || cvr.dzPU <= 0.0)
+                             ? NaNf : (float)(std::abs(clusZ - vtxZ) / cvr.dzPU);
       for (size_t k = 0; k < cl.trackIndices.size(); ++k) {
         const int trk = cl.trackIndices[k];
         T = TrackRow{};
@@ -848,6 +945,13 @@ auto main(int argc, char** argv) -> int {
               (std::find(gh.begin(), gh.end(), trk) != gh.end()) ? 1.f : 0.f;
         }
         T.is_lepton = (branch.trackLeptonID && branch.isGoodLepton(trk)) ? 1.f : 0.f;
+        {
+          const VtxRel tvr = vertexRelation(branch.trackZ0[trk], &branch);
+          T.dz_to_nearest_pu_vtx_trk = tvr.dzPU;
+          const double dpv = std::abs(branch.trackZ0[trk] - vtxZ);
+          T.closer_to_pu_than_pv = (std::isnan(tvr.dzPU)) ? NaNf
+                                   : (tvr.dzPU < dpv ? 1.f : 0.f);
+        }
         const NearJet anyj = nearestAnyJet(trk, &branch);
         T.dr_nearest_anyjet = anyj.idx >= 0 ? (float)anyj.dr : NaNf;
         T.pt_nearest_anyjet = anyj.idx >= 0 ? (float)anyj.pt : NaNf;
@@ -857,6 +961,8 @@ auto main(int argc, char** argv) -> int {
                      ? NaNf : (float)(T.loo_shift / clusTSig);
         T.cluster_time = (float)tClus;
         T.cluster_delta_z = (float)(clusZ - vtxZ);
+        T.cluster_dz_to_nearest_pu_vtx = cvr.dzPU;
+        T.cluster_pv_pu_dz_ratio = cvrRatio;
         T.truth_is_hs = (branch.trackToTruthvtx[trk] == 0) ? 1.f : 0.f;
         trackTree->Fill();
         ++nTrackRows;

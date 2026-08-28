@@ -84,7 +84,21 @@ TRACK_FEATURES = ["pt", "eta", "theta", "z0", "d0", "qOverP",
                   "time", "timeRes", "time_valid", "quality", "nhgtd_hits",
                   "z0_pull_pv", "t_pull_cluster",
                   "dr_nearest_fwdjet", "pt_nearest_fwdjet", "is_ghost_of_nearest",
-                  "is_lepton", "cluster_time", "cluster_delta_z"]
+                  "is_lepton", "cluster_time", "cluster_delta_z",
+                  # Added after the vertex-relational study. RecoVtx_z is a full
+                  # array and only index 0 was ever read; these recover the
+                  # pileup vertices ITk already reconstructed. Conditioned on
+                  # |delta_z| the PU-vertex distance still lifts discrimination
+                  # 1.78-2.34x in the displaced bins -- which is exactly where
+                  # the model picks pileup clusters. closest_vtx_is_pv is NOT
+                  # here: conditioned on delta_z its lift collapses to ~1.2 and
+                  # inverts at large |delta_z|, so it is a restatement of
+                  # delta_z rather than new information.
+                  "dz_to_nearest_pu_vtx_trk", "closer_to_pu_than_pv",
+                  "cluster_dz_to_nearest_pu_vtx", "cluster_pv_pu_dz_ratio",
+                  # Jet association independent of the forward band, and
+                  # leave-one-out time stability (studies E and in/out-of-jet).
+                  "is_in_any_jet", "dr_nearest_anyjet", "loo_pull"]
 # Truth can never be an input. TRACK_FEATURES is an allowlist, but assert anyway --
 # nHGTDPrimaryHits is truth (Athena's per-hit m_isprime) and was worth ~14 points on
 # Z+jets the one time it leaked in.
