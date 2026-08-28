@@ -158,7 +158,7 @@ struct ThreadState {
 
   long nSeen = 0, nSel = 0, nNoPair = 0, nBelowMjj = 0;
   std::array<long, NCAT> nCat{};
-  long nHelpFwdHS = 0, nHelpNoHS = 0, nNoT0 = 0, nNoT0Fwd = 0;
+  long nHelpFwdHS = 0, nHelpNoHS = 0, nNoT0 = 0;
   long nMayNotHsBeyond = 0, nMayNotNoFwd = 0;
   long nAnyFwd = 0;
 
@@ -281,7 +281,7 @@ int main(int argc, char** argv) {
     // so vbs_region_mjj and rpt_v5_hist cannot drift on what the regions mean.
     // Membership is decided over EVERY jet in the event via isJetTruthHS, not
     // over the VBS candidate pair -- m_jj below is only the x-axis variable.
-    int cnt[5] = {0, 0, 0, 0, 0};   // nFwdHS, nFwdPU, nCenHS, nAnyHS, nFwdHSTrk
+    int cnt[5] = {0, 0, 0, 0, 0};  // nFwdHS, nFwdPU, nCenHS, nAnyHS, nFwdHSTrk
     const EventRegion region =
         branch.classifyEventRegion(MIN_ABS_ETA_JET, MAX_ABS_ETA_JET,
                                    MIN_ABS_ETA_JET, cnt);
@@ -297,15 +297,14 @@ int main(int argc, char** argv) {
 
     // Sub-case bookkeeping for the summary, mirroring the ladder in
     // classifyEventRegion so the printed breakdown cannot disagree with it.
-    if (region == EventRegion::CAN_HELP) {
-      if (cnt[0] >= 1) ++state.nHelpFwdHS;   // genuine forward tag, no forward fake
-      else             ++state.nHelpNoHS;    // forward fake, but HS tracks exist
-    } else if (region == EventRegion::NO_T0) {
+    if (region == EventRegion::NO_T0) {
       ++state.nNoT0;
-      if (cnt[4] == 0) ++state.nNoT0Fwd;     // and literally zero forward HS tracks
+    } else if (region == EventRegion::CAN_HELP) {
+      ++state.nHelpNoHS;                          // fake, no HS jet, but HS tracks exist
     } else if (region == EventRegion::MAY_NOT) {
-      if (cnt[1] >= 1) ++state.nMayNotHsBeyond;  // fwd PU, HS only beyond acceptance
-      else             ++state.nMayNotNoFwd;     // nothing forward to time at all
+      if      (cnt[0] >= 1) ++state.nHelpFwdHS;   // fwd HS, no competing fwd PU
+      else if (cnt[1] >= 1) ++state.nMayNotHsBeyond;  // fwd PU, HS beyond acceptance
+      else                  ++state.nMayNotNoFwd;     // nothing forward at all
     }
     if (cnt[0] >= 1 || cnt[1] >= 1) ++state.nAnyFwd;
 
@@ -340,7 +339,7 @@ int main(int argc, char** argv) {
     merged.nSeen     += o.nSeen;      merged.nSel        += o.nSel;
     merged.nNoPair   += o.nNoPair;    merged.nBelowMjj   += o.nBelowMjj;
     merged.nHelpFwdHS += o.nHelpFwdHS; merged.nHelpNoHS  += o.nHelpNoHS;
-    merged.nNoT0 += o.nNoT0; merged.nNoT0Fwd += o.nNoT0Fwd;
+    merged.nNoT0 += o.nNoT0;
     merged.nMayNotHsBeyond += o.nMayNotHsBeyond;
     merged.nMayNotNoFwd    += o.nMayNotNoFwd;
     merged.nAnyFwd   += o.nAnyFwd;
@@ -353,7 +352,7 @@ int main(int argc, char** argv) {
   const long nSeen = merged.nSeen, nSel = merged.nSel;
   const long nNoPair = merged.nNoPair, nBelowMjj = merged.nBelowMjj;
   const long nHelpFwdHS = merged.nHelpFwdHS, nHelpNoHS = merged.nHelpNoHS;
-  const long nNoT0 = merged.nNoT0, nNoT0Fwd = merged.nNoT0Fwd;
+  const long nNoT0 = merged.nNoT0;
   const long nMayNotHsBeyond = merged.nMayNotHsBeyond;
   const long nMayNotNoFwd = merged.nMayNotNoFwd;
   const long nAnyFwd = merged.nAnyFwd;
@@ -498,24 +497,22 @@ int main(int argc, char** argv) {
 
   // Both "Other" bands broken out, so neither is a black box on the plot.
   printf("\n  \"Other: HGTD can help\" is made of:\n");
-  printf("      fwd HS, no fwd PU         %8ld (%.2f%%)  confirm the genuine tag\n"
-         "                                                   (pileup central, beyond |eta| %.1f,\n"
-         "                                                    or absent -- never competing)\n",
-         nHelpFwdHS, nPlot ? 100.0*nHelpFwdHS/nPlot : 0.0, MAX_ABS_ETA_JET);
-  printf("      fwd PU, no HS jet, but      %6ld (%.2f%%)  reject the fake, and there\n"
-         "        >=1 fwd HS TRACK                                 is a real t0 to do it with\n",
+  printf("      fwd PU, no HS jet, and    %8ld (%.2f%%)  reject the fake, and a real\n"
+         "        >=1 forward HS TRACK                             t0 exists to do it with\n",
          nHelpNoHS, nPlot ? 100.0*nHelpNoHS/nPlot : 0.0);
 
-  // The category this split exists for. Named separately because "can help" was
-  // claiming a job the event cannot support: with no forward hard-scatter track
-  // the only forward tracks belong to the pileup jet, so the forward t0 IS that
-  // pileup vertex's time and the gate judges the fake against a t0 it set itself.
-  printf("\n  \"fwd PU only: t0 set by the fake\" (NEW -- was inside \"can help\"):\n");
-  printf("      fwd PU, no HS jet, and      %6ld (%.2f%%)  no forward hard-scatter\n"
-         "        ZERO fwd HS tracks                               track to build a t0 from\n",
+  // Split out because "can help" was claiming a job the event cannot support:
+  // with no forward hard-scatter track the only forward tracks belong to the
+  // pileup jet, so the forward t0 IS that pileup vertex's time.
+  printf("\n  \"fwd PU only: t0 set by the fake\":\n");
+  printf("      fwd PU, no HS jet, and    %8ld (%.2f%%)  no forward hard-scatter\n"
+         "        ZERO forward HS tracks                           track to build a t0 from\n",
          nNoT0, nPlot ? 100.0*nNoT0/nPlot : 0.0);
 
   printf("\n  \"Other: HGTD may not help\" is made of:\n");
+  printf("      fwd HS, no fwd PU         %8ld (%.2f%%)  genuine tag, but no competing\n"
+         "                                                   fake -- nothing to disambiguate\n",
+         nHelpFwdHS, nPlot ? 100.0*nHelpFwdHS/nPlot : 0.0);
   printf("      no forward jet at all     %8ld (%.2f%%)  nothing timeable\n",
          nMayNotNoFwd, nPlot ? 100.0*nMayNotNoFwd/nPlot : 0.0);
   printf("      fwd PU, HS only beyond |eta| %.1f %5ld (%.2f%%)  edge case, kept visible\n",
