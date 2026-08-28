@@ -1,47 +1,52 @@
 #!/usr/bin/env python3
 """
-guarded_pooled.py -- two upgrades to the guarded metric, measured together and
-separately: aggregate-t0 features in both stages, and POOLING the switch
-training across all four mu=200 samples.
+guarded_pooled.py -- the full guarded-metric configuration: per-sample stage-1
+with aggregate-t0 AND per-candidate tagger aggregates, cross-candidate time
+consistency in the pair features, switch training pooled across all four mu=200
+samples. Supersedes the earlier version of this file (git history has it).
 
-WHY POOL. The zjets switch model is starved -- ~36k events yield only ~2k
-switch-helps positives -- and the ceiling measurement says decision quality is
-what binds there: the top-2 challenger structural cap on zjets is 87.2% against
-~66.7 achieved (on VBF the same gap is ~3 points). ttbar alone contributes ~24k
-positives, so pooling multiplies zjets's effective switch training by ~10x.
-Stage 1 and the aggregate-t0 tagger stay per-sample (in-domain, out-of-fold);
-only the switch stage pools. Evaluation is per-sample and fold-honest.
+The two feature blocks this version adds attack the zjets decision-quality gap
+(top-2 structural cap 87.2% vs ~67 achieved) with exactly what the failure
+gallery said was missing:
 
-AGGREGATE-t0 FEATURES (t0_agg, sum_ph, dt_to_agg): the prob-weighted-median
-event time from the per-track HS tagger, i.e. event-level timing context that
-no single cluster row carries. Measured worth ~+0.3-0.4 on zjets at moderate
-operating points, null-not-negative on VBF.
+  per-candidate tagger aggregates   ph_sum/ph_mean/ph_max/ph_pt_sum/n_ph05/
+        (HS content per candidate)  ph_pt_frac/t_tagw/dt_tagw_agg -- the
+                                    per-track HS tagger (out-of-fold) summed
+                                    over each candidate's own tracks. The wrong
+                                    picks are pure pileup; this measures that
+                                    reco-only. Worth +0.47 on zjets alone.
+  cross-candidate time consistency  fraction of the PICK's timed tracks within
+                                    60 ps of the CHALLENGER's time, and vice
+                                    versa. If the pick's own tracks agree
+                                    better with the challenger's time, the
+                                    pick's time is an outlier artifact. +0.11.
 
-RESULT (see results/guarded_pooled.log for full tables): pooling helps exactly
-the small samples and costs nothing on the large ones. zjets max-net rises to
-66.98 with FEWER losses (-898 vs -1057), its zero-loss row rises +45 -> +74,
-and at matched ~25 lost pooled gains +538 vs own ~+380. dijet: same gains at
--656 vs -809 lost. vbf/ttbar: unchanged within noise (they dominate the pool).
+Cross-fitted final table (ALL events, every verdict out-of-fold):
 
-zjets progression across this study, all vs TRKPTZ 61.87:
-  frozen VBF transfer 65.97 -> in-domain switch 66.38 -> +agg 66.65 ->
-  pooled+agg 66.98, with a strict zero-loss operating point (-0/+74) available.
+  sample TRKPTZ    t=0.6              t=0.9            t=0.95          t=0.98
+  vbf    90.45   94.02 (-2817/+21335) 93.01 (-326)   92.52 (-133)   91.88 (-34)
+  zjets  61.87   67.49 (-987/+3040)   63.50 (-34)    62.73 (-8)     62.17 (-0/+111)
+  dijet  86.88   90.12 (-695/+3295)   88.56 (-48)    88.06 (-13)    87.54 (-4)
+  ttbar  87.08   90.61 (-4877/+24723) 88.96 (-385)   88.35 (-107)   87.76 (-29)
+
+zjets progression across the study, all vs TRKPTZ 61.87: frozen VBF transfer
+65.97 -> in-domain switch 66.38 -> +aggregate-t0 66.65 -> pooled 66.98 ->
++candidate-HS/+cross-time pooled 67.49, now ABOVE in-domain Deep Sets (67.3),
+with a zero-loss operating point of -0/+111.
 """
 import numpy as np, pandas as pd, uproot, gc
 import xgboost as xgb
-EVT=["sample_id","file_idx","event_num"]
+EVT=["sample_id","file_idx","event_num"]; KEY=EVT+["cluster_idx"]
 D="/Users/mcard/project/vertex_timing/training_new"
 SAMPLES=["vbf","zjets","dijet","ttbar"]
-rng=np.random.default_rng(0)
 THR=(0.6,0.9,0.95,0.98)
-
-def xgbc(depth,mcw):
-    return xgb.XGBClassifier(n_estimators=500,learning_rate=0.05,max_depth=depth,
+rng=np.random.default_rng(0)
+def xgbc(depth,mcw,n=500,lr=0.05):
+    return xgb.XGBClassifier(n_estimators=n,learning_rate=lr,max_depth=depth,
         subsample=0.8,colsample_bytree=0.8,min_child_weight=mcw,
         eval_metric="logloss",n_jobs=-1,tree_method="hist")
 
-packs={}
-FE=None
+packs={}; FE=None
 for s in SAMPLES:
     F=f"{D}/{s}_mjj500p0_training.root"
     c=uproot.open(F)["clusters"].arrays(library="pd")
@@ -52,7 +57,6 @@ for s in SAMPLES:
         drop={"ok","k","p","delta_t","weight","cluster_idx"}
         FE=[x for x in c.columns if x not in EVT and x not in drop
             and not x.startswith("truth_") and c[x].dtype!=object]
-    # ---- aggregate t0 (in-domain tagger, out-of-fold) ----------------------
     t=uproot.open(F)["tracks"].arrays(library="pd")
     t=t[(t.time_valid>0)&(t.timeRes>0)].drop_duplicates(EVT+["track_idx"])
     t=t.merge(ev,on=EVT,how="left")
@@ -61,8 +65,8 @@ for s in SAMPLES:
          and t[x].dtype!=object]
     t["ph"]=np.nan
     for kt in range(4):
-        m=xgbc(7,10); m.set_params(n_estimators=300,learning_rate=0.06)
-        tr=t[t.k!=kt]; m.fit(tr[TFE].to_numpy(np.float32),tr.truth_is_hs.to_numpy(int))
+        m=xgbc(7,10,n=300,lr=0.06); tr=t[t.k!=kt]
+        m.fit(tr[TFE].to_numpy(np.float32),tr.truth_is_hs.to_numpy(int))
         msk=t.k==kt
         t.loc[msk,"ph"]=m.predict_proba(t.loc[msk,TFE].to_numpy(np.float32))[:,1]
     d=t.sort_values(EVT+["time"])
@@ -75,21 +79,27 @@ for s in SAMPLES:
     hit=cw>=0.5*tot[codes]; idx=np.arange(len(d))
     firsts=np.minimum.reduceat(np.where(hit,idx,len(d)+1),start)
     t0agg=pd.Series(tm[np.clip(firsts,0,len(d)-1)],index=uniq)
-    sumw=pd.Series(tot,index=uniq)
     mi=pd.MultiIndex.from_frame(c[EVT])
     c["t0_agg"]=t0agg.reindex(mi).to_numpy()
-    c["sum_ph"]=sumw.reindex(mi).to_numpy()
+    c["sum_ph"]=pd.Series(tot,index=uniq).reindex(mi).to_numpy()
     c["dt_to_agg"]=(c["cluster_time"]-c["t0_agg"]).abs()
-    del t,d; gc.collect()
-    # ---- in-domain out-of-fold stage-1 p ------------------------------------
-    FEA=FE+["t0_agg","sum_ph","dt_to_agg"]
+    t["ph_pt"]=t["ph"]*t["pt"]; t["w_t"]=t["ph"]/t["timeRes"]**2; t["wt_t"]=t["w_t"]*t["time"]
+    gcl=t.groupby(KEY,sort=False)
+    cand=pd.DataFrame({"ph_sum":gcl["ph"].sum(),"ph_mean":gcl["ph"].mean(),
+        "ph_max":gcl["ph"].max(),"ph_pt_sum":gcl["ph_pt"].sum(),
+        "n_ph05":gcl["ph"].apply(lambda x:(x>0.5).sum()),
+        "t_tagw":gcl["wt_t"].sum()/gcl["w_t"].sum()})
+    cand["ph_pt_frac"]=cand["ph_pt_sum"]/gcl["pt"].sum()
+    c=c.merge(cand.reset_index(),on=KEY,how="left")
+    c["dt_tagw_agg"]=(c["t_tagw"]-c["t0_agg"]).abs()
+    FEA=FE+["t0_agg","sum_ph","dt_to_agg","ph_sum","ph_mean","ph_max","ph_pt_sum",
+            "n_ph05","ph_pt_frac","t_tagw","dt_tagw_agg"]
     c["p"]=np.nan
     for kt in range(4):
         m1=xgbc(6,20); tr=c[c.k!=kt]
         m1.fit(tr[FEA].to_numpy(np.float32),tr.ok.to_numpy(int))
         msk=c.k==kt
         c.loc[msk,"p"]=m1.predict_proba(c.loc[msk,FEA].to_numpy(np.float32))[:,1]
-    # ---- pairs ---------------------------------------------------------------
     g=c.groupby(EVT,sort=False); ib=g["trkptz_score"].idxmax()
     o=c.loc[ib].copy(); o["_eid"]=np.arange(len(o))
     emap=o.set_index(pd.MultiIndex.from_frame(o[EVT]))[["_eid"]]
@@ -99,57 +109,55 @@ for s in SAMPLES:
     ch["_eid"]=emap.reindex(pd.MultiIndex.from_frame(ch[EVT]))["_eid"].to_numpy()
     ch=ch[np.isfinite(ch._eid)]; ch["_eid"]=ch._eid.astype(int)
     O=o.set_index("_eid")
+    # vectorized cross-candidate time consistency
+    tt=t[EVT+["cluster_idx","time"]]
+    def xfrac(keys,other_t):
+        j=keys.reset_index(drop=True).copy(); j["_pid"]=np.arange(len(j)); j["_ot"]=other_t.to_numpy()
+        m=j.merge(tt,on=EVT+["cluster_idx"],how="left")
+        good=(m["time"].notna()&((m["time"]-m["_ot"]).abs()<60)).to_numpy(float)
+        cnt=np.bincount(m["_pid"],minlength=len(j)).astype(float)
+        hits=np.bincount(m["_pid"],weights=good,minlength=len(j))
+        with np.errstate(invalid="ignore",divide="ignore"):
+            f=np.where(cnt>0,hits/cnt,0.0)
+        return f.astype(np.float32)
+    pk_key=O.loc[ch._eid,EVT+["cluster_idx"]].reset_index(drop=True)
+    fA=xfrac(pk_key,ch["cluster_time"])
+    fB=xfrac(ch[EVT+["cluster_idx"]],O.loc[ch._eid,"cluster_time"])
     Xo=O.loc[ch._eid,FEA].to_numpy(np.float32); Xn=ch[FEA].to_numpy(np.float32)
     packs[s]=dict(
         X=np.hstack([Xo,Xn,Xn-Xo,O.loc[ch._eid,["p"]].to_numpy(np.float32),
-                     ch[["p"]].to_numpy(np.float32)]),
+                     ch[["p"]].to_numpy(np.float32),
+                     np.stack([fA,fB,fB-fA],axis=1)]),
         okO=O.loc[ch._eid,"ok"].to_numpy(bool), okN=ch["ok"].to_numpy(bool),
         eid=ch._eid.to_numpy(), kf=O["k"].to_numpy(int)[ch._eid.to_numpy()],
         pickok=O["ok"].to_numpy(bool), evk=O["k"].to_numpy(int))
-    del c,o,d2,ch,O,Xo,Xn; gc.collect()
-    print(f"{s}: pairs {len(packs[s]['X']):,}",flush=True)
+    del c,t,o,d2,ch,O,Xo,Xn; gc.collect()
+    print(f"{s}: pack built, {len(packs[s]['X']):,} pairs",flush=True)
 
-for mode in ("own","pooled"):
-    print(f"\n===== switch training: {mode} =====",flush=True)
-    for kt in range(4):
-        Xtr=[];ytr=[]
-        srcs=SAMPLES if mode=="pooled" else None
-        for s in SAMPLES:
-            pk=packs[s]
-            use=[s] if mode=="own" else SAMPLES
-            # training pairs come from `use` samples, folds != kt
-        # build once per fold
-        for s2 in (SAMPLES if mode=="pooled" else []):
-            pk=packs[s2]; trm=(pk["kf"]!=kt)&(pk["okO"]!=pk["okN"])
-            Xtr.append(pk["X"][trm]); ytr.append((pk["okN"]&~pk["okO"])[trm])
-        if mode=="own":
-            pass
-        else:
-            m2=xgbc(5,10); m2.fit(np.vstack(Xtr),np.concatenate(ytr).astype(int))
-        for s in SAMPLES:
-            pk=packs[s]
-            if mode=="own":
-                trm=(pk["kf"]!=kt)&(pk["okO"]!=pk["okN"])
-                m2s=xgbc(5,10); m2s.fit(pk["X"][trm],(pk["okN"]&~pk["okO"])[trm].astype(int))
-                mm=m2s
-            else:
-                mm=m2
-            tem=pk["kf"]==kt
-            ps=mm.predict_proba(pk["X"][tem])[:,1]
-            e_t,okN_t=pk["eid"][tem],pk["okN"][tem]
-            order=np.lexsort((-ps,e_t)); first=np.unique(e_t[order],return_index=True)[1]
-            be,bp,bok=e_t[order][first],ps[order][first],okN_t[order][first]
-            st=pk.setdefault("res_"+mode,{x:[0,0] for x in THR})
-            evk=pk["evk"]==kt
-            for x in THR:
-                ok=pk["pickok"].copy(); sw=bp>x; ok[be[sw]]=bok[sw]
-                st[x][0]+=int((pk["pickok"][evk]&~ok[evk]).sum())
-                st[x][1]+=int((~pk["pickok"][evk]&ok[evk]).sum())
-        print(f"  fold {kt} done",flush=True)
+print("\n===== pooled switch, full feature set =====",flush=True)
+for kt in range(4):
+    Xtr=[];ytr=[]
+    for s2 in SAMPLES:
+        pk=packs[s2]; trm=(pk["kf"]!=kt)&(pk["okO"]!=pk["okN"])
+        Xtr.append(pk["X"][trm]); ytr.append((pk["okN"]&~pk["okO"])[trm])
+    m2=xgbc(5,10); m2.fit(np.vstack(Xtr),np.concatenate(ytr).astype(int))
     for s in SAMPLES:
-        pk=packs[s]; n=len(pk["pickok"]); trk=int(pk["pickok"].sum())
-        line=f"  {s:6s} TRKPTZ {100*trk/n:6.2f}%"
+        pk=packs[s]; tem=pk["kf"]==kt
+        ps=m2.predict_proba(pk["X"][tem])[:,1]
+        e_t,okN_t=pk["eid"][tem],pk["okN"][tem]
+        order=np.lexsort((-ps,e_t)); first=np.unique(e_t[order],return_index=True)[1]
+        be,bp,bok=e_t[order][first],ps[order][first],okN_t[order][first]
+        st=pk.setdefault("res",{x:[0,0] for x in THR})
+        evk=pk["evk"]==kt
         for x in THR:
-            l,g_=pk["res_"+mode][x]
-            line+=f"  [t={x}] {100*(trk-l+g_)/n:6.2f} (-{l}/+{g_})"
-        print(line,flush=True)
+            ok=pk["pickok"].copy(); sw=bp>x; ok[be[sw]]=bok[sw]
+            st[x][0]+=int((pk["pickok"][evk]&~ok[evk]).sum())
+            st[x][1]+=int((~pk["pickok"][evk]&ok[evk]).sum())
+    print(f"  fold {kt} done",flush=True)
+for s in SAMPLES:
+    pk=packs[s]; n=len(pk["pickok"]); trk=int(pk["pickok"].sum())
+    line=f"  {s:6s} TRKPTZ {100*trk/n:6.2f}%"
+    for x in THR:
+        l,g_=pk["res"][x]
+        line+=f"  [t={x}] {100*(trk-l+g_)/n:6.2f} (-{l}/+{g_})"
+    print(line,flush=True)
