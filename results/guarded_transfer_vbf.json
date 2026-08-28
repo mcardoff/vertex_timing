@@ -1,0 +1,146 @@
+{
+  "args": {
+    "input_dir": "/Users/mcard/project/vertex_timing/training_new",
+    "train_sample": "vbf",
+    "test_samples": "zjets,dijet,ttbar,vbf_mu0,zeejets_mu0,ttbar_mu0",
+    "tag": "mjj500p0",
+    "challengers": 2,
+    "thresholds": "0.6,0.9,0.95,0.98",
+    "seed": 0,
+    "out": "/tmp/guarded_transfer.json"
+  },
+  "results": {
+    "zjets": {
+      "n": 36531,
+      "trkptz": 22601,
+      "thr": {
+        "0.6": {
+          "lost": 1172,
+          "gained": 2672
+        },
+        "0.9": {
+          "lost": 100,
+          "gained": 708
+        },
+        "0.95": {
+          "lost": 37,
+          "gained": 372
+        },
+        "0.98": {
+          "lost": 11,
+          "gained": 165
+        }
+      }
+    },
+    "dijet": {
+      "n": 80383,
+      "trkptz": 69840,
+      "thr": {
+        "0.6": {
+          "lost": 819,
+          "gained": 3188
+        },
+        "0.9": {
+          "lost": 58,
+          "gained": 1427
+        },
+        "0.95": {
+          "lost": 19,
+          "gained": 1033
+        },
+        "0.98": {
+          "lost": 10,
+          "gained": 643
+        }
+      }
+    },
+    "ttbar": {
+      "n": 561745,
+      "trkptz": 489149,
+      "thr": {
+        "0.6": {
+          "lost": 5926,
+          "gained": 24238
+        },
+        "0.9": {
+          "lost": 477,
+          "gained": 10470
+        },
+        "0.95": {
+          "lost": 180,
+          "gained": 7189
+        },
+        "0.98": {
+          "lost": 52,
+          "gained": 4329
+        }
+      }
+    },
+    "vbf_mu0": {
+      "n": 2097581,
+      "trkptz": 2095175,
+      "thr": {
+        "0.6": {
+          "lost": 61,
+          "gained": 567
+        },
+        "0.9": {
+          "lost": 6,
+          "gained": 387
+        },
+        "0.95": {
+          "lost": 2,
+          "gained": 322
+        },
+        "0.98": {
+          "lost": 0,
+          "gained": 240
+        }
+      }
+    },
+    "zeejets_mu0": {
+      "n": 4524,
+      "trkptz": 4520,
+      "thr": {
+        "0.6": {
+          "lost": 0,
+          "gained": 1
+        },
+        "0.9": {
+          "lost": 0,
+          "gained": 0
+        },
+        "0.95": {
+          "lost": 0,
+          "gained": 0
+        },
+        "0.98": {
+          "lost": 0,
+          "gained": 0
+        }
+      }
+    },
+    "ttbar_mu0": {
+      "n": 941956,
+      "trkptz": 941122,
+      "thr": {
+        "0.6": {
+          "lost": 30,
+          "gained": 183
+        },
+        "0.9": {
+          "lost": 4,
+          "gained": 123
+        },
+        "0.95": {
+          "lost": 1,
+          "gained": 102
+        },
+        "0.98": {
+          "lost": 1,
+          "gained": 67
+        }
+      }
+    }
+  }
+}
