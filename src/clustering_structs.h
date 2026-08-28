@@ -597,6 +597,100 @@ namespace MyUtl {
     }
 
     // -----------------------------------------------------------------------
+    // classifyEventRegion
+    //   Event-level region membership -- see the EventRegion doc comment in
+    //   clustering_constants.h for what each region means and why this exists
+    //   alongside the pair-level classifyVbsRegion.
+    //
+    //   Uses the paper's dR-cone labels (isJetPaperHS / isJetPaperPU), the same
+    //   definition the R_pT histogram fill uses, so region membership and the
+    //   signal/background split inside a region cannot disagree.
+    //
+    //   Tried and rejected: isJetTruthHS (the ntuple's own truthHSJet_idx
+    //   link). It is strictly binary, which looked attractive -- no "neither"
+    //   jets -- but it tags 73.5% of forward jets above 30 GeV as hard-scatter
+    //   against the paper definition's far more conservative labelling, so
+    //   almost every event ended up with a forward HS jet and no forward
+    //   pileup jet: 99.93% of events landed in a "HGTD can contribute" region,
+    //   which is true under that definition and useless as a statement. NOT a
+    //   soft-truth-jet artefact -- requiring the linked truth jet above 10 GeV
+    //   moves it only to 72.6%, and above 30 GeV to 68.3%.
+    //
+    //   Consequence of the paper labels: they are NOT complements, so a jet
+    //   can be neither HS nor PU (it contributes to no count below). Events
+    //   still partition exactly across the four regions; individual jets need
+    //   not.
+    //
+    //   Jets considered are exactly collectPtPassingJets' -- above MIN_JET_PT
+    //   and not lepton-overlap-removed -- so region membership can never
+    //   disagree with the jets the rest of the selection sees.
+    //
+    //   outCounts, when given, receives {nFwdHS, nFwdPU, nCenHS, nAnyHS} so a
+    //   caller can report the sub-case breakdown without re-deriving it.
+    // -----------------------------------------------------------------------
+    EventRegion classifyEventRegion(double fwdEtaMin, double fwdEtaMax,
+                                    double centralEtaMax,
+                                    int* outCounts = nullptr) const {
+      std::vector<int> passPtIdx;
+      int nPt = 0, nPtEta = 0;
+      this->collectPtPassingJets(passPtIdx, nPt, nPtEta);
+
+      int nFwdHS = 0, nFwdPU = 0, nCenHS = 0, nAnyHS = 0, nFwdHSTrk = 0;
+      // Truth forward hard-scatter TRACKS -- what a forward t0 is built from.
+      // Truth vertex 0 is the hard scatter by construction. This is a track
+      // count, not a jet count, on purpose: a jet needs 30 GeV, so an event can
+      // carry no hard-scatter jet and still have forward hard-scatter tracks a
+      // t0 could be built from.
+      for (int t = 0; t < (int)this->trackPt.GetSize(); ++t) {
+        if (this->trackToTruthvtx[t] != 0)    continue;
+        if (this->trackPt[t] <= MIN_TRACK_PT) continue;
+        const double ae = std::abs((double)this->trackEta[t]);
+        if (ae > fwdEtaMin && ae < fwdEtaMax) ++nFwdHSTrk;
+      }
+      for (int j : passPtIdx) {
+        const double e   = std::abs((double)this->topoJetEta[j]);
+        const double phi = this->topoJetPhi[j];
+        const double eta = this->topoJetEta[j];
+        const bool   hs  = this->isJetPaperHS(eta, phi);
+        const bool   pu  = this->isJetPaperPU(eta, phi);
+        const bool  fwd  = (e > fwdEtaMin && e < fwdEtaMax);
+        const bool  cen  = (e < centralEtaMax);
+        if (hs) {
+          ++nAnyHS;
+          if (fwd) ++nFwdHS;
+          else if (cen) ++nCenHS;
+        } else if (pu && fwd) {
+          ++nFwdPU;
+        }
+      }
+      if (outCounts) {
+        outCounts[0] = nFwdHS; outCounts[1] = nFwdPU;
+        outCounts[2] = nCenHS; outCounts[3] = nAnyHS;
+        outCounts[4] = nFwdHSTrk;
+      }
+
+      // Every reachable region requires a forward PU jet -- something for
+      // timing to actually act against. A forward HS jet with NO forward
+      // pileup is deliberately NOT reachable: timing would only confirm a tag
+      // that had no competitor to be confused with, and on local VBF that
+      // single case is 72.7% of events, which alone drove the "HGTD can
+      // contribute" fraction to 98.9% and made the split meaningless.
+      if (nFwdPU >= 1) {
+        if (nFwdHS >= 1) return EventRegion::R1;        // both timeable
+        if (nCenHS >= 1) return EventRegion::R2;        // only the fake timeable
+        // Fake with no hard-scatter JET anywhere. Whether timing has anything
+        // to work with then turns on a forward hard-scatter TRACK existing:
+        // with none, the only forward tracks belong to the pileup jet, so the
+        // reconstructed forward t0 IS that pileup vertex's time and the gate
+        // ends up judging the fake against a t0 the fake itself set.
+        if (nAnyHS == 0)
+          return nFwdHSTrk >= 1 ? EventRegion::CAN_HELP : EventRegion::NO_T0;
+        // else: the only hard-scatter jet sits beyond fwdEtaMax -- falls through.
+      }
+      return EventRegion::MAY_NOT;
+    }
+
+    // -----------------------------------------------------------------------
     // passJetPtCut
     //   Requires at least MIN_PASSPT_JETS reco jets above MIN_JET_PT,
     //   at least MIN_PASSETA_JETS of which are in the forward HGTD acceptance,

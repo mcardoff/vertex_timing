@@ -374,6 +374,54 @@ namespace MyUtl {
   //   point at which overflow is collapsed into the last visible bin so that
   //   sparse high-multiplicity tails don't dominate the plots.
   // ---------------------------------------------------------------------------
+  // ── Event-level regions (classifyEventRegion, clustering_structs.h) ───────
+  // Supersedes the pair-level VbsRegion above for the R_pT study and the m_jj
+  // composition plot. Two things differ:
+  //
+  //   1. Scope. VbsRegion classifies the VBS CANDIDATE PAIR -- the single
+  //      highest-m_jj opposite-hemisphere pair. EventRegion classifies the
+  //      EVENT, over every jet in it, so an event is not mislabelled because
+  //      the pair search happened to pick two jets that misrepresent it.
+  //
+  //   Both use the paper's dR-cone HS/PU labels (isJetPaperHS/isJetPaperPU) --
+  //   the same definition the R_pT histogram fill uses, so region membership
+  //   and the signal/background split inside a region cannot disagree. Those
+  //   labels are NOT complements, so a jet can be neither and contribute to
+  //   no count; events still partition exactly, jets need not.
+  //
+  //   isJetTruthHS was tried here and rejected -- see the longer note on
+  //   classifyEventRegion in clustering_structs.h for the measured reason.
+  //
+  //   R1        >=1 forward HS and >=1 forward PU jet. Both are timeable, so
+  //             timing has to say WHICH forward jet is the hard-scatter one.
+  //   R2        no forward HS, >=1 forward PU, >=1 CENTRAL HS. Only the fake
+  //             is timeable; timing's job is to reject it.
+  //   CAN_HELP  everything else where timing still has real work:
+  //               - >=1 forward HS with NO forward PU: the genuine tag is
+  //                 timeable and timing confirms it. Covers the pileup being
+  //                 central, beyond |eta| MAX, or absent entirely -- one
+  //                 condition, since all three differ only in where the
+  //                 non-competing pileup sits.
+  //               - >=1 forward PU and NO hard-scatter jet anywhere in the
+  //                 event: nothing genuine to protect, but the fake is
+  //                 timeable, so timing can reject the event's forward
+  //                 activity outright.
+  //   MAY_NOT   no forward jet at all (nothing HGTD can measure), or forward
+  //             PU whose only hard-scatter counterpart sits beyond |eta| MAX
+  //             -- rare, and counted separately in the diagnostics so it stays
+  //             visible rather than silently folded in.
+  enum class EventRegion { R1, R2, CAN_HELP, NO_T0, MAY_NOT };
+
+  // NO_T0 is new, and it exists because CAN_HELP was making a claim the event
+  // could not support. Its "forward fake with no hard-scatter jet anywhere"
+  // branch is 59.79% of selected Z+jets, and in those events the ONLY forward
+  // tracks belong to the pileup jet -- so a forward t0 built from them IS that
+  // pileup vertex's time, and the gate then judges the fake against a t0 the
+  // fake itself determined. Splitting on whether any forward hard-scatter TRACK
+  // exists separates "there is a fake and something real to time it against"
+  // from "there is a fake and nothing else", which the jet-level test cannot
+  // see: a jet needs 30 GeV, a track needs MIN_TRACK_PT.
+
   const double DIFF_MIN = -1000.0, DIFF_MAX = 1000.0;
   const double DIFF_WIDTH = 5.0;
 
