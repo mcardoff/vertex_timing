@@ -118,6 +118,28 @@ NearJet nearestForwardJet(int trk, BranchPointerWrapper* b) {
   return nj;
 }
 
+// Nearest jet of ANY eta, unlike nearestForwardJet which is restricted to the
+// HGTD forward band. The distinction is the point: in VBF or ttbar the
+// hard-scatter tracks sit inside forward jets, which is what the WAVeS-style
+// features already capture. In Z+jets the forward jets are usually PILEUP, so
+// the hard-scatter content is whatever is left over -- central, or in no jet at
+// all -- and no existing feature separates those two populations within a
+// cluster. pT > MIN_JET_PT still applies; only the eta restriction is dropped.
+NearJet nearestAnyJet(int trk, BranchPointerWrapper* b) {
+  NearJet nj;
+  const double te = b->trackEta[trk], tp = b->trackPhi[trk];
+  for (int j = 0; j < (int)b->topoJetEta.GetSize(); ++j) {
+    if (b->isJetRemoved(j)) continue;
+    const double jp = b->topoJetPt[j];
+    if (jp < MIN_JET_PT) continue;
+    const double deta = b->topoJetEta[j] - te;
+    const double dphi = TVector2::Phi_mpi_pi(b->topoJetPhi[j] - tp);
+    const double dr   = std::hypot(deta, dphi);
+    if (dr < nj.dr) { nj.dr = dr; nj.pt = jp; nj.idx = j; }
+  }
+  return nj;
+}
+
 float median(std::vector<float> v) {
   if (v.empty()) return NaNf;
   std::sort(v.begin(), v.end());
@@ -190,6 +212,16 @@ struct ClusterRow {
   // leave-one-out asks whether the answer is ROBUST, and a two-track cluster can
   // have a perfect chi2 while resting entirely on one track.
   float max_abs_loo_shift, mean_abs_loo_shift, loo_shift_lead_pt;
+  // Cluster time SPLIT BY JET ASSOCIATION. Two precision-weighted means over
+  // disjoint subsets of the cluster's timed tracks: those within dR < 0.4 of any
+  // jet, and those in no jet at all. A cluster whose in-jet and out-of-jet halves
+  // disagree in time is one whose tracks do not share an origin, which is what a
+  // pileup jet absorbing hard-scatter tracks (or vice versa) looks like.
+  // t_in_minus_out is that disagreement directly; the counts and sumpt say how
+  // well-determined each half is, since a one-track half means nothing.
+  float t_in_jet, t_in_jet_sigma, n_in_jet_timed, sumpt_in_jet_timed;
+  float t_out_jet, t_out_jet_sigma, n_out_jet_timed, sumpt_out_jet_timed;
+  float t_in_minus_out;
   float time_chi2_ndf, max_abs_tpull, n_tpull_gt2, time_spread;
   float min_timeRes, median_timeRes, max_timeRes;
   float n_valid_time, frac_valid_time, sumpt_valid_time;
@@ -223,6 +255,10 @@ struct ClusterRow {
   float hgtd_time, hgtd_valid, hgtd_time_res, dt_cluster_to_hgtd;
   // --- TARGET + truth-only diagnostics (never model inputs) ---------------
   float delta_t;                 // TARGET: cluster time - truth HS time
+  // The same two times measured against truth. TRUTH-PREFIXED and therefore
+  // never model inputs -- they exist to answer "which half was right", which is
+  // the diagnostic the split was proposed to settle.
+  float truth_dt_in_jet, truth_dt_out_jet;
   float truth_purity;            // HS pT fraction of the cluster
   float truth_n_hs_tracks;       // HS tracks in this cluster
   float truth_hs_frac_tracks;    // HS track fraction
@@ -239,6 +275,11 @@ struct TrackRow {
   // units of the cluster's own time uncertainty. NaN when the track has no valid
   // time, or when it is the only timed track (removing it leaves nothing).
   float loo_shift, loo_pull;
+  // Association to ANY jet, not just a forward one. dr_nearest_fwdjet above is
+  // NaN for a track with no qualifying FORWARD jet, which in Z+jets is most of
+  // them -- so without this the pooling model cannot tell "outside every jet"
+  // from "outside the forward jets but inside a central one".
+  float dr_nearest_anyjet, pt_nearest_anyjet, is_in_any_jet;
   float dr_nearest_fwdjet, pt_nearest_fwdjet, is_ghost_of_nearest;
   float is_lepton;
   float cluster_time, cluster_delta_z;   // context, so track rows stand alone
@@ -331,6 +372,11 @@ auto main(int argc, char** argv) -> int {
   BC("max_abs_loo_shift",&C.max_abs_loo_shift);
   BC("mean_abs_loo_shift",&C.mean_abs_loo_shift);
   BC("loo_shift_lead_pt",&C.loo_shift_lead_pt);
+  BC("t_in_jet",&C.t_in_jet); BC("t_in_jet_sigma",&C.t_in_jet_sigma);
+  BC("n_in_jet_timed",&C.n_in_jet_timed); BC("sumpt_in_jet_timed",&C.sumpt_in_jet_timed);
+  BC("t_out_jet",&C.t_out_jet); BC("t_out_jet_sigma",&C.t_out_jet_sigma);
+  BC("n_out_jet_timed",&C.n_out_jet_timed); BC("sumpt_out_jet_timed",&C.sumpt_out_jet_timed);
+  BC("t_in_minus_out",&C.t_in_minus_out);
   BC("time_chi2_ndf",&C.time_chi2_ndf); BC("max_abs_tpull",&C.max_abs_tpull);
   BC("n_tpull_gt2",&C.n_tpull_gt2); BC("time_spread",&C.time_spread);
   BC("min_timeRes",&C.min_timeRes); BC("median_timeRes",&C.median_timeRes);
@@ -370,6 +416,7 @@ auto main(int argc, char** argv) -> int {
   BC("hgtd_time",&C.hgtd_time); BC("hgtd_valid",&C.hgtd_valid);
   BC("hgtd_time_res",&C.hgtd_time_res); BC("dt_cluster_to_hgtd",&C.dt_cluster_to_hgtd);
   BC("delta_t",&C.delta_t);
+  BC("truth_dt_in_jet",&C.truth_dt_in_jet); BC("truth_dt_out_jet",&C.truth_dt_out_jet);
   BC("truth_purity",&C.truth_purity); BC("truth_n_hs_tracks",&C.truth_n_hs_tracks);
   BC("truth_hs_frac_tracks",&C.truth_hs_frac_tracks);
 
@@ -384,6 +431,9 @@ auto main(int argc, char** argv) -> int {
   BT("truth_nhgtd_primary",&T.nhgtd_primary);
   BT("z0_pull_pv",&T.z0_pull_pv); BT("t_pull_cluster",&T.t_pull_cluster);
   BT("loo_shift",&T.loo_shift); BT("loo_pull",&T.loo_pull);
+  BT("dr_nearest_anyjet",&T.dr_nearest_anyjet);
+  BT("pt_nearest_anyjet",&T.pt_nearest_anyjet);
+  BT("is_in_any_jet",&T.is_in_any_jet);
   BT("dr_nearest_fwdjet",&T.dr_nearest_fwdjet);
   BT("pt_nearest_fwdjet",&T.pt_nearest_fwdjet);
   BT("is_ghost_of_nearest",&T.is_ghost_of_nearest);
@@ -575,6 +625,42 @@ auto main(int argc, char** argv) -> int {
         if (branch.trackToTruthvtx[trk] == 0) ++nHsTracks;
       }
 
+      // Cluster time split by jet association. Two disjoint precision-weighted
+      // means over the cluster's TIMED tracks: inside dR < 0.4 of any jet, and
+      // inside no jet. Same weights as the full cluster time, so the three are
+      // directly comparable and t_in_minus_out is a like-for-like difference.
+      {
+        double Wi = 0, WTi = 0, Wo = 0, WTo = 0, ptI = 0, ptO = 0;
+        int ni = 0, no = 0;
+        for (size_t k = 0; k < cl.trackIndices.size(); ++k) {
+          const int trk2 = cl.trackIndices[k];
+          const double sg = branch.trackTimeRes[trk2];
+          if (branch.trackTimeValid[trk2] == 0 || sg <= 0.0) continue;
+          const double w = 1.0 / (sg * sg), tt = cl.allTimes[k];
+          const NearJet aj = nearestAnyJet(trk2, &branch);
+          if (aj.idx >= 0 && aj.dr < 0.4) {
+            Wi += w; WTi += w * tt; ptI += branch.trackPt[trk2]; ++ni;
+          } else {
+            Wo += w; WTo += w * tt; ptO += branch.trackPt[trk2]; ++no;
+          }
+        }
+        R.t_in_jet        = ni ? (float)(WTi / Wi) : NaNf;
+        R.t_in_jet_sigma  = ni ? (float)(1.0 / std::sqrt(Wi)) : NaNf;
+        R.n_in_jet_timed  = (float)ni;
+        R.sumpt_in_jet_timed = (float)ptI;
+        R.t_out_jet       = no ? (float)(WTo / Wo) : NaNf;
+        R.t_out_jet_sigma = no ? (float)(1.0 / std::sqrt(Wo)) : NaNf;
+        R.n_out_jet_timed = (float)no;
+        R.sumpt_out_jet_timed = (float)ptO;
+        // NaN unless BOTH halves exist -- a difference against a missing half is
+        // not a small disagreement, it is no measurement, and 0 would read as
+        // "the halves agree perfectly".
+        R.t_in_minus_out  = (ni && no) ? (float)(WTi / Wi - WTo / Wo) : NaNf;
+        const double truthT = branch.truthVtxTime[0];
+        R.truth_dt_in_jet  = ni ? (float)(WTi / Wi - truthT) : NaNf;
+        R.truth_dt_out_jet = no ? (float)(WTo / Wo - truthT) : NaNf;
+      }
+
       // Leave-one-out summary for this cluster.
       {
         const TimeSums ts = timeSums(cl, &branch);
@@ -762,6 +848,10 @@ auto main(int argc, char** argv) -> int {
               (std::find(gh.begin(), gh.end(), trk) != gh.end()) ? 1.f : 0.f;
         }
         T.is_lepton = (branch.trackLeptonID && branch.isGoodLepton(trk)) ? 1.f : 0.f;
+        const NearJet anyj = nearestAnyJet(trk, &branch);
+        T.dr_nearest_anyjet = anyj.idx >= 0 ? (float)anyj.dr : NaNf;
+        T.pt_nearest_anyjet = anyj.idx >= 0 ? (float)anyj.pt : NaNf;
+        T.is_in_any_jet = (anyj.idx >= 0 && anyj.dr < 0.4) ? 1.f : 0.f;
         T.loo_shift = looShift(ts, cl, &branch, k);
         T.loo_pull = (std::isnan(T.loo_shift) || clusTSig <= 0.0)
                      ? NaNf : (float)(T.loo_shift / clusTSig);
