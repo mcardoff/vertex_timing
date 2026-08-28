@@ -165,13 +165,26 @@ struct VtxRel {
 // lepton term, and considers only qualifying FORWARD jets. Reporting ours as
 // "WAVeS" against the literature would be wrong, which is why this exists.
 //
-// TRACK-TO-VERTEX ASSIGNMENT IS AN APPROXIMATION AND MUST BE READ AS ONE. The
-// ntuple carries RecoVtx_z but no reco track-to-vertex association (only
-// Track_truthVtx_idx, which is truth and therefore unusable here), so each
-// track is assigned to the vertex it is most compatible with in z0
-// significance. A real vertex fit's track list is not identical to that. The
-// scores are therefore a faithful reproduction of the FORMULAS on an
-// approximate track partition, not a reproduction of the experiment's numbers.
+// TRACK-TO-VERTEX ASSIGNMENT HERE IS AN APPROXIMATION, AND IT DOES NOT NEED TO
+// BE. An earlier version of this comment claimed the ntuple carried no reco
+// track-to-vertex association and that z0-significance assignment was the only
+// option. That is FALSE: `Track_recoVtx_idx` holds the vertex fit's own
+// assignment, `Track_recoVtx_weight` its per-track fit weight, and
+// `RecoVtx_sumPt2` Athena's own SumPt^2 per vertex. None are bound in
+// BranchPointerWrapper yet.
+//
+// The difference is not cosmetic. Measured on the local VBF sample, forward
+// region (2.4 < |eta| < 4.0, pt > 1): tracks the fit assigns to vertex 0 are
+// 58.0% truly hard-scatter, against ~32% for the incumbent z-significance cut,
+// and tracks it assigns to a PILEUP vertex are 98.5% truly pileup -- a
+// near-perfect veto. The fit uses full track parameters and covariances, so it
+// still separates in the regime where |dz| cannot: at ~110 reconstructed
+// vertices per event the nearest pileup vertex sits 0.024 mm from the primary,
+// which is far inside the hard-scatter cluster's own z spread.
+//
+// Until those branches are bound, the scores below are a faithful reproduction
+// of the FORMULAS on an approximate track partition, not of the experiment's
+// numbers.
 //
 // The published w_jet has a bare 1/dR and no floor; a track collinear with a
 // jet axis would diverge. DR_EPS guards that, and nDrBelowFloor counts how
