@@ -124,7 +124,7 @@ _bad = [f for f in TRACK_FEATURES if f.startswith("truth_")
         or f in ("mean_nhgtd_primary", "nhgtd_primary")]
 assert not _bad, f"TRUTH IN TRACK FEATURES: {_bad}"
 
-CLUSTER_COLS = KEY + ["delta_t", "trkptz_score", "waves_score"]
+CLUSTER_COLS = KEY + ["delta_t", "trkptz_score", "waves_score", "truth_purity"]
 
 
 def log(msg):
@@ -554,6 +554,25 @@ def main():
     # whether Z+jets is data-limited -- it contributed every one of its available
     # train-fold events in the last run, and the canonical selection cut it to
     # ~36.5k, so this is the question that decides whether more MC would help.
+    p.add_argument("--train-purity-file", default="",
+                   help="CSV of per-event HS timing purity (sample_id, file_idx, "
+                        "event_num, hs_tpur). Used with --min-train-purity.")
+    p.add_argument("--min-train-purity", type=float, default=-1.0,
+                   help="Drop TRAINING events whose HS timing purity is below "
+                        "this. The test set is untouched, so the model is still "
+                        "scored on the full population -- this asks whether "
+                        "learning only from events where the hard-scatter time "
+                        "is actually measurable generalises to those where it "
+                        "is not.")
+    p.add_argument("--clean-labels", type=float, default=-1.0,
+                   help="Require truth_purity > X for a cluster to count as a "
+                        "POSITIVE in training. -1 disables. Applied to the FIT "
+                        "tensor only -- validation and test keep the true "
+                        "within-60ps label, so the reported metric is unchanged "
+                        "and the comparison stays honest. Motivation: 22.1%% of "
+                        "Z+jets 'recoverable' targets are pure-pileup clusters "
+                        "that land near truth by coincidence, so the listwise "
+                        "loss is being asked to find something unlearnable.")
     p.add_argument("--drop-features", default="",
                    help="comma-separated TRACK_FEATURES to remove before "
                         "training. The A/B knob for a feature ablation: run "
@@ -668,7 +687,33 @@ def main():
     labels = df[KEY + ["within60"]].drop_duplicates(KEY)
     log(f"{len(TRACK_FEATURES)} features + {len(na_cols)} missing-indicators")
 
-    FIT = make_tensors(FIT_T, mu, sd, na_cols, labels, dev)
+    # Training labels may be cleaned; VAL and TEST never are, so the number
+    # reported is always the real core fraction.
+    fit_labels = labels
+    if args.clean_labels >= 0:
+        if "truth_purity" not in df.columns:
+            sys.exit("FATAL: --clean-labels needs truth_purity in the export")
+        cl = df[KEY + ["within60", "truth_purity"]].drop_duplicates(KEY).copy()
+        keep = (cl["within60"] > 0) & (cl["truth_purity"] > args.clean_labels)
+        n_before = int((cl["within60"] > 0).sum())
+        cl["within60"] = keep.astype(np.float32)
+        fit_labels = cl[KEY + ["within60"]]
+        log(f"clean-labels: positives {n_before:,} -> {int(keep.sum()):,} "
+            f"({100*keep.sum()/max(n_before,1):.1f}% kept) at truth_purity > "
+            f"{args.clean_labels}; VAL/TEST labels untouched")
+
+    if args.min_train_purity >= 0:
+        if not args.train_purity_file:
+            sys.exit("FATAL: --min-train-purity needs --train-purity-file")
+        pf = pd.read_csv(args.train_purity_file)
+        keep = pf[pf["hs_tpur"] > args.min_train_purity][EVT]
+        n0 = FIT_T[EVT].drop_duplicates().shape[0]
+        FIT_T = FIT_T.merge(keep, on=EVT, how="inner")
+        n1 = FIT_T[EVT].drop_duplicates().shape[0]
+        log(f"train-purity: fit events {n0:,} -> {n1:,} ({100*n1/max(n0,1):.1f}% kept) "
+            f"at hs_tpur > {args.min_train_purity}; VAL/TEST untouched")
+
+    FIT = make_tensors(FIT_T, mu, sd, na_cols, fit_labels, dev)
     VAL = make_tensors(VAL_T, mu, sd, na_cols, labels, dev)
     TST = make_tensors(TE_T, mu, sd, na_cols, labels, dev)
     sp = spans(FIT)
