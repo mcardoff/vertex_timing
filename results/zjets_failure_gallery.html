@@ -266,10 +266,55 @@ footer{margin-top:3.5rem;padding-top:1.2rem;border-top:1px solid var(--rule);fon
 
 <div class="call" style="border-left-color:var(--hs);background:var(--gain-bg)">
 <span class="key">87% of the misses are in the top three</span>
-<p>Over half the time &mdash; <strong>52.0%</strong> &mdash; the correct cluster is the very next one down the list. Add ranks 2 and 3 and you have <strong>87.0%</strong>. Not one recoverable failure in 11,225 has its answer beyond rank 9, in events carrying 5.7 candidates on average.</p>
+<p>Over half the time &mdash; <strong>52.0%</strong> &mdash; the correct cluster is the very next one down the list, and <strong>87.0%</strong> sit in the top three. Not one recoverable failure in 11,225 has its answer beyond rank 9.</p>
 </div>
 
-<p>This reframes the problem. It is not a needle in a haystack: the ordering is already nearly right, and what fails is a fine discrimination between the top two or three candidates. That is the regime a re-ranker is actually suited to &mdash; and it also explains why the <span class="mono">|&Delta;t|</span>-ordered pairwise ranker lost. Asked to sort candidates that are all far from truth, it optimised a distinction the 60&nbsp;ps criterion does not reward.</p>
+<p>Two controls before reading anything into that. Part of it <em>is</em> an artefact of how many candidates exist: the rank&nbsp;1 share falls from 100% in 2-candidate events to <strong>44.5%</strong> in events with nine or more. It stays far above the ~12% a random ordering would give, so the effect is real &mdash; but smaller than the raw 52% suggests.</p>
+
+<div class="call" style="border-left-color:var(--pick);background:var(--null-bg)">
+<span class="key">Second place is not a near miss</span>
+<p>The correct cluster scores a median of <strong>0.556</strong> of the winner&rsquo;s TRKPTZ value &mdash; barely half. Only <strong>10.7%</strong> come within 10% of the winner. It is second, and it is second by a wide margin, so this is not an ordering that is nearly right and needs a nudge.</p>
+</div>
+
+<h2 style="margin-top:2.6rem">Why the wrong cluster wins</h2>
+<p class="standfirst" style="font-size:1rem;margin-bottom:1.2rem">TRKPTZ is <span class="mono">&Sigma;p<sub>T</sub>&thinsp;e<sup>&minus;1.5|&Delta;z|</sup></span>. For the rank-1 failures, the cluster it picks beats the correct one on <em>both</em> factors at once.</p>
+
+<div class="tablewrap">
+<table>
+<thead><tr><th>median</th><th class="num">chosen (wrong)</th><th class="num">correct</th><th>which wins</th></tr></thead>
+<tbody>
+<tr><td>&Sigma; p<sub>T</sub></td><td class="num">15.7</td><td class="num">10.7</td><td>chosen, in 71.3% of cases</td></tr>
+<tr><td>|&Delta;z| from the primary</td><td class="num">0.297 mm</td><td class="num">0.524 mm</td><td>chosen, in 69.0%</td></tr>
+<tr><td>n tracks</td><td class="num">10</td><td class="num">7</td><td>chosen</td></tr>
+<tr><td>truth purity</td><td class="num">0.00</td><td class="num">0.46</td><td>&mdash;</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>The pileup cluster is not squeaking through on a technicality. By every reconstructed proxy TRKPTZ has available, it looks <em>more</em> like a hard-scatter vertex than the real one does.</p>
+
+<h2 style="margin-top:2.6rem">The z axis is saturated</h2>
+<p class="standfirst" style="font-size:1rem;margin-bottom:1.2rem">The reason the wrong cluster is also the closer one in z.</p>
+
+<div class="tablewrap">
+<table>
+<tbody>
+<tr><td>reconstructed vertices per event (median)</td><td class="num"><strong>110</strong></td></tr>
+<tr><td>nearest pileup vertex to the primary (median)</td><td class="num"><strong>0.024 mm</strong></td></tr>
+<tr><td>events with a pileup vertex within 0.3 mm of the primary</td><td class="num"><strong>100.0%</strong></td></tr>
+<tr><td>|&Delta;z| of the correct cluster (median)</td><td class="num">0.796 mm</td></tr>
+<tr><td>|&Delta;z| of the chosen cluster (median)</td><td class="num">0.326 mm</td></tr>
+<tr><td>failures where the correct cluster is <em>further</em> from the primary</td><td class="num"><strong>77.9%</strong></td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="call" style="border-left-color:var(--pick);background:var(--null-bg)">
+<span class="key">The z term is anti-informative, not merely useless</span>
+<p>At 110 vertices per event the pileup population is denser in z than the hard-scatter cluster&rsquo;s own spread. There is <em>always</em> a pileup cluster sitting closer to the primary than the true one, so <span class="mono">e<sup>&minus;1.5|&Delta;z|</sup></span> systematically rewards pileup. In 77.9% of recoverable failures the correct answer is the more distant cluster &mdash; the score is not mis-weighted, it is being applied to an axis that carries no separation left.</p>
+</div>
+
+<p>This is the same &ldquo;merged pileup vertices&rdquo; regime the WAVeS note describes, and it explains why the reconstructed-vertex features bought only <strong>+0.34</strong> points: asking &ldquo;is a pileup vertex claiming this z?&rdquo; returns yes essentially always, so the question has little discriminating power left in it. It also says what <em>does</em> remain &mdash; timing is the only axis on which these two clusters genuinely differ, which is exactly what the 13.2-point time-quality term measures.</p>
 
 <h2 style="margin-top:2.6rem">Failure is U-shaped in multiplicity</h2>
 <p class="standfirst" style="font-size:1rem;margin-bottom:1.2rem">Total failure rate by forward reconstructed track count; the solid part is the no-candidate share, the faded part the recoverable share. Bin populations underneath.</p>

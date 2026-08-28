@@ -539,14 +539,74 @@ footer p { margin: 0 0 .4rem; }
 </section>
 
 <section>
+  <h2 class="sec">The features, measured</h2>
+  <p class="sec-note">Paired A/B on the 2026-08-28 re-export, canonical selection, 4 samples, 5 init seeds per arm. Identical split <em>and</em> identical init seed between arms, so only the input columns differ.</p>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>arm</th><th class="num">dijet</th><th class="num">ttbar</th><th class="num">vbf</th><th class="num">zjets</th></tr></thead>
+      <tbody>
+        <tr><td>base (22 features)</td><td class="num">90.00</td><td class="num">90.30</td><td class="num">93.30</td><td class="num">66.94</td></tr>
+        <tr><td>+ vertex (29)</td><td class="num">−0.02</td><td class="num flat">−0.06</td><td class="num flat">−0.10</td><td class="num up"><strong>+0.34 ± 0.11</strong></td></tr>
+        <tr><td>+ jet/loo (25)</td><td class="num">−0.04</td><td class="num flat">−0.08</td><td class="num up">+0.12</td><td class="num flat">−0.16</td></tr>
+        <tr class="hi"><td>full (32)</td><td class="num">−0.08</td><td class="num">−0.04</td><td class="num">+0.10</td><td class="num up"><strong>+0.40 ± 0.16</strong></td></tr>
+        <tr><td>TRKPTZ</td><td class="num">86.60</td><td class="num">87.00</td><td class="num">90.40</td><td class="num">61.20</td></tr>
+        <tr><td>oracle</td><td class="num">97.70</td><td class="num">98.00</td><td class="num">98.30</td><td class="num">92.60</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="call good">
+    <span class="label">The two feature groups are sample-antagonistic</span>
+    <p>The vertex features help <strong>only</strong> Z+jets (+0.34, 5/5 seeds up) and are mildly negative on the other three — 0/5 seeds up on both vbf and ttbar. The jet/loo trio does the exact reverse: <strong>+0.12 on vbf with 5/5 up, −0.16 on Z+jets with 0/5 up</strong>. Both are consistent in direction across every seed, so neither is noise.</p>
+  </div>
+
+  <p>The mechanism accounts for it exactly. Vertex relations answer "is a reconstructed pileup vertex claiming this z?", which only matters where the failure is picking a displaced pure-pileup cluster — <strong>65.9%</strong> of Z+jets recoverable failures and rare elsewhere. Jet association only matters where the hard scatter <em>is</em> the forward jets, which is VBF and emphatically not Z+jets.</p>
+
+  <p>This is also why an earlier ablation on the local VBF sample pointed the other way: there the jet/loo group carried everything (+0.38) and the vertex features were a clean null on top of it (−0.02, 0/5 seeds). That was the correct reading of a sample that does not have the failure the vertex features target — and the wrong basis for a general conclusion.</p>
+
+  <div class="call note">
+    <span class="label">Real, reproducible, and small</span>
+    <p><strong>+0.40 on a 25.7-point Z+jets gap closes about 1.6% of it.</strong> The features were worth exporting and the mechanism is confirmed, but this does not move Z+jets meaningfully. The gap remains dominated by the 13.2-point time-quality term that no selector reaches, plus a selection problem that the rank distribution characterises as top-3 discrimination rather than search. <span class="mono">base</span> reproducing the published 67.1 baseline at 66.94 confirms the harness before any of this is layered on.</p>
+  </div>
+</section>
+
+<section>
+  <h2 class="sec">Where the right answer actually sits</h2>
+  <p class="sec-note">All 36,531 canonical Z+jets events, scored with TRKPTZ — the physics baseline, whose failures the learned selector inherits.</p>
+
+  <div class="lrow"><span class="llabel">correct</span><div>22,601 events, <strong>61.9%</strong></div></div>
+  <div class="lrow"><span class="llabel">recoverable</span><div>11,225, <strong>30.7%</strong> — a qualifying cluster existed and a different one was chosen</div></div>
+  <div class="lrow"><span class="llabel">no candidate</span><div>2,705, 7.4% — nothing within ±60 ps exists; this is what sets the 92.6% ceiling</div></div>
+
+  <div class="call good">
+    <span class="label">The correct cluster is the runner-up 52% of the time</span>
+    <p>Ranking every candidate by TRKPTZ's own score, the right answer sits at <strong>rank 1</strong> — the very next one down — in 52.0% of recoverable failures, and inside the <strong>top three in 87.0%</strong>. Not one of the 11,225 has its answer beyond rank 9, in events carrying 5.7 candidates on average.</p>
+  </div>
+
+  <p>That is partly an artefact of candidate count — the rank-1 share falls from 100% in 2-candidate events to <strong>44.5%</strong> at nine or more, still well above the ~12% of a random ordering. But second place is <em>not</em> a near miss: the correct cluster scores a median <strong>0.556</strong> of the winner's TRKPTZ value, with only 10.7% inside 10% of it.</p>
+
+  <div class="call bad">
+    <span class="label">The wrong cluster wins on both terms at once</span>
+    <p>TRKPTZ is Σp<sub>T</sub>·e<sup>−1.5|Δz|</sup>. The cluster it picks has <strong>1.47× the pT</strong> (more in 71.3% of cases) <em>and</em> sits <strong>closer to the primary in z</strong> (closer in 69.0%), at 0.297 mm against the correct cluster's 0.524 mm. By every reconstructed proxy the score has available, the pileup cluster looks more like a hard-scatter vertex than the real one does.</p>
+  </div>
+
+  <p>The z half of that has a specific cause. At a median of <strong>110 reconstructed vertices per event</strong>, the nearest pileup vertex to the primary sits <strong>0.024 mm</strong> away, and <em>every</em> event has one within 0.3 mm — while the correct cluster sits at a median 0.796 mm. The pileup population is denser in z than the hard-scatter cluster's own spread, so <span class="mono">e<sup>−1.5|Δz|</sup></span> systematically rewards pileup: in <strong>77.9%</strong> of recoverable failures the correct answer is the <em>more distant</em> cluster. The z term is not mis-weighted, it is being applied to an axis with no separation left on it.</p>
+
+  <p>That also bounds what the vertex features could ever have bought. "Is a pileup vertex claiming this z?" returns yes essentially always, which is consistent with the measured <strong>+0.34</strong>. What remains is timing — the one axis on which these two clusters genuinely differ, and precisely what the 13.2-point time-quality term quantifies.</p>
+
+  <p>Failure is <strong>U-shaped in multiplicity</strong>, and the ends fail for opposite reasons. Below 2 forward tracks, 58.9% fail and every one is a no-candidate failure — no selection decision is being made at all. Above 20 tracks the no-candidate share collapses to 5.7% while total failure returns to 39.3%, i.e. pure selection failure. Since <strong>25,662 of 36,531</strong> events sit in that top bin, that is the dominant mode in this sample. Full breakdown in the <a href="https://claude.ai/code/artifact/412f8033-449b-4026-bb89-922e2e44bfaf">failure gallery</a>.</p>
+</section>
+
+<section>
   <h2 class="sec">Where this goes next</h2>
   <p class="sec-note">Four lines closed by measurement, one open and in flight.</p>
 
   <ol class="steps">
     <li><span class="snum">1</span><div class="sbody">
-      <h4>Retrain on the vertex-relational features</h4>
-      <p><strong>In flight.</strong> Full re-export running: 7 samples × 2 selections, 152 jobs. The test is whether <span class="mono">pv_pu_dz_ratio</span>'s 1.78–2.34× lift in the displaced |Δz| bins — measured on local VBF — reproduces on Z+jets, where there is more pileup and the failure mode lives, and whether it converts into core fraction.</p>
-      <p>Honest prior: six things have measured null on this gap already. What distinguishes this one is that it targets the <em>specific</em> failure the gallery identified, using information that was demonstrably in the ntuples and demonstrably unread.</p>
+      <h4>Vertex-relational features — done, +0.40 on Z+jets</h4>
+      <p><strong>Answered.</strong> The re-export landed, the paired A/B ran on all four samples, and the result is above: the vertex features work on Z+jets and only Z+jets, worth +0.34 alone and +0.40 in the full set. Small against a 25.7-point gap, and the mechanism is confirmed rather than merely plausible.</p>
+      <p>The unexpected part is the antagonism — each group helps exactly one sample and costs the others, so a single pooled feature set is a compromise. Whether a per-sample or gated model beats it is open, but specialising trades away the cross-topology transfer that was one of the learned selector's clearest wins.</p>
     </div></li>
     <li><span class="snum">2</span><div class="sbody">
       <h4>Quantify the half that cannot be closed</h4>
