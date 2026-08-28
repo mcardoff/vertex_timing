@@ -1,0 +1,198 @@
+<title>The Topology Cut That Wasn't</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,500;0,600;1,400&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+:root{
+  --paper:#FBFAF7; --surface:#FFF; --surface-2:#F1EFE9; --ink:#1A1916; --ink-2:#4A4740;
+  --ink-3:#807B70; --rule:#DEDAD0; --rule-soft:#EBE8E0;
+  --gain:#2F6E4E; --gain-bg:#E6F0E9; --null:#9C3A2E; --null-bg:#F6E7E4;
+  --warn:#95661A; --warn-bg:#F5EDDD; --accent:#2F4E6E;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#12120F; --surface:#1B1A17; --surface-2:#242220; --ink:#EDEAE3; --ink-2:#B6B1A6;
+  --ink-3:#847F74; --rule:#33302B; --rule-soft:#26241F;
+  --gain:#69BC90; --gain-bg:#152A1F; --null:#DE8272; --null-bg:#2E1A16;
+  --warn:#D6A44F; --warn-bg:#2C2314; --accent:#84AFD6;}}
+:root[data-theme="dark"]{
+  --paper:#12120F; --surface:#1B1A17; --surface-2:#242220; --ink:#EDEAE3; --ink-2:#B6B1A6;
+  --ink-3:#847F74; --rule:#33302B; --rule-soft:#26241F;
+  --gain:#69BC90; --gain-bg:#152A1F; --null:#DE8272; --null-bg:#2E1A16;
+  --warn:#D6A44F; --warn-bg:#2C2314; --accent:#84AFD6;}
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font-family:Inter,system-ui,sans-serif;
+ font-size:16.5px;line-height:1.62;margin:0;padding:0 1.4rem 5rem;-webkit-font-smoothing:antialiased}
+.wrap{max-width:50rem;margin:0 auto}
+header{padding:3.4rem 0 1.6rem;border-bottom:2px solid var(--ink)}
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:.7rem;letter-spacing:.15em;
+ text-transform:uppercase;color:var(--ink-3);display:flex;gap:1.1rem;flex-wrap:wrap;margin-bottom:.9rem}
+h1{font-family:Spectral,Georgia,serif;font-weight:600;font-size:clamp(2rem,5.4vw,3rem);
+ line-height:1.06;letter-spacing:-.015em;margin:0 0 .8rem;text-wrap:balance}
+.lede{font-size:1.1rem;color:var(--ink-2);margin:0;max-width:38rem}
+.lede strong{color:var(--ink);font-weight:600}
+section{margin-top:3rem}
+h2{font-family:Spectral,Georgia,serif;font-size:1.5rem;font-weight:600;margin:0 0 .25rem;
+ letter-spacing:-.01em;text-wrap:balance}
+.note{font-size:.9rem;color:var(--ink-3);margin:0 0 1.3rem;padding-bottom:.8rem;
+ border-bottom:1px solid var(--rule)}
+p{margin:0 0 1rem}
+.mono{font-family:"IBM Plex Mono",monospace;font-size:.87em}
+.tw{overflow-x:auto;margin:1.1rem 0;border:1px solid var(--rule);border-radius:3px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.9rem;min-width:31rem}
+th{text-align:left;font-family:"IBM Plex Mono",monospace;font-size:.66rem;letter-spacing:.09em;
+ text-transform:uppercase;color:var(--ink-3);padding:.7rem .9rem;background:var(--surface-2);
+ border-bottom:1px solid var(--rule);white-space:nowrap}
+td{padding:.6rem .9rem;border-bottom:1px solid var(--rule-soft);color:var(--ink-2)}
+td:first-child{color:var(--ink)}
+tr:last-child td{border-bottom:0}
+.n{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.good{color:var(--gain);font-weight:600}.bad{color:var(--null);font-weight:600}
+tr.hl td{background:var(--surface-2)}
+.fig{background:var(--surface);border:1px solid var(--rule);border-radius:3px;
+ padding:1.3rem 1.2rem .8rem;margin:1.3rem 0}
+.cap{font-size:.85rem;color:var(--ink-3);margin:.7rem 0 0;padding-top:.7rem;border-top:1px solid var(--rule-soft)}
+.box{border:1px solid var(--rule);border-left:3px solid var(--ink-3);border-radius:3px;
+ background:var(--surface);padding:1.05rem 1.2rem;margin:1.3rem 0}
+.box.g{border-left-color:var(--gain);background:var(--gain-bg)}
+.box.b{border-left-color:var(--null);background:var(--null-bg)}
+.box.w{border-left-color:var(--warn);background:var(--warn-bg)}
+.box .k{font-family:"IBM Plex Mono",monospace;font-size:.67rem;font-weight:600;letter-spacing:.11em;
+ text-transform:uppercase;color:var(--ink-3);display:block;margin-bottom:.45rem}
+.box.g .k{color:var(--gain)}.box.b .k{color:var(--null)}.box.w .k{color:var(--warn)}
+.box p{margin:0;color:var(--ink)}
+footer{margin-top:3.4rem;padding-top:1.2rem;border-top:1px solid var(--rule);
+ font-size:.85rem;color:var(--ink-3)}
+@media(max-width:640px){body{font-size:15.5px;padding:0 1rem 3rem}}
+</style>
+
+<div class="wrap">
+<header>
+  <div class="eyebrow"><span>HGTD Vertex Timing</span><span>Selection</span><span>28 Aug 2026</span></div>
+  <h1>The topology cut that wasn&rsquo;t</h1>
+  <p class="lede">Our VBS selection required <span class="mono">|&Delta;&eta;| &ge; 3</span> on the candidate jet pair. Measured against truth, that cut is <strong>purity-neutral on VBF and purity-negative on Z+jets and dijet</strong> &mdash; on two samples out of three it admitted more pileup-legged pairs than it removed. Swapping in m<sub>jj</sub> is at least as good everywhere.</p>
+</header>
+
+<section>
+  <h2>What was actually being asked</h2>
+  <p class="note">Method: one denominator, both variables, truth as the referee.</p>
+  <p>A &ldquo;VBS topology&rdquo; requirement is supposed to select events whose forward jet pair comes from the hard scatter. At &mu;&nbsp;=&nbsp;200 a jet pair can just as easily be assembled out of pileup, and nothing in <span class="mono">|&Delta;&eta;|</span> or m<sub>jj</sub> forces the legs to be real.</p>
+  <p>So we defined a pair as <strong>genuine</strong> when both legs are truth-HS-matched, and scanned both variables over the identical denominator: every event the rest of the selection admits, with an opposite-hemisphere pair, and <em>no</em> topology cut applied. Two numbers per working point &mdash; <strong>purity</strong> (genuine / kept) and <strong>efficiency</strong> (genuine kept / all genuine).</p>
+</section>
+
+<section>
+  <h2>The two variables are not equivalent</h2>
+  <p class="note">VBF, 112,400 events, 48,640 passing everything except the topology cut. Baseline purity 57.11%.</p>
+  <div class="fig"><svg viewBox="0 0 660 400" role="img" aria-label="Candidate-pair purity versus hard-scatter efficiency for m_jj and |Deta| cuts" style="width:100%;height:auto">
+<line x1="58" y1="348.0" x2="550" y2="348.0" stroke="var(--rule)" stroke-width="1"/>
+<text x="50" y="352.0" text-anchor="end" font-size="11" font-family="JetBrains Mono,monospace" fill="var(--ink-3)">50%</text>
+<line x1="58" y1="300.9" x2="550" y2="300.9" stroke="var(--rule)" stroke-width="1"/>
+<text x="50" y="304.9" text-anchor="end" font-size="11" font-family="JetBrains Mono,monospace" fill="var(--ink-3)">52%</text>
+<line x1="58" y1="253.7" x2="550" y2="253.7" stroke="var(--rule)" stroke-width="1"/>
+<text x="50" y="257.7" text-anchor="end" font-size="11" font-family="JetBrains Mono,monospace" fill="var(--ink-3)">54%</text>
+<line x1="58" y1="206.6" x2="550" y2="206.6" stroke="var(--rule)" stroke-width="1"/>
+<text x="50" y="210.6" text-anchor="end" font-size="11" font-family="JetBrains Mono,monospace" fill="var(--ink-3)">56%</text>
+<line x1="58" y1="159.4" x2="550" y2="159.4" stroke="var(--rule)" stroke-width="1"/>
+<text x="50" y="163.4" text-anchor="end" font-size="11" font-family="JetBrains Mono,monospace" fill="var(--ink-3)">58%</text>
+<line x1="58" y1="112.3" x2="550" y2="112.3" stroke="var(--rule)" stroke-width="1"/>
+<text x="50" y="116.3" text-anchor="end" font-size="11" font-family="JetBrains Mono,monospace" fill="var(--ink-3)">60%</text>
+<line x1="58" y1="65.1" x2="550" y2="65.1" stroke="var(--rule)" stroke-width="1"/>
+<text x="50" y="69.1" text-anchor="end" font-size="11" font-family="JetBrains Mono,monospace" fill="var(--ink-3)">62%</text>
+<line x1="58" y1="18.0" x2="550" y2="18.0" stroke="var(--rule)" stroke-width="1"/>
+<text x="50" y="22.0" text-anchor="end" font-size="11" font-family="JetBrains Mono,monospace" fill="var(--ink-3)">64%</text>
+<text x="111.5" y="366" text-anchor="middle" font-size="11" font-family="JetBrains Mono,monospace" fill="var(--ink-3)">20%</text>
+<text x="218.4" y="366" text-anchor="middle" font-size="11" font-family="JetBrains Mono,monospace" fill="var(--ink-3)">40%</text>
+<text x="325.4" y="366" text-anchor="middle" font-size="11" font-family="JetBrains Mono,monospace" fill="var(--ink-3)">60%</text>
+<text x="432.3" y="366" text-anchor="middle" font-size="11" font-family="JetBrains Mono,monospace" fill="var(--ink-3)">80%</text>
+<text x="539.3" y="366" text-anchor="middle" font-size="11" font-family="JetBrains Mono,monospace" fill="var(--ink-3)">100%</text>
+<line x1="58" y1="180.4" x2="550" y2="180.4" stroke="var(--ink-3)" stroke-width="1.4" stroke-dasharray="5 4"/>
+<text x="556" y="184.4" font-size="11" font-family="JetBrains Mono,monospace" fill="var(--ink-3)">no cut 57.1%</text>
+<path d="M539.3,180.4 L538.1,174.5 L528.5,150.7 L505.8,116.3 L470.4,89.2 L432.0,70.6 L349.1,65.4 L275.8,92.5 L205.5,146.0 L153.9,205.2 L88.7,316.7" fill="none" stroke="var(--gain)" stroke-width="2.4" stroke-linejoin="round"/>
+<circle cx="539.3" cy="180.4" r="3.4" fill="var(--gain)"/>
+<circle cx="538.1" cy="174.5" r="3.4" fill="var(--gain)"/>
+<circle cx="528.5" cy="150.7" r="3.4" fill="var(--gain)"/>
+<circle cx="505.8" cy="116.3" r="3.4" fill="var(--gain)"/>
+<circle cx="470.4" cy="89.2" r="3.4" fill="var(--gain)"/>
+<circle cx="432.0" cy="70.6" r="3.4" fill="var(--gain)"/>
+<circle cx="349.1" cy="65.4" r="3.4" fill="var(--gain)"/>
+<circle cx="275.8" cy="92.5" r="3.4" fill="var(--gain)"/>
+<circle cx="205.5" cy="146.0" r="3.4" fill="var(--gain)"/>
+<circle cx="153.9" cy="205.2" r="3.4" fill="var(--gain)"/>
+<circle cx="88.7" cy="316.7" r="3.4" fill="var(--gain)"/>
+<path d="M539.3,180.4 L538.9,180.4 L538.1,179.7 L528.2,177.6 L500.0,176.4 L445.3,184.4 L277.8,269.5" fill="none" stroke="var(--null)" stroke-width="2.4" stroke-linejoin="round"/>
+<circle cx="539.3" cy="180.4" r="3.4" fill="var(--null)"/>
+<circle cx="538.9" cy="180.4" r="3.4" fill="var(--null)"/>
+<circle cx="538.1" cy="179.7" r="3.4" fill="var(--null)"/>
+<circle cx="528.2" cy="177.6" r="3.4" fill="var(--null)"/>
+<circle cx="500.0" cy="176.4" r="3.4" fill="var(--null)"/>
+<circle cx="445.3" cy="184.4" r="3.4" fill="var(--null)"/>
+<circle cx="277.8" cy="269.5" r="3.4" fill="var(--null)"/>
+<text x="524.5" y="136.7" text-anchor="end" font-size="11.5" font-weight="600" font-family="JetBrains Mono,monospace" fill="var(--ink)">m_jj 300</text>
+<text x="524.2" y="194.6" text-anchor="end" font-size="11.5" font-weight="600" font-family="JetBrains Mono,monospace" fill="var(--ink)">|&#916;&#951;| 3</text>
+<text x="357.1" y="55.4" text-anchor="end" font-size="11.5" font-weight="600" font-family="JetBrains Mono,monospace" fill="var(--ink)">m_jj 800 (peak)</text>
+<line x1="58" y1="348" x2="550" y2="348" stroke="var(--ink-3)"/>
+<text x="304" y="392" text-anchor="middle" font-size="12" fill="var(--ink-2)">genuine-pair efficiency</text>
+<text transform="rotate(-90 14 183)" x="14" y="183" text-anchor="middle" font-size="12" fill="var(--ink-2)">candidate-pair purity</text>
+<rect x="554" y="48" width="10" height="10" fill="var(--gain)"/><text x="569" y="57" font-size="11.5" fill="var(--ink)">m_jj</text>
+<rect x="554" y="68" width="10" height="10" fill="var(--null)"/><text x="569" y="77" font-size="11.5" fill="var(--ink)">|&#916;&#951;|</text>
+</svg><p class="cap">Each point is a cut value. Up is purer, right is more efficient. The dashed line is applying no cut at all &mdash; a variable is only doing something if it lifts the curve above it.</p></div>
+
+  <div class="box b">
+    <span class="k">|&Delta;&eta;| never leaves the baseline</span>
+    <p>Across its whole usable range the <span class="mono">|&Delta;&eta;|</span> curve sits on the no-cut line: 57.11% &rarr; a peak of <strong>57.28%</strong>, then it turns over and <em>drops below</em> baseline past 4. It is discarding events without enriching what remains. m<sub>jj</sub> reaches <strong>61.99%</strong>, nearly 5 points above baseline.</p>
+  </div>
+
+  <div class="tw"><table>
+    <thead><tr><th>at matched efficiency</th><th class="n">efficiency</th><th class="n">purity</th><th class="n">kept</th></tr></thead>
+    <tbody>
+      <tr><td>no topology cut</td><td class="n">100.00%</td><td class="n">57.11%</td><td class="n">48,640</td></tr>
+      <tr><td>|&Delta;&eta;| &ge; 3.0 <span class="mono">(the old default)</span></td><td class="n">97.93%</td><td class="n bad">57.23%</td><td class="n">47,535</td></tr>
+      <tr class="hl"><td>m<sub>jj</sub> &ge; 300 GeV</td><td class="n">97.98%</td><td class="n good">58.37%</td><td class="n">46,626</td></tr>
+    </tbody>
+  </table></div>
+  <p>At the same genuine-pair efficiency to within 0.05 points, m<sub>jj</sub> is <strong>+1.14 points purer</strong>. The old cut bought 0.12.</p>
+</section>
+
+<section>
+  <h2>It holds on the other samples &mdash; and gets worse for |&Delta;&eta;|</h2>
+  <p class="note">Candidate-pair purity, no cut &rarr; |&Delta;&eta;| &ge; 3.</p>
+  <div class="tw"><table>
+    <thead><tr><th>sample</th><th class="n">no cut</th><th class="n">|&Delta;&eta;| &ge; 3</th><th class="n">change</th><th class="n">m<sub>jj</sub> gain</th></tr></thead>
+    <tbody>
+      <tr><td>VBF</td><td class="n">57.1%</td><td class="n">57.2%</td><td class="n">+0.1</td><td class="n good">+1.2</td></tr>
+      <tr class="hl"><td>dijet</td><td class="n">40.1%</td><td class="n bad">35.0%</td><td class="n bad">&minus;5.1</td><td class="n good">+8.7</td></tr>
+      <tr class="hl"><td>Z+jets</td><td class="n">2.69%</td><td class="n bad">2.51%</td><td class="n bad">&minus;0.18</td><td class="n">+0.2</td></tr>
+    </tbody>
+  </table></div>
+  <div class="box b">
+    <span class="k">On two samples out of three the cut was actively harmful</span>
+    <p>dijet loses <strong>5.1 points of purity</strong> to a cut whose stated purpose is to raise it. The mechanism is the one we should have expected: a genuine forward hard-scatter pair is rare, so requiring a wide rapidity gap preferentially selects the events where a <em>pileup</em> jet supplies the second leg.</p>
+  </div>
+</section>
+
+<section>
+  <h2>What m<sub>jj</sub> does not fix</h2>
+  <div class="box w">
+    <span class="k">Z+jets has no forward VBS topology to select for</span>
+    <p>Its baseline purity is <strong>2.69%</strong>, and m<sub>jj</sub> moves it by +0.2. Out of 2M events processed there are <strong>1,872 genuine pairs.</strong> Neither variable can enrich a population that is essentially not there, and no reco-jet kinematic will &mdash; only truth matching separates these, which is not available at selection time.</p>
+  </div>
+  <p>This matters beyond the cut itself: it is the same fact that makes Z+jets the hardest sample for the timing analysis. The forward jets it selects on are overwhelmingly pileup-supplied, which is exactly the regime where a jet-proximity score has nothing real to weight toward.</p>
+  <div class="box">
+    <span class="k">Neither variable is monotonic</span>
+    <p>Both turn over. m<sub>jj</sub> peaks near <strong>600&ndash;800 GeV</strong> and degrades above ~2 TeV, where a single far-forward pileup jet manufactures a large invariant mass. <span class="mono">|&Delta;&eta;|</span> degrades past 4&ndash;5 the same way. A tighter cut is not automatically a purer one.</p>
+  </div>
+</section>
+
+<section>
+  <h2>What changed</h2>
+  <p>The default is now <strong>no |&Delta;&eta;| requirement, m<sub>jj</sub> &ge; 200 GeV</strong>. Both remain runtime flags (<span class="mono">--vbs-deta=</span>, <span class="mono">--vbs-mjj=</span>), and every output file is tagged with its selection so a re-cut run cannot overwrite a standard one.</p>
+  <div class="box g">
+    <span class="k">200 GeV is deliberately conservative</span>
+    <p>It is <em>not</em> the purity optimum &mdash; that sits nearer 600&ndash;800 GeV. It is set low so the new baseline costs almost no efficiency (99.78% of genuine pairs survive) while removing a cut that was measurably harmful. Studies wanting the purer working point ask for it with a flag rather than a rebuild.</p>
+  </div>
+  <p>Honest framing for the group: this is <strong>the better of two imperfect proxies</strong>, not a solution. Neither variable enforces that the candidate pair is hard-scatter; only truth matching does that, and it is not available at selection time.</p>
+</section>
+
+<footer>
+  <p>Diagnostic: <span class="mono">util/vbs_mjj_diag.cxx</span>, pure read, changes no analysis behaviour. VBF scan re-run and reproduced 28 Aug 2026 (57.11% baseline, |&Delta;&eta;|&ge;3 &rarr; 57.23%, m<sub>jj</sub>&ge;300 &rarr; 58.37%). Z+jets and dijet figures are from the full three-sample run of 26 Aug 2026 recorded in <span class="mono">src/clustering_constants.h</span>. Selection default changed in <span class="mono">9377346</span>, merged as PR&nbsp;#15.</p>
+</footer>
+</div>
