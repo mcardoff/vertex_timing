@@ -41,6 +41,17 @@ def xgbc(depth, mcw, n=500, lr=0.05, seed=0):
                              random_state=seed)
 
 
+def shrink(df):
+    """uproot hands back float64/int64; halve the footprint. Keys stay int64
+    (keyfold multiplies into uint64 range)."""
+    for col in df.columns:
+        if col in EVT: continue
+        if df[col].dtype == np.float64: df[col] = df[col].astype(np.float32)
+        elif df[col].dtype == np.int64 and col not in ("track_idx", "cluster_idx"):
+            df[col] = df[col].astype(np.int32)
+    return df
+
+
 def keyfold(df):
     h = (df["file_idx"].to_numpy(np.int64) * 1000003 + df["event_num"].to_numpy(np.int64))
     h = (h.astype(np.uint64) * np.uint64(2654435761))
@@ -107,7 +118,7 @@ pd.concat(out).to_pickle(f"{wd}/e2e_out.pkl")
 
 
 def build(files, n_seeds):
-    cs = [uproot.open(f)["clusters"].arrays(library="pd") for f in files]
+    cs = [shrink(uproot.open(f)["clusters"].arrays(library="pd")) for f in files]
     if len(cs) > 1:
         k0 = set(map(tuple, cs[0][EVT].drop_duplicates().to_numpy()))
         cs[1] = cs[1][~pd.MultiIndex.from_frame(cs[1][EVT]).isin(k0)]
@@ -117,7 +128,7 @@ def build(files, n_seeds):
     c["k"] = keyfold(c)
     ts = []
     for f in files:
-        x = uproot.open(f)["tracks"].arrays(library="pd")
+        x = shrink(uproot.open(f)["tracks"].arrays(library="pd"))
         ts.append(x[(x.time_valid > 0) & (x.timeRes > 0)])
     if len(ts) > 1:
         ts[1] = ts[1][~pd.MultiIndex.from_frame(ts[1][EVT]).isin(
@@ -133,6 +144,7 @@ def build(files, n_seeds):
         m.fit(tr[TFE].to_numpy(np.float32), tr.truth_is_hs.to_numpy(int))
         msk = t.k == kt
         t.loc[msk, "ph"] = m.predict_proba(t.loc[msk, TFE].to_numpy(np.float32))[:, 1]
+        del m, tr; gc.collect()
     # round 2: neighbor context, chunked by event block (ttbar OOM'd unchunked)
     nb = t[EVT + ["track_idx", "time", "z0", "ph"]].copy()
     ekeys = nb[EVT].drop_duplicates().reset_index(drop=True)
@@ -161,6 +173,7 @@ def build(files, n_seeds):
         m.fit(tr[TFE2].to_numpy(np.float32), tr.truth_is_hs.to_numpy(int))
         msk = t.k == kt
         t.loc[msk, "ph"] = m.predict_proba(t.loc[msk, TFE2].to_numpy(np.float32))[:, 1]
+        del m, tr; gc.collect()
     # event t0: prob-weighted median, double-truncated
     d = t.sort_values(EVT + ["time"])
     codes, uniq = pd.factorize(pd.MultiIndex.from_frame(d[EVT]), sort=False)
@@ -219,6 +232,7 @@ def build(files, n_seeds):
                 m1.fit(tr[FEA].to_numpy(np.float32), tr[lab].to_numpy(int))
                 msk = (c.k == kt).to_numpy()
                 pc[msk] = m1.predict_proba(c.loc[msk, FEA].to_numpy(np.float32))[:, 1]
+                del m1, tr; gc.collect()
             ps += pc
         c[col] = ps / n_seeds
     return c, t, t0f
