@@ -68,3 +68,57 @@ flag lets the gate be applied only where it is earned.
 Caveats: defined for 53.8% of Z+jets events only; VBF not yet run; and the flag
 costs a second clustering pass, though on the in-jet subset that is ~1.3 tracks
 and therefore nearly free.
+
+---
+
+# VBF (local export, 39,681 events) — the same study
+
+Clustering validation again **3000/3000 exact**.
+
+## As a replacement estimator
+
+| collection | clusters/event | core frac | sel. purity | n trk in pick |
+|---|---:|---:|---:|---:|
+| all tracks | 5.64 | **91.49%** | 72.66% | 13.8 |
+| in-jet only | 1.77 | 86.38% | **86.03%** | 5.2 |
+| out-of-jet only | 5.39 | 66.00% | 44.70% | 9.4 |
+
+Still no replacement -- all-track wins -- but the in-jet collection is *viable*
+here (86.38% at 86% purity on 5.2 tracks) where in Z+jets it collapsed to 25.34%
+on 1.8 tracks. And the ordering INVERTS between samples: in VBF the in-jet
+collection is the good one and out-of-jet is the poor one (66.00%), which is the
+exact reverse of Z+jets (25.34% vs 60.75%).
+
+## And the oracle flips sign
+
+| | Z+jets | VBF |
+|---|---:|---:|
+| oracle over the three collections | 69.39% | 95.62% |
+| matched-noise null | 72.00% | 93.67% |
+| **real complementarity** | **-2.61** | **+1.95** |
+
+**On VBF the separate collections carry genuinely complementary information**
+(~2 points of real, non-artifact headroom); on Z+jets they carry none. Same
+mechanism as everywhere else in this document: the jet partition is informative
+where the jets hold the hard scatter (VBF, 47% of HS timing weight) and
+uninformative where they do not (Z+jets, 10%).
+
+## The confidence flag works on both, with different reach
+
+| | Z+jets | VBF |
+|---|---:|---:|
+| events with `t_in` defined | 53.8% | **93.3%** |
+| agree (`< 60 ps`), of defined | 40.1% | 61.2% |
+| core \| agree | 79.42% | **97.90%** |
+| core \| disagree | 58.36% | 85.49% |
+| **gap** | **+21.05** | **+12.40** |
+| core \| no in-jet track at all | 60.51% | **69.17%** |
+
+Larger absolute gap on Z+jets, but VBF's baseline is 28 points higher so there
+is less room. Not multiplicity in disguise on either sample -- on VBF the gap
+runs +13.1 to +21.7 across track-multiplicity bins.
+
+Note the last row: on VBF, having **no in-jet track at all** is itself a strong
+negative indicator (69.17% against a 91.49% average) and covers only 6.7% of
+events. On Z+jets that condition covers 46.2% of events and barely
+discriminates (60.51% vs 63.89%), so it is only usable in VBF-like topologies.
