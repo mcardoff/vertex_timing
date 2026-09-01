@@ -4,12 +4,12 @@
 // The analysis argues that HGTD's gain is concentrated in the VBS topologies,
 // but nothing so far said what FRACTION of the selection it can act on at all.
 // This answers that: a stacked composition plot, one column per m_jj bin, every
-// column normalised to 1, with the three reachable topologies at the bottom.
+// column normalised to 1, with the two reachable topologies at the bottom.
 //
-//   R1  both tags forward, one HS + one PU  -- timing says WHICH is real
-//   R2  forward PU + central HS             -- timing rejects the fake
-//   R3  forward HS + central PU             -- the mirror of R2: the GENUINE
-//       tag is the timeable one, so timing confirms rather than rejects
+//   R1        both tags forward, one HS + one PU  -- timing says WHICH is real
+//   R2        forward PU + central HS             -- timing rejects the fake
+//   BOTH_HS   both VBS jets truth hard-scatter    -- nothing to reject
+//   OTHER     everything else
 //
 // Reading it: the y axis is "given an event at this m_jj, what topology is it?"
 // Because each column is normalised independently, the falling m_jj spectrum
@@ -61,61 +61,38 @@ using namespace MyUtl;
 namespace {
 
   // ── Categories ───────────────────────────────────────────────────────────
-  // Ordered to answer one question: in what fraction of events can HGTD
-  // contribute at all? The first three are the topologies where it can; the
-  // rest are the ways an event puts itself out of reach.
+  // Four bands, per the simplified scheme:
   //
-  //   R1  both tags forward, one HS + one PU  -- timing must say WHICH is real
-  //   R2  forward PU + central HS             -- timing must reject the fake
-  //   R3  forward HS + central PU             -- the mirror of R2: the GENUINE
-  //       tag is the timeable one, so timing confirms rather than rejects. A
-  //       different use of the same information, and on local VBF roughly 3x
-  //       the size of R2, which is why it is broken out rather than buried in a
-  //       residual.
+  //   R1       both tags forward, one HS + one PU -- timing says WHICH is real
+  //   R2       forward PU + central HS            -- timing rejects the fake
+  //   BOTH_HS  both VBS jets truth hard-scatter (any eta) -- a genuine VBS
+  //            pair; nothing for timing to reject
+  //   OTHER    everything else: mixed pairs in other eta configurations
+  //            (incl. the old R3), both-PU pairs, out-of-acceptance pairs, and
+  //            pairs with a neither-label jet (isJetPaperHS / isJetPaperPU are
+  //            NOT complements, so a jet between the two cones is neither)
   //
   // EXHAUSTIVE by construction: per-column normalisation is meaningless
   // otherwise, so the ladder ends in a catch-all and main() checks the totals.
-  //
-  // NO_ACC ("neither tag in HGTD acceptance") deliberately sits ABOVE the
-  // truth-content categories in the ladder: for the question being asked, an
-  // event with both tags out of acceptance is unreachable regardless of whether
-  // its tags are truth-HS, and saying so is more informative than sorting it by
-  // a truth label HGTD will never get to use. R1/R2/R3 all require a forward
-  // leg, so they cannot collide with it.
-  //
-  // OTHER is not padding. isJetPaperHS and isJetPaperPU are NOT complements --
-  // HS wants a match within dR 0.3 of a truth HS jet above 10 GeV, PU wants NO
-  // match within dR 0.6 above 4 GeV -- so a jet between the two cones is
-  // neither, and those events have to land somewhere. It also holds the mixed
-  // pairs whose second leg is beyond |eta| = MAX_ABS_ETA_JET.
-  enum Cat { R1 = 0, R2, R3, BOTH_HS, BOTH_PU, OTHER, NO_ACC, NCAT };
+  enum Cat { R1 = 0, R2, BOTH_HS, OTHER, NCAT };
 
   const std::array<const char*, NCAT> CAT_KEY = {
-    "r1", "r2", "r3", "both_hs", "both_pu", "other", "no_acc"
+    "r1", "r2", "both_hs", "other"
   };
 
   const std::array<const char*, NCAT> CAT_LABEL = {
     "R1: both tags fwd, HS + PU",
     "R2: fwd PU + central HS",
-    "R3: fwd HS + central PU",
-    "Both tags truth-HS",
-    "Both tags pileup",
-    "Other",
-    "Neither tag in HGTD acceptance"
+    "Both VBS jets truth HS",
+    "Other"
   };
 
-  // Palette carries the message: the three topologies HGTD can act on are
-  // saturated and mutually distinct, everything it cannot reach is muted. Two
-  // greys rather than four so the neutral block stays legible; brown and violet
-  // keep the middle two separable without competing with the regions.
+  // The two regions timing can act on are saturated; the rest muted.
   const std::array<Color_t, NCAT> CAT_COLOR = {
-    C01,        // R1       blue   -+
-    C02,        // R2       red     |- HGTD can contribute
-    C08,        // R3       green  -+
-    kGray,      // both HS  (dominant, so the lightest of the neutrals)
-    C06,        // both PU  brown
-    C04,        // other    violet
-    kGray + 2   // no acc.  dark grey
+    C01,        // R1       blue  -+ HGTD can contribute
+    C02,        // R2       red   -+
+    kGray,      // both HS  (dominant, lightest neutral)
+    kGray + 2   // other    dark grey
   };
 
   // ── m_jj binning ─────────────────────────────────────────────────────────
@@ -208,7 +185,6 @@ int main(int argc, char** argv) {
   // become the black box that "other eta config" was before R3 was split out of
   // it. Indexed [HS leg zone][PU leg zone]: 0 = central |eta| < MIN_ABS_ETA_JET,
   // 1 = HGTD acceptance, 2 = beyond MAX_ABS_ETA_JET.
-  long nMix[3][3] = {};
 
   const Long64_t nEntries = chain.GetEntries();
   const Long64_t denom    = (maxEvents > 0 && maxEvents < nEntries) ? maxEvents : nEntries;
@@ -262,11 +238,7 @@ int main(int argc, char** argv) {
     const bool puB = branch.isJetPaperPU(branch.topoJetEta[b], branch.topoJetPhi[b]);
     const int  zA  = zone(a), zB = zone(b);
 
-    // ── The three regions, defined together ─────────────────────────────────
-    // Written out side by side rather than taking R1/R2 from the shared
-    // classifier and bolting R3 on beside them: the three are one set, and the
-    // symmetry between R2 and R3 (which leg is the timeable one) is the whole
-    // point. Spelling them out is what makes that readable.
+    // ── The two regions, defined together ───────────────────────────────────
     //
     // isR1/isR2 must still agree with classifyVbsRegion, since that is what
     // rpt_v5 and the clustering analysis fill -- cross-checked per event below,
@@ -274,29 +246,17 @@ int main(int argc, char** argv) {
     const bool isR1 = (zA == 1 && zB == 1) && ((hsA && puB) || (hsB && puA));
     const bool isR2 = (zA == 1 && puA && zB == 0 && hsB) ||
                       (zB == 1 && puB && zA == 0 && hsA);
-    const bool isR3 = (zA == 1 && hsA && zB == 0 && puB) ||
-                      (zB == 1 && hsB && zA == 0 && puA);
-
     if (isR1 != (region == VbsRegion::R1)) ++nDisagreeR1;
     if (isR2 != (region == VbsRegion::R2)) ++nDisagreeR2;
 
     Cat cat;
-    if      (isR1) cat = R1;
-    else if (isR2) cat = R2;
-    else if (isR3) cat = R3;
-    // Nothing timeable at all. Checked before the truth split on purpose: see
-    // the NO_ACC note on the enum.
-    else if (zA != 1 && zB != 1) cat = NO_ACC;
-    else if (hsA && hsB)         cat = BOTH_HS;
-    else if (puA && puB)         cat = BOTH_PU;
-    else {
-      cat = OTHER;
-      if ((hsA && puB) || (hsB && puA)) {
-        const int hsIdx = (hsA && puB) ? a : b;
-        const int puIdx = (hsA && puB) ? b : a;
-        ++nMix[zone(hsIdx)][zone(puIdx)];
-      }
-    }
+    if      (isR1)       cat = R1;
+    else if (isR2)       cat = R2;
+    // Truth-content band regardless of eta: a genuine VBS pair is a genuine
+    // VBS pair wherever its legs sit, and the question the plot answers is
+    // "what is this event", not "is it in acceptance".
+    else if (hsA && hsB) cat = BOTH_HS;
+    else                 cat = OTHER;
 
     // Below the axis floor the event cannot be placed on this plot. Dropped
     // rather than piled into the first column, which would misreport it, and
@@ -437,8 +397,8 @@ int main(int argc, char** argv) {
            sum, nPlot);
 
   // The headline this plot exists to give.
-  const long nReach = nCat[R1] + nCat[R2] + nCat[R3];
-  printf("\n  HGTD can contribute (R1 + R2 + R3): %ld  (%.2f%% of plotted)\n",
+  const long nReach = nCat[R1] + nCat[R2];
+  printf("\n  HGTD can contribute (R1 + R2): %ld  (%.2f%% of plotted)\n",
          nReach, nPlot ? 100.0 * nReach / nPlot : 0.0);
 
   if (nDisagreeR1 || nDisagreeR2)
@@ -448,23 +408,6 @@ int main(int argc, char** argv) {
            nDisagreeR1, nDisagreeR2);
   else
     printf("  (local R1/R2 agree with classifyVbsRegion on every event)\n");
-
-  // Where the "HS + PU, other eta config" events actually sit. This is the
-  // largest non-both-HS category, so it is worth saying what it is rather than
-  // leaving it as a residual.
-  const char* ZONE[3] = { "central", "HGTD acc", "beyond" };
-  printf("\n  \"Other\" mixed-truth breakdown (rows = HS leg, cols = PU leg):\n");
-  printf("    %-10s %10s %10s %10s %10s\n", "HS \\ PU", ZONE[0], ZONE[1], ZONE[2], "total");
-  printf("    %s\n", std::string(54, '-').c_str());
-  for (int i = 0; i < 3; ++i) {
-    long rowsum = nMix[i][0] + nMix[i][1] + nMix[i][2];
-    printf("    %-10s %10ld %10ld %10ld %10ld\n",
-           ZONE[i], nMix[i][0], nMix[i][1], nMix[i][2], rowsum);
-  }
-  printf("    (R1/R2/R3 are already broken out, so acc/acc, acc-PU/central-HS and\n"
-         "     acc-HS/central-PU are absent here by construction. central =\n"
-         "     |eta| < %.2f, HGTD acc = %.2f-%.2f, beyond = above that.)\n",
-         MIN_ABS_ETA_JET, MIN_ABS_ETA_JET, MAX_ABS_ETA_JET);
 
   printf("\n  Wrote %s\n", pdf.c_str());
   printf("  Wrote %s\n", rootPath.c_str());
