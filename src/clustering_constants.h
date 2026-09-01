@@ -604,6 +604,7 @@ namespace MyUtl {
     static const Score TRKPTZ_TZ_IJ;
     static const Score TRKPTZ_TZ_OJ;
     static const Score TRKPTZ_TZ_GIJ;
+    static const Score WAVES_GIJ;
   };
 
   inline const std::string STR_TRKPTZ = "#Sigma p_{T}e^{-|#Delta z|}";
@@ -741,6 +742,15 @@ namespace MyUtl {
                                               ClusteringMethod::ITERATIVE, false, TrackFilterType::ALL,
                                               VbsRegion::NONE, TimeSource::IN_JET,
                                               MIN_INJET_TRACKS_FOR_TIME };
+  // WAVeS SELECTION with the guarded in-jet time. Deployed WAVeS (id 18) applies
+  // its in-jet re-timing unconditionally, and that re-timing is +0.82 on VBF but
+  // -1.43 on Z+jets for ANY selector -- so WAVeS inherits that Z+jets deficit.
+  // This row is the same selection with the same guard as TRKPTZ_TZ_GIJ, which
+  // isolates what guarding costs WAVeS on VBF against what it recovers elsewhere.
+  inline const Score Score::WAVES_GIJ = { 31, "WAVeS Score [guarded in-jet t]", "WAVES_GIJ",
+                                          false, false, -1.f, -1.0, ClusteringMethod::ITERATIVE,
+                                          false, TrackFilterType::ALL, VbsRegion::NONE,
+                                          TimeSource::IN_JET, MIN_INJET_TRACKS_FOR_TIME };
 
   // Scores with a dedicated collection (distCut ≥ 0 → buildsCollection() = true)
   inline const Score Score::CONE       = {  7, "Cone"                       , "CONE",     true , false, -1.f, DIST_CUT_CONE, ClusteringMethod::CONE };
@@ -754,7 +764,7 @@ namespace MyUtl {
     Score::WAVES,    Score::JET_T_REFINED, Score::WAVES_MISCL, Score::WAVES_MISAS,
     Score::VBF_R1,   Score::VBF_R2,
     Score::TRKPTZ_PV, Score::TRKPTZ_PU, Score::TRKPTZ_PUW, Score::TRKPTZ_TZ,
-    Score::TRKPTZ_TZ_IJ, Score::TRKPTZ_TZ_OJ, Score::TRKPTZ_TZ_GIJ,
+    Score::TRKPTZ_TZ_IJ, Score::TRKPTZ_TZ_OJ, Score::TRKPTZ_TZ_GIJ, Score::WAVES_GIJ,
   };
 
   // ---------------------------------------------------------------------------

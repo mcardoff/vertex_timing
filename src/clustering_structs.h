@@ -1108,10 +1108,14 @@ namespace MyUtl {
               wavesSum * std::exp(-1.5 * std::abs(rawDeltaZ));
         else
           this->scores[Score::WAVES.id] = this->scores.at(Score::TRKPTZ.id);
+
       }
 
       // JET_T_REFINED: dedicated collection (jet-filtered tracks at 2σ iterative);
       // cluster selected by TRKPTZ via the aux-collection path in selectClusters().
+      // Same value as WAVES, so chooseCluster picks the identical cluster;
+      // the two rows differ only in Score::minSubsetTracks.
+      this->scores[Score::WAVES_GIJ.id] = this->scores.at(Score::WAVES.id);
       this->scores[Score::JET_T_REFINED.id] = this->scores.at(Score::TRKPTZ.id);
 
       // WAVeS oracle variants: selected by the WAVeS score; denominator gates
