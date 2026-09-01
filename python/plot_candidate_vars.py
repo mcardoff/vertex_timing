@@ -78,11 +78,15 @@ def main():
             txt.append(f"{tag}: AUC {fold:.3f} {arrow}")
             for dm, ls, lw in ((True, "-", 1.8), (False, "--", 1.2)):
                 sel = m & (dom == dm)
-                h, e = np.histogram(np.clip(x[sel], bins[0], bins[-1]),
-                                    bins=bins, density=True)
+                h, e = np.histogram(np.clip(x[sel], bins[0], bins[-1]), bins=bins)
+                # unit-SUM normalisation (fraction of clusters per bin), not
+                # density: density divides by bin width, which on log-spaced
+                # bins distorts the shapes and defeats a shape comparison.
+                h = h / max(h.sum(), 1)
                 ax.stairs(h, e, color=col[tag], linestyle=ls, linewidth=lw,
                           label=f"{tag} {'HS-dom' if dm else 'other'}")
         ax.set_yscale("log")
+        ax.set_ylabel("fraction of clusters / bin", fontsize=8)
         ax.set_xlabel(label, fontsize=9)
         ax.text(0.03, 0.97, "\n".join(txt), transform=ax.transAxes, fontsize=8,
                 va="top", ha="left",
@@ -90,7 +94,7 @@ def main():
         ax.tick_params(labelsize=8)
     axes[0, 0].legend(fontsize=8, loc="lower left")
     fig.suptitle("Variables NOT in the current score: HS-dominant cluster (solid) "
-                 "vs other clusters (dashed), whole population", fontsize=12)
+                 "vs other clusters (dashed), whole population, each curve normalised to unit sum", fontsize=12)
     fig.tight_layout(rect=[0, 0, 1, 0.97])
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     fig.savefig(a.out)
