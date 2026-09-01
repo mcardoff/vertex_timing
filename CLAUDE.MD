@@ -379,6 +379,15 @@ IDEAL_TRACK_RES       = 1.0   // ps — flat per-track resolution for ideal scen
 PASS_SIGMA            = 60.0  // ps — ±window for "Core Fraction" efficiency oracle
 TRUTH_PULL_CUT        = 3.0   // σ — |pull| threshold for oracle timing purity gates
 WAVES_DR_FLOOR        = 0.05  // minimum ΔR for the WAVeS 1/ΔR weight (prevents divergence)
+// TZP classical selector (2026-09-01, see Physics Findings) — these three are
+// TZP-ONLY; TRACK_DZ_WEIGHT (0.7) and the 1.5 stay untouched for the ladder rows
+TZP_TRACK_DZ_WEIGHT   = 1.0   // /mm — per-track exp(−α|z0_t − z_PV|) inside the pT sum
+TZP_CLUSTER_DZ_WEIGHT = 0.6   // /mm — cluster-level exp(−β|Δz|); TRKPTZ's 1.5 was never tuned and is too steep
+TZP_D0_PRECISION      = 0.45  // exponent on (1/σ_d0^cluster); d0 beat its qP/z0 siblings head-to-head
+MIN_INJET_TRACKS_FOR_TIME = 3 // Score::minSubsetTracks — in-jet time only when ≥3 in-jet tracks (sample-independence guard)
+TRACK_DZ_WEIGHT       = 0.7   // /mm — the TZ-family ladder rows (historical, kept for continuity)
+QP_PRECISION_WEIGHT   = 0.8   // unused; superseded by d0 (kept for the record)
+JET_FRAC_WEIGHT       = 0.0   // jet-fraction term REJECTED by the population check (kept as diagnostic)
 VBS_JET_D_ETA         = 0.0   // NO |Deta| requirement (was 3.0 before 2026-08-26)
                               //   NEGATIVE (--vbs-deta=-1) drops the VBS PAIR
                               //   requirement itself; see the novbs note below
@@ -819,15 +828,43 @@ All scores are defined as `static const Score` members of the `Score` struct in 
 | 19 | JET_T_REFINED | WAVeS 2σ t Re-clustering | Own collection (`WAVES_RECLUST` short name); `JET` filter, `ClusteringMethod::ITERATIVE` at `DIST_CUT_T_REFINED`; selected by TRKPTZ |
 | 20 | WAVES_MISCL | WAVeS [Events with Pure Clusters] | Oracle: `requiresPurity`, gated on cluster purity > 0.75 |
 | 21 | WAVES_MISAS | WAVeS [Events with Perfect Timing] | Oracle: `requiresPurity`, gated on event-level HS timing purity ≥ 0.95 |
+| 22 | VBF_R1 | WAVeS [VBF R1: both tags fwd] | WAVeS selection, denominator gated on VBS region R1 (`regionGate`) |
+| 23 | VBF_R2 | WAVeS [VBF R2: fwd PU + cen. HS] | Same, region R2 |
+| 24 | TRKPTZ_PV | ... [PV-side tracks] | pT sum restricted to tracks closer to PV than any PU vtx — hard veto, **−1.27** on VBF |
+| 25 | TRKPTZ_PU | ... [PU-side tracks] | Orientation control for 24 (−9.03) |
+| 26 | TRKPTZ_PUW | ... [PU-side down-weighted] | Softened veto (w=0.4); superseded by TRKPTZ_TZ |
+| 27 | TRKPTZ_TZ | ... [per-track #Deltaz] | + per-track `exp(−0.7·dz)` weight; +1.76 zjets / +0.68 vbf |
+| 28 | TRKPTZ_TZ_IJ | ... [, in-jet t] | TZ selection (identical score value), `TimeSource::IN_JET` unconditional |
+| 29 | TRKPTZ_TZ_OJ | ... [, out-jet t] | Same, `OUT_JET` complement |
+| 30 | TRKPTZ_TZ_GIJ | ... [, guarded in-jet t] | Same, in-jet time gated at `minSubsetTracks = 3` |
+| 31 | WAVES_GIJ | WAVeS Score [guarded in-jet t] | WAVeS selection with the ≥3 guard |
+| 32 | TRKPTZ_TZJ | ... [+ jet frac] | Bounded jet term — REJECTED (population coin-flip on zjets); `JET_FRAC_WEIGHT = 0` |
+| 33 | TRKPTZ_TZP | ... [+ d0 precision] | **The final classical selector (TZP)** — C++ symbol is still `Score::TRKPTZ_TZQ`, renamed short/long name after the d0-supersedes-qP swap. See Physics Findings |
+
+Two fields added to `Score` (2026-09-01): **`timeSource`**
+(`TimeSource::{FULL, IN_JET, OUT_JET}`) — which subset of the SELECTED
+cluster's tracks `calculateTime` builds the reported time from (`FULL`
+deliberately not `RAW`: macOS's `<sys/ioctl_compat.h>` defines a `RAW` macro
+that only bites when ROOT/cling compiles `runHGTD_Clustering.cxx`, silently
+breaking `event_display.py`) — and **`minSubsetTracks`** (fall back to the
+full-cluster time below it; 0 = historical behaviour, which the WAVES family
+keeps). `calculateTime` dispatches on the flag instead of the old hard-coded
+WAVES score list. **Score long names must never contain `/`** — the histogram
+key embeds them, and `TFile::Get`/uproot treat `/` as a directory separator:
+the write succeeds and every readback fails.
 
 Oracle scores (`requiresPurity=true`) gate their denominator: events outside the gate are not counted. **Important:** `calcHSTimingPurity` (event-level, used by `TEST_MISAS`/`WAVES_MISAS`) returns `0.0f` — not `1.0f` — when no qualifying HS tracks exist, ensuring that events with zero forward HS tracks are excluded from oracle denominators.
 
-`clustering_hist`/`clustering_plot`'s currently active scores (built by `buildAnalysisMap`, `src/clustering_dt_common.h`) are `TRKPTZ`, `WAVES`, `JET_T_REFINED`, `TEST_MISAS`, `WAVES_MISCL`, `WAVES_MISAS`, plus `HGTD`.
+`clustering_hist`/`clustering_plot`'s currently active scores (built by `buildAnalysisMap`, `src/clustering_dt_common.h`) are `TRKPTZ`, `WAVES`, `JET_T_REFINED`, `TEST_MISAS`, `WAVES_MISCL`, `WAVES_MISAS`, `VBF_R1/R2`, the full id 24–33 ladder above, plus `HGTD`.
 
 Comparison PDF groups produced by `clustering_plot` from histograms written by `clustering_hist` (`makeComparisonPlots`, one set per `KEYS = {pu_frac, fjet, ftrack, hs_track, truthjets}`):
 - `theplot_*.pdf` — HGTD vs TRKPTZ vs TEST_MISAS
 - `waves_oracle_*.pdf` — HGTD vs TRKPTZ vs WAVES vs WAVES_MISAS
 - `hgtd_trkptz_waves_*.pdf` — HGTD vs TRKPTZ vs WAVES (no oracles)
+- `vbf_regions_*.pdf` — WAVES vs VBF_R1 vs VBF_R2 (topology, algorithm fixed)
+- `trkptz_tz_*.pdf` — TRKPTZ vs TRKPTZ_TZ vs WAVES (the per-track Δz term isolated)
+- `timesource_*.pdf` — TRKPTZ_TZ raw vs in-jet vs out-of-jet time (selection bit-identical)
+- `guarded_*.pdf` — the deployable set: TRKPTZ / TZ / TZ_GIJ / **TZP** / WAVES
 
 Plus inclusive resolution/pull plots (`inclusive/inclusivereso_*`,
 `inclusive/inclusivepull_*`, log/lin) and shape-comparison plots
@@ -888,6 +925,71 @@ Key structures and entry points:
 > mismatch (`HistReader::CheckSelection`); files older than that cannot be
 > checked and produce a warning instead — those are exactly the ones whose
 > untagged name no longer implies their selection.
+
+### TZP: the classical selector (2026-09-01) — supersedes WAVeS as the best non-ML score
+
+`Score::TRKPTZ_TZQ` (short name `TRKPTZ_TZP`, id 33). One closed-form,
+sample-independent algorithm:
+
+```
+S(C)  =  [ Σ_t pT_t · exp(−1.0·|z0_t − z_PV|) ] · exp(−0.6·|z_C − z_PV|) · [ Σ_t 1/σ²_d0,t ]^0.225
+t0    =  in-jet inverse-variance mean if the cluster holds ≥3 in-jet tracks, else full-cluster mean
+```
+
+Core fraction (novbs; mjj500 in parens; μ=0 controls −0.01 everywhere over 4.9M events):
+
+| | vbf | zjets | dijet | ttbar |
+|---|---|---|---|---|
+| TZP | 91.66 (92.08) | 64.71 (**64.31**) | 88.97 (88.58) | 89.08 (88.84) |
+| vs TRKPTZ | +1.6 | **+2.4** | +1.7 | +1.8 |
+| vs deployed WAVeS | +0.2 | **+6.4** | +2.5 | +2.8 |
+
+Canonical zjets 61.87 → **64.31** with no ML and no per-sample configuration.
+Full trail: `results/{trkptz_pv_augmentation, injet_decomposition,
+sample_independent_timing, guarded_allsamples, qoverp_term, score_grid_search,
+t0_integration, failure_modes, tiebreak_scan, jet_term_consistency,
+classical_scoring_brainstorm, split_clustering}.md`. Key mechanisms:
+
+- **WAVeS decomposes into selection (+0.5) and in-jet re-timing (+0.8), and the
+  re-timing is a pure additive term** — identical to two decimals across
+  TRKPTZ/TZ/WAVeS selectors on every sample tested. Unconditionally applied
+  (deployed WAVeS) it is NEGATIVE on 3 of 4 samples (zjets −1.4); the ≥3-track
+  guard makes it safe everywhere because the sample dependence then emerges
+  from the data (fires on 70% of VBF events, 9% of zjets) instead of being
+  configured in. The sign is set by the share of HS *timing weight* inside
+  jets: 48% VBF vs 10% zjets — a statistics effect, not purity (zjets in-jet
+  purity is still 2.1× enriched and the subset still times worse).
+- **Gentle-beats-steep, uniformly.** Every steep/binary z- or agreement-based
+  penalty lost (PV-proximity veto −1.27, vertex-WAVeS multiplier −5.7, t0
+  fallback −2.8); the gentle continuous versions of the same information won
+  (+1.76). At ~106 vertices/event the HS cluster is often NOT nearest the PV.
+- **TRKPTZ's cluster-level 1.5 was stale.** Never tuned by anyone; jointly with
+  the per-track term the optimum softens it 2.5× to 0.6 (α 0.7→1.0, γ 1.2→0.45,
+  each 1-D optimum having been conditioned on the others' old values).
+- **The three precision sums (z0/d0/qP) are one signal** (mutual corr
+  0.86–0.95); d0 is the best packaging and stacking a second adds nothing.
+- **Raw |Δz| in mm beats z0 significance** as the per-track weight (+1.76 vs
+  +1.21 on zjets) — same conclusion as the z-association study reached about
+  `sqrt(var_z0)`.
+- **Closed negatives** (do not retry): canonical vertex-WAVeS weighting (its
+  score is ~10⁴:1 concentrated on the PV, so it cancels in the within-event
+  argmax); jet-fraction score term (population coin-flip on zjets, 0.612 AUC vs
+  0.90 on the loss subset); aggregate-t0 as score term or timing fallback
+  (aggregate right only ~27% of disagreements); multiplicity-gated chooser
+  (truth gate no better than reco gate — multiplicity is not the variable);
+  per-event adaptive α (optimum is 0.7–1.0 in every n-vertices bin).
+- **What remains uncaptured**: union(TZP, aggregate t0) is 3–7 points above TZP
+  on every sample; only a chooser reaches it and no classical one works. The
+  `|t_in − t_out|` split-clustering agreement flag is the strongest reco-only
+  confidence variable found (79% vs 58% core at +19–27 in every multiplicity
+  bin) — unused by TZP, natural consumer is the RpT gate.
+- **Methodology, hard-won**: (1) rank variables on the events a method LOSES
+  and they overstate themselves — generate hypotheses there, but believe only
+  population-wide switch accounting; (2) any best-of-N oracle needs a
+  matched-noise null (the 3-timing oracle read +1.12 real, null +1.67);
+  (3) event-level quantities cancel exactly in a within-event argmax;
+  (4) `truth_n_hs_tracks` is PER CLUSTER — event totals are the SUM, and
+  `.first()` silently reads one cluster's count.
 
 Results as of 2026-08-20, from `rpt_v5` (grid samples, |Deta| >= 0 and
 m_jj >= 500 GeV) and `failure_decomposition` (local VBF). Numbers are pileup
