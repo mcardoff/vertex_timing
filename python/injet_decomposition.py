@@ -142,7 +142,10 @@ def main():
     E["agg_ij"] = okI.to_numpy()
     for lab in ("TRKPTZ", "TRKPTZ_TZ", "WAVeS"):
         E[lab] = ((picks[lab]["cluster_time"] - truth).abs() < 60).to_numpy()
-    E["nhs"] = c.groupby(EVT, sort=False)["truth_n_hs_tracks"].first().reindex(E.index).to_numpy()
+    # truth_n_hs_tracks is PER CLUSTER ("HS tracks in this cluster"), so the
+    # event-level count is the SUM over the event's clusters, not .first() --
+    # .first() silently takes whichever cluster happens to be listed first.
+    E["nhs"] = c.groupby(EVT, sort=False)["truth_n_hs_tracks"].sum().reindex(E.index).to_numpy()
     E["njet"] = c.groupby(EVT, sort=False)["n_forward_jets"].first().reindex(E.index).to_numpy()
 
     for var, title, edges in [
