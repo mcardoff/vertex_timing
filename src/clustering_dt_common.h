@@ -154,6 +154,19 @@ inline void makeComparisonPlots(
 	    },
 	    {C08, C01, C02});
 
+  // The deployable comparison: baseline, the per-track dz weighting, the same
+  // plus the SAMPLE-INDEPENDENT guarded in-jet re-timing, and WAVeS as the
+  // incumbent to beat. Every curve here is a single algorithm with no per-sample
+  // configuration, so this is the set that could actually ship.
+  moneyPlot(MyUtl::plotFilePath("comparisons", TString::Format("guarded_%s.pdf", key).Data()).c_str(), key, canvas,
+	    {
+	      &mapHGTD.at(Score::TRKPTZ),
+	      &mapHGTD.at(Score::TRKPTZ_TZ),
+	      &mapHGTD.at(Score::TRKPTZ_TZ_GIJ),
+	      &mapHGTD.at(Score::WAVES),
+	    },
+	    {C02, C08, C01, C03});
+
 }
 
 #endif  // CLUSTERING_DT_COMMON_H
