@@ -351,3 +351,29 @@ So the diagnostic is not vacuous -- it finds real complementarity on VBF
 document: the jet partition is informative where the jets hold the hard scatter
 (VBF, 47% of HS timing weight) and uninformative where they do not (Z+jets,
 10%).
+
+---
+
+# Methodological note: screening event displays
+
+Selecting display candidates on the time criterion alone (`|t - t_truth| < 60`)
+does NOT isolate a selection difference. It admits events where the losing method
+picked a **lone genuine hard-scatter track carrying a mis-measured HGTD time** --
+`truth_purity = 1.000`, one HS track, sitting 1.2 ns from truth. Those are the
+irreducible ~13.5% mis-measurement tail, not a selection failure, and they
+flatter whichever method happens to avoid them.
+
+This is the mirror image of the warning already in CLAUDE.md ("never rank a
+selection oracle by cluster purity"): ranking by TIME error alone has the
+complementary blind spot. Two of the first four candidates chosen this way were
+artifacts of exactly this kind.
+
+`python/pick_display_events.py` screens properly. A genuine selection difference
+requires the event to HAVE a right answer (the HS-dominant cluster is itself
+within 60 ps), the two methods to pick DIFFERENT clusters, and the loser's
+cluster to be genuinely pileup-like (<= 2 HS tracks, purity <= 0.50, >= 3 tracks
+so it is not a lone mis-timed track).
+
+Applied to local VBF, the clean candidate counts are **271 ours-wins vs 299
+WAVeS-wins**, in line with the raw 1001 / 1077 -- so the screen removes artifacts
+roughly symmetrically rather than favouring either method.
