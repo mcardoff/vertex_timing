@@ -553,6 +553,9 @@ namespace MyUtl {
     static const Score WAVES_MISAS;
     static const Score VBF_R1;
     static const Score VBF_R2;
+    static const Score TRKPTZ_PV;
+    static const Score TRKPTZ_PU;
+    static const Score TRKPTZ_PUW;
   };
 
   inline const std::string STR_TRKPTZ = "#Sigma p_{T}e^{-|#Delta z|}";
@@ -614,6 +617,38 @@ namespace MyUtl {
                                        -1.0, ClusteringMethod::ITERATIVE, false,
                                        TrackFilterType::ALL, VbsRegion::R2 };
 
+  // TRKPTZ_PV / TRKPTZ_PU: TRKPTZ with the pT sum restricted by the per-track
+  // vertex-proximity flag (BranchPointerWrapper::closerToPuThanPv), i.e.
+  //   score = exp(−1.5|Δz_cluster|) · Σ_i { pT_i if <flag matches>, else 0 }
+  // Same main collection and same Δz term as TRKPTZ — ONLY the pT sum changes,
+  // so the pair isolates what the flag is worth to the selector.
+  //
+  // The two differ solely in orientation, and both are built because the flag's
+  // sense is easy to invert by accident: closer_to_pu_than_pv == 1 marks a track
+  // nearer a PILEUP vertex, so _PV (keep flag == 0) is the physically motivated
+  // reading and _PU (keep flag == 1) is its control. If the flag carries real
+  // information the two must land on opposite sides of the TRKPTZ baseline;
+  // if both track the baseline, the Δz factor is doing all the work.
+  inline const Score Score::TRKPTZ_PV = { 24, STR_TRKPTZ + " [PV-side tracks]", "TRKPTZ_PV", false, false, -1.f };
+  inline const Score Score::TRKPTZ_PU = { 25, STR_TRKPTZ + " [PU-side tracks]", "TRKPTZ_PU", false, false, -1.f };
+
+  // TRKPTZ_PUW: the veto above, softened into a down-weight —
+  //   score = exp(−1.5|Δz|) · ( Σ_PV-side pT  +  PU_SIDE_PT_WEIGHT · Σ_PU-side pT )
+  // so weight 1 reproduces TRKPTZ exactly and weight 0 reproduces TRKPTZ_PV.
+  //
+  // The hard veto is far too aggressive to use directly: the flag fires on 88.0%
+  // of pileup tracks but ALSO on 46.8% of genuine hard-scatter tracks (local VBF),
+  // which zeroes 56% of clusters outright and costs 1.2–1.3 points of core
+  // fraction. Down-weighting keeps the flag's real discrimination while leaving
+  // the hard-scatter pT sum intact enough to still rank clusters.
+  //
+  // 0.4 is the flat optimum of a w ∈ [0,1] scan on the local VBF sample
+  // (90.45% at w = 1 → 90.76% at w = 0.4 → 89.22% at w = 0); the curve is smooth
+  // and single-peaked, and anything in 0.2–0.6 is within 0.03 of the peak. It has
+  // NOT been re-scanned on zjets/dijet/ttbar — do that before trusting it there.
+  inline constexpr double PU_SIDE_PT_WEIGHT = 0.4;
+  inline const Score Score::TRKPTZ_PUW = { 26, STR_TRKPTZ + " [PU-side down-weighted]", "TRKPTZ_PUW", false, false, -1.f };
+
   // Scores with a dedicated collection (distCut ≥ 0 → buildsCollection() = true)
   inline const Score Score::CONE       = {  7, "Cone"                       , "CONE",     true , false, -1.f, DIST_CUT_CONE, ClusteringMethod::CONE };
   inline const Score Score::FILTJET    = {  9, "Filter Tracks in Jets"      , "FILTJET",  true , false, -1.f, DIST_CUT_CONE, ClusteringMethod::CONE, false, TrackFilterType::JET };
@@ -625,6 +660,7 @@ namespace MyUtl {
     Score::CONE_BDT, Score::TEST_MISAS, Score::TEST_HS,
     Score::WAVES,    Score::JET_T_REFINED, Score::WAVES_MISCL, Score::WAVES_MISAS,
     Score::VBF_R1,   Score::VBF_R2,
+    Score::TRKPTZ_PV, Score::TRKPTZ_PU, Score::TRKPTZ_PUW,
   };
 
   // ---------------------------------------------------------------------------

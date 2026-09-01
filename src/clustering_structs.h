@@ -873,6 +873,34 @@ namespace MyUtl {
       return returnScore;
     }
 
+    // -----------------------------------------------------------------------
+    // closerToPuThanPv
+    //   True when the track's z₀ sits nearer to SOME reconstructed pileup
+    //   vertex than to the primary.  Reco-only: RecoVtx_z[0] is taken as the
+    //   primary (the selection already requires the PV be reconstructed, see
+    //   passBasicCuts' MAX_VTX_DZ test) and every other entry is treated as
+    //   pileup.  No truth is consulted.
+    //
+    //   Mirrors vertexRelation() in util/export_training_data.cxx, which is
+    //   where the training column `closer_to_pu_than_pv` comes from — keep the
+    //   two in step, since the whole point of the derived scores below is to
+    //   test that column inside the C++ selector.
+    //
+    //   Returns false when the event has no pileup vertex at all: with nothing
+    //   to be closer TO, the track cannot be closer to pileup, and a "true"
+    //   there would silently veto every track in a single-vertex event.
+    // -----------------------------------------------------------------------
+    bool closerToPuThanPv(int trkIdx) const {
+      const int nVtx = (int)this->recoVtxZ.GetSize();
+      if (nVtx < 2) return false;
+      const double z = this->trackZ0[trkIdx];
+      const double dPV = std::abs(z - this->recoVtxZ[0]);
+      double dPU = 1e9;
+      for (int v = 1; v < nVtx; ++v)
+        dPU = std::min(dPU, (double)std::abs(z - this->recoVtxZ[v]));
+      return dPU < dPV;
+    }
+
   };
 
   // ---------------------------------------------------------------------------
@@ -1007,6 +1035,27 @@ namespace MyUtl {
         // Common case (usez0=false): reuse deltaZ already computed by calcFeatures.
         this->scores[Score::TRKPTZ.id] =
           this->scores.at(Score::TRKPT.id) * std::exp(-1.5 * std::abs(rawDeltaZ));
+      }
+
+      // TRKPTZ_PV / TRKPTZ_PU: the same exp(−1.5|Δz|) envelope as TRKPTZ, but
+      // with the pT sum restricted to one side of the per-track vertex-
+      // proximity flag.  Deliberately reuses the Δz already computed above so
+      // the ONLY difference from TRKPTZ is which tracks enter the sum.
+      {
+        double sumPV = 0.0, sumPU = 0.0;
+        for (int trk : this->trackIndices) {
+          if (branch->closerToPuThanPv(trk)) sumPU += branch->trackPt[trk];
+          else                               sumPV += branch->trackPt[trk];
+        }
+        // Same Δz branch as TRKPTZ above: values[1] when clustering carried z₀
+        // as a second dimension, the calcFeatures value otherwise.
+        const double dzTerm = (this->values.size() > 1)
+          ? std::exp(-1.5 * std::abs(this->values.at(1) - branch->recoVtxZ[0]))
+          : std::exp(-1.5 * std::abs(rawDeltaZ));
+        this->scores[Score::TRKPTZ_PV.id] = sumPV * dzTerm;
+        this->scores[Score::TRKPTZ_PU.id] = sumPU * dzTerm;
+        this->scores[Score::TRKPTZ_PUW.id] =
+          (sumPV + PU_SIDE_PT_WEIGHT * sumPU) * dzTerm;
       }
 
       // WAVES: WAVeS-style score — Σ_i pT_i × pT_jet(i) / max(ΔR_i, DR_FLOOR)

@@ -55,6 +55,11 @@ inline auto buildAnalysisMap(
   // with the algorithm held fixed.
   m.emplace(Score::VBF_R1,      AnalysisObj(label, Score::VBF_R1));
   m.emplace(Score::VBF_R2,      AnalysisObj(label, Score::VBF_R2));
+  // TRKPTZ with the pT sum split on the per-track PV/PU proximity flag. Both
+  // orientations, so the flag's sense is settled by the run rather than assumed.
+  m.emplace(Score::TRKPTZ_PV,   AnalysisObj(label, Score::TRKPTZ_PV));
+  m.emplace(Score::TRKPTZ_PU,   AnalysisObj(label, Score::TRKPTZ_PU));
+  m.emplace(Score::TRKPTZ_PUW,  AnalysisObj(label, Score::TRKPTZ_PUW));
 
   // Scores active only in the real-HGTD scenario
   if (scenario == Scenario::HGTD) {
