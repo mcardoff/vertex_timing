@@ -66,6 +66,7 @@ inline auto buildAnalysisMap(
   m.emplace(Score::TRKPTZ_TZ_GIJ, AnalysisObj(label, Score::TRKPTZ_TZ_GIJ));
   m.emplace(Score::WAVES_GIJ,   AnalysisObj(label, Score::WAVES_GIJ));
   m.emplace(Score::TRKPTZ_TZJ,  AnalysisObj(label, Score::TRKPTZ_TZJ));
+  m.emplace(Score::TRKPTZ_TZQ,  AnalysisObj(label, Score::TRKPTZ_TZQ));
 
   // Scores active only in the real-HGTD scenario
   if (scenario == Scenario::HGTD) {
@@ -166,7 +167,7 @@ inline void makeComparisonPlots(
 	      &mapHGTD.at(Score::TRKPTZ_TZ),
 	      &mapHGTD.at(Score::TRKPTZ_TZ_GIJ),
 	      &mapHGTD.at(Score::WAVES),
-	      &mapHGTD.at(Score::TRKPTZ_TZJ),
+	      &mapHGTD.at(Score::TRKPTZ_TZQ),
 	    },
 	    {C02, C08, C01, C03, C04});
 

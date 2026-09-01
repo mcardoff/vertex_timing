@@ -1091,6 +1091,18 @@ namespace MyUtl {
         const double fJet = (ptAll > 0.0) ? ptInJet / ptAll : 0.0;
         this->scores[Score::TRKPTZ_TZJ.id] =
           sumTz * dzTerm * (1.0 + JET_FRAC_WEIGHT * fJet);
+
+        // Momentum-precision term: 1/sigma_qP^2 = SUM_t 1/var_qOverP -- the
+        // cluster's combined q/P information. Multiplying by its
+        // QP_PRECISION_WEIGHT power up-weights clusters holding well-measured
+        // momentum; see the constant's comment for the four-sample validation.
+        double qpInfo = 0.0;
+        for (int trk : this->trackIndices) {
+          const double v = branch->trackVarQp[trk];
+          if (v > 0.0) qpInfo += 1.0 / v;
+        }
+        this->scores[Score::TRKPTZ_TZQ.id] =
+          sumTz * dzTerm * std::pow(qpInfo, 0.5 * QP_PRECISION_WEIGHT);
       }
 
       // WAVES: WAVeS-style score — Σ_i pT_i × pT_jet(i) / max(ΔR_i, DR_FLOOR)

@@ -611,6 +611,7 @@ namespace MyUtl {
     static const Score TRKPTZ_TZ_GIJ;
     static const Score WAVES_GIJ;
     static const Score TRKPTZ_TZJ;
+    static const Score TRKPTZ_TZQ;
   };
 
   inline const std::string STR_TRKPTZ = "#Sigma p_{T}e^{-|#Delta z|}";
@@ -758,7 +759,24 @@ namespace MyUtl {
   // Since Z+jets is the background to VBF H->inv, a signal-only +0.32 bought with
   // an extra term is not a good trade. Left implemented and tunable so the
   // measurement is reproducible, but off.
-inline constexpr double JET_FRAC_WEIGHT = 0.0;
+// Exponent of the cluster momentum-precision term, score *= (1/sigma_qP)^b
+  // with sigma_qP = 1/sqrt(SUM_t 1/var_qOverP_t) -- the inverse-variance-
+  // combined q/P uncertainty of the cluster. 1/sigma_qP^2 is "amount of
+  // well-measured momentum", rising with both track count and per-track
+  // momentum quality, which is why it narrowly beats plain n_tracks^g or
+  // sumpt^g controls (worst-sample +0.21 vs +0.14 / +0.18 at the controls'
+  // best working points).
+  //
+  // Unlike the jet-fraction term above, this one PASSED the population
+  // consistency battery: the four-sample scan (novbs, ~2.0M events) is
+  // positive on every sample at both 0.4 and 0.8 --
+  //     beta   vbf    zjets  dijet  ttbar   worst
+  //     0.40  +0.19  +0.26  +0.20  +0.19   +0.19
+  //     0.80  +0.26  +0.24  +0.25  +0.21   +0.21
+  // -- with one global value and no per-sample configuration. 0.8 is the
+  // flat optimum; the curve turns over by 1.6 (zjets -0.03).
+  inline constexpr double QP_PRECISION_WEIGHT = 0.8;
+  inline constexpr double JET_FRAC_WEIGHT = 0.0;
   inline constexpr double TRACK_DZ_WEIGHT = 0.7;
   inline const Score Score::TRKPTZ_TZ = { 27, STR_TRKPTZ + " [per-track #Deltaz]", "TRKPTZ_TZ", false, false, -1.f };
   // Same SELECTION as TRKPTZ_TZ (updateScores copies its value verbatim, so the
@@ -781,6 +799,18 @@ inline constexpr double JET_FRAC_WEIGHT = 0.0;
                                               ClusteringMethod::ITERATIVE, false, TrackFilterType::ALL,
                                               VbsRegion::NONE, TimeSource::IN_JET,
                                               MIN_INJET_TRACKS_FOR_TIME };
+  // NB: the long name deliberately says 'qP', not 'q/P'. Histogram names
+  // embed the long name as the TFile key, and TFile::Get (and uproot)
+  // treat '/' in a key path as a DIRECTORY separator -- the write succeeds
+  // and every readback then fails with 'key not found'.
+  // TRKPTZ_TZ x (1/sigma_qP)^0.8 with the guarded in-jet time: the full
+  // sample-independent candidate. See QP_PRECISION_WEIGHT above for the
+  // four-sample validation.
+  inline const Score Score::TRKPTZ_TZQ = { 33, STR_TRKPTZ + " [per-track #Deltaz + qP precision]",
+                                           "TRKPTZ_TZQ", false, false, -1.f, -1.0,
+                                           ClusteringMethod::ITERATIVE, false,
+                                           TrackFilterType::ALL, VbsRegion::NONE,
+                                           TimeSource::IN_JET, MIN_INJET_TRACKS_FOR_TIME };
   // WAVeS SELECTION with the guarded in-jet time. Deployed WAVeS (id 18) applies
   // its in-jet re-timing unconditionally, and that re-timing is +0.82 on VBF but
   // -1.43 on Z+jets for ANY selector -- so WAVeS inherits that Z+jets deficit.
@@ -811,7 +841,7 @@ inline constexpr double JET_FRAC_WEIGHT = 0.0;
     Score::WAVES,    Score::JET_T_REFINED, Score::WAVES_MISCL, Score::WAVES_MISAS,
     Score::VBF_R1,   Score::VBF_R2,
     Score::TRKPTZ_PV, Score::TRKPTZ_PU, Score::TRKPTZ_PUW, Score::TRKPTZ_TZ,
-    Score::TRKPTZ_TZ_IJ, Score::TRKPTZ_TZ_OJ, Score::TRKPTZ_TZ_GIJ, Score::WAVES_GIJ, Score::TRKPTZ_TZJ,
+    Score::TRKPTZ_TZ_IJ, Score::TRKPTZ_TZ_OJ, Score::TRKPTZ_TZ_GIJ, Score::WAVES_GIJ, Score::TRKPTZ_TZJ, Score::TRKPTZ_TZQ,
   };
 
   // ---------------------------------------------------------------------------
