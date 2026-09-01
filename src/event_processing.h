@@ -191,7 +191,7 @@ namespace MyUtl {
     // qualifying forward jets are usually PILEUP, so the subset to keep and the
     // subset to discard swap over relative to VBF, and only running both
     // settles which.
-    if (score.timeSource != TimeSource::RAW) {
+    if (score.timeSource != TimeSource::FULL) {
       const bool wantInJet = (score.timeSource == TimeSource::IN_JET);
       // Collect (eta, phi) of qualifying forward reco jets — no truth matching
       std::vector<std::pair<double,double>> hsJets;

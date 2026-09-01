@@ -359,7 +359,7 @@ namespace MyUtl {
   //   what time a chosen cluster reports, never which cluster is chosen, so a
   //   pair of scores differing solely in this field isolates the re-timing.
   //
-  //     RAW      the full cluster (values[0]) -- the precision-weighted mean
+  //     FULL     the full cluster (values[0]) -- the precision-weighted mean
   //              over every timed constituent. The historical default.
   //     IN_JET   only tracks within dR < 0.4 of a qualifying forward jet.
   //              Previously hard-coded into calculateTime for the WAVES family;
@@ -375,7 +375,12 @@ namespace MyUtl {
   //   All three fall back to the full-cluster time when the subset is empty,
   //   matching the pre-existing WAVES behaviour.
   // ---------------------------------------------------------------------------
-  enum class TimeSource { RAW, IN_JET, OUT_JET };
+  // NB: the first enumerator is FULL, not RAW. <sys/ioctl_compat.h> on macOS
+  // defines RAW as a macro (0x00000020), and while the cmake build never pulls
+  // that header in, ROOT/cling does when python/runHGTD_Clustering.cxx is
+  // compiled -- so naming it RAW compiles fine here and silently breaks
+  // event_display.py with "expected identifier". Do not rename it back.
+  enum class TimeSource { FULL, IN_JET, OUT_JET };
 
   // ---------------------------------------------------------------------------
   // 3d. VBS topology region
@@ -541,7 +546,7 @@ namespace MyUtl {
     VbsRegion        regionGate        = VbsRegion::NONE;
     // Which track subset the SELECTED cluster's time is computed from.
     // Changes the reported time only, never the ranking -- see TimeSource.
-    TimeSource       timeSource        = TimeSource::RAW;
+    TimeSource       timeSource        = TimeSource::FULL;
     // Minimum tracks the IN_JET / OUT_JET subset must contain before its time is
     // used; below this calculateTime falls back to the full-cluster time. 0
     // reproduces the historical behaviour (fall back only on a completely empty
@@ -563,7 +568,7 @@ namespace MyUtl {
           double dc=-1.0, ClusteringMethod m=ClusteringMethod::ITERATIVE,
           bool z0=false, TrackFilterType f=TrackFilterType::ALL,
           VbsRegion rg=VbsRegion::NONE,
-          TimeSource ts=TimeSource::RAW, int mst=0)
+          TimeSource ts=TimeSource::FULL, int mst=0)
       : id(id_), longName(std::move(ln)), shortName(sn),
         usesOwnCollection(own), requiresPurity(pur), threshold(thr),
         distCut(dc), method(m), useZ0(z0), filter(f), regionGate(rg),
