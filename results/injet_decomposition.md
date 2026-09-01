@@ -139,3 +139,52 @@ addressed by anything studied this session.
    validated before this is actionable.
 4. **Z+jets' residual 11-point deficit at matched multiplicity is unexplained**
    and is a better target than further selector work.
+
+## Event-level n forward HS tracks — the distribution
+
+Sum of the per-cluster `truth_n_hs_tracks` over each event.
+
+| n HS | VBF n | VBF frac | VBF cum | zjets n | zjets frac | zjets cum |
+|---:|---:|---:|---:|---:|---:|---:|
+| 0 | 343 | 0.86% | 0.9% | 8844 | **9.41%** | 9.4% |
+| 1 | 695 | 1.75% | 2.6% | 9501 | 10.11% | 19.5% |
+| 2 | 1223 | 3.08% | 5.7% | 9568 | 10.18% | 29.7% |
+| 3 | 1775 | 4.47% | 10.2% | 9430 | 10.03% | 39.7% |
+| 4 | 2378 | 5.99% | 16.2% | 9008 | 9.59% | 49.3% |
+| 5 | 2920 | 7.36% | 23.5% | 8140 | 8.66% | 58.0% |
+| 6 | 3159 | 7.96% | 31.5% | 7507 | 7.99% | 66.0% |
+| 7 | 3310 | 8.34% | 39.8% | 6350 | 6.76% | 72.7% |
+| 8 | 3351 | 8.44% | 48.3% | 5559 | 5.92% | 78.6% |
+| 9 | 3124 | 7.87% | 56.1% | 4608 | 4.90% | 83.5% |
+| 10 | 2951 | 7.44% | 63.6% | 3686 | 3.92% | 87.5% |
+| 11-15 | 9882 | 24.9% | 88.5% | 9303 | 9.9% | 97.4% |
+| 16-19 | 3102 | 7.82% | 96.3% | 1877 | 2.00% | 99.4% |
+| >=20 | 1468 | 3.70% | 100% | 596 | 0.63% | 100% |
+
+| | mean | median | p25 | p75 | <=2 | <=5 |
+|---|---:|---:|---:|---:|---:|---:|
+| VBF | 9.35 | 9 | 6 | 12 | 5.70% | 23.52% |
+| **zjets** | **5.40** | **5** | **2** | **8** | **29.70%** | **57.98%** |
+
+**The shapes differ in kind, not just in mean.** VBF is peaked at 7-8. Z+jets is
+almost FLAT from 0 to 4 — each of those bins holds 9.5-10.2% of the sample — then
+falls. So Z+jets is not a shifted VBF; it has a large, structurally sparse
+population that VBF simply does not have. **58% of Z+jets events have <= 5
+forward HS tracks**, against 23.5% in VBF, and in that regime nothing exceeds
+~70% core fraction.
+
+## The reco proxy is too weak to gate on
+
+A multiplicity-gated chooser needs a reconstructable stand-in for the truth
+count. `n_fwd_tracks_reco` is not it:
+
+| | mean n reco | median | **corr(n_reco, n_HS)** | zero-reco |
+|---|---:|---:|---:|---:|
+| VBF | 29.2 | 28 | **0.421** | 0.00% |
+| zjets | 25.8 | 25 | **0.345** | 0.00% |
+
+At correlation 0.35 on Z+jets — and with 25.8 reco forward tracks per event
+against 5.4 genuine HS ones — the gate would be badly smeared, and no event ever
+has zero reco tracks to key on. **This substantially weakens implication 3
+above**: the truth-gated crossover is real but there is currently no reco
+variable that locates it. Finding one is a prerequisite, not a detail.
