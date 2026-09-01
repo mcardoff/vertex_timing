@@ -122,3 +122,33 @@ global.**
 4. **Cluster in (t, z) jointly rather than t alone.** The clustering has been
    untouched all session; `useZ0` and the distance-cut machinery already exist.
 5. Stop spending effort on central information via the routes above.
+
+## The aggregate t0 on VBF — it beats every cluster selector we have
+
+Run on all three VBF variants. **These are three different event sets**; the
+C++ `clustering_hist` reads the 33-file local ntuples at m_jj >= 200, while both
+exports carry the exporter's m_jj >= 500, and the grid export is a 1001-file
+sample rather than the local 33. Compare only within a row-group.
+
+| | local export | grid export |
+|---|---:|---:|
+| files / events | 33 / 39,681 | 1001 / 519,115 |
+| TRKPTZ | 90.83% | 90.45% |
+| TRKPTZ_TZ | 91.49% | 91.14% |
+| weighted median alone | 90.33% | 90.03% |
+| **+ double truncation** | **91.84%** | **91.67%** |
+| inverse-variance mean over all tracks | 71.07% | 71.16% |
+| union(TRKPTZ_TZ, t0) | 94.77% | 94.54% |
+
+**On VBF the model-free aggregate t0 alone (91.84%) beats both TRKPTZ (+1.01)
+and TRKPTZ_TZ (+0.35), while choosing no cluster at all.** The two exports agree
+to 0.17 across a 13x size difference.
+
+Contrast with Z+jets, where the aggregate (62.89%) sits just *below* TRKPTZ_TZ
+(63.89%). So the aggregate is relatively stronger where tracks are plentiful and
+the cluster answer is already good, and relatively weaker on the sparse sample
+-- the opposite of what would be most useful, and worth understanding before
+leaning on it.
+
+The estimator gap is ~20 points on both samples (91.84 vs 71.07 here, 62.89 vs
+41.43 on Z+jets), so that finding is not sample-specific.
