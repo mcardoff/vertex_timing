@@ -155,14 +155,49 @@ def main():
               f"(vs {100*(np.abs(dA[~m])<60).mean():6.2f}% when they disagree)")
     rng = np.random.default_rng(0)
     s1 = np.nanstd(dI - dA); s2 = np.nanstd(dO - dA)
-    N = np.vstack([dA, dA + rng.normal(0, s1, len(dA)), dA + rng.normal(0, s2, len(dA))])
-    nullb = N[np.argmin(np.abs(N), axis=0), np.arange(N.shape[1])]
-    O = np.vstack([dA, dI, dO])
-    orc = O[np.argmin(np.abs(O), axis=0), np.arange(O.shape[1])]
+    # NaN-safe best-of: an event with no in-jet track has no in-jet time, and
+    # np.argmin would SELECT that NaN (NaN compares False against everything),
+    # scoring the event as a miss. Rank on a NaN->+inf copy instead.
+    def bestof(rows):
+        M = np.vstack(rows)
+        R = np.where(np.isnan(M), np.inf, np.abs(M))
+        return M[np.argmin(R, axis=0), np.arange(M.shape[1])]
+    nullb = bestof([dA, dA + rng.normal(0, s1, len(dA)), dA + rng.normal(0, s2, len(dA))])
+    orc = bestof([dA, dI, dO])
     print(f"\n  oracle over the three collections : {100*(np.abs(orc)<60).mean():6.2f}%")
     print(f"  matched-noise null                : {100*(np.abs(nullb)<60).mean():6.2f}%")
     print(f"  REAL complementarity              : "
           f"{100*(np.abs(orc)<60).mean()-100*(np.abs(nullb)<60).mean():+6.2f}")
+
+    # Control: an event with NO in-jet track has an undefined t_in, so it falls
+    # into the "disagree" bucket by default. Those events are also the sparsest
+    # and hardest, which would manufacture the gap. Restrict to events where the
+    # comparison is actually defined.
+    defd = np.isfinite(sep)
+    print(f"\n  control -- events where t_in is DEFINED ({100*defd.mean():.1f}% of all):")
+    for cut in (30, 60):
+        m = defd & (sep < cut); d_ = defd & ~(sep < cut)
+        print(f"    |t_in - t_out| < {cut:3d} ps : {100*m.sum()/defd.sum():5.1f}% of defined events, "
+              f"core {100*(np.abs(dA[m])<60).mean():6.2f}% vs {100*(np.abs(dA[d_])<60).mean():6.2f}% "
+              f"(gap {100*(np.abs(dA[m])<60).mean()-100*(np.abs(dA[d_])<60).mean():+.2f})")
+    print(f"    events with NO in-jet track     : {100*(~defd).mean():5.1f}%, "
+          f"core {100*(np.abs(dA[~defd])<60).mean():6.2f}%")
+
+    # Does the agreement flag say anything BEYOND "this event has more tracks"?
+    ntr = t.groupby(EVT, sort=False).size().reindex(truth.index).to_numpy()
+    agree = sep < 60
+    print(f"\n  is the agreement flag just multiplicity in disguise?")
+    print(f"    {'n timed trk':>12s} {'events':>7s} {'agree':>7s} | "
+          f"{'core|agree':>11s} {'core|disagree':>14s} {'gap':>6s}")
+    for lo, hi in [(0,10),(10,20),(20,30),(30,45),(45,10**9)]:
+        m = (ntr >= lo) & (ntr < hi)
+        if m.sum() < 300: continue
+        ga, gd = m & agree, m & ~agree
+        if ga.sum() < 50 or gd.sum() < 50: continue
+        ca = 100*(np.abs(dA[ga])<60).mean(); cd = 100*(np.abs(dA[gd])<60).mean()
+        lab = f"{lo}-{hi-1}" if hi < 10**8 else f">={lo}"
+        print(f"    {lab:>12s} {m.sum():7d} {100*agree[m].mean():6.1f}% | "
+              f"{ca:10.2f}% {cd:13.2f}% {ca-cd:+6.2f}")
 
 
 if __name__ == "__main__":
