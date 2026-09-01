@@ -188,3 +188,83 @@ against 5.4 genuine HS ones — the gate would be badly smeared, and no event ev
 has zero reco tracks to key on. **This substantially weakens implication 3
 above**: the truth-gated crossover is real but there is currently no reco
 variable that locates it. Finding one is a prerequisite, not a detail.
+
+---
+
+# TimeSource implemented in the main program
+
+`Score::timeSource` (`enum class TimeSource { RAW, IN_JET, OUT_JET }`) now
+selects which subset of the CHOSEN cluster's tracks its reported time is built
+from. `calculateTime` dispatches on the flag instead of the old hard-coded
+`score == Score::WAVES || ...` list, so the re-timing is a knob any score can
+set rather than a property welded to one. OUT_JET is the exact complement of the
+same predicate. All three fall back to the full-cluster time on an empty subset,
+matching the previous WAVES behaviour.
+
+WAVES / WAVES_MISCL / WAVES_MISAS / VBF_R1 / VBF_R2 carry `TimeSource::IN_JET`
+so the refactor is behaviour-preserving. **Regression check: WAVES reproduces at
+94.11% exactly, unchanged from the pre-refactor run.**
+
+`TRKPTZ_TZ_IJ` (28) and `TRKPTZ_TZ_OJ` (29) copy TRKPTZ_TZ's score value
+verbatim, so selection is bit-identical across the three and any separation is
+the TIMING alone. `makeComparisonPlots` emits `timesource_<key>.pdf`.
+
+## Local VBF (clustering_hist, m_jj >= 200, 45,335 events)
+
+| | core frac | vs TRKPTZ |
+|---|---:|---:|
+| **TRKPTZ_TZ, in-jet t** | **94.35%** | **+1.32** |
+| WAVES (deployed: WAVeS selection + in-jet t) | 94.11% | +1.08 |
+| TRKPTZ_TZ, raw t | 93.68% | +0.64 |
+| TRKPTZ | 93.04% | — |
+| TRKPTZ_TZ, out-jet t | 91.60% | -1.44 |
+
+**TRKPTZ_TZ + in-jet timing beats deployed WAVeS**, using a selector that never
+looks at a jet.
+
+## Where the timing actually lives
+
+| | HS tracks that are in-jet | HS purity in-jet | HS purity out-jet | enrichment |
+|---|---:|---:|---:|---:|
+| local VBF | **47.0%** | 76.7% | 21.1% | 3.6x |
+| Z+jets | **10.2%** | 42.4% | 19.8% | 2.1x |
+
+TRKPTZ_TZ selection, three timings (export, m_jj >= 500):
+
+| | VBF | Z+jets |
+|---|---:|---:|
+| raw (full cluster) | 91.49% | **63.89%** |
+| in-jet | **92.31%** (+0.82) | 62.46% (-1.43) |
+| out-jet | 89.31% (-2.18) | 63.61% (-0.27) |
+
+**The mechanism is statistics, not purity.** Z+jets forward jets are still
+HS-*enriched* (42.4% vs 19.8%, 2.1x) -- the earlier shorthand that they are
+"usually pileup" was too strong. The problem is that they contain only **10.2%
+of the hard-scatter tracks**, so the filter trades away 90% of the signal for a
+2x purity gain. In VBF the same filter keeps 47% of the signal at 3.6x
+enrichment, which is why the identical operation is +0.82 there and -1.43 here.
+
+Corollary: on Z+jets the out-of-jet time is nearly identical to the raw time
+(-0.27), because the out-of-jet subset IS ~95% of the tracks and ~90% of the
+hard scatter. There is no useful third option there -- only in VBF is the
+partition informative.
+
+# Multiplicity-gated chooser: measured, and it does not work
+
+Z+jets, TRKPTZ_TZ cluster answer vs classical aggregate t0 (union 72.31%,
+so **+8.43 is available**):
+
+| gate | best | vs cluster-only |
+|---|---:|---:|
+| **truth** n_HS <= 2 *(unreachable upper bound)* | 64.28% | **+0.40** |
+| reco n_fwd_tracks <= 22 | 64.28% | **+0.40** |
+| coarse 2-bin reco gate, out-of-fold | 64.26% | +0.37 |
+
+**The truth-gated version is no better than the reco-gated one.** So the weak
+`corr(n_reco, n_HS) = 0.345` is not the binding constraint -- multiplicity
+simply is not the variable that says which answer to trust. It captures 4.7% of
+the available headroom, and a perfect multiplicity oracle would capture no more.
+
+This closes the idea. It also confirms the ratio it was premised on: genuine HS
+tracks are **20.9%** of reconstructed forward tracks on Z+jets (VBF ~32%), i.e.
+about 1 in 5.

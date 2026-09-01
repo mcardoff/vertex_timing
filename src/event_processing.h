@@ -180,8 +180,19 @@ namespace MyUtl {
     // purifies the time by dropping absorbed PU tracks, worth ~+1% efficiency.
     // WAVES_MISCL / WAVES_MISAS share this path so the oracle rows report the same
     // time as the WAVES row they gate.
-    if (score == Score::WAVES || score == Score::WAVES_MISCL || score == Score::WAVES_MISAS ||
-        score == Score::VBF_R1 || score == Score::VBF_R2) {
+    // Jet-subset timing. Dispatches on score.timeSource rather than on a
+    // hard-coded score list: the re-timing was measured to be a pure additive
+    // term worth the SAME amount for every selector (+0.82 on local VBF for
+    // TRKPTZ / TRKPTZ_TZ / WAVeS alike, -1.4 for all three on Z+jets), so it is
+    // a property of the timing choice and not of any one score. See
+    // results/injet_decomposition.md.
+    //
+    // OUT_JET is the complement rather than a separate concept: in Z+jets the
+    // qualifying forward jets are usually PILEUP, so the subset to keep and the
+    // subset to discard swap over relative to VBF, and only running both
+    // settles which.
+    if (score.timeSource != TimeSource::RAW) {
+      const bool wantInJet = (score.timeSource == TimeSource::IN_JET);
       // Collect (eta, phi) of qualifying forward reco jets — no truth matching
       std::vector<std::pair<double,double>> hsJets;
       const int nJets = (int)branch->topoJetPt.GetSize();
@@ -203,7 +214,7 @@ namespace MyUtl {
           double dphi = TVector2::Phi_mpi_pi(trkPhi - jphi);
           if (std::hypot(deta, dphi) < 0.4) { inJet = true; break; }
         }
-        if (!inJet) continue;
+        if (inJet != wantInJet) continue;
         double t = allTimes[i];
         double s = (idealRes > 0.0) ? idealRes
                                     : static_cast<double>(branch->trackTimeRes[idx]);
@@ -212,7 +223,7 @@ namespace MyUtl {
         sumW += w;  sumWT += w * t;
       }
       if (sumW > 0.0) return sumWT / sumW;
-      return values[0];  // fallback: no tracks survived jet filter
+      return values[0];  // fallback: no tracks survived the jet filter
     }
 
     return values[0];

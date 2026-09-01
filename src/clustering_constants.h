@@ -353,6 +353,31 @@ namespace MyUtl {
   enum class TrackFilterType { ALL, JET, HS_ONLY };
 
   // ---------------------------------------------------------------------------
+  // 3c-bis. TimeSource
+  //   Which subset of the SELECTED cluster's tracks its reported time is
+  //   computed from. Orthogonal to everything else on Score: it changes only
+  //   what time a chosen cluster reports, never which cluster is chosen, so a
+  //   pair of scores differing solely in this field isolates the re-timing.
+  //
+  //     RAW      the full cluster (values[0]) -- the precision-weighted mean
+  //              over every timed constituent. The historical default.
+  //     IN_JET   only tracks within dR < 0.4 of a qualifying forward jet.
+  //              Previously hard-coded into calculateTime for the WAVES family;
+  //              measured worth +0.82 on local VBF for ANY selector, and
+  //              -1.4 on Z+jets for any selector (see
+  //              results/injet_decomposition.md), so it is a knob and not a
+  //              property of one score.
+  //     OUT_JET  the complement -- only tracks NOT within dR < 0.4 of one.
+  //              Exists to answer where the usable timing actually lives: in
+  //              Z+jets the forward jets are usually PILEUP, so the in-jet
+  //              subset is the one that should be AVOIDED there.
+  //
+  //   All three fall back to the full-cluster time when the subset is empty,
+  //   matching the pre-existing WAVES behaviour.
+  // ---------------------------------------------------------------------------
+  enum class TimeSource { RAW, IN_JET, OUT_JET };
+
+  // ---------------------------------------------------------------------------
   // 3d. VBS topology region
   //   The two topologies where forward timing is the deciding information.
   //   Classified from the VBS candidate pair by
@@ -514,16 +539,21 @@ namespace MyUtl {
     // denominator fill to the gated block in processEventData's step H, they
     // just test different things.
     VbsRegion        regionGate        = VbsRegion::NONE;
+    // Which track subset the SELECTED cluster's time is computed from.
+    // Changes the reported time only, never the ranking -- see TimeSource.
+    TimeSource       timeSource        = TimeSource::RAW;
 
     Score() = default;
     Score(int id_, std::string ln, const char* sn,
           bool own=false, bool pur=false, float thr=-1.f,
           double dc=-1.0, ClusteringMethod m=ClusteringMethod::ITERATIVE,
           bool z0=false, TrackFilterType f=TrackFilterType::ALL,
-          VbsRegion rg=VbsRegion::NONE)
+          VbsRegion rg=VbsRegion::NONE,
+          TimeSource ts=TimeSource::RAW)
       : id(id_), longName(std::move(ln)), shortName(sn),
         usesOwnCollection(own), requiresPurity(pur), threshold(thr),
-        distCut(dc), method(m), useZ0(z0), filter(f), regionGate(rg) {}
+        distCut(dc), method(m), useZ0(z0), filter(f), regionGate(rg),
+        timeSource(ts) {}
 
     bool operator<(const Score& o)  const { return id < o.id; }
     bool operator==(const Score& o) const { return id == o.id; }
@@ -557,6 +587,8 @@ namespace MyUtl {
     static const Score TRKPTZ_PU;
     static const Score TRKPTZ_PUW;
     static const Score TRKPTZ_TZ;
+    static const Score TRKPTZ_TZ_IJ;
+    static const Score TRKPTZ_TZ_OJ;
   };
 
   inline const std::string STR_TRKPTZ = "#Sigma p_{T}e^{-|#Delta z|}";
@@ -593,15 +625,15 @@ namespace MyUtl {
   // WAVES: WAVeS-style selection score — Σ pT·pT_jet/max(ΔR,floor) × exp(−1.5|Δz|).
   // Pure selection: picks the highest-scoring main-collection cluster and reports its
   // standard weighted-mean time and full-cluster purity (no in-jet-only recomputation).
-  inline const Score Score::WAVES  = { 18, "WAVeS Score",                      "WAVES",        false, false, -1.f };
+  inline const Score Score::WAVES  = { 18, "WAVeS Score", "WAVES", false, false, -1.f, -1.0, ClusteringMethod::ITERATIVE, false, TrackFilterType::ALL, VbsRegion::NONE, TimeSource::IN_JET };
   // JET_T_REFINED: clusters only jet-proximate tracks at DIST_CUT_T_REFINED (2σ iterative)
   inline const Score Score::JET_T_REFINED = { 19, "WAVeS 2#sigma t Re-clustering",  "WAVES_RECLUST", true,  false, -1.f,
                                               DIST_CUT_T_REFINED, ClusteringMethod::ITERATIVE,
                                               false, TrackFilterType::JET };
   // WAVeS oracle variants: selection by the WAVeS score, denominator gates applied
   // at fill time — cluster purity (MISCL-style) / HS timing purity (like TEST_MISAS)
-  inline const Score Score::WAVES_MISCL  = { 20, "WAVeS [Events with Pure Clusters]" , "WAVES Pure Clust.", false, true, -1.f };
-  inline const Score Score::WAVES_MISAS  = { 21, "WAVeS [Events with Perfect Timing]", "WAVES Perf. Time" , false, true, -1.f };
+  inline const Score Score::WAVES_MISCL  = { 20, "WAVeS [Events with Pure Clusters]", "WAVES Pure Clust.", false, true, -1.f, -1.0, ClusteringMethod::ITERATIVE, false, TrackFilterType::ALL, VbsRegion::NONE, TimeSource::IN_JET };
+  inline const Score Score::WAVES_MISAS  = { 21, "WAVeS [Events with Perfect Timing]", "WAVES Perf. Time", false, true, -1.f, -1.0, ClusteringMethod::ITERATIVE, false, TrackFilterType::ALL, VbsRegion::NONE, TimeSource::IN_JET };
   // VBS topology regions. Same construction as the WAVES_MISAS oracle -- WAVeS
   // selection and WAVeS in-jet-refined time, denominator restricted at fill
   // time -- except the gate is the event's VBS region rather than its timing
@@ -613,10 +645,10 @@ namespace MyUtl {
   // one-line change in Cluster::updateScores plus calculateTime's score list.
   inline const Score Score::VBF_R1 = { 22, "WAVeS [VBF R1: both tags fwd]"    , "VBF_R1", false, false, -1.f,
                                        -1.0, ClusteringMethod::ITERATIVE, false,
-                                       TrackFilterType::ALL, VbsRegion::R1 };
+                                       TrackFilterType::ALL, VbsRegion::R1, TimeSource::IN_JET };
   inline const Score Score::VBF_R2 = { 23, "WAVeS [VBF R2: fwd PU + cen. HS]" , "VBF_R2", false, false, -1.f,
                                        -1.0, ClusteringMethod::ITERATIVE, false,
-                                       TrackFilterType::ALL, VbsRegion::R2 };
+                                       TrackFilterType::ALL, VbsRegion::R2, TimeSource::IN_JET };
 
   // TRKPTZ_PV / TRKPTZ_PU: TRKPTZ with the pT sum restricted by the per-track
   // vertex-proximity flag (BranchPointerWrapper::closerToPuThanPv), i.e.
@@ -670,6 +702,18 @@ namespace MyUtl {
   // -- they diverge, over-rewarding a track that happens to sit on the vertex.
   inline constexpr double TRACK_DZ_WEIGHT = 0.7;
   inline const Score Score::TRKPTZ_TZ = { 27, STR_TRKPTZ + " [per-track #Deltaz]", "TRKPTZ_TZ", false, false, -1.f };
+  // Same SELECTION as TRKPTZ_TZ (updateScores copies its value verbatim, so the
+  // argmax is bit-identical), differing only in which subset of the chosen
+  // cluster's tracks the reported time is built from. Reading the three rows
+  // together answers "where does the usable timing live?" with the selector
+  // held fixed -- which is not answerable from the WAVES row, since that varies
+  // selection and timing at once.
+  inline const Score Score::TRKPTZ_TZ_IJ = { 28, STR_TRKPTZ + " [per-track #Deltaz, in-jet t]", "TRKPTZ_TZ_IJ",
+                                             false, false, -1.f, -1.0, ClusteringMethod::ITERATIVE,
+                                             false, TrackFilterType::ALL, VbsRegion::NONE, TimeSource::IN_JET };
+  inline const Score Score::TRKPTZ_TZ_OJ = { 29, STR_TRKPTZ + " [per-track #Deltaz, out-jet t]", "TRKPTZ_TZ_OJ",
+                                             false, false, -1.f, -1.0, ClusteringMethod::ITERATIVE,
+                                             false, TrackFilterType::ALL, VbsRegion::NONE, TimeSource::OUT_JET };
 
   // Scores with a dedicated collection (distCut ≥ 0 → buildsCollection() = true)
   inline const Score Score::CONE       = {  7, "Cone"                       , "CONE",     true , false, -1.f, DIST_CUT_CONE, ClusteringMethod::CONE };
@@ -683,6 +727,7 @@ namespace MyUtl {
     Score::WAVES,    Score::JET_T_REFINED, Score::WAVES_MISCL, Score::WAVES_MISAS,
     Score::VBF_R1,   Score::VBF_R2,
     Score::TRKPTZ_PV, Score::TRKPTZ_PU, Score::TRKPTZ_PUW, Score::TRKPTZ_TZ,
+    Score::TRKPTZ_TZ_IJ, Score::TRKPTZ_TZ_OJ,
   };
 
   // ---------------------------------------------------------------------------

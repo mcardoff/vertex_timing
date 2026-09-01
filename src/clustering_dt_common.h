@@ -61,6 +61,8 @@ inline auto buildAnalysisMap(
   m.emplace(Score::TRKPTZ_PU,   AnalysisObj(label, Score::TRKPTZ_PU));
   m.emplace(Score::TRKPTZ_PUW,  AnalysisObj(label, Score::TRKPTZ_PUW));
   m.emplace(Score::TRKPTZ_TZ,   AnalysisObj(label, Score::TRKPTZ_TZ));
+  m.emplace(Score::TRKPTZ_TZ_IJ, AnalysisObj(label, Score::TRKPTZ_TZ_IJ));
+  m.emplace(Score::TRKPTZ_TZ_OJ, AnalysisObj(label, Score::TRKPTZ_TZ_OJ));
 
   // Scores active only in the real-HGTD scenario
   if (scenario == Scenario::HGTD) {
@@ -138,6 +140,18 @@ inline void makeComparisonPlots(
 	      &mapHGTD.at(Score::WAVES),
 	    },
 	    {C02, C08, C03});
+
+  // Where does the usable timing live? The same selector (TRKPTZ_TZ) reporting
+  // the full-cluster time, the in-jet subset, and its complement. Selection is
+  // bit-identical across all three -- updateScores copies one value into all
+  // three score ids -- so any separation is the TIMING alone.
+  moneyPlot(MyUtl::plotFilePath("comparisons", TString::Format("timesource_%s.pdf", key).Data()).c_str(), key, canvas,
+	    {
+	      &mapHGTD.at(Score::TRKPTZ_TZ),
+	      &mapHGTD.at(Score::TRKPTZ_TZ_IJ),
+	      &mapHGTD.at(Score::TRKPTZ_TZ_OJ),
+	    },
+	    {C08, C01, C02});
 
 }
 
