@@ -71,3 +71,46 @@ long name as the TFile key, and `TFile::Get` (and uproot's `file[key]`) treat
 '/' in a key path as a DIRECTORY separator -- the write succeeds and every
 readback fails with "key not found" (clustering_plot aborted rc=134). Renamed to
 "qP precision"; do not put a slash back into any Score long name.
+
+---
+
+# Follow-up: the z0 and d0 siblings (`python/zd0_precision_terms.py`)
+
+The same construction applied to the other two per-track variances. All three
+precision sums are near-duplicates -- mutual correlations of log(1/sigma):
+z0-d0 **+0.93 to +0.95**, d0-qP **+0.92 to +0.95**, z0-qP +0.81 to +0.88 --
+so this was a test of which packaging of ONE signal is best, and whether a
+second copy adds anything.
+
+## Alone on TZ + guarded timing (worst-sample delta at each optimum)
+
+| term | optimum | worst-sample | vbf | zjets | dijet | ttbar |
+|---|---|---:|---:|---:|---:|---:|
+| **(1/sigma_d0)^b** | **1.2-1.6 plateau** | **+0.29/+0.30** | +0.29 | +0.42 | +0.33 | +0.30 |
+| (1/sigma_qP)^b | 0.8 | +0.22 | +0.26 | +0.24 | +0.25 | +0.21 |
+| (1/sigma_z0)^b | 0.4 | +0.09 | +0.09 | +0.43 | +0.22 | +0.23 |
+
+d0 is the best on every sample; z0 is zjets-loving but VBF-capped. The d0 curve
+is a clean plateau at 1.2-1.6 turning over by 3.2.
+
+## Stacked -- they are one signal, carried once
+
+| stack | worst-sample |
+|---|---:|
+| z0 on top of qP@0.8 | +0.03 |
+| d0 on top of qP@0.8 | +0.02 |
+| z0 on top of d0@1.6 | **-0.04 / -0.09** |
+
+Nothing survives stacking. Carry exactly one precision term.
+
+## Consequence: the shipped term is now d0, not qP
+
+`Score` id 33 renamed `TRKPTZ_TZP` ("[per-track #Deltaz + d0 precision]"),
+computed as `(SUM_t 1/var_d0)^{D0_PRECISION_WEIGHT/2}` with
+`D0_PRECISION_WEIGHT = 1.2` (plateau centre). d0@1.6 vs the superseded qP@0.8:
+vbf +0.04, zjets +0.15, dijet +0.05, ttbar +0.09 -- uniformly >=.
+
+C++ validation (local VBF, mjj>=200, all 48,314 events): TRKPTZ_TZP = 91.83%
+(+1.47 over TRKPTZ, +0.12 over deployed WAVeS), d0 term worth +0.25 over
+TZ_GIJ against the scan's +0.29 (novbs); WAVES reproduces at 91.71% exactly.
+QP_PRECISION_WEIGHT retained in the header as a record but unused.

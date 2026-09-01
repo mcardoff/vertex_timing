@@ -1092,17 +1092,18 @@ namespace MyUtl {
         this->scores[Score::TRKPTZ_TZJ.id] =
           sumTz * dzTerm * (1.0 + JET_FRAC_WEIGHT * fJet);
 
-        // Momentum-precision term: 1/sigma_qP^2 = SUM_t 1/var_qOverP -- the
-        // cluster's combined q/P information. Multiplying by its
-        // QP_PRECISION_WEIGHT power up-weights clusters holding well-measured
-        // momentum; see the constant's comment for the four-sample validation.
-        double qpInfo = 0.0;
+        // Precision term: SUM_t 1/var_d0 -- the cluster's combined transverse
+        // impact-parameter information, i.e. "amount of well-measured pT".
+        // d0 was chosen over its qP and z0 siblings by a head-to-head scan
+        // (see D0_PRECISION_WEIGHT in clustering_constants.h); the three are
+        // 0.86-0.95 correlated and stacking a second adds nothing.
+        double d0Info = 0.0;
         for (int trk : this->trackIndices) {
-          const double v = branch->trackVarQp[trk];
-          if (v > 0.0) qpInfo += 1.0 / v;
+          const double v = branch->trackVarD0[trk];
+          if (v > 0.0) d0Info += 1.0 / v;
         }
         this->scores[Score::TRKPTZ_TZQ.id] =
-          sumTz * dzTerm * std::pow(qpInfo, 0.5 * QP_PRECISION_WEIGHT);
+          sumTz * dzTerm * std::pow(d0Info, 0.5 * D0_PRECISION_WEIGHT);
       }
 
       // WAVES: WAVeS-style score — Σ_i pT_i × pT_jet(i) / max(ΔR_i, DR_FLOOR)

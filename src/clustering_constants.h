@@ -775,7 +775,20 @@ namespace MyUtl {
   //     0.80  +0.26  +0.24  +0.25  +0.21   +0.21
   // -- with one global value and no per-sample configuration. 0.8 is the
   // flat optimum; the curve turns over by 1.6 (zjets -0.03).
-  inline constexpr double QP_PRECISION_WEIGHT = 0.8;
+  // SUPERSEDED by D0_PRECISION_WEIGHT below before ever reaching a grid run:
+  // the three precision siblings (z0/d0/qP; all 1/sqrt(SUM 1/var) over the
+  // same tracks, mutually correlated 0.86-0.95) were scanned head-to-head and
+  // d0 is the best single packaging on every sample --
+  //     alone on TZ+guard, worst-sample delta at each one's optimum:
+  //         d0 +0.30 (beta 1.2-1.6 plateau)  >  qP +0.22 (0.8)  >  z0 +0.09
+  //     d0@1.6 vs qP@0.8: vbf +0.04, zjets +0.15, dijet +0.05, ttbar +0.09
+  //     stacking z0 or qP ON TOP of d0 adds nothing (-0.04 / -0.09) -- they
+  //     are one signal, carried once.
+  inline constexpr double QP_PRECISION_WEIGHT = 0.8;   // unused; kept for the record
+  // Exponent of the d0-precision term, score *= (SUM_t 1/var_d0)^{b/2}.
+  // 1.2 is the centre of the 1.2-1.6 plateau (worst-sample +0.29/+0.30, all
+  // four samples positive); the curve turns over by 3.2.
+  inline constexpr double D0_PRECISION_WEIGHT = 1.2;
   inline constexpr double JET_FRAC_WEIGHT = 0.0;
   inline constexpr double TRACK_DZ_WEIGHT = 0.7;
   inline const Score Score::TRKPTZ_TZ = { 27, STR_TRKPTZ + " [per-track #Deltaz]", "TRKPTZ_TZ", false, false, -1.f };
@@ -803,11 +816,11 @@ namespace MyUtl {
   // embed the long name as the TFile key, and TFile::Get (and uproot)
   // treat '/' in a key path as a DIRECTORY separator -- the write succeeds
   // and every readback then fails with 'key not found'.
-  // TRKPTZ_TZ x (1/sigma_qP)^0.8 with the guarded in-jet time: the full
+  // TRKPTZ_TZ x (1/sigma_d0)^1.2 with the guarded in-jet time: the full
   // sample-independent candidate. See QP_PRECISION_WEIGHT above for the
   // four-sample validation.
-  inline const Score Score::TRKPTZ_TZQ = { 33, STR_TRKPTZ + " [per-track #Deltaz + qP precision]",
-                                           "TRKPTZ_TZQ", false, false, -1.f, -1.0,
+  inline const Score Score::TRKPTZ_TZQ = { 33, STR_TRKPTZ + " [per-track #Deltaz + d0 precision]",
+                                           "TRKPTZ_TZP", false, false, -1.f, -1.0,
                                            ClusteringMethod::ITERATIVE, false,
                                            TrackFilterType::ALL, VbsRegion::NONE,
                                            TimeSource::IN_JET, MIN_INJET_TRACKS_FOR_TIME };
