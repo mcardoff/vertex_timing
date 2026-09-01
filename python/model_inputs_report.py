@@ -51,6 +51,56 @@ def imps(model, feats):
     return [{"f": feats[i], "imp": round(100 * float(v[i]), 2)} for i in o]
 
 
+def auc(x, y):
+    """Rank-based (Mann-Whitney) AUC of a single variable against a binary
+    label. NaNs are dropped rather than imputed -- a sentinel value would land
+    at one end of the ranking and manufacture separation."""
+    m = np.isfinite(x)
+    x, y = x[m], y[m].astype(bool)
+    ns, nb = int(y.sum()), int((~y).sum())
+    if ns == 0 or nb == 0: return float("nan")
+    r = pd.Series(x).rank().to_numpy()
+    return float((r[y].sum() - ns * (ns + 1) / 2.0) / (ns * nb))
+
+
+def panel(x, y, name, step, split, sig_lab, bkg_lab, nbins=44):
+    """One signal-vs-background comparison. Few distinct values -> categorical
+    bars; otherwise a density histogram over the combined [0.5, 99.5] range so
+    one long tail cannot flatten the whole picture. Both classes are normalised
+    to unit area, since the classes differ in size by up to 30x and raw counts
+    would only show which is bigger."""
+    x = np.asarray(x, float); y = np.asarray(y).astype(bool)
+    m = np.isfinite(x); x, y = x[m], y[m]
+    a = auc(x, y)
+    if a == a and a < 0.5:        # orient so signal sits high; note the flip
+        a, flipped = 1.0 - a, True
+    else:
+        flipped = False
+    uq = np.unique(x)
+    out = {"step": step, "var": name, "split": split, "sig": sig_lab,
+           "bkg": bkg_lab, "auc": None if a != a else round(a, 3),
+           "flipped": flipped, "n_sig": int(y.sum()), "n_bkg": int((~y).sum())}
+    if len(uq) <= 6:
+        out["kind"] = "cat"
+        out["labels"] = [f"{v:g}" for v in uq]
+        out["s"] = [round(float((x[y] == v).mean()), 5) for v in uq]
+        out["b"] = [round(float((x[~y] == v).mean()), 5) for v in uq]
+        return out
+    lo, hi = np.percentile(x, [0.5, 99.5])
+    if hi <= lo: hi = lo + 1e-6
+    e = np.linspace(lo, hi, nbins + 1)
+    xc = np.clip(x, lo, hi)
+    hs, _ = np.histogram(xc[y], bins=e, density=True)
+    hb, _ = np.histogram(xc[~y], bins=e, density=True)
+    out.update(kind="hist", edges=[round(float(v), 5) for v in e],
+               s=[round(float(v), 8) for v in hs],
+               b=[round(float(v), 8) for v in hb],
+               clip_hi=round(100 * float((x > hi).mean()), 2),
+               median_s=round(float(np.median(x[y])), 4),
+               median_b=round(float(np.median(x[~y])), 4))
+    return out
+
+
 E2E_IMP = r'''
 import json,sys,numpy as np,pandas as pd,torch,torch.nn as nn
 wd=sys.argv[1]
@@ -311,6 +361,50 @@ def main():
 
     json.dump(R, open(a.out, "w"), indent=1)
     log(f"wrote {a.out}")
+
+    # ---- signal-vs-background for the top 3 of each step -------------------
+    # Each step gets the split its OWN model was trained against, which is not
+    # the same question in each case -- a track-level HS/PU split for the
+    # tagger, an in-window/out-of-window cluster split for the selector, and a
+    # which-answer-wins split for the chooser. Comparing across steps therefore
+    # compares separations of different quantities, deliberately.
+    log("\ncomputing signal-vs-background distributions")
+    NEED = ["time", "timeRes", "ph", "truth_is_hs", "nb_phzt", "nb_ph60",
+            "closer_to_pu_than_pv", "cluster_closest_vtx_is_pv"]
+    tv = t[EVT + NEED].merge(
+        truth_ev.rename("t_truth_ev").rename_axis(EVT).reset_index(),
+        on=EVT, how="left")
+    tv["abs_dt_truth"] = (tv["time"] - tv["t_truth_ev"]).abs()
+    yt = tv["truth_is_hs"].to_numpy().astype(bool)
+    TL, BL = "hard scatter", "pileup"
+    P = []
+    for v in ("closer_to_pu_than_pv", "nb_phzt", "cluster_closest_vtx_is_pv"):
+        P.append(panel(tv[v], yt, v, "1", "truth_is_hs", TL, BL))
+    yc = c["ok_tagw"].to_numpy().astype(bool)
+    for v in ("dt_tagw_agg", "dt_to_agg", "n_ph05"):
+        P.append(panel(c[v], yc, v, "2", "ok_tagw",
+                       "cluster lands within 60 ps", "cluster misses"))
+    # step 3 has no fitted model, so "top 3" is the three quantities its
+    # arithmetic consumes: the new weight, the old weight, and the residual
+    # both are trying to estimate.
+    for v in ("ph", "timeRes", "abs_dt_truth"):
+        P.append(panel(tv[v], yt, v, "3", "truth_is_hs", TL, BL))
+    for v in ("ph", "nb_ph60", "timeRes"):
+        P.append(panel(tv[v], yt, v, "4", "truth_is_hs", TL, BL))
+    dec = (E.ok_base != E.ok_t0).to_numpy()
+    ye = (E["ok_t0"] & ~E["ok_base"]).to_numpy().astype(bool)[dec]
+    for v in ("dt_tagw_agg", "abs_dt_base_t0", "p_gap"):
+        P.append(panel(E[v].to_numpy()[dec], ye, v, "5", "switch helps",
+                       "aggregate wins", "cluster wins"))
+    # track-time outlier rate, quoted on the page as the reason for a median
+    hs = tv.loc[yt, "abs_dt_truth"]
+    D3 = {"panels": P,
+          "hs_tail_gt200ps": round(100 * float((hs > 200).mean()), 2),
+          "hs_median_abs_dt": round(float(hs.median()), 2),
+          "hs_median_timeRes": round(float(tv.loc[yt, "timeRes"].median()), 2)}
+    dout = a.out.replace(".json", "_dists.json")
+    json.dump(D3, open(dout, "w"), indent=1)
+    log(f"wrote {dout}  ({len(P)} panels)")
 
 
 if __name__ == "__main__":
