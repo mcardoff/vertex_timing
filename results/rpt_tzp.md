@@ -98,3 +98,62 @@ zjets gain is the largest (+20% rejection over deployed WAVeS at 0.90), and the
 one residual WAVeS edge is loose WPs in soft slices. Inflation rows could be
 updated to the measured 1.59/1.43/1.43 for a future rerun; at 2-4% the effect
 is sub-percent on the gate and does not change any ordering.
+
+---
+
+# CORRECTION (same day): the grid rejection cells compare unequal efficiencies
+
+Prompted by the question "why is tzp better than truth?" -- tracing the actual
+(eff, rejection) curves shows the rejAtEff cells near the efficiency ceiling
+sit at actual efficiencies up to 1.6% apart, and on these samples that is
+decisive. This is the exact trap the harmonized-ROC notes warn about, walked
+into while quoting the warning.
+
+## What the cells actually compared (>40 GeV, "0.90" column)
+
+| sample | cell | actual eff | at MATCHED eff ~0.90 |
+|---|---|---|---|
+| zjets | tzp 17.2 | 0.8869 | ~12.8 |
+| zjets | waves 14.3 | 0.8976 | 14.3 |
+| zjets | truth 17.0 | 0.8928 | ~14.9 |
+| ttbar | tzp 18.1 | ~0.885 | 10.6 (@0.9015) |
+| ttbar | waves 15.6 | 0.8890 | ~11.2 |
+| ttbar | truth 9.5 | 0.8959 | ~9.0 |
+
+## Corrected matched-efficiency orderings (>40 GeV, eff ~= 0.90)
+
+- **vbf**: tzp ~77 > trkptz 75.5 > waves ~74; truth 96-115 far above (a proper
+  upper bound here). TZP's edge is real but ~+3-4%, not the printed +7%.
+- **zjets**: **waves 14.3 ~= truth ~14.9 > tzp ~12.8 > trkptz 10.5.** The
+  earlier "+20% over waves, above the oracle" claim is RETRACTED -- at matched
+  efficiency deployed WAVeS is ~10-15% AHEAD of TZP on the zjets RpT side.
+- **ttbar**: waves ~11.2 ~= tzp 10.6 ~= trkptz ~10.4 > truth ~9.0. A wash among
+  the real scenarios.
+- **dijet**: cells had tzp ~= trkptz > waves; not re-traced, treat as within
+  steps.
+
+## Why tzp genuinely CAN sit above "truth" (ttbar, and the zjets near-tie)
+
+The truth row is not truth-gating-reality. It is a different world: t0 =
+Gaus(truth, 10 ps) AND every timed track re-smeared at a FLAT 30 ps from its
+own truth vertex. CLAUDE.md already documents that a flat 30 ps smear is WORSE
+than HGTD's real per-hit resolutions (35/25/21 ps for 1/2/3 hits, ~26 ps
+effective), i.e. **the truth row is explicitly not an upper bound** -- and
+waves_ideal additionally inherits WAVeS selection. On VBF the perfect-t0 gain
+dwarfs the smear penalty so the ordering looks normal; on ttbar the margin is
+small enough that the real detector's sharper multi-hit times win.
+
+## The important dissociation this exposes
+
+On zjets, **WAVeS has the worst core fraction of any selector (57.9%) and the
+best real-scenario RpT rejection at matched efficiency.** Core fraction at
+60 ps and per-track gate quality at 2.5 sigma are NOT the same objective: the
+gate passes untimed tracks unconditionally and removes timed ones by pull, so
+a catastrophically wrong t0 (WAVeS's zjets failure mode) empties the timed
+component entirely -- costing efficiency ceiling but not mid-curve rejection --
+while a slightly-wrong t0 mistags track by track. Understanding and exploiting
+this dissociation (what does the RpT gate actually want from t0?) is now the
+open question on the consumer side.
+
+The core-fraction results of this branch are unaffected by any of this; it is
+the RpT translation that is subtler than one fixed-efficiency table.
