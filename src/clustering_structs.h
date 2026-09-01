@@ -1069,6 +1069,7 @@ namespace MyUtl {
         // only Score::timeSource differs, which calculateTime acts on.
         this->scores[Score::TRKPTZ_TZ_IJ.id] = sumTz * dzTerm;
         this->scores[Score::TRKPTZ_TZ_OJ.id] = sumTz * dzTerm;
+        this->scores[Score::TRKPTZ_TZ_GIJ.id] = sumTz * dzTerm;
       }
 
       // WAVES: WAVeS-style score — Σ_i pT_i × pT_jet(i) / max(ΔR_i, DR_FLOOR)

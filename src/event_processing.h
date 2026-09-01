@@ -204,6 +204,7 @@ namespace MyUtl {
         hsJets.push_back({jEta, branch->topoJetPhi[j]});
       }
       double sumW = 0.0, sumWT = 0.0;
+      int    nUsed = 0;
       for (size_t i = 0; i < trackIndices.size(); ++i) {
         int    idx     = trackIndices[i];
         double trkEta  = branch->trackEta[idx];
@@ -220,10 +221,13 @@ namespace MyUtl {
                                     : static_cast<double>(branch->trackTimeRes[idx]);
         if (s <= 0.0) continue;
         double w = 1.0 / (s * s);
-        sumW += w;  sumWT += w * t;
+        sumW += w;  sumWT += w * t;  ++nUsed;
       }
-      if (sumW > 0.0) return sumWT / sumW;
-      return values[0];  // fallback: no tracks survived the jet filter
+      // Fall back to the full-cluster time unless the subset is both non-empty
+      // AND large enough to be worth trusting. minSubsetTracks = 0 reproduces
+      // the historical 'any surviving track will do' behaviour.
+      if (sumW > 0.0 && nUsed >= score.minSubsetTracks) return sumWT / sumW;
+      return values[0];
     }
 
     return values[0];

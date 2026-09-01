@@ -542,6 +542,20 @@ namespace MyUtl {
     // Which track subset the SELECTED cluster's time is computed from.
     // Changes the reported time only, never the ranking -- see TimeSource.
     TimeSource       timeSource        = TimeSource::RAW;
+    // Minimum tracks the IN_JET / OUT_JET subset must contain before its time is
+    // used; below this calculateTime falls back to the full-cluster time. 0
+    // reproduces the historical behaviour (fall back only on a completely empty
+    // subset), which is what the WAVES family keeps.
+    //
+    // This is what makes a jet-subset time SAMPLE-INDEPENDENT. Applying the
+    // in-jet time unconditionally is +0.82 on VBF and -1.43 on Z+jets, so it is
+    // only usable per-sample -- and Z+jets is the background to VBF H->inv, so a
+    // per-sample configuration would give signal and background different
+    // algorithms and manufacture separation. A per-EVENT threshold is a single
+    // fixed function of reco quantities: at 3 it fires on 70% of VBF events and
+    // 9% of Z+jets ones purely because Z+jets clusters rarely hold 3 in-jet
+    // tracks, giving +0.50 on VBF and +0.02 on Z+jets with ONE threshold.
+    int              minSubsetTracks   = 0;
 
     Score() = default;
     Score(int id_, std::string ln, const char* sn,
@@ -549,11 +563,11 @@ namespace MyUtl {
           double dc=-1.0, ClusteringMethod m=ClusteringMethod::ITERATIVE,
           bool z0=false, TrackFilterType f=TrackFilterType::ALL,
           VbsRegion rg=VbsRegion::NONE,
-          TimeSource ts=TimeSource::RAW)
+          TimeSource ts=TimeSource::RAW, int mst=0)
       : id(id_), longName(std::move(ln)), shortName(sn),
         usesOwnCollection(own), requiresPurity(pur), threshold(thr),
         distCut(dc), method(m), useZ0(z0), filter(f), regionGate(rg),
-        timeSource(ts) {}
+        timeSource(ts), minSubsetTracks(mst) {}
 
     bool operator<(const Score& o)  const { return id < o.id; }
     bool operator==(const Score& o) const { return id == o.id; }
@@ -589,6 +603,7 @@ namespace MyUtl {
     static const Score TRKPTZ_TZ;
     static const Score TRKPTZ_TZ_IJ;
     static const Score TRKPTZ_TZ_OJ;
+    static const Score TRKPTZ_TZ_GIJ;
   };
 
   inline const std::string STR_TRKPTZ = "#Sigma p_{T}e^{-|#Delta z|}";
@@ -700,6 +715,10 @@ namespace MyUtl {
   // which is the same conclusion the z-association study reached about
   // sqrt(var_z0) mis-modelling the true z0 spread. 1/dz forms are worse still
   // -- they diverge, over-rewarding a track that happens to sit on the vertex.
+  // Minimum in-jet tracks before the in-jet time is trusted. 3 is the smallest
+  // value that is >= the raw baseline on BOTH VBF and Z+jets simultaneously
+  // (VBF +0.50, Z+jets +0.02); 2 is worth +0.80 on VBF but -0.08 on Z+jets.
+  inline constexpr int MIN_INJET_TRACKS_FOR_TIME = 3;
   inline constexpr double TRACK_DZ_WEIGHT = 0.7;
   inline const Score Score::TRKPTZ_TZ = { 27, STR_TRKPTZ + " [per-track #Deltaz]", "TRKPTZ_TZ", false, false, -1.f };
   // Same SELECTION as TRKPTZ_TZ (updateScores copies its value verbatim, so the
@@ -714,6 +733,14 @@ namespace MyUtl {
   inline const Score Score::TRKPTZ_TZ_OJ = { 29, STR_TRKPTZ + " [per-track #Deltaz, out-jet t]", "TRKPTZ_TZ_OJ",
                                              false, false, -1.f, -1.0, ClusteringMethod::ITERATIVE,
                                              false, TrackFilterType::ALL, VbsRegion::NONE, TimeSource::OUT_JET };
+  // The sample-independent version: in-jet time only when the subset is big
+  // enough to be worth trusting, full-cluster time otherwise. Same selection as
+  // TRKPTZ_TZ, so the difference from it is the guarded re-timing alone.
+  inline const Score Score::TRKPTZ_TZ_GIJ = { 30, STR_TRKPTZ + " [per-track #Deltaz, guarded in-jet t]",
+                                              "TRKPTZ_TZ_GIJ", false, false, -1.f, -1.0,
+                                              ClusteringMethod::ITERATIVE, false, TrackFilterType::ALL,
+                                              VbsRegion::NONE, TimeSource::IN_JET,
+                                              MIN_INJET_TRACKS_FOR_TIME };
 
   // Scores with a dedicated collection (distCut ≥ 0 → buildsCollection() = true)
   inline const Score Score::CONE       = {  7, "Cone"                       , "CONE",     true , false, -1.f, DIST_CUT_CONE, ClusteringMethod::CONE };
@@ -727,7 +754,7 @@ namespace MyUtl {
     Score::WAVES,    Score::JET_T_REFINED, Score::WAVES_MISCL, Score::WAVES_MISAS,
     Score::VBF_R1,   Score::VBF_R2,
     Score::TRKPTZ_PV, Score::TRKPTZ_PU, Score::TRKPTZ_PUW, Score::TRKPTZ_TZ,
-    Score::TRKPTZ_TZ_IJ, Score::TRKPTZ_TZ_OJ,
+    Score::TRKPTZ_TZ_IJ, Score::TRKPTZ_TZ_OJ, Score::TRKPTZ_TZ_GIJ,
   };
 
   // ---------------------------------------------------------------------------
