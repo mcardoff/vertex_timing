@@ -59,3 +59,46 @@ samples. Every choice is plateau-supported and uniform across samples, which is
 the best available internal evidence -- but a genuinely out-of-sample
 confirmation (mjj500 selections, mu0 no-harm controls) is the cheap way to close
 the accumulated-tuning concern before this is quoted anywhere.
+
+---
+
+# Out-of-sample check (`python/oos_check.py`)
+
+## mjj500 (mu=200) -- the VBS-enriched selection
+
+Honest framing: these events OVERLAP the novbs tuning sets (mjj500 is stricter,
+so a subset), but the population mix is very different -- this tests survival
+under reweighting toward VBS topology, not statistical independence.
+
+| sample | events | TRKPTZ | TZP | WAVES | TZP-TRKPTZ | +- |
+|---|---:|---:|---:|---:|---:|---:|
+| vbf | 519,115 | 90.45 | **92.08** | 91.91 | **+1.63** | 0.06 |
+| zjets | 36,531 | 61.87 | **64.31** | 57.94 | **+2.44** | 0.36 |
+| dijet | 80,383 | 86.88 | **88.58** | 86.08 | **+1.70** | 0.16 |
+| ttbar | 561,745 | 87.08 | **88.84** | 86.08 | **+1.77** | 0.06 |
+
+Gains of the same size as on the tuning selection (+1.6 to +2.4), and TZP beats
+deployed WAVeS on ALL FOUR (vbf +0.17, zjets +6.37, dijet +2.50, ttbar +2.76).
+On the canonical zjets selection specifically -- the headline population of the
+whole effort -- TZP reaches **64.31% against the 61.87% TRKPTZ baseline**, a
+purely classical +2.44.
+
+## mu0 (novbs) -- disjoint zero-pileup no-harm controls
+
+| sample | events | TRKPTZ | TZP | delta |
+|---|---:|---:|---:|---:|
+| vbf_mu0 | 2,741,680 | 99.87 | 99.86 | -0.01 |
+| zeejets_mu0 | 34,310 | 99.76 | 99.76 | -0.01 |
+| ttbar_mu0 | 2,128,740 | 99.87 | 99.86 | -0.01 |
+
+4.9M genuinely disjoint events: deltas of -0.01 everywhere, i.e. ~300 events out
+of 4.9M. The full stack of changes (per-track z-weight, softened cluster term,
+d0 power, guarded in-jet timing) is inert where there is nothing to gain.
+Deployed WAVeS by contrast costs 0.3-0.8 even at mu0.
+
+## Verdict
+
+The accumulated-tuning concern is closed to the extent local data allows: the
+constants survive a strong reweighting with undiminished gains, and do no harm
+on disjoint zero-pileup data. What this does NOT test: a statistically
+independent mu=200 dataset. That would need new MC.
