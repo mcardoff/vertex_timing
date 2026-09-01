@@ -268,3 +268,86 @@ the available headroom, and a perfect multiplicity oracle would capture no more.
 This closes the idea. It also confirms the ratio it was premised on: genuine HS
 tracks are **20.9%** of reconstructed forward tracks on Z+jets (VBF ~32%), i.e.
 about 1 in 5.
+
+---
+
+# Time-source oracle (DIAGNOSTIC ONLY) — Z+jets
+
+For the cluster TRKPTZ_TZ chose, compute all three times and report whichever is
+closest to truth. Selection never changes, so this isolates the value of picking
+the TIME SOURCE per event. Truth-using; not a method.
+
+**With a matched-noise null**, because best-of-N is upward-biased even on
+uninformative candidates: the null replaces the two alternatives with Gaussian
+perturbations of the raw time at the observed raw->in-jet (18.6 ps) and
+raw->out-jet (4.7 ps) spreads, then takes the same best-of-3.
+
+| time source | core frac | core RMS | 68% half | median \|dt\| | full RMS |
+|---|---:|---:|---:|---:|---:|
+| raw | 63.89% | 23.40 | 84.69 | 29.05 | 182.4 |
+| in-jet | 62.46% | 24.37 | 88.81 | 32.25 | 183.2 |
+| out-of-jet | 63.61% | 23.93 | 85.35 | 30.33 | 182.6 |
+| ORACLE2 (raw+in-jet) | 64.88% | 22.01 | 80.52 | 25.69 | 180.9 |
+| **ORACLE3** | **65.01%** | 21.75 | 79.82 | 25.20 | 180.6 |
+| **NULL best-of-3** | **65.55%** | 20.55 | 76.78 | 22.58 | 178.1 |
+
+| | |
+|---|---:|
+| oracle3 gain over raw | +1.12 |
+| null gain over raw | **+1.67** |
+| **real complementarity** | **-0.54** |
+
+**The null BEATS the real oracle.** The three time sources carry less
+complementary information than three independent Gaussians of the same width --
+they are highly correlated (raw and out-of-jet differ by only 4.7 ps RMS,
+because out-of-jet IS ~90% of the tracks). The apparent +1.12 is entirely a
+best-of-N artifact and then some.
+
+Purity of the tracks used (pT-weighted HS fraction). The SELECTED-CLUSTER purity
+is identical across rows by construction; only the subset differs:
+
+| subset used for the time | purity |
+|---|---:|
+| whole cluster (= raw) | 42.24% |
+| in-jet subset | **53.23%** |
+| out-of-jet subset | 40.00% |
+
+Note the in-jet subset IS purer (53.2 vs 42.2) and still times worse -- the
+statistics argument again, not a purity one.
+
+Oracle wins: raw 57.5%, in-jet 28.0%, out-of-jet 14.4%.
+
+Differential vs event-level n forward HS tracks -- "real" is the oracle minus
+the null, i.e. the part that is not best-of-N inflation:
+
+| n HS | events | raw | in-jet | out-jet | ORACLE3 | NULL | **real** |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 0 | 8844 | 18.69 | 18.52 | 18.70 | 19.87 | 21.29 | **-1.42** |
+| 1 | 9501 | 34.91 | 34.82 | 34.79 | 36.41 | 37.80 | -1.39 |
+| 2 | 9568 | 45.55 | 45.22 | 45.21 | 47.18 | 48.00 | -0.83 |
+| 3 | 9430 | 55.30 | 54.06 | 54.83 | 56.72 | 57.34 | -0.62 |
+| 4 | 9008 | 64.29 | 62.70 | 63.77 | 65.48 | 66.03 | -0.56 |
+| 5 | 8140 | 70.90 | 69.47 | 70.47 | 72.11 | 72.49 | -0.38 |
+| 6-7 | 13857 | 78.31 | 76.03 | 78.01 | 79.38 | 79.58 | -0.20 |
+| 8-9 | 10167 | 85.46 | 83.09 | 85.26 | 86.32 | 86.38 | -0.06 |
+| 10-13 | 10706 | 91.55 | 89.30 | 91.36 | 92.18 | 92.19 | -0.01 |
+| 14-19 | 4160 | 96.27 | 93.89 | 96.15 | 96.54 | 96.49 | +0.05 |
+
+Negative in every bin with statistics. **There is nothing to gain from
+per-event time-source selection on Z+jets** -- do not build a chooser for it.
+
+## VBF control — where the same diagnostic IS positive
+
+| | raw | in-jet | out-jet | ORACLE3 | NULL | **real** |
+|---|---:|---:|---:|---:|---:|---:|
+| core frac | 91.49% | 92.31% | 89.31% | 92.92% | 92.30% | **+0.62** |
+| core RMS | 17.72 | 16.42 | 22.10 | 12.48 | 14.36 | |
+
+Oracle wins: raw 28.4%, **in-jet 49.4%**, out-of-jet 22.2%; in-jet subset purity
+88.25% against 72.66% for the whole cluster.
+
+So the diagnostic is not vacuous -- it finds real complementarity on VBF
+(+0.62) and none on Z+jets (-0.54). Consistent with everything else in this
+document: the jet partition is informative where the jets hold the hard scatter
+(VBF, 47% of HS timing weight) and uninformative where they do not (Z+jets,
+10%).
