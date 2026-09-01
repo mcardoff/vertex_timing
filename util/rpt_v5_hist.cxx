@@ -148,6 +148,10 @@ static Inflation inflationFor(const std::string& sample) {
   // first run per sample if they disagree.
   if (sample == "zjets") return {1.61, 1.63, 1.65, 1.65};
   if (sample == "dijet") return {1.53, 1.45, 1.46, 1.46};
+  // SEEDED, NOT MEASURED: no rpt_v5 run has measured ttbar's ratios yet. Seeded
+  // from the dijet row (ttbar has tracked dijet in every core-fraction study
+  // this branch). Check this run's calibration table and replace.
+  if (sample == "ttbar") return {1.53, 1.45, 1.46, 1.46};
   return {1.48, 1.39, 1.38, 1.38};  // vbf, and the local default run
 }
 
