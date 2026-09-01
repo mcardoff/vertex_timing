@@ -1070,6 +1070,27 @@ namespace MyUtl {
         this->scores[Score::TRKPTZ_TZ_IJ.id] = sumTz * dzTerm;
         this->scores[Score::TRKPTZ_TZ_OJ.id] = sumTz * dzTerm;
         this->scores[Score::TRKPTZ_TZ_GIJ.id] = sumTz * dzTerm;
+
+        // Bounded jet-association term: the fraction of the cluster's pT carried
+        // by tracks within dR < 0.4 of a qualifying forward jet. Same jet
+        // qualification as calculateTime's IN_JET path.
+        double ptInJet = 0.0, ptAll = 0.0;
+        for (int trk : this->trackIndices) {
+          const double p = branch->trackPt[trk];
+          ptAll += p;
+          const double te = branch->trackEta[trk], tp = branch->trackPhi[trk];
+          for (int j = 0; j < (int)branch->topoJetPt.GetSize(); ++j) {
+            if (branch->isJetRemoved(j)) continue;
+            if (branch->topoJetPt[j] < MIN_JET_PT) continue;
+            const double je = branch->topoJetEta[j];
+            if (std::abs(je) < MIN_ABS_ETA_JET || std::abs(je) > MAX_ABS_ETA_JET) continue;
+            const double dphi = TVector2::Phi_mpi_pi(branch->topoJetPhi[j] - tp);
+            if (std::hypot(je - te, dphi) < 0.4) { ptInJet += p; break; }
+          }
+        }
+        const double fJet = (ptAll > 0.0) ? ptInJet / ptAll : 0.0;
+        this->scores[Score::TRKPTZ_TZJ.id] =
+          sumTz * dzTerm * (1.0 + JET_FRAC_WEIGHT * fJet);
       }
 
       // WAVES: WAVeS-style score — Σ_i pT_i × pT_jet(i) / max(ΔR_i, DR_FLOOR)

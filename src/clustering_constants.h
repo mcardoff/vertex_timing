@@ -610,6 +610,7 @@ namespace MyUtl {
     static const Score TRKPTZ_TZ_OJ;
     static const Score TRKPTZ_TZ_GIJ;
     static const Score WAVES_GIJ;
+    static const Score TRKPTZ_TZJ;
   };
 
   inline const std::string STR_TRKPTZ = "#Sigma p_{T}e^{-|#Delta z|}";
@@ -725,6 +726,39 @@ namespace MyUtl {
   // value that is >= the raw baseline on BOTH VBF and Z+jets simultaneously
   // (VBF +0.50, Z+jets +0.02); 2 is worth +0.80 on VBF but -0.08 on Z+jets.
   inline constexpr int MIN_INJET_TRACKS_FOR_TIME = 3;
+  // Weight of the BOUNDED jet-association term, score *= (1 + JET_FRAC_WEIGHT *
+  // frac_pT_in_forward_jet). 0 disables it and reproduces TRKPTZ_TZ exactly.
+  //
+  // Why bounded rather than WAVeS's form. On the events TRKPTZ_TZ loses, its own
+  // inputs carry nothing -- cluster |dz| separates the wrong pick from the true
+  // cluster at AUC 0.502 and sumpt at 0.466, i.e. no better than chance -- while
+  // every jet-association variable separates at 0.86-0.90 against a 0.978 truth
+  // ceiling. So jet association IS the missing information. But WAVeS already
+  // uses it and loses 1.40 on Z+jets, because it MULTIPLIES by jet pT
+  // (pT_trk^2 pT_jet^2 / dR), letting one high-pT pileup jet dominate the score.
+  // A fraction lives in [0,1], so a jet can at most scale a cluster by
+  // (1 + alpha) and can never run away with it.
+  //
+  // VERDICT: NOT RECOMMENDED as a default, and the default below is 0.
+  //
+  // The AUC ranking above was computed on the 543 events TRKPTZ_TZ loses -- a
+  // SELECTED subpopulation -- and a population-wide check does not support it:
+  //
+  //                       frac_pt_in_fwdjet AUC     switch ratio at alpha=1
+  //     over all clusters   (vs base 0.974)         (better:worse)
+  //     VBF                  0.882                   2.20  (+0.32 net)
+  //     Z+jets               0.612                   0.97  (-0.01 net)
+  //
+  // On VBF it is real but it is the WEAKEST of the variables available -- the
+  // existing score itself separates at 0.974 -- so the +0.32 is residual
+  // correlation, not new discriminating power. On Z+jets it is noise: it flips
+  // 1.3% of picks and gets them right 49.2% of the time. Its "safe on every
+  // sample" scan result was safe only because it does nothing there.
+  //
+  // Since Z+jets is the background to VBF H->inv, a signal-only +0.32 bought with
+  // an extra term is not a good trade. Left implemented and tunable so the
+  // measurement is reproducible, but off.
+inline constexpr double JET_FRAC_WEIGHT = 0.0;
   inline constexpr double TRACK_DZ_WEIGHT = 0.7;
   inline const Score Score::TRKPTZ_TZ = { 27, STR_TRKPTZ + " [per-track #Deltaz]", "TRKPTZ_TZ", false, false, -1.f };
   // Same SELECTION as TRKPTZ_TZ (updateScores copies its value verbatim, so the
@@ -756,6 +790,14 @@ namespace MyUtl {
                                           false, false, -1.f, -1.0, ClusteringMethod::ITERATIVE,
                                           false, TrackFilterType::ALL, VbsRegion::NONE,
                                           TimeSource::IN_JET, MIN_INJET_TRACKS_FOR_TIME };
+  // TRKPTZ_TZ + the bounded jet term + the guarded in-jet time. The full
+  // sample-independent candidate: pT, z AND jet association, none of which can
+  // individually run away with the score.
+  inline const Score Score::TRKPTZ_TZJ = { 32, STR_TRKPTZ + " [per-track #Deltaz + jet frac]",
+                                           "TRKPTZ_TZJ", false, false, -1.f, -1.0,
+                                           ClusteringMethod::ITERATIVE, false,
+                                           TrackFilterType::ALL, VbsRegion::NONE,
+                                           TimeSource::IN_JET, MIN_INJET_TRACKS_FOR_TIME };
 
   // Scores with a dedicated collection (distCut ≥ 0 → buildsCollection() = true)
   inline const Score Score::CONE       = {  7, "Cone"                       , "CONE",     true , false, -1.f, DIST_CUT_CONE, ClusteringMethod::CONE };
@@ -769,7 +811,7 @@ namespace MyUtl {
     Score::WAVES,    Score::JET_T_REFINED, Score::WAVES_MISCL, Score::WAVES_MISAS,
     Score::VBF_R1,   Score::VBF_R2,
     Score::TRKPTZ_PV, Score::TRKPTZ_PU, Score::TRKPTZ_PUW, Score::TRKPTZ_TZ,
-    Score::TRKPTZ_TZ_IJ, Score::TRKPTZ_TZ_OJ, Score::TRKPTZ_TZ_GIJ, Score::WAVES_GIJ,
+    Score::TRKPTZ_TZ_IJ, Score::TRKPTZ_TZ_OJ, Score::TRKPTZ_TZ_GIJ, Score::WAVES_GIJ, Score::TRKPTZ_TZJ,
   };
 
   // ---------------------------------------------------------------------------
