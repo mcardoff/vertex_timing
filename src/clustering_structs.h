@@ -1097,13 +1097,21 @@ namespace MyUtl {
         // d0 was chosen over its qP and z0 siblings by a head-to-head scan
         // (see D0_PRECISION_WEIGHT in clustering_constants.h); the three are
         // 0.86-0.95 correlated and stacking a second adds nothing.
-        double d0Info = 0.0;
+        double d0Info = 0.0, sumTzp = 0.0;
         for (int trk : this->trackIndices) {
           const double v = branch->trackVarD0[trk];
           if (v > 0.0) d0Info += 1.0 / v;
+          sumTzp += branch->trackPt[trk]
+                  * std::exp(-TZP_TRACK_DZ_WEIGHT
+                             * std::abs(branch->trackZ0[trk] - branch->recoVtxZ[0]));
         }
+        // TZP uses its OWN jointly-tuned constants (see clustering_constants.h);
+        // sumTz/dzTerm above keep the ladder rows' historical (0.7, 1.5).
+        const double dzTermTzp = (this->values.size() > 1)
+          ? std::exp(-TZP_CLUSTER_DZ_WEIGHT * std::abs(this->values.at(1) - branch->recoVtxZ[0]))
+          : std::exp(-TZP_CLUSTER_DZ_WEIGHT * std::abs(rawDeltaZ));
         this->scores[Score::TRKPTZ_TZQ.id] =
-          sumTz * dzTerm * std::pow(d0Info, 0.5 * D0_PRECISION_WEIGHT);
+          sumTzp * dzTermTzp * std::pow(d0Info, 0.5 * TZP_D0_PRECISION);
       }
 
       // WAVES: WAVeS-style score — Σ_i pT_i × pT_jet(i) / max(ΔR_i, DR_FLOOR)

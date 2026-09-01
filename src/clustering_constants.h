@@ -788,7 +788,25 @@ namespace MyUtl {
   // Exponent of the d0-precision term, score *= (SUM_t 1/var_d0)^{b/2}.
   // 1.2 is the centre of the 1.2-1.6 plateau (worst-sample +0.29/+0.30, all
   // four samples positive); the curve turns over by 3.2.
-  inline constexpr double D0_PRECISION_WEIGHT = 1.2;
+  inline constexpr double D0_PRECISION_WEIGHT = 1.2;   // 1-D optimum; superseded by the joint tune below
+
+  // Joint (alpha, beta, gamma) tune of the TZP score,
+  //   S = [SUM_t pT e^{-alpha |z0_t - z_PV|}] * e^{-beta |z_C - z_PV|} * (1/sigma_d0)^gamma.
+  // alpha and gamma were previously tuned 1-D with the others fixed, and beta
+  // (the cluster-level 1.5) had NEVER been tuned -- it is inherited from
+  // original TRKPTZ. Jointly the terms rebalance: a stronger per-track z-term
+  // makes the steep cluster-level term partly redundant (1.5 -> 0.6) and needs
+  // less precision weight (1.2 -> 0.45). 5x5x5 grid + edge extensions, all four
+  // novbs samples, maximin objective; the chosen point is interior on every
+  // axis and sits on a plateau (beta flat 0.45-0.75, gamma flat 0.3-0.6, alpha
+  // peaked at 1.0):
+  //     vs (0.7, 1.5, 1.2):  vbf +0.16  zjets +0.38  dijet +0.15  ttbar +0.15
+  // Per-sample optima buy at most +0.41 (zjets), so the one-global-point
+  // constraint costs little. These constants are TZP-ONLY: TRACK_DZ_WEIGHT and
+  // the 1.5 stay untouched for TRKPTZ and the historical ladder rows.
+  inline constexpr double TZP_TRACK_DZ_WEIGHT   = 1.0;
+  inline constexpr double TZP_CLUSTER_DZ_WEIGHT = 0.6;
+  inline constexpr double TZP_D0_PRECISION      = 0.45;
   inline constexpr double JET_FRAC_WEIGHT = 0.0;
   inline constexpr double TRACK_DZ_WEIGHT = 0.7;
   inline const Score Score::TRKPTZ_TZ = { 27, STR_TRKPTZ + " [per-track #Deltaz]", "TRKPTZ_TZ", false, false, -1.f };
