@@ -8,7 +8,170 @@ replaces rather than duplicates.
 import json, re, sys
 
 R = json.load(open("results/model_inputs.json"))
+D = json.load(open("results/model_inputs_dists.json"))
 H = open("results/method_explainer.html").read()
+
+
+def fmt(v):
+    a = abs(v)
+    if a == 0: return "0"
+    if a >= 1000: return f"{v:,.0f}"
+    if a >= 10: return f"{v:.0f}"
+    if a >= 1: return f"{v:.1f}"
+    if a >= 0.01: return f"{v:.2f}"
+    return f"{v:.1e}"
+
+
+def spark(p, w=250, h=126):
+    """One signal-vs-background panel. Signal is a filled area, background an
+    unfilled dashed outline, so the two stay distinguishable without relying on
+    colour alone. Both are densities (unit area), never counts -- the classes
+    differ in size by up to 30x here."""
+    ml, mr, mt, mb = 4, 4, 6, 15
+    iw, ih = w - ml - mr, h - mt - mb
+    y0 = mt + ih
+    S = [f'<svg viewBox="0 0 {w} {h}" role="img" aria-label="'
+         f'{p["var"]}, {p["sig"]} versus {p["bkg"]}" '
+         f'style="width:100%;height:auto">']
+    if p["kind"] == "cat":
+        labs, sv, bv = p["labels"], p["s"], p["b"]
+        mx = max(max(sv), max(bv)) or 1.0
+        slot = iw / len(labs)
+        bw = min(slot * 0.34, 26)
+        for i, lb in enumerate(labs):
+            cx = ml + slot * (i + 0.5)
+            for j, (v, cls) in enumerate(((sv[i], "s"), (bv[i], "b"))):
+                bh = ih * v / mx
+                x = cx - bw * (1 - j) - 1 + j
+                if cls == "s":
+                    S.append(f'<rect x="{x:.1f}" y="{y0 - bh:.1f}" width="{bw:.1f}" '
+                             f'height="{bh:.1f}" fill="var(--accent)" opacity="0.85"/>')
+                else:
+                    S.append(f'<rect x="{x:.1f}" y="{y0 - bh:.1f}" width="{bw:.1f}" '
+                             f'height="{bh:.1f}" fill="none" stroke="var(--ink-3)" '
+                             f'stroke-width="1.2" stroke-dasharray="3 2"/>')
+            S.append(f'<text x="{cx:.1f}" y="{h - 4}" text-anchor="middle" '
+                     f'font-size="8.5" fill="var(--ink-3)" '
+                     f'font-family="IBM Plex Mono,monospace">{lb}</text>')
+    else:
+        e, sv, bv = p["edges"], p["s"], p["b"]
+        mx = max(max(sv), max(bv)) or 1.0
+        x0, x1 = e[0], e[-1]
+        sx = lambda v: ml + iw * (v - x0) / (x1 - x0 or 1)
+        sy = lambda v: y0 - ih * v / mx
+
+        def steps(vals):
+            d = [f"M{sx(e[0]):.1f},{y0:.1f}"]
+            for i, v in enumerate(vals):
+                d.append(f"L{sx(e[i]):.1f},{sy(v):.1f}")
+                d.append(f"L{sx(e[i + 1]):.1f},{sy(v):.1f}")
+            d.append(f"L{sx(e[-1]):.1f},{y0:.1f}")
+            return " ".join(d)
+        S.append(f'<path d="{steps(sv)}" fill="var(--accent)" fill-opacity="0.20" '
+                 f'stroke="var(--accent)" stroke-width="1.35" stroke-linejoin="round"/>')
+        S.append(f'<path d="{steps(bv)}" fill="none" stroke="var(--ink-3)" '
+                 f'stroke-width="1.2" stroke-dasharray="3 2" stroke-linejoin="round"/>')
+        S.append(f'<text x="{ml}" y="{h - 4}" font-size="8.5" fill="var(--ink-3)" '
+                 f'font-family="IBM Plex Mono,monospace">{fmt(x0)}</text>')
+        S.append(f'<text x="{w - mr}" y="{h - 4}" text-anchor="end" font-size="8.5" '
+                 f'fill="var(--ink-3)" font-family="IBM Plex Mono,monospace">{fmt(x1)}</text>')
+    S.append("</svg>")
+    a = "&mdash;" if p["auc"] is None else f'{p["auc"]:.3f}'
+    # NB: build the note without a separator prefix. An earlier version stripped
+    # one with lstrip(" &#183;"), which takes a character SET -- so a value like
+    # "1.2% above range" lost its leading digit.
+    tail = "&nbsp;"
+    if p["kind"] == "hist" and p.get("clip_hi", 0) >= 0.5:
+        tail = f'{p["clip_hi"]:g}% clipped'
+    return (f'<div class="pn"><h4>{p["var"]}</h4>{"".join(S)}'
+            f'<div class="a"><span>AUC {a}</span><span>{tail}</span></div></div>')
+
+
+def dpanels(step, note):
+    ps = [p for p in D["panels"] if p["step"] == step]
+    if not ps: return ""
+    q = ps[0]
+    return ('<p class="dh">Signal vs background for the top three, as densities '
+            f'&mdash; split on <span class="mono">{q["split"]}</span>.</p>'
+            + '<div class="pg">' + "".join(spark(p) for p in ps) + "</div>"
+            + f'<p class="lg"><span><s class="f"></s>{q["sig"]} '
+              f'({q["n_sig"]:,})</span><span><s class="o"></s>{q["bkg"]} '
+              f'({q["n_bkg"]:,})</span><span>AUC = single-variable separation</span></p>'
+            + f"<p>{note}</p>")
+
+def pa(step, var):
+    return next(p for p in D["panels"] if p["step"] == step and p["var"] == var)
+
+
+def A(step, var):
+    """AUC as a display string, pulled from the data rather than typed, so the
+    prose cannot drift from the panel beside it."""
+    v = pa(step, var)["auc"]
+    return "&mdash;" if v is None else f"{v:.3f}"
+
+
+NOTE = {
+ "1": ('The two binary panels say the same thing twice &mdash; a track whose nearest vertex is '
+       'the primary is mostly hard scatter, one sitting closer to a pileup vertex is mostly not '
+       f'&mdash; and neither says anything about time. '
+       '<span class="mono">nb_phzt</span> is the one that does: pileup piles against zero (no '
+       'probable hard-scatter company nearby in <em>both</em> z and time) while hard-scatter '
+       'tracks spread out, with medians of '
+       f'{pa("1", "nb_phzt")["median_b"]:g} against {pa("1", "nb_phzt")["median_s"]:g}.'
+       '<div class="box b" style="margin-top:1.1rem"><span class="k">This qualifies the box above'
+       '</span><p><span class="mono">closer_to_pu_than_pv</span> takes 65.8% of round 1&rsquo;s '
+       f'<em>gain</em> but separates at only AUC {A("1", "closer_to_pu_than_pv")} on its own '
+       f'&mdash; weaker than <span class="mono">nb_phzt</span>&rsquo;s {A("1", "nb_phzt")}. '
+       'The two metrics answer different questions: gain rewards a cheap, reliable first split '
+       'that the tree reaches for at every node, while AUC asks how well one variable ranks '
+       'tracks by itself. So the honest statement is that the round-1 tagger is '
+       '<em>structurally organised around</em> that flag, not that the flag is a strong '
+       'classifier. Read the two charts together &mdash; neither alone is the whole picture.'
+       '</p></div>'),
+ "2": ('Both agreement variables behave the same way and it is the cleanest separation on this '
+       'page: clusters that land inside the window pile hard against zero, clusters that miss '
+       'spread out. <span class="mono">dt_tagw_agg</span> reaches AUC '
+       f'{A("2", "dt_tagw_agg")} on its own &mdash; a single variable, no model. '
+       '<span class="mono">n_ph05</span> (how many tracks the tagger calls hard scatter at '
+       f'p&nbsp;&gt;&nbsp;0.5) is a genuinely different axis at {A("2", "n_ph05")}: '
+       'not <em>where</em> the cluster sits but <em>how much</em> hard scatter it holds.'),
+ "3": ('This trio is the whole argument for the change, and the middle panel is the one to look '
+       f'at. <span class="mono">ph</span> separates well ({A("3", "ph")}). '
+       f'<span class="mono">timeRes</span> does not ({A("3", "timeRes")}, i.e. a coin flip). '
+       'It takes only four values &mdash; 17.5, 20.2, 24.7 and 35&nbsp;ps, the HGTD resolutions '
+       'for 4/3/2/1 hits &mdash; and hard-scatter and pileup tracks populate them almost '
+       'identically (50.9% vs 49.3% in the 24.7&nbsp;ps bin, 31.4% vs 31.2% at 35&nbsp;ps).'
+       '<div class="box a" style="margin-top:1.1rem"><span class="k">Why this matters</span>'
+       '<p>&sigma;&#7522; is the <strong>only</strong> weight the current estimator uses, and it '
+       'carries essentially no information about whether a track belongs to the hard scatter. '
+       'The inverse-variance mean is not making a bad choice among the available weights &mdash; '
+       'it is weighting by the one quantity here that does not discriminate. That is the whole '
+       'of the +1.72, and it is why the p&#7522; weighting rather than the trimming is the '
+       'mechanism.</p></div>'
+       '<p>The third panel is why a plain mean stays wrong even after re-weighting: '
+       f'<strong>{D["hs_tail_gt200ps"]}% of genuine hard-scatter tracks sit more than '
+       f'200&nbsp;ps from truth</strong>, against a median residual of '
+       f'{D["hs_median_abs_dt"]}&nbsp;ps and a median quoted resolution of '
+       f'{D["hs_median_timeRes"]}&nbsp;ps. The tail is real, &sigma; does not describe it, and '
+       'the two Winsorisation passes exist to cut it.</p>'),
+ "4": ('Same split as &#9312;, and <span class="mono">ph</span> and '
+       '<span class="mono">timeRes</span> are deliberately the same two panels as &#9314; '
+       '&mdash; repeated rather than cross-referenced because the fact that one variable tops '
+       'three of the five steps <em>is</em> the finding. '
+       f'<span class="mono">nb_ph60</span> ({A("4", "nb_ph60")}) is a partly independent '
+       'handle, which is why it survives permutation at second place.</p>'
+       f'<p>Note that <span class="mono">timeRes</span> ranks third on permutation at '
+       f'{A("4", "timeRes")} separation. That is not a contradiction: its job in this network '
+       'is not to say <em>whose</em> track it is but <em>how much to trust the time</em> &mdash; '
+       'it enters the weight, and the weighted median needs it even though it discriminates '
+       'nothing.'),
+ "5": ('The weakest separations on the page, and that is the finding rather than a defect. '
+       'Even the best single variable manages only AUC '
+       f'{A("5", "dt_tagw_agg")}, and the distributions overlap heavily &mdash; on the '
+       'events where the two answers actually disagree there is little in the reconstructed '
+       'summaries that says which one to believe. This is the quantitative form of &ldquo;the '
+       'chooser is the weak link&rdquo;, and it is where the remaining union headroom sits.'),
+}
 
 TAGDER = set(R["stage1"]["tagger_derived"]) | {"ph"} | set(R["tagger_r2"]["new_features"])
 
@@ -70,6 +233,7 @@ B["s1"] = (
       f'{r1["top"][0]["imp"]}% to {r2["top"][0]["imp"]}%. The neighbourhood evidence '
       '<em>displaces</em> the single-feature reliance rather than piling on top of it, which is '
       'the sign that round 2 added information rather than redundancy.</p>'
+    + dpanels("1", NOTE["1"])
     + flist("Full round-1 input list", r1["features"])
     + flist("Round-2 additions", r2["new_features"]))
 
@@ -95,6 +259,7 @@ B["s2"] = (
       '<strong>&ldquo;does this cluster&rsquo;s time agree with what all the tracks in the event say?&rdquo;</strong> '
       'That is the reason &#9315; cannot be treated as an optional extra bolted on at the end: '
       'the aggregate answer is also the reference the selector measures candidates against.</p></div>'
+    + dpanels("2", NOTE["2"])
     + flist("Full input list", s1["features"]))
 
 # ---- 3 re-timing ---------------------------------------------------------
@@ -123,7 +288,8 @@ B["s3"] = (
       f'{d2:.2f}. The trimming is cheap insurance against a single wild track, not the mechanism.</p>'
     + '<p class="note" style="border:0;padding:0;margin:.4rem 0 0">Measured over all 93,977 '
       'novbs-augmented events, so the 62.12 baseline here is not the 61.87 headline figure, which '
-      'is the canonical-selection subset. The deltas are what transfer.</p>')
+      'is the canonical-selection subset. The deltas are what transfer.</p>'
+    + dpanels("3", NOTE["3"]))
 
 # ---- 4 e2e ---------------------------------------------------------------
 e = R["e2e"]
@@ -145,6 +311,7 @@ B["s4"] = (
       '<p>That is the single most consequential fact on this page for anyone deciding what to '
       'reuse: <strong>the per-track tagger is the load-bearing component of all five changes.</strong> '
       'It drives &#9313;, it is two-thirds of &#9314;&rsquo;s inputs, and it is four-fifths of &#9315;.</p></div>'
+    + dpanels("4", NOTE["4"])
     + flist("Full input list", e["features"]))
 
 # ---- 5 meta --------------------------------------------------------------
@@ -167,6 +334,7 @@ B["s5"] = (
       '(<span class="mono">maxp_near_t0</span>, <span class="mono">n_cl_near_t0</span>). No single '
       'feature exceeds 8.2% &mdash; unlike every other model here, this one spreads its decision '
       'thinly, which is consistent with it being the weakest link in the chain.</p>'
+    + dpanels("5", NOTE["5"])
     + flist("Full input list", m["features"]))
 
 # ---- splice --------------------------------------------------------------
