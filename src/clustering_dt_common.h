@@ -125,6 +125,20 @@ inline void makeComparisonPlots(
 	    },
 	    {C03, C08, C02});
 
+  // Per-track dz weighting against the baseline it modifies, with WAVeS as the
+  // reference for what a jet-aware selector buys. TRKPTZ and TRKPTZ_TZ share
+  // the same clusters, the same cluster-level exp(-1.5|dz|) envelope and the
+  // same time estimator, and differ ONLY in the per-track pT weight -- so the
+  // separation between those two curves is exactly what the per-track term is
+  // worth, with nothing else moving.
+  moneyPlot(MyUtl::plotFilePath("comparisons", TString::Format("trkptz_tz_%s.pdf", key).Data()).c_str(), key, canvas,
+	    {
+	      &mapHGTD.at(Score::TRKPTZ),
+	      &mapHGTD.at(Score::TRKPTZ_TZ),
+	      &mapHGTD.at(Score::WAVES),
+	    },
+	    {C02, C08, C03});
+
 }
 
 #endif  // CLUSTERING_DT_COMMON_H

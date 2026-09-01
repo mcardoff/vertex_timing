@@ -162,3 +162,62 @@ throws away real signal. The gentle continuous weight of proposal 3 is worth
   the m_jj≥500 + novbs union, 93,977 events), not from a `clustering_hist` run;
   the local ntuples are VBF only. The C++ `TRKPTZ_TZ` row was confirmed against
   VBF (+0.64 vs the python scan's +0.68 on a different selection).
+
+---
+
+## TRKPTZ_TZ in the main program — differential core fraction (local VBF)
+
+`clustering_hist` + `clustering_plot`, 45,335 events. `makeComparisonPlots` now
+emits a `trkptz_tz_<key>.pdf` group (TRKPTZ vs TRKPTZ_TZ vs WAVeS) for each of
+the five KEYs; the two TRKPTZ curves share clusters, cluster-level envelope and
+time estimator, so their separation is exactly the per-track term.
+
+| | core fraction |
+|---|---:|
+| TRKPTZ | 93.04% |
+| **TRKPTZ_TZ** | **93.68%  (+0.64, 283 events)** |
+| WAVES | 94.11% |
+
+**vs n forward HS tracks** — event-level binning, so this IS a paired comparison
+(per-bin totals differ by at most 2 events):
+
+| n fwd HS trk | events | TRKPTZ | TRKPTZ_TZ | change |
+|---|---:|---:|---:|---:|
+| 3 | 2319 | 73.74 | 74.69 | +0.95 |
+| **4** | 3003 | 80.55 | 82.91 | **+2.35** |
+| 5 | 3604 | 85.99 | 87.29 | +1.30 |
+| 6 | 3906 | 89.40 | 90.52 | +1.12 |
+| 7 | 4112 | 92.34 | 93.48 | +1.14 |
+| 8 | 4094 | 94.36 | 95.24 | +0.88 |
+| 9 | 3823 | 95.68 | 95.87 | +0.18 |
+| 10+ | — | — | — | ~0 |
+
+**The entire gain is at low multiplicity and it is gone by ~10 tracks.** That is
+exactly the population `failure_decomposition` names as dominant (selection
+failure is 52.9% of failures at 0-1 forward HS tracks, and ~78% of all events
+that fail do so below 2 tracks). Above 10 tracks the baseline is already >96%
+and there is nothing left to win.
+
+**vs n forward jets** — the gain is largest where there is least jet information
+to exploit, which is also where most events are:
+
+| n fwd jets | events | TRKPTZ | TRKPTZ_TZ | change |
+|---|---:|---:|---:|---:|
+| 1 | 30896 (68%) | 88.86 | 89.77 | +0.91 |
+| 2 | 13062 | 92.82 | 93.25 | +0.43 |
+| 3 | 3162 | 94.05 | 94.43 | +0.38 |
+
+**vs cluster PU fraction** — read with care: this axis is a property of the
+SELECTED cluster, so the binning is score-dependent and up to 312 events migrate
+between bins. It is NOT a paired comparison, unlike the two above.
+
+| PU frac | TRKPTZ | TRKPTZ_TZ | change |
+|---|---:|---:|---:|
+| 0.0-0.1 | 97.82 | 95.74 | -2.08 |
+| 0.5-0.6 | 97.08 | 96.58 | -0.49 |
+| 0.8-0.9 | 58.65 | 60.53 | +1.89 |
+| **0.9-1.0** | 26.57 | **31.07** | **+4.50** |
+
+Suggestive rather than conclusive: the large gains sit in the dirtiest selected
+clusters and there is an apparent loss in the cleanest bin, but some of both is
+population migration. Worth a paired re-measurement before being quoted.
