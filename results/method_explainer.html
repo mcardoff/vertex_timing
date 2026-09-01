@@ -1,0 +1,214 @@
+<title>What the Method Changes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,500;0,7..72,600;1,7..72,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --paper:#F6F8F9; --surface:#FFFFFF; --surface-2:#ECF1F3;
+  --ink:#14181B; --ink-2:#414B52; --ink-3:#77848C;
+  --rule:#DBE3E7; --rule-soft:#EAEFF2;
+  --accent:#0F6E7A; --accent-bg:#E2EFF1;
+  --gain:#1D6E4E; --gain-bg:#E4F0EA;
+  --warn:#96631A; --warn-bg:#F7EEDD;
+  --null:#9A3B33; --null-bg:#F6E7E5;
+  --shadow:0 1px 2px rgba(20,24,27,.04), 0 10px 26px -16px rgba(20,24,27,.20);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#0D1113; --surface:#151A1D; --surface-2:#1E2529;
+  --ink:#E6ECEF; --ink-2:#AEB9C0; --ink-3:#7C8992;
+  --rule:#2A3338; --rule-soft:#1F272B;
+  --accent:#5FBECB; --accent-bg:#0E2C31;
+  --gain:#5CBF8D; --gain-bg:#10301F;
+  --warn:#D6A24F; --warn-bg:#2E2413;
+  --null:#DD8377; --null-bg:#2F1917;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 26px -16px rgba(0,0,0,.75);
+}}
+:root[data-theme="dark"]{
+  --paper:#0D1113; --surface:#151A1D; --surface-2:#1E2529;
+  --ink:#E6ECEF; --ink-2:#AEB9C0; --ink-3:#7C8992;
+  --rule:#2A3338; --rule-soft:#1F272B;
+  --accent:#5FBECB; --accent-bg:#0E2C31;
+  --gain:#5CBF8D; --gain-bg:#10301F;
+  --warn:#D6A24F; --warn-bg:#2E2413;
+  --null:#DD8377; --null-bg:#2F1917;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 26px -16px rgba(0,0,0,.75);
+}
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font-family:"IBM Plex Sans",system-ui,sans-serif;
+ font-size:16.5px;line-height:1.62;margin:0;padding:0 1.4rem 5rem;-webkit-font-smoothing:antialiased}
+.wrap{max-width:52rem;margin:0 auto}
+header{padding:3.6rem 0 1.7rem;border-bottom:2px solid var(--ink)}
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:.7rem;letter-spacing:.15em;
+ text-transform:uppercase;color:var(--ink-3);display:flex;gap:1.1rem;flex-wrap:wrap;margin-bottom:1rem}
+h1{font-family:Literata,Georgia,serif;font-weight:600;font-size:clamp(2rem,5.2vw,2.9rem);
+ line-height:1.08;letter-spacing:-.015em;margin:0 0 .85rem;text-wrap:balance}
+.lede{font-size:1.09rem;color:var(--ink-2);margin:0;max-width:39rem}
+.lede strong{color:var(--ink);font-weight:600}
+section{margin-top:3.1rem}
+h2{font-family:Literata,Georgia,serif;font-size:1.48rem;font-weight:600;margin:0 0 .25rem;
+ letter-spacing:-.008em;text-wrap:balance}
+h3{font-size:1.02rem;font-weight:600;margin:2rem 0 .5rem;color:var(--ink);
+ display:flex;align-items:baseline;gap:.6rem}
+h3 .num{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;
+ width:1.5rem;height:1.5rem;border-radius:50%;background:var(--accent);color:var(--surface);
+ font-family:"IBM Plex Mono",monospace;font-size:.78rem;font-weight:700}
+.note{font-size:.9rem;color:var(--ink-3);margin:0 0 1.3rem;padding-bottom:.8rem;border-bottom:1px solid var(--rule)}
+p{margin:0 0 1rem}
+p:last-child{margin-bottom:0}
+.mono{font-family:"IBM Plex Mono",monospace;font-size:.87em}
+.eq{font-family:"IBM Plex Mono",monospace;font-size:.9rem;background:var(--surface-2);
+ border-left:3px solid var(--rule);padding:.75rem 1rem;margin:.9rem 0;overflow-x:auto;
+ white-space:nowrap;color:var(--ink)}
+.eq.new{border-left-color:var(--accent)}
+.tw{overflow-x:auto;margin:1.15rem 0;border:1px solid var(--rule);border-radius:3px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.9rem;min-width:31rem}
+th{text-align:left;font-family:"IBM Plex Mono",monospace;font-size:.65rem;letter-spacing:.09em;
+ text-transform:uppercase;color:var(--ink-3);padding:.7rem .85rem;background:var(--surface-2);
+ border-bottom:1px solid var(--rule);white-space:nowrap;font-weight:600}
+td{padding:.6rem .85rem;border-bottom:1px solid var(--rule-soft);color:var(--ink-2)}
+td:first-child{color:var(--ink);font-weight:500}
+tr:last-child td{border-bottom:0}
+.n{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+tr.hl td{background:var(--accent-bg)}
+.up{color:var(--gain);font-weight:600}
+figure{margin:1.4rem 0;background:var(--surface);border:1px solid var(--rule);
+ border-radius:3px;padding:1.4rem 1.2rem 1rem;box-shadow:var(--shadow)}
+figcaption{font-size:.85rem;color:var(--ink-3);margin-top:1rem;padding-top:.75rem;
+ border-top:1px solid var(--rule-soft)}
+.box{border:1px solid var(--rule);border-left:3px solid var(--ink-3);border-radius:3px;
+ background:var(--surface);padding:1.05rem 1.2rem;margin:1.3rem 0}
+.box.g{border-left-color:var(--gain);background:var(--gain-bg)}
+.box.w{border-left-color:var(--warn);background:var(--warn-bg)}
+.box.a{border-left-color:var(--accent);background:var(--accent-bg)}
+.box.b{border-left-color:var(--null);background:var(--null-bg)}
+.box .k{font-family:"IBM Plex Mono",monospace;font-size:.66rem;font-weight:600;letter-spacing:.11em;
+ text-transform:uppercase;color:var(--ink-3);display:block;margin-bottom:.45rem}
+.box.g .k{color:var(--gain)}.box.w .k{color:var(--warn)}.box.a .k{color:var(--accent)}.box.b .k{color:var(--null)}
+.box p{margin:0;color:var(--ink)}
+.box p + p{margin-top:.6rem}
+ul{margin:0 0 1rem;padding-left:1.15rem}
+li{margin-bottom:.5rem;color:var(--ink-2)}
+li strong{color:var(--ink)}
+.worth{font-family:"IBM Plex Mono",monospace;font-size:.8rem;color:var(--gain);
+ background:var(--gain-bg);border-radius:2px;padding:.15em .5em;font-weight:600;white-space:nowrap}
+footer{margin-top:3.4rem;padding-top:1.2rem;border-top:1px solid var(--rule);font-size:.85rem;color:var(--ink-3)}
+@media(max-width:640px){body{font-size:15.5px;padding:0 1rem 3rem}h3{flex-wrap:wrap}}
+</style>
+
+<div class="wrap">
+<header>
+  <div class="eyebrow"><span>HGTD Vertex Timing</span><span>Method explainer</span><span>1 Sep 2026</span></div>
+  <h1>What the method changes</h1>
+  <p class="lede">Five changes, none of which touch the clustering or the track selection. The short version: <strong>the answer stops being &ldquo;the time of the cluster we picked&rdquo;</strong> and becomes a time built from tracks, weighted by how likely each one is to be hard scatter.</p>
+</header>
+
+<section>
+  <h2>What happens today</h2>
+  <p class="note">The baseline, in four steps.</p>
+  <p>Given an event, the current analysis:</p>
+  <ul>
+    <li>selects tracks by z-compatibility with the primary vertex, plus &eta; and p<sub>T</sub> cuts;</li>
+    <li>groups them into clusters by <strong>time agreement</strong> (<span class="mono">clusterTracksInTime</span>, 3&sigma; iterative);</li>
+    <li>scores each cluster with <strong>TRKPTZ</strong> and takes the highest;</li>
+    <li>reports that cluster's time as the event t&#8320;.</li>
+  </ul>
+  <div class="eq">TRKPTZ  =  &#931;&#7522; p<sub>T,i</sub>  &#215;  exp(&#8722;1.5 &#183; |&#916;z|)</div>
+  <p>&mdash; the summed track p<sub>T</sub> of the cluster, damped by how far the cluster's z sits from the primary vertex. The time it reports is the precision-weighted mean of that cluster's track times:</p>
+  <div class="eq">t&#8320;  =  &#931;&#7522; (t&#7522; / &#963;&#7522;&#178;)  /  &#931;&#7522; (1 / &#963;&#7522;&#178;)</div>
+  <p>Both of those are the things I change. <strong>The clustering itself, the track selection, and the vertex are untouched.</strong></p>
+</section>
+
+<section>
+  <h2>The five changes</h2>
+  <p class="note">Where each one inserts, and what it replaces.</p>
+
+  <figure><svg viewBox="0 0 800 440" role="img" aria-label="The baseline picks a cluster and reports its inverse-variance mean time; the new method keeps the same clustering but adds a per-track hard-scatter tagger that powers a better pick, a re-timed answer, a whole-event answer, and a chooser between them" style="width:100%;height:auto;max-width:100%"><defs><marker id="ah" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="currentColor"/></marker><marker id="ahA" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="var(--accent)"/></marker></defs><rect x="14" y="150" width="104" height="74" rx="4" fill="var(--surface-2)" stroke="currentColor" stroke-width="1.1"/><text x="66.0" y="176.0" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor" font-family="IBM Plex Sans,sans-serif">tracks</text><text x="66.0" y="191.0" text-anchor="middle" font-size="10.5" font-weight="400" fill="var(--ink-3)" font-family="IBM Plex Sans,sans-serif">z-associated,</text><text x="66.0" y="206.0" text-anchor="middle" font-size="10.5" font-weight="400" fill="var(--ink-3)" font-family="IBM Plex Sans,sans-serif">HGTD times</text><rect x="146" y="150" width="104" height="74" rx="4" fill="var(--surface-2)" stroke="currentColor" stroke-width="1.1"/><text x="198.0" y="176.0" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor" font-family="IBM Plex Sans,sans-serif">clustering</text><text x="198.0" y="191.0" text-anchor="middle" font-size="10.5" font-weight="400" fill="var(--ink-3)" font-family="IBM Plex Sans,sans-serif">group by time</text><text x="198.0" y="206.0" text-anchor="middle" font-size="10.5" font-weight="400" fill="var(--ink-3)" font-family="IBM Plex Sans,sans-serif">(unchanged)</text><line x1="118" y1="187" x2="144" y2="187" stroke="currentColor" stroke-width="1.4" marker-end="url(#ah)"/><line x1="250" y1="187" x2="282" y2="116" stroke="currentColor" stroke-width="1.4" marker-end="url(#ah)"/><line x1="250" y1="187" x2="282" y2="262" stroke="var(--accent)" stroke-width="1.4" marker-end="url(#ahA)"/><text x="286" y="46" font-size="10.5" font-weight="600" fill="var(--ink-3)" font-family="IBM Plex Mono,monospace" letter-spacing="0.08em">TODAY</text><rect x="284" y="60" width="150" height="66" rx="4" fill="var(--surface-2)" stroke="currentColor" stroke-width="1.1"/><text x="359.0" y="89.5" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor" font-family="IBM Plex Sans,sans-serif">TRKPTZ argmax</text><text x="359.0" y="104.5" text-anchor="middle" font-size="10.5" font-weight="400" fill="var(--ink-3)" font-family="IBM Plex Sans,sans-serif">&#931;p_T &#183; e^(&#8722;1.5|&#916;z|)</text><rect x="460" y="60" width="158" height="66" rx="4" fill="var(--surface-2)" stroke="currentColor" stroke-width="1.1"/><text x="539.0" y="82.0" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor" font-family="IBM Plex Sans,sans-serif">its time</text><text x="539.0" y="97.0" text-anchor="middle" font-size="10.5" font-weight="400" fill="var(--ink-3)" font-family="IBM Plex Sans,sans-serif">inverse-variance</text><text x="539.0" y="112.0" text-anchor="middle" font-size="10.5" font-weight="400" fill="var(--ink-3)" font-family="IBM Plex Sans,sans-serif">mean over its tracks</text><rect x="644" y="60" width="142" height="66" rx="4" fill="var(--surface-2)" stroke="currentColor" stroke-width="1.1"/><text x="715.0" y="89.5" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor" font-family="IBM Plex Sans,sans-serif">t&#8320;</text><text x="715.0" y="104.5" text-anchor="middle" font-size="10.5" font-weight="400" fill="var(--ink-3)" font-family="IBM Plex Sans,sans-serif">the answer today</text><line x1="434" y1="93" x2="458" y2="93" stroke="currentColor" stroke-width="1.4" marker-end="url(#ah)"/><text x="446.0" y="87.0" text-anchor="middle" font-size="10" fill="var(--ink-3)" font-family="IBM Plex Mono,monospace">pick</text><line x1="618" y1="93" x2="642" y2="93" stroke="currentColor" stroke-width="1.4" marker-end="url(#ah)"/><text x="286" y="152" font-size="10.5" font-weight="600" fill="var(--accent)" font-family="IBM Plex Mono,monospace" letter-spacing="0.08em">THIS METHOD</text><rect x="284" y="164" width="150" height="60" rx="4" fill="var(--accent-bg)" stroke="var(--accent)" stroke-width="1.6"/><text x="359.0" y="183.0" text-anchor="middle" font-size="12" font-weight="600" fill="var(--accent)" font-family="IBM Plex Sans,sans-serif">per-track tagger</text><text x="359.0" y="198.0" text-anchor="middle" font-size="10.5" font-weight="400" fill="var(--ink-3)" font-family="IBM Plex Sans,sans-serif">p&#7522; = P(track is</text><text x="359.0" y="213.0" text-anchor="middle" font-size="10.5" font-weight="400" fill="var(--ink-3)" font-family="IBM Plex Sans,sans-serif">hard scatter)</text><circle cx="297" cy="177" r="9" fill="var(--accent)"/><text x="297" y="181" text-anchor="middle" font-size="11" font-weight="700" fill="var(--surface)" font-family="IBM Plex Mono,monospace">1</text><rect x="284" y="246" width="150" height="58" rx="4" fill="var(--accent-bg)" stroke="var(--accent)" stroke-width="1.6"/><text x="359.0" y="271.5" text-anchor="middle" font-size="12" font-weight="600" fill="var(--accent)" font-family="IBM Plex Sans,sans-serif">learned score</text><text x="359.0" y="286.5" text-anchor="middle" font-size="10.5" font-weight="400" fill="var(--ink-3)" font-family="IBM Plex Sans,sans-serif">argmax over clusters</text><circle cx="297" cy="259" r="9" fill="var(--accent)"/><text x="297" y="263" text-anchor="middle" font-size="11" font-weight="700" fill="var(--surface)" font-family="IBM Plex Mono,monospace">2</text><rect x="284" y="326" width="150" height="58" rx="4" fill="var(--accent-bg)" stroke="var(--accent)" stroke-width="1.6"/><text x="359.0" y="351.5" text-anchor="middle" font-size="12" font-weight="600" fill="var(--accent)" font-family="IBM Plex Sans,sans-serif">learned t&#8320;</text><text x="359.0" y="366.5" text-anchor="middle" font-size="10.5" font-weight="400" fill="var(--ink-3)" font-family="IBM Plex Sans,sans-serif">over ALL tracks</text><circle cx="297" cy="339" r="9" fill="var(--accent)"/><text x="297" y="343" text-anchor="middle" font-size="11" font-weight="700" fill="var(--surface)" font-family="IBM Plex Mono,monospace">4</text><rect x="460" y="246" width="158" height="58" rx="4" fill="var(--accent-bg)" stroke="var(--accent)" stroke-width="1.6"/><text x="539.0" y="264.0" text-anchor="middle" font-size="12" font-weight="600" fill="var(--accent)" font-family="IBM Plex Sans,sans-serif">re-timed</text><text x="539.0" y="279.0" text-anchor="middle" font-size="10.5" font-weight="400" fill="var(--ink-3)" font-family="IBM Plex Sans,sans-serif">tagger-weighted +</text><text x="539.0" y="294.0" text-anchor="middle" font-size="10.5" font-weight="400" fill="var(--ink-3)" font-family="IBM Plex Sans,sans-serif">Winsorised</text><circle cx="473" cy="259" r="9" fill="var(--accent)"/><text x="473" y="263" text-anchor="middle" font-size="11" font-weight="700" fill="var(--surface)" font-family="IBM Plex Mono,monospace">3</text><rect x="644" y="246" width="142" height="58" rx="4" fill="var(--accent-bg)" stroke="var(--accent)" stroke-width="1.6"/><text x="715.0" y="264.0" text-anchor="middle" font-size="12" font-weight="600" fill="var(--accent)" font-family="IBM Plex Sans,sans-serif">meta</text><text x="715.0" y="279.0" text-anchor="middle" font-size="10.5" font-weight="400" fill="var(--ink-3)" font-family="IBM Plex Sans,sans-serif">picks one</text><text x="715.0" y="294.0" text-anchor="middle" font-size="10.5" font-weight="400" fill="var(--ink-3)" font-family="IBM Plex Sans,sans-serif">of the two</text><circle cx="657" cy="259" r="9" fill="var(--accent)"/><text x="657" y="263" text-anchor="middle" font-size="11" font-weight="700" fill="var(--surface)" font-family="IBM Plex Mono,monospace">5</text><rect x="644" y="346" width="142" height="44" rx="4" fill="var(--accent-bg)" stroke="var(--accent)" stroke-width="1.6"/><text x="715.0" y="364.5" text-anchor="middle" font-size="12" font-weight="600" fill="var(--accent)" font-family="IBM Plex Sans,sans-serif">t&#8320;</text><text x="715.0" y="379.5" text-anchor="middle" font-size="10.5" font-weight="400" fill="var(--ink-3)" font-family="IBM Plex Sans,sans-serif">the new answer</text><line x1="359" y1="224" x2="359" y2="244" stroke="var(--accent)" stroke-width="1.4" marker-end="url(#ahA)"/><line x1="434" y1="275" x2="458" y2="275" stroke="var(--accent)" stroke-width="1.4" marker-end="url(#ahA)"/><text x="446.0" y="269.0" text-anchor="middle" font-size="10" fill="var(--ink-3)" font-family="IBM Plex Mono,monospace">pick</text><line x1="618" y1="275" x2="642" y2="275" stroke="var(--accent)" stroke-width="1.4" marker-end="url(#ahA)"/><text x="630.0" y="268" text-anchor="middle" font-size="10" fill="var(--ink-3)" font-family="IBM Plex Mono,monospace">answer A</text><line x1="434" y1="355" x2="642" y2="355" stroke="var(--accent)" stroke-width="1.4" marker-end="url(#ahA)"/><text x="538.0" y="348" text-anchor="middle" font-size="10" fill="var(--ink-3)" font-family="IBM Plex Mono,monospace">answer B</text><line x1="715" y1="304" x2="715" y2="344" stroke="var(--accent)" stroke-width="1.4" marker-end="url(#ahA)"/><path d="M 284 194 L 262 194 L 262 355 L 282 355" fill="none" stroke="var(--accent)" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#ahA)"/><path d="M 359 224 L 359 236 M 400 224 L 470 224 L 470 244" fill="none" stroke="var(--accent)" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#ahA)"/><text x="252" y="290" text-anchor="end" font-size="9.5" fill="var(--accent)" font-family="IBM Plex Mono,monospace">p&#7522; weights</text><text x="500" y="220" font-size="9.5" fill="var(--accent)" font-family="IBM Plex Mono,monospace">p&#7522; weights</text></svg>
+  <figcaption>The grey path is what runs today: score the clusters, pick one, average its track times. The teal path keeps the same tracks and the same clusters, then replaces the scoring and the timing, and adds a second answer computed from all of the event's tracks rather than one cluster's. Everything teal is powered by the per-track tagger at <span class="mono">&#9312;</span>.</figcaption></figure>
+
+  <h3><span class="num">1</span> A per-track hard-scatter tagger</h3>
+  <p>A gradient-boosted classifier that answers, for every track: <strong>is this track from the hard scatter?</strong> Output is a probability p&#7522;. It is trained on <span class="mono">truth_is_hs</span> and used nowhere as an input feature &mdash; only as a weight.</p>
+  <p>It runs in <strong>two rounds</strong>. Round 1 uses the track's own row: p<sub>T</sub>, &eta;, z&#8320;, its z&#8320; pull to the primary, its time, its timing resolution, HGTD hit count, jet association, and so on. Round 2 adds <em>neighbour context</em> &mdash; for each track, the p&#7522;-weighted count of other tracks nearby in time and in z, from round 1:</p>
+  <div class="eq new">nb_ph60&#7522;  =  &#931;&#11002;&#8800;&#7522;  p&#7522;&#690;&#7523;  &#183;  [ |t&#7522; &#8722; t&#11002;| &lt; 60 ps ]</div>
+  <p>The idea is that a hard-scatter track lives <em>among other hard-scatter tracks</em> at the same time and z, and a pileup track does not. Weighting the neighbourhood by round-1 probability stops one confidently-wrong neighbour from poisoning the count. <span class="worth">worth +1.7 pts on the Z+jets t&#8320; alone</span></p>
+
+  <h3><span class="num">2</span> A learned cluster score, replacing TRKPTZ</h3>
+  <p>Instead of <span class="mono">&#931;p<sub>T</sub>&#183;e^(&#8722;1.5|&#916;z|)</span>, a classifier predicts directly what we care about: <strong>P(this cluster's reported time lands within 60 ps of truth)</strong>. Its inputs are the cluster's reconstructed summary columns plus the tagger aggregates from &#9312; &mdash; how much hard-scatter probability the cluster contains, its p&#7522;-weighted time, and so on.</p>
+  <p>Crucially the training label is the <em>tagw</em> criterion from &#9313;, not the old cluster-time one &mdash; the selector is trained on the same quantity the pipeline will actually report. <span class="worth">+3.0 to +5.9 pts across samples</span></p>
+
+  <h3><span class="num">3</span> Re-timing the chosen cluster</h3>
+  <p>Once a cluster is picked, its time is recomputed. Rather than the plain precision-weighted mean, each track is also weighted by its hard-scatter probability:</p>
+  <div class="eq new">t_tagw  =  &#931;&#7522; (p&#7522; &#183; t&#7522; / &#963;&#7522;&#178;)  /  &#931;&#7522; (p&#7522; / &#963;&#7522;&#178;)</div>
+  <p>Then it is <strong>Winsorised twice</strong>: drop tracks more than 100 ps from that estimate, recompute; drop tracks more than 60 ps from the new estimate, recompute again.</p>
+  <div class="box a">
+    <span class="k">This is the change that needs no new selection at all</span>
+    <p>It does not alter which cluster was chosen &mdash; only what time that cluster reports. It is worth <strong>+0.9 to +1.7 points on every sample</strong>, which makes it the cheapest change here to adopt: it can be dropped into the existing TRKPTZ pipeline on its own.</p>
+  </div>
+
+  <h3><span class="num">4</span> A second answer, computed from all tracks</h3>
+  <p>The largest conceptual change. Nothing in the &plusmn;60 ps criterion requires the answer to be <em>a cluster's</em> time &mdash; it only requires a number. So a second estimate is built from every timed track in the event, ignoring cluster boundaries entirely.</p>
+  <p>A small network emits a weight per track; the weights combine the track times through five unrolled IRLS steps, which converge to a <strong>weighted median</strong> rather than a mean; and the whole thing trains directly on a smooth version of &ldquo;is |t&#8320; &#8722; t<sub>truth</sub>| &lt; 60 ps&rdquo;.</p>
+  <div class="box w">
+    <span class="k">Why a median and not a mean</span>
+    <p><strong>13.7% of genuine hard-scatter tracks sit more than 200 ps from truth</strong>, while their quoted resolution is ~25 ps. There is a fat outlier tail the resolution does not describe, and the inverse-variance mean is the estimator <em>most</em> sensitive to it, because it trusts &sigma;. On identical, perfectly-tagged tracks: median <strong>81.7%</strong> vs inverse-variance mean <strong>65.3%</strong>.</p>
+    <p>Swapping the estimator <em>inside</em> a cluster does not help (61.9 &rarr; 61.6) &mdash; the clustering already grouped tracks by time agreement, so within one cluster the times concur. The mis-timed tracks were split off into their own clusters, which is exactly why no single-cluster answer can reach them and why aggregating across the whole event can.</p>
+  </div>
+
+  <h3><span class="num">5</span> A chooser between the two answers</h3>
+  <p>&#9313;+&#9314; give one answer; &#9315; gives another. They fail on different events &mdash; their union is 1&ndash;3 points above either alone. A final classifier predicts <strong>P(the aggregate answer is right and the cluster answer is wrong)</strong>, trained only on events where exactly one of the two is correct, and switches when that probability crosses a threshold.</p>
+  <p>Its inputs include corroboration features: how many tracks and clusters sit near each candidate answer, and how far apart the two answers are.</p>
+</section>
+
+<section>
+  <h2>What each change is worth</h2>
+  <p class="note">Cumulative over TRKPTZ, measured per sample.</p>
+  <div class="tw"><table>
+    <thead><tr><th>after adding</th><th class="n">vbf</th><th class="n">zjets</th><th class="n">dijet</th><th class="n">ttbar</th></tr></thead>
+    <tbody>
+      <tr><td>&mdash; TRKPTZ baseline</td><td class="n">90.45</td><td class="n">61.87</td><td class="n">86.88</td><td class="n">87.08</td></tr>
+      <tr><td><span class="mono">&#9312;&#9313;</span> learned score</td><td class="n">93.77</td><td class="n">67.78</td><td class="n">89.87</td><td class="n">90.42</td></tr>
+      <tr><td><span class="mono">&#9314;</span> re-timing</td><td class="n">94.99</td><td class="n">69.43</td><td class="n">90.78</td><td class="n">91.47</td></tr>
+      <tr><td><span class="mono">&#9315;</span> aggregate answer <span class="mono">(alone)</span></td><td class="n">94.45</td><td class="n">68.72</td><td class="n">90.12</td><td class="n">90.92</td></tr>
+      <tr class="hl"><td><span class="mono">&#9316;</span> chooser <span class="mono">(final)</span></td><td class="n"><strong>95.26</strong></td><td class="n"><strong>69.79</strong></td><td class="n"><strong>91.02</strong></td><td class="n"><strong>91.75</strong></td></tr>
+      <tr><td>&nbsp;&nbsp;&nbsp;total gain</td><td class="n up">+4.81</td><td class="n up">+7.92</td><td class="n up">+4.14</td><td class="n up">+4.67</td></tr>
+    </tbody>
+  </table></div>
+  <p>Row 4 is not cumulative &mdash; it is the alternative answer standing on its own, for comparison against row 3. The chooser in row 5 picks between rows 3 and 4 per event.</p>
+</section>
+
+<section>
+  <h2>What is <em>not</em> changed</h2>
+  <p class="note">Scoping, so the diff is clear.</p>
+  <ul>
+    <li><strong>The clustering.</strong> <span class="mono">clusterTracksInTime</span> runs exactly as it does now, same 3&sigma; iterative grouping, same <span class="mono">DIST_CUT_CONE</span>.</li>
+    <li><strong>Track selection and z-association.</strong> Same <span class="mono">MAX_NSIGMA</span> cut, same &eta; and p<sub>T</sub> windows. (The separate z-association study found the incumbent cut is mistuned for TRKPTZ &mdash; that finding is untouched and unused here.)</li>
+    <li><strong>The vertex.</strong> Primary vertex z is taken as given.</li>
+    <li><strong>The selection / fiducial region.</strong> Canonical <span class="mono">--vbs-deta=0 --vbs-mjj=500</span> throughout.</li>
+    <li><strong>The metric.</strong> Core fraction at &plusmn;60 ps, unchanged, and every number is out-of-fold.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>Where truth enters</h2>
+  <p class="note">The part that determines what a deployed version would look like.</p>
+  <div class="tw"><table>
+    <thead><tr><th>component</th><th>truth used for</th><th>at inference?</th></tr></thead>
+    <tbody>
+      <tr><td><span class="mono">&#9312;</span> per-track tagger</td><td>training label (<span class="mono">truth_is_hs</span>)</td><td>no &mdash; weights only</td></tr>
+      <tr><td><span class="mono">&#9313;</span> learned score</td><td>training label (60 ps criterion)</td><td>no</td></tr>
+      <tr><td><span class="mono">&#9314;</span> re-timing</td><td>none &mdash; pure arithmetic on p&#7522;</td><td>no</td></tr>
+      <tr><td><span class="mono">&#9315;</span> aggregate t&#8320;</td><td>training loss (60 ps window)</td><td>no</td></tr>
+      <tr><td><span class="mono">&#9316;</span> chooser</td><td>training label</td><td>no</td></tr>
+    </tbody>
+  </table></div>
+  <p>No truth quantity is ever a model <em>input</em>, and every reported number is measured on held-out folds. But all five components are currently trained <strong>in-domain, per sample</strong>.</p>
+  <div class="box b">
+    <span class="k">The honest gap to something deployable</span>
+    <p>A real analysis would train these once on MC and freeze them. <strong>That transfer is not measured here.</strong> The earlier and much simpler guarded metric <em>was</em> transfer-tested &mdash; a VBF-trained model applied frozen to every other sample stayed net-positive everywhere, including three million &mu;&nbsp;=&nbsp;0 control events &mdash; which is encouraging but is not evidence about this stronger pipeline. Freeze-and-transfer is the first thing I would run next.</p>
+  </div>
+</section>
+
+<footer>
+  <p>Pipeline <span class="mono">python/zjets_seventy.py</span>; cross-sample evaluation <span class="mono">python/final_method_eval.py</span>; results in <span class="mono">results/final_method_eval.json</span>. Branch <span class="mono">ml/cluster-selection</span>.</p>
+  <p>Baseline definitions quoted from <span class="mono">src/clustering_structs.h</span> (<span class="mono">Score::TRKPTZ</span>) and <span class="mono">src/event_processing.h</span> (<span class="mono">Cluster::calculateTime</span>).</p>
+</footer>
+</div>
