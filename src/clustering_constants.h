@@ -556,6 +556,7 @@ namespace MyUtl {
     static const Score TRKPTZ_PV;
     static const Score TRKPTZ_PU;
     static const Score TRKPTZ_PUW;
+    static const Score TRKPTZ_TZ;
   };
 
   inline const std::string STR_TRKPTZ = "#Sigma p_{T}e^{-|#Delta z|}";
@@ -649,6 +650,27 @@ namespace MyUtl {
   inline constexpr double PU_SIDE_PT_WEIGHT = 0.4;
   inline const Score Score::TRKPTZ_PUW = { 26, STR_TRKPTZ + " [PU-side down-weighted]", "TRKPTZ_PUW", false, false, -1.f };
 
+  // TRKPTZ_TZ: TRKPTZ with each track's pT additionally weighted by that
+  // track's OWN distance to the primary vertex --
+  //   score = exp(-1.5|dz_cluster|) * SUM_t pT_t * exp(-TRACK_DZ_WEIGHT * |z0_t - z_PV|)
+  // The cluster-level term is KEPT, not replaced: the two are complementary,
+  // and dropping it is worth ~0.1-0.2 less on both samples scanned.
+  //
+  // 0.7 is the joint optimum of an a-scan run separately on local VBF and on
+  // Z+jets, which peak at the SAME value from very different baselines
+  // (VBF 90.45 -> 91.14, +0.68; Z+jets 62.12 -> 63.89, +1.76). Two independent
+  // topologies agreeing on the exponent is the main reason to believe this is
+  // a real effect rather than a per-sample fit. The curve is broad -- anything
+  // in 0.4-1.2 is within 0.1 of the peak on both.
+  //
+  // Raw |dz| in mm, NOT the z0 significance: the significance forms were
+  // scanned too and are consistently worse (best +1.21 vs +1.76 on Z+jets),
+  // which is the same conclusion the z-association study reached about
+  // sqrt(var_z0) mis-modelling the true z0 spread. 1/dz forms are worse still
+  // -- they diverge, over-rewarding a track that happens to sit on the vertex.
+  inline constexpr double TRACK_DZ_WEIGHT = 0.7;
+  inline const Score Score::TRKPTZ_TZ = { 27, STR_TRKPTZ + " [per-track #Deltaz]", "TRKPTZ_TZ", false, false, -1.f };
+
   // Scores with a dedicated collection (distCut ≥ 0 → buildsCollection() = true)
   inline const Score Score::CONE       = {  7, "Cone"                       , "CONE",     true , false, -1.f, DIST_CUT_CONE, ClusteringMethod::CONE };
   inline const Score Score::FILTJET    = {  9, "Filter Tracks in Jets"      , "FILTJET",  true , false, -1.f, DIST_CUT_CONE, ClusteringMethod::CONE, false, TrackFilterType::JET };
@@ -660,7 +682,7 @@ namespace MyUtl {
     Score::CONE_BDT, Score::TEST_MISAS, Score::TEST_HS,
     Score::WAVES,    Score::JET_T_REFINED, Score::WAVES_MISCL, Score::WAVES_MISAS,
     Score::VBF_R1,   Score::VBF_R2,
-    Score::TRKPTZ_PV, Score::TRKPTZ_PU, Score::TRKPTZ_PUW,
+    Score::TRKPTZ_PV, Score::TRKPTZ_PU, Score::TRKPTZ_PUW, Score::TRKPTZ_TZ,
   };
 
   // ---------------------------------------------------------------------------

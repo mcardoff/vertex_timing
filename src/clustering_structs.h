@@ -1056,6 +1056,15 @@ namespace MyUtl {
         this->scores[Score::TRKPTZ_PU.id] = sumPU * dzTerm;
         this->scores[Score::TRKPTZ_PUW.id] =
           (sumPV + PU_SIDE_PT_WEIGHT * sumPU) * dzTerm;
+
+        // Per-track dz weighting: same cluster-level envelope, but each track's
+        // pT is damped by its OWN distance to the primary vertex.
+        double sumTz = 0.0;
+        for (int trk : this->trackIndices)
+          sumTz += branch->trackPt[trk]
+                 * std::exp(-TRACK_DZ_WEIGHT
+                            * std::abs(branch->trackZ0[trk] - branch->recoVtxZ[0]));
+        this->scores[Score::TRKPTZ_TZ.id] = sumTz * dzTerm;
       }
 
       // WAVES: WAVeS-style score — Σ_i pT_i × pT_jet(i) / max(ΔR_i, DR_FLOOR)

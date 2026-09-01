@@ -1,83 +1,164 @@
-# Augmenting TRKPTZ with `closer_to_pu_than_pv` — local VBF, 2026-09-01
+# Augmenting TRKPTZ with vertex-proximity information — local VBF + Z+jets, 2026-09-01
 
-Proposal: restrict TRKPTZ's pT sum with the per-track vertex-proximity flag,
+Four related proposals tested against the TRKPTZ baseline. All are implemented
+in the main program as registry scores (`src/clustering_constants.h`, ids 24–27),
+computed in `Cluster::updateScores` beside TRKPTZ and sharing its identical
+`exp(-1.5|dz_cluster|)` factor, so ONLY the pT sum differs. None appears in
+`Cluster::calculateTime`'s score list, so all report the standard
+inverse-variance mean and every comparison is **pure selection**.
 
-    score = exp(-1.5 |dz_cluster|) * SUM_tracks { pT if <flag matches>, else 0 }
+## Headline
 
-with `RecoVtx_z[0]` as the primary vertex. Implemented in the main program as
-three registry scores (`src/clustering_constants.h`, ids 24/25/26), computed in
-`Cluster::updateScores` beside TRKPTZ itself, sharing the identical `exp(-1.5|dz|)`
-factor so ONLY the pT sum differs. Timing is untouched: none of the three appears
-in `Cluster::calculateTime`'s score list, so all report the standard
-inverse-variance mean, and the comparison is pure selection.
-
-Flag helper: `BranchPointerWrapper::closerToPuThanPv` (`src/clustering_structs.h`),
-mirroring `vertexRelation()` in `util/export_training_data.cxx`. Reco-only —
-`RecoVtx_z[0]` is the primary, every other entry is pileup, no truth consulted.
-
-## Result — `clustering_hist` + `clustering_plot`, local VBF (45,335 events)
-
-Core fraction at PASS_SIGMA = 60 ps, summed over all n-forward-HS-track bins.
-
-| score | core frac | vs TRKPTZ |
+| variant | VBF | Z+jets |
 |---|---:|---:|
-| WAVES | 94.11% | +1.08 |
-| HGTD | 93.32% | +0.29 |
-| **TRKPTZ_PUW** — PU-side down-weighted, w = 0.4 | **93.31%** | **+0.28** |
-| TRKPTZ — baseline | 93.04% | — |
-| **TRKPTZ_PV** — hard veto, as proposed | **91.76%** | **-1.27** |
-| TRKPTZ_PU — orientation control | 84.00% | -9.03 |
+| WAVES (reference) | +1.08 | — |
+| **TRKPTZ_TZ** — per-track `exp(-0.7·\|z0_t − z_PV\|)` | **+0.64** | **+1.76** |
+| TRKPTZ_PUW — PU-side pT down-weighted, w = 0.4 | +0.28 | +1.04 |
+| TRKPTZ_PV — PU-side pT vetoed outright | −1.27 | — |
+| TRKPTZ_PU — orientation control | −9.03 | — |
+| TRKPTZ baseline | 93.04% | 62.12% |
 
-**The hard veto as specified costs 1.27 points.** The orientation control settles
-that this is not a sign error: keeping the PU-side tracks instead is 9 points
-worse, so the flag carries real information and `_PV` is the correct reading of
-it. The veto is simply too blunt to use.
+**The per-track Δz weighting is the winner** and is the one to carry forward.
+VBF and Z+jets peak at the **same exponent a = 0.7** from very different
+baselines, which is the main reason to believe it rather than a per-sample fit;
+the curve is broad, with anything in 0.4–1.2 within 0.1 of the peak on both.
 
-## Why it fails (local VBF, 15.25M timed tracks)
+Details of each below.
+
+---
+
+## 1. The `closer_to_pu_than_pv` hard veto — costs 1.27
+
+Proposal: `score = exp(-1.5|dz_cl|) · SUM_t { pT if <flag matches>, else 0 }`,
+with `RecoVtx_z[0]` as the primary. Flag helper
+`BranchPointerWrapper::closerToPuThanPv`, mirroring `vertexRelation()` in
+`util/export_training_data.cxx` — reco-only, no truth.
+
+The orientation control settles that this is not a sign error: keeping the
+PU-side tracks instead is **9 points worse**, so the flag is informative and
+`_PV` reads it the right way round. It is simply too blunt (local VBF, 15.25M
+timed tracks):
 
 | quantity | value |
 |---|---:|
 | P(flag = 1 \| genuine HS track) | **46.8%** |
 | P(flag = 1 \| PU track) | 88.0% |
 | clusters vetoed to exactly zero | **56.0%** |
-| median cluster pT surviving the veto | 0.0% |
 | events where every cluster scores zero (argmax arbitrary) | 1.02% |
 
-The flag removes 88% of pileup but **also 47% of the hard scatter**. TRKPTZ ranks
-clusters by hard-scatter pT content, so destroying half of that signal costs more
-than the pileup suppression buys — especially since `exp(-1.5|dz|)` already
-penalises off-vertex clusters, which is the same information in smoother form.
+It removes 88% of pileup but **also 47% of the hard scatter**. TRKPTZ ranks
+clusters by hard-scatter pT content, so destroying half that signal costs more
+than the pileup suppression buys.
 
-The degeneracy is a second, smaller problem: a cluster with every track flagged
-scores exactly 0, and in 1.02% of events that is true of *every* cluster, leaving
-`chooseCluster` to keep `collection[0]` — an arbitrary pick.
+## 2. Softening the veto to a down-weight — gains 0.28
 
-## Softening it does help
+`SUM_PV pT + w·SUM_PU pT`, so w = 1 is TRKPTZ and w = 0 is the veto. Scanned on
+exported VBF (TRKPTZ reproduced from `sumpt`/`delta_z` to max relative error
+9.6e-05 over 2.93M clusters, and `sumpt` from the track table to 1.2e-07,
+before trusting any of it):
 
-Replacing the veto with a down-weight, `SUM_PV pT + w * SUM_PU pT`, so w = 1 is
-TRKPTZ and w = 0 is the veto. Scanned in python against the exported local VBF
-(m_jj >= 500; TRKPTZ reproduced from `sumpt` and `delta_z` to max relative error
-9.6e-05 over 2.93M clusters, and `sumpt` from the track table to 1.2e-07, before
-trusting any of it):
+| w | 0.0 | 0.2 | 0.3 | **0.4** | 0.5 | 0.6 | 0.8 | 1.0 |
+|---|---|---|---|---|---|---|---|---|
+| core frac | 89.22 | 90.65 | 90.74 | **90.76** | 90.73 | 90.70 | 90.58 | 90.45 |
 
-| w | 0.0 | 0.1 | 0.2 | 0.3 | **0.4** | 0.5 | 0.6 | 0.8 | 1.0 |
-|---|---|---|---|---|---|---|---|---|---|
-| core frac | 89.22 | 90.34 | 90.65 | 90.74 | **90.76** | 90.73 | 90.70 | 90.58 | 90.45 |
+The python w = 0 point (−1.23) reproduces the C++ `TRKPTZ_PV` row (−1.27) across
+a different selection and a separate implementation.
 
-Smooth and single-peaked, +0.31 over the w = 1 baseline, flat to within 0.03
-across w in [0.2, 0.6]. `PU_SIDE_PT_WEIGHT = 0.4` is now that peak.
+## 3. Per-track Δz weighting — gains 0.64 / 1.76, and supersedes 2
 
-Two independent confirmations that this is not a scan artefact: the python
-w = 0 point (-1.23) reproduces the C++ `TRKPTZ_PV` row (-1.27) across a
-different selection and a separate implementation, and the C++ `TRKPTZ_PUW` row
-lands at +0.28 against the python scan's predicted +0.31.
+`score = exp(-1.5|dz_cluster|) · SUM_t pT_t · exp(-a·|z0_t − z_PV|)`. The
+cluster-level term is **kept, not replaced**: replacing it is 0.1–0.2 worse.
+
+| a | 0.1 | 0.3 | 0.5 | **0.7** | 0.9 | 1.2 | 2.0 |
+|---|---|---|---|---|---|---|---|
+| Z+jets | +0.64 | +1.40 | +1.66 | **+1.76** | +1.73 | +1.67 | +1.22 |
+| VBF | +0.33 | +0.59 | +0.67 | **+0.68** | +0.63 | +0.54 | +0.21 |
+
+Two functional-form findings, both consistent with prior work:
+
+- **Raw \|Δz\| in mm beats the z0 significance** (best +1.76 vs +1.21 on Z+jets).
+  Same conclusion the z-association study reached about `sqrt(var_z0)`
+  mis-modelling the true z0 spread.
+- **`exp` beats `1/Δz`**, which is worse than the baseline at every floor tried.
+  A `1/Δz` weight diverges and over-rewards a track that happens to sit on the
+  vertex.
+
+This contradicts the standing comment on `Score::WAVES` in
+`src/clustering_structs.h` ("the cluster-level z-term is more effective than
+per-track z-pull weighting because it averages over track-by-track z noise").
+That holds for a *steep* per-track weight — `exp(-6·dz)` is −1.77 — but a gentle
+one applied ON TOP of the cluster term is worth more than either alone.
+
+**Not complementary with 2.** TZ +1.76 and PUW +1.04 combine to **+1.58**, i.e.
+worse than TZ alone. `closer_to_pu_than_pv` is a coarse binary version of the
+same track-to-PV distance that `exp(-0.7·dz)` encodes continuously. Use TZ, drop
+PUW.
+
+## 4. Weighting by the canonical vertex-WAVeS score — refuted
+
+Proposal: `w_t = SUM_V WAVeS(V) / dz(V, t)`, so a track close in z to a vertex
+that looks hard-scatter-like is boosted — the appeal being that
+`computeVertexScores` uses `nearestAnyJet` (ALL jets, not just forward), so it
+would inject **central** information into an otherwise forward-only selector.
+
+Sound motivation, but it does not survive contact with the numbers.
+
+**The canonical WAVeS score is overwhelmingly concentrated on one vertex, and
+that vertex is the PV.**
+
+| | VBF | Z+jets |
+|---|---:|---:|
+| canonical WAVeS picks the PV | 85.9% | **96.4%** |
+| canonical sumpt2 picks the PV | 65.0% | 77.3% |
+| median n reco vertices | 103 | 106 |
+
+For clusters whose nearest vertex is NOT the WAVeS-best one, `waves(nearest) /
+waves(best)` has median **9.9e-05** on Z+jets (VBF 9.0e-04); only 1.29% exceed
+0.10. So on Z+jets the sum is dominated by a single term:
+
+    w_t  ~=  WAVeS(V*) / dz(V*, t)      with V* = the PV, 96.4% of the time
+
+and `WAVeS(V*)` is a **per-event constant**. Cluster selection is an argmax
+*within* an event, so that constant cancels exactly and the score reduces to
+`SUM_t pT / dz(t, PV)` — which is proposal 3, with the worse `1/dz` functional
+form. **The central information enters as an event-level constant and therefore
+carries no ranking information at all.**
+
+Why Z+jets is the extreme case: the lepton term `pT^4 / 0.01` dominates
+everything (a 45 GeV muon contributes 4.1e8), so WAVeS there is close to "which
+vertex has the Z leptons" — a near-binary signal. VBF, with no leptons and a
+jet-driven score, is far less concentrated (9.1% of non-best-nearest clusters
+above 0.10), so this is the one place the multi-vertex term could have distinct
+content — but VBF has little headroom to begin with.
+
+Measured directly on top of TZ (Z+jets), using the exported cluster-level
+`nearest_vtx_waves_frac`:
+
+| multiplier on TZ | frac^0.05 | frac^0.1 | frac^0.25 | frac^0.5 | frac^1.0 |
+|---|---|---|---|---|---|
+| vs TZ | −0.54 | −1.47 | −3.94 | −5.13 | −5.69 |
+
+Monotonically harmful, and a binary "halve any cluster whose nearest vertex is
+not WAVeS-best" is −0.98. The failure mode is the same one as proposal 1:
+`nearest_vtx_waves_frac` is effectively a step function (~1 near the PV, ~1e-4
+elsewhere), so multiplying by it is a near-veto that destroys more hard scatter
+than it removes pileup.
+
+## The lesson common to 1 and 4
+
+Both failures are steep, near-binary z-based penalties, and both lose for the
+same reason: at this pileup level the hard-scatter cluster is often NOT the one
+nearest the primary vertex in z, so anything that sharply penalises distance
+throws away real signal. The gentle continuous weight of proposal 3 is worth
++1.76 where the sharp versions of the same information are worth −1.27 and −5.69.
 
 ## Standing caveats
 
-- **Local VBF only.** The weight has NOT been re-scanned on zjets/dijet/ttbar,
-  and zjets is where the headroom is. Do that before treating 0.4 as general.
-- **+0.28 is well below WAVeS's +1.08** on the same sample, so this is a cheap
-  refinement of the baseline rather than a competitive selector.
-- The degeneracy at w = 0 disappears for any w > 0 (the PU-side sum is never
-  identically zero for a non-empty cluster), so the down-weighted form has no
-  arbitrary-argmax population at all.
+- **VBF and Z+jets only.** `TRACK_DZ_WEIGHT = 0.7` has not been scanned on dijet
+  or ttbar. Do that before treating it as general.
+- **TRKPTZ_TZ's +0.64 on VBF is still below WAVeS's +1.08**, though on Z+jets
+  its +1.76 has no WAVeS comparison in this table yet — worth running.
+- Z+jets numbers here come from the exported training data (`training_new/`,
+  the m_jj≥500 + novbs union, 93,977 events), not from a `clustering_hist` run;
+  the local ntuples are VBF only. The C++ `TRKPTZ_TZ` row was confirmed against
+  VBF (+0.64 vs the python scan's +0.68 on a different selection).

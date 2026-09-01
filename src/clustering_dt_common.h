@@ -60,6 +60,7 @@ inline auto buildAnalysisMap(
   m.emplace(Score::TRKPTZ_PV,   AnalysisObj(label, Score::TRKPTZ_PV));
   m.emplace(Score::TRKPTZ_PU,   AnalysisObj(label, Score::TRKPTZ_PU));
   m.emplace(Score::TRKPTZ_PUW,  AnalysisObj(label, Score::TRKPTZ_PUW));
+  m.emplace(Score::TRKPTZ_TZ,   AnalysisObj(label, Score::TRKPTZ_TZ));
 
   // Scores active only in the real-HGTD scenario
   if (scenario == Scenario::HGTD) {
