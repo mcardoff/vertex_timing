@@ -67,6 +67,9 @@ vertex_timing/
 │                                 #   section below indexes the load-bearing ones
 ├── condor/                        # HTCondor grid submission templates (see Grid Submission)
 │   ├── run_analysis.sh           # Generic job executable (any --sample/--threads-aware target)
+│   ├── run_training.sh           # ML training job executable (script transferred via $(script) macro)
+│   ├── train_*.sub, probe_env.*  # ML training/env-probe submit files (see Machine Learning)
+│   ├── export_training_data_*.sub, merge_exports.sh  # ML-export jobs + hadd-based shard merge
 │   ├── clustering_dt.sub         # Submit file: one job per sample, for the legacy clustering_dt
 │   ├── clustering_hist.sub       # Submit file: one job per sample, for clustering_hist (histogramming stage)
 │   ├── rpt_v5.sub                # Submit file: one job per sample, for the legacy rpt_v5
@@ -569,12 +572,41 @@ has a matching matplotlib. On the AF use ROOT 6.38.04, not an LCG_106 view:
 that ships ROOT 6.32, where `TF1::GetParError` has no `const char*` overload
 and `src/plotting_utilities.h` fails to compile.
 
-## Machine Learning Model
+## Machine Learning
 
-**Currently inactive.** There is no `src/ml_model.h`, no ONNX runtime
-integration, and no `Score::TEST_ML` in the current `Score` registry — the
-WAVeS jet-proximity score (see section above) is the current alternative to
-the TRKPTZ baseline. What remains from the prior ML effort:
+Two distinct ML eras, neither active in the C++ analysis today.
+
+### Cluster-selection ML (2026-08, concluded — see `results/ml_overview.md`)
+
+A GBDT / Deep Sets / transformer effort against the same cluster-selection
+problem TZP now solves classically. **`results/ml_overview.md` is the
+consolidated record** — the endpoint ladder (TRKPTZ 61.87 → TZP 64.31 → Deep
+Sets selector 66.94 → full guarded pipeline 69.79 on canonical zjets, against
+an honest ceiling of ~74.3 after the best-of-N oracle correction), the
+measured mechanism (the per-track HS tagger is load-bearing; the learned
+cluster score is 43% agreement-with-aggregate-t0 and 0.19% raw trkptz_score),
+the transfer matrix (learned selection transfers across topologies, ttbar
+alone ≈ pooled; WAVeS doesn't transfer), the null levers, and the methodology
+rules (AUC anti-correlated with core fraction; null-test best-of-N oracles;
+split-dominated variance). Individual run records live beside it in
+`results/` (`PLAN.md`, `README.md`, `oracle_is_inflated.md`,
+`feature_ablation_4sample.md`, `final_method_eval_results.md`, the `.json`
+histories, the `.html` reports).
+
+Retained infrastructure: `util/export_training_data.cxx` (the exporter — ML
+Data Export section above), `python/train_deepsets.py` /
+`train_transformer.py` / `ensemble_eval.py` / `compare_models.py` /
+`final_method_eval.py`, and `condor/run_training.sh` + `condor/train_*.sub` +
+`condor/probe_env.*` (GPU-less AF training jobs). The ~35 one-off study
+scripts that produced the `results/` documents were **removed from `python/`
+once their findings were captured** — recover from git history if a
+measurement needs rerunning; do not rewrite them from scratch.
+
+### Legacy DNN/TMVA artifacts (historical)
+
+There is no `src/ml_model.h`, no ONNX runtime integration, and no
+`Score::TEST_ML` in the current `Score` registry. What remains from that
+earlier effort:
 - `share/models/` still holds artifacts (`model.onnx`, `model_weights.json`,
   `normalization_params.json`, a TMVA `.weights.xml`) from that earlier
   work, but nothing in `src/` currently loads or runs inference against
@@ -583,9 +615,6 @@ the TRKPTZ baseline. What remains from the prior ML effort:
   pipeline) and `share/docs/ML_MODEL_INTEGRATION.md` /
   `ONNX_INTEGRATION_GUIDE.md` document that pipeline for reference, but it
   has no active consumer.
-- `util/export_training_data.cxx` is the ACTIVE exporter for the current
-  cluster-selection ML effort (see ML Data Export above) — unrelated to the
-  8-feature DNN artifacts described here.
 - `src/clustering_structs.h`'s `Cluster::calcFeatures()` still computes and
   normalises the same 8-feature vector (used historically as DNN input); its
   `rawDeltaZ`/`rawDeltaZResunits` outputs are reused by `updateScores` for
