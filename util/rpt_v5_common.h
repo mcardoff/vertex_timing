@@ -76,6 +76,11 @@ inline std::vector<Scenario> makeScenarios(const std::string& suffix) {
     // Needs truth for the selection, so it is an oracle, not deployable.
     {"waves_ideal", "Idealised WAVeS [oracle]",    C04, nullptr, nullptr},
     {"truth",       "Truth t_{0} (10#oplus30 ps)",  C06, nullptr, nullptr},
+    // TZP: the classical selector (Score::TRKPTZ_TZQ, short name TRKPTZ_TZP)
+    // with its guarded in-jet time -- see the TZP section in CLAUDE.md's
+    // Physics Findings. Appended LAST so the load-bearing indices 0-5 are
+    // untouched; fillJets fills sv[6] positionally.
+    {"tzp",         "TZP t_{0}",                   C08, nullptr, nullptr},
   };
   for (auto& sc : s) {
     sc.h_hs = makeHist(("HS_" + sc.name + suffix).c_str(),
