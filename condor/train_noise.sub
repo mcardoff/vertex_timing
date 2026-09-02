@@ -1,0 +1,91 @@
+# ---------------------------------------------------------------------------
+# train_noise.sub — how much do two runs differ when NOTHING was changed?
+#
+# Every remaining study compares runs against each other: the learning curve
+# compares --sample-frac points, the transfer matrix compares rows. A one-point
+# difference between two of them means nothing until we know the spread between
+# two runs that should be identical. This measures that spread.
+#
+# It also settles an open discrepancy. The first condor training reported
+# epoch-1 loss 0.4345 and a VBF validation of 61.3%, while every login-node
+# rerun of the same config, same seed and same files gives 0.4242 and 79.5%.
+# That gap is far too large to be floating-point noise, and it is NOT thread
+# count: torch.set_num_threads(4) and (48) were verified byte-identical to each
+# other. So either the condor environment differs from the login node, or the
+# files it read at the time differed. These jobs distinguish the two:
+#
+#   all 4 seed=0 jobs agree with each other AND with 0.4242
+#       -> the original 0.4345 was a one-off, most likely stale/partial input
+#          staged at the moment it ran. Nothing systematic; noise floor ~0.
+#   all 4 agree with each other but NOT with 0.4242
+#       -> the worker environment is genuinely different from the login node.
+#          Every login-node number in this study needs re-taking on a worker.
+#   the 4 disagree among themselves
+#       -> real run-to-run nondeterminism on the pool, and its size is the noise
+#          band that every later comparison must clear.
+#
+# seed 0 x 4 is the INFRASTRUCTURE floor: identical inputs, identical seed, so
+# any spread is pure nondeterminism. seeds 1-3 add the STATISTICAL floor, since
+# the seed moves both the weight init and the event fold assignment -- that is
+# the honest band for "is this configuration better than that one".
+#
+# Keep the two apart when reading the results. A learning-curve point is a
+# different configuration at the SAME seed, so the infrastructure floor is the
+# relevant one; but if the statistical floor is much larger, the curve should be
+# run at several seeds instead of one.
+#
+#   cd condor && condor_submit train_noise.sub && condor_q
+#
+# Compare with:
+#   for d in runs/noise_*; do
+#     python3 -c "import json,sys; r=json.load(open('$d/results.json'));
+#                 print('$d', r['selected_val_macro'],
+#                       list(r['results'].values())[0]['test_per_sample'])"
+#   done
+# ---------------------------------------------------------------------------
+universe                = vanilla
+executable              = run_training.sh
+
+INPUT_DIR = /data/mcardiff/training
+SELECTION = canonical
+TAG       = noise_s$(seed)_$(rep)
+
+# The frozen configuration, unchanged -- this measures the noise OF that
+# configuration, so altering it here would measure something else. Threads are
+# pinned to request_cpus so a worker cannot vary them underneath us; that was
+# shown not to matter, but pinning costs nothing and removes it as a variable.
+arguments = train_deepsets.py $(INPUT_DIR) runs/$(TAG) --selection $(SELECTION) --epochs 15 --seed $(seed) --torch-threads 4
+
+should_transfer_files   = YES
+when_to_transfer_output = ON_EXIT
+transfer_input_files    = ../python/train_deepsets.py
+transfer_output_files   = runs/$(TAG)
+transfer_output_remaps  = "$(TAG)=runs/$(TAG)"
+
+getenv                  = True
++JobFlavour             = "tomorrow"
+
+request_cpus            = 4
+request_memory          = 16GB
+request_disk            = 8GB
+# Deliberately 0 here, unlike the other training templates. A GPU changes the
+# reduction order again, and these jobs exist to measure spread on ONE hardware
+# configuration -- mixing CPU and GPU slots would fold a hardware difference
+# into the number meant to represent run-to-run noise.
+request_gpus            = 0
+
+output = logs/train_$(TAG).$(ClusterId).$(ProcId).out
+error  = logs/train_$(TAG).$(ClusterId).$(ProcId).err
+log    = logs/train_$(TAG).$(ClusterId).$(ProcId).log
+
+# rep distinguishes otherwise-identical rows; without it all four seed=0 jobs
+# would share a TAG and overwrite each other's output directory.
+queue seed,rep from (
+  0, a
+  0, b
+  0, c
+  0, d
+  1, a
+  2, a
+  3, a
+)

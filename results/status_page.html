@@ -1,0 +1,653 @@
+<title>The 25-Point Gap</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,600;1,6..72,400&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+
+<style>
+:root {
+  --paper:     #F7F7FB;
+  --surface:   #FFFFFF;
+  --surface-2: #EEEEF5;
+  --ink:       #16161D;
+  --ink-2:     #43434F;
+  --ink-3:     #74748A;
+  --rule:      #DBDBE6;
+  --rule-soft: #E9E9F1;
+  --accent:    #4338A8;
+  --accent-bg: #E7E6F5;
+  --gain:      #1F7A4D;
+  --gain-bg:   #E2F1E9;
+  --warn:      #A8620E;
+  --warn-bg:   #F7ECDD;
+  --null:      #9A3B3B;
+  --null-bg:   #F6E5E5;
+  --shadow:    0 1px 2px rgba(22,22,29,.05), 0 10px 28px -14px rgba(22,22,29,.16);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper:     #0E0E14;
+    --surface:   #16161F;
+    --surface-2: #1E1E29;
+    --ink:       #E8E8F0;
+    --ink-2:     #B4B4C4;
+    --ink-3:     #82829A;
+    --rule:      #2C2C3B;
+    --rule-soft: #21212C;
+    --accent:    #9A93F0;
+    --accent-bg: #1E1B3D;
+    --gain:      #5FC48D;
+    --gain-bg:   #14301F;
+    --warn:      #DFA25A;
+    --warn-bg:   #322213;
+    --null:      #E08585;
+    --null-bg:   #331A1A;
+    --shadow:    0 1px 2px rgba(0,0,0,.5), 0 10px 28px -14px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"] {
+  --paper:     #0E0E14;
+  --surface:   #16161F;
+  --surface-2: #1E1E29;
+  --ink:       #E8E8F0;
+  --ink-2:     #B4B4C4;
+  --ink-3:     #82829A;
+  --rule:      #2C2C3B;
+  --rule-soft: #21212C;
+  --accent:    #9A93F0;
+  --accent-bg: #1E1B3D;
+  --gain:      #5FC48D;
+  --gain-bg:   #14301F;
+  --warn:      #DFA25A;
+  --warn-bg:   #322213;
+  --null:      #E08585;
+  --null-bg:   #331A1A;
+  --shadow:    0 1px 2px rgba(0,0,0,.5), 0 10px 28px -14px rgba(0,0,0,.7);
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
+  font-size: 17px;
+  line-height: 1.6;
+  margin: 0;
+  padding: 0 1.5rem 6rem;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 52rem; margin: 0 auto; }
+
+/* masthead */
+.masthead { padding: 4rem 0 2rem; display: flex; flex-direction: column; gap: 1rem;
+            border-bottom: 1px solid var(--rule); }
+.eyebrow {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: .72rem; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--ink-3); display: flex; flex-wrap: wrap; gap: .4rem 1.1rem;
+}
+h1 {
+  font-family: "Newsreader", Georgia, serif; font-weight: 600;
+  font-size: clamp(2.3rem, 6vw, 3.6rem); line-height: 1.05;
+  letter-spacing: -.02em; margin: 0; text-wrap: balance;
+}
+.standfirst { font-size: 1.15rem; line-height: 1.5; color: var(--ink-2);
+              max-width: 40rem; margin: 0; }
+.standfirst strong { color: var(--ink); font-weight: 600; }
+
+/* sections */
+section { margin-top: 3.8rem; }
+h2.sec {
+  font-family: "Newsreader", Georgia, serif; font-size: 1.75rem; font-weight: 600;
+  letter-spacing: -.012em; line-height: 1.15; margin: 0 0 .3rem; text-wrap: balance;
+}
+.sec-note { font-size: .95rem; color: var(--ink-3); margin: 0 0 1.5rem;
+            padding-bottom: .9rem; border-bottom: 1px solid var(--rule); }
+h3 { font-size: 1.05rem; font-weight: 600; margin: 2rem 0 .5rem; }
+p { margin: 0 0 1rem; }
+p:last-child { margin-bottom: 0; }
+.mono, code { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .86em; }
+p code, li code, td code { background: var(--surface-2); padding: .08em .32em; border-radius: 2px; }
+
+/* tables */
+.tablewrap { overflow-x: auto; margin: 1.2rem 0; border: 1px solid var(--rule);
+             border-radius: 4px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: .93rem; min-width: 33rem; }
+th { text-align: left; font-family: "JetBrains Mono", monospace; font-size: .68rem;
+     letter-spacing: .09em; text-transform: uppercase; color: var(--ink-3);
+     font-weight: 600; padding: .75rem 1rem; border-bottom: 1px solid var(--rule);
+     white-space: nowrap; background: var(--surface-2); }
+td { padding: .68rem 1rem; border-bottom: 1px solid var(--rule-soft);
+     vertical-align: top; color: var(--ink-2); }
+td:first-child { color: var(--ink); }
+tr:last-child td { border-bottom: 0; }
+.num { font-variant-numeric: tabular-nums; font-family: "JetBrains Mono", monospace;
+       text-align: right; white-space: nowrap; }
+tr.hi td { background: var(--accent-bg); }
+tr.hi td:first-child { color: var(--ink); font-weight: 600; }
+.up { color: var(--gain); font-weight: 600; }
+.flat { color: var(--null); font-weight: 600; }
+
+/* the ladder graphic */
+.ladder { margin: 1.6rem 0 .6rem; background: var(--surface); border: 1px solid var(--rule);
+          border-radius: 4px; padding: 1.6rem 1.5rem 1.2rem; box-shadow: var(--shadow); }
+.lrow { display: grid; grid-template-columns: 8.5rem 1fr; gap: 0 1rem;
+        align-items: center; margin-bottom: .55rem; }
+.llabel { font-family: "JetBrains Mono", monospace; font-size: .74rem;
+          color: var(--ink-3); text-align: right; letter-spacing: .02em; }
+.lbar { position: relative; height: 1.7rem; background: var(--surface-2);
+        border-radius: 2px; overflow: hidden; }
+.lfill { position: absolute; inset: 0 auto 0 0; border-radius: 2px;
+         display: flex; align-items: center; justify-content: flex-end;
+         padding-right: .5rem; font-family: "JetBrains Mono", monospace;
+         font-size: .76rem; font-weight: 600; color: #fff; }
+.lcap { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink);
+        opacity: .55; }
+.lnote { font-size: .84rem; color: var(--ink-3); margin: .9rem 0 0;
+         padding-top: .8rem; border-top: 1px solid var(--rule-soft); }
+
+/* callouts */
+.call { border: 1px solid var(--rule); border-left: 4px solid var(--ink-3);
+        background: var(--surface); border-radius: 4px; padding: 1.2rem 1.4rem;
+        margin: 1.4rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.call.good { border-left-color: var(--gain); background: var(--gain-bg); }
+.call.bad  { border-left-color: var(--null); background: var(--null-bg); }
+.call.note { border-left-color: var(--warn); background: var(--warn-bg); }
+.call .label { font-family: "JetBrains Mono", monospace; font-size: .7rem;
+               font-weight: 600; letter-spacing: .11em; text-transform: uppercase;
+               color: var(--ink-3); }
+.call.good .label { color: var(--gain); }
+.call.bad .label  { color: var(--null); }
+.call.note .label { color: var(--warn); }
+.call p { margin: 0; color: var(--ink); }
+
+/* chips */
+.chip { display: inline-block; font-family: "JetBrains Mono", monospace;
+        font-size: .65rem; font-weight: 600; letter-spacing: .07em;
+        text-transform: uppercase; padding: .18em .5em; border-radius: 2px; white-space: nowrap; }
+.chip.done { background: var(--gain-bg); color: var(--gain); }
+.chip.null { background: var(--null-bg); color: var(--null); }
+.chip.open { background: var(--warn-bg); color: var(--warn); }
+
+/* ordered steps */
+ol.steps { margin: 1.2rem 0; padding: 0; list-style: none;
+           display: flex; flex-direction: column; gap: 1.4rem; }
+ol.steps > li { display: grid; grid-template-columns: 2rem 1fr; gap: 0 1rem; align-items: start; }
+.snum { font-family: "JetBrains Mono", monospace; font-size: .95rem; font-weight: 600;
+        color: var(--accent); padding-top: .1rem; }
+.sbody h4 { margin: 0 0 .35rem; font-size: 1.02rem; font-weight: 600; }
+.sbody p { margin: 0 0 .5rem; color: var(--ink-2); }
+.sbody p:last-child { margin-bottom: 0; }
+.sbody strong { color: var(--ink); }
+
+ul.bullets { margin: 1rem 0; padding-left: 1.15rem; display: flex;
+             flex-direction: column; gap: .5rem; }
+ul.bullets li { color: var(--ink-2); }
+ul.bullets li strong { color: var(--ink); }
+
+footer { margin-top: 4rem; padding-top: 1.3rem; border-top: 1px solid var(--rule);
+         font-size: .86rem; color: var(--ink-3); }
+footer p { margin: 0 0 .4rem; }
+
+@media (max-width: 640px) {
+  body { padding: 0 1.1rem 4rem; font-size: 16px; }
+  .masthead { padding-top: 2.5rem; }
+  .lrow { grid-template-columns: 5.5rem 1fr; gap: 0 .6rem; }
+  .llabel { font-size: .66rem; }
+  ol.steps > li { grid-template-columns: 1.6rem 1fr; gap: 0 .7rem; }
+}
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <div class="eyebrow">
+    <span>HGTD Vertex Timing</span><span>Cluster Selection</span><span>28 Aug 2026</span>
+  </div>
+  <h1>The 25-point gap</h1>
+  <p class="standfirst">A learned selector beats both hand-designed scores on every sample, including one it had never seen. On Z+jets it reaches <strong>67.1%</strong> against a <strong>92.6%</strong> ceiling. Half that gap is unreachable by any selector. Of the reachable half, four candidate explanations have now been closed by measurement — including a jet tagger whose <em>perfect</em> version scores 15 points worse. <strong>What was left was a column of the ntuple nobody had read.</strong></p>
+</header>
+
+<section>
+  <h2 class="sec">Where selection stands</h2>
+  <p class="sec-note">Canonical selection (<span class="mono">--vbs-mjj=500</span>), μ = 200, core fraction at ±60 ps. Deep Sets averaged over four split seeds.</p>
+
+  <div class="tablewrap">
+    <table>
+      <thead>
+        <tr><th>Sample</th><th class="num">TRKPTZ</th><th class="num">WAVeS</th><th class="num">Deep Sets</th><th class="num">Oracle</th><th class="num">Gain</th><th class="num">Gap left</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>vbf</td><td class="num">90.4</td><td class="num">91.1</td><td class="num"><strong>92.2 ± 0.6</strong></td><td class="num">98.3</td><td class="num up">+1.8</td><td class="num">6.1</td></tr>
+        <tr class="hi"><td>zjets</td><td class="num">61.2</td><td class="num">59.4</td><td class="num"><strong>67.1 ± 1.0</strong></td><td class="num">92.6</td><td class="num up">+5.9</td><td class="num">25.5</td></tr>
+        <tr><td>dijet</td><td class="num">86.6</td><td class="num">86.2</td><td class="num"><strong>89.9 ± 0.3</strong></td><td class="num">97.7</td><td class="num up">+3.3</td><td class="num">7.8</td></tr>
+        <tr><td>ttbar</td><td class="num">87.0</td><td class="num">86.3</td><td class="num"><strong>90.3 ± 0.3</strong></td><td class="num">98.0</td><td class="num up">+3.3</td><td class="num">7.7</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p><strong>Deep Sets beats both hand-designed scores on all four samples</strong> — including ttbar, added this round and never previously trained on. WAVeS trails TRKPTZ everywhere except VBF, now confirmed on a third topology whose forward jets are scarce for a different reason than Z+jets'.</p>
+</section>
+
+<section>
+  <h2 class="sec">What the Z+jets gap is made of</h2>
+  <p class="sec-note">The stack that matters. Each bar is a fraction of all accepted Z+jets events.</p>
+
+  <div class="ladder">
+    <div class="lrow">
+      <div class="llabel">TRKPTZ</div>
+      <div class="lbar"><div class="lfill" style="width:61.2%;background:var(--ink-3)">61.2%</div></div>
+    </div>
+    <div class="lrow">
+      <div class="llabel">WAVeS</div>
+      <div class="lbar"><div class="lfill" style="width:59.4%;background:var(--ink-3)">59.4%</div></div>
+    </div>
+    <div class="lrow">
+      <div class="llabel">Deep Sets</div>
+      <div class="lbar"><div class="lfill" style="width:67.1%;background:var(--accent)">67.1%</div></div>
+    </div>
+    <div class="lrow">
+      <div class="llabel">oracle ceiling</div>
+      <div class="lbar"><div class="lfill" style="width:92.6%;background:var(--warn)">92.6%</div></div>
+    </div>
+    <div class="lrow">
+      <div class="llabel">all events</div>
+      <div class="lbar"><div class="lfill" style="width:100%;background:var(--surface-2);color:var(--ink-3)">100%</div><div class="lcap" style="left:92.6%"></div></div>
+    </div>
+    <p class="lnote">The oracle is <span class="mono">P(∃ cluster with |t − t_truth| &lt; 60 ps)</span> — whether a good candidate <em>exists</em> at all. So the 7.4% beyond it is unrecoverable by any selector, and the <strong>25.5 points between 67.1 and 92.6 are pure selection failure</strong>, with candidate availability already excluded.</p>
+  </div>
+
+  <p>This matters for how the gap is read. A recurring worry is that much of it might be events where no good cluster exists — that the problem isn't really cluster selection. It isn't: that population is <strong>7.4%</strong>, and it already sits outside the 25.5.</p>
+
+  <h3>And the 25.5 splits almost exactly in half</h3>
+  <p>Inserting a rung for a <em>perfect</em> per-track HS tagger — sum pT over the tracks that genuinely came from the hard-scatter vertex, pooled by the current rule, with real measured times — separates the two halves. It needs no model: it is what a flawless tagger would hand the existing machinery.</p>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Rung</th><th class="num">vbf</th><th class="num">zjets</th><th class="num">dijet</th><th class="num">ttbar</th></tr></thead>
+      <tbody>
+        <tr><td>TRKPTZ</td><td class="num">89.9</td><td class="num">61.2</td><td class="num">86.6</td><td class="num">86.7</td></tr>
+        <tr><td>WAVeS</td><td class="num">90.7</td><td class="num">59.4</td><td class="num">86.2</td><td class="num">86.1</td></tr>
+        <tr class="hi"><td>Deep Sets</td><td class="num">92.7</td><td class="num"><strong>66.4</strong></td><td class="num">89.5</td><td class="num">90.0</td></tr>
+        <tr><td>Σ pT · truth <em>(perfect tagger)</em></td><td class="num">94.8</td><td class="num"><strong>79.4</strong></td><td class="num">93.4</td><td class="num">94.1</td></tr>
+        <tr><td>oracle</td><td class="num">98.1</td><td class="num"><strong>92.6</strong></td><td class="num">97.7</td><td class="num">98.0</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="call note">
+    <span class="label">The split, on Z+jets</span>
+    <p><strong>+13.0 — track identity.</strong> A perfect per-track HS tagger takes 66.4 → 79.4. Reachable in principle by a better selector.<br>
+    <strong>+13.2 — time quality.</strong> Perfect track identity still cannot reach the oracle. <em>No selector closes this</em>, however good: the times themselves are the limit.</p>
+  </div>
+
+  <p>The earlier round's 80.2% figure re-derives to <strong>79.4%</strong> at the canonical selection, so that decomposition survives the fiducial change. Restricting the perfect tagger to tracks that actually carry a time changes nothing on any sample, so untimed hard-scatter tracks are not what is costing us.</p>
+</section>
+
+<section>
+  <h2 class="sec">Where the right answer sits when we miss it</h2>
+  <p class="sec-note">Among Z+jets events that <em>have</em> a valid candidate. Rank 1 means we already pick it.</p>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Sample</th><th class="num">top-1</th><th class="num">top-2</th><th class="num">top-3</th><th class="num">top-5</th></tr></thead>
+      <tbody>
+        <tr class="hi"><td>zjets</td><td class="num">71.7%</td><td class="num">87.5%</td><td class="num">94.4%</td><td class="num">99.3%</td></tr>
+        <tr><td>vbf</td><td class="num">94.5%</td><td class="num">97.9%</td><td class="num">99.1%</td><td class="num">99.8%</td></tr>
+        <tr><td>dijet</td><td class="num">91.6%</td><td class="num">96.9%</td><td class="num">98.6%</td><td class="num">99.8%</td></tr>
+        <tr><td>ttbar</td><td class="num">91.9%</td><td class="num">97.1%</td><td class="num">98.7%</td><td class="num">99.8%</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>The right candidate is inside the top 3 for <strong>94.4%</strong> of recoverable Z+jets events and picked for 71.7% — so roughly 23 points sit in reordering ranks 2 and 3. This is fine-grained ranking, not gross misidentification.</p>
+
+  <div class="call bad">
+    <span class="label">Hypothesis rejected</span>
+    <p>A natural mechanism is that failures cluster where two candidates sit close in z, their times overlapping within resolution. <strong>They do not.</strong> Z+jets efficiency against distance to the nearest other candidate is flat from below 0.2 mm to above 5 mm: 66.2 / 65.9 / 66.1 / 68.3 / 66.1 / 63.7. Candidate crowding in z is not the mechanism.</p>
+  </div>
+</section>
+
+<section>
+  <h2 class="sec">The one thing that improved selection</h2>
+  <p class="sec-note">A defect, not a tuning knob. Same seed, same config, same machine.</p>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Epoch selected on</th><th class="num">Epoch</th><th class="num">vbf</th><th class="num">zjets</th><th class="num">dijet</th><th class="num">ttbar</th></tr></thead>
+      <tbody>
+        <tr><td>validation core fraction</td><td class="num">1</td><td class="num">91.7</td><td class="num">65.4</td><td class="num">89.2</td><td class="num">89.8</td></tr>
+        <tr class="hi"><td><strong>validation loss</strong></td><td class="num">5</td><td class="num"><strong>92.8</strong></td><td class="num"><strong>67.0</strong></td><td class="num"><strong>89.9</strong></td><td class="num"><strong>90.2</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>Validation core fraction was unreliable: on VBF it collapsed to 17.6% and <em>degraded</em> with training while the same weights scored 91.7% on test. The slice is sound — its oracle matches test's to 0.2 points, and TRKPTZ pushed through the identical tensor scores 90.0%. The fault is in the argmax-of-model-scores step on that slice, and it was selecting epoch 1.</p>
+
+  <p>Validation <em>loss</em> is the training objective itself, reads the whole score distribution rather than only its argmax, and moves smoothly — so it sidesteps the failure rather than depending on it. Core fraction is still reported every epoch, because the two disagreeing is the signature of the open bug.</p>
+
+  <div class="call note">
+    <span class="label">Still open</span>
+    <p>The root cause is not understood. Nothing depends on the broken signal any more, and a control column now pushes TRKPTZ through every tensor so a recurrence is visible immediately — but this is a symptom fix, not a cure.</p>
+  </div>
+</section>
+
+<section>
+  <h2 class="sec">Four things that did not work — and why that is the finding</h2>
+  <p class="sec-note">Each was a genuine attempt with a stated hypothesis. All four failing in the same direction is what makes the conclusion strong.</p>
+
+  <ul class="bullets">
+    <li><strong>More Z+jets data: null.</strong> <span class="chip null">measured</span> Over a 5.5× range (4,688 → 25,589 events actually fitted) core fraction moved 0.2 points inside a ±0.8 band. Z+jets is information-starved, not statistics-starved.</li>
+    <li><strong>Seed ensembling: null.</strong> <span class="chip null">measured</span> Four members gave −0.0 / +0.1 / +0.0 / +0.1 against the best single member.</li>
+    <li><strong>Model capacity, pooling form, auxiliary head, feature sets: null.</strong> <span class="chip null">prior</span> All scanned in the previous round; none cleared noise.</li>
+    <li><strong>Topology transfer: excellent</strong> <span class="chip done">measured</span> — which is the same evidence read the other way. A model that transfers freely between topologies is not one that is missing topology-specific structure.</li>
+  </ul>
+
+  <div class="call bad">
+    <span class="label">Why ensembling could not have worked</span>
+    <p>The variance decomposition explains it. Infrastructure noise is exactly <strong>0.000</strong> — four runs at one seed are bit-identical. Init-only variance is 0.2–0.5 points. Split variance is 0.6–1.9. Ensemble members <em>must</em> share a split or member B trains on member A's test events, so the construction can only exploit the small term. The premise was real; the usable variance simply lives on the axis this method cannot touch without leaking.</p>
+  </div>
+</section>
+
+<section>
+  <h2 class="sec">Topology transfer, and what ttbar turned out to be</h2>
+  <p class="sec-note">Rows are the sample fit on; columns evaluated on. Three split seeds per row.</p>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Trained on</th><th class="num">vbf</th><th class="num">zjets</th><th class="num">dijet</th><th class="num">ttbar</th></tr></thead>
+      <tbody>
+        <tr class="hi"><td><strong>ttbar</strong></td><td class="num">92.4 ± 0.1</td><td class="num">66.7 ± 0.5</td><td class="num">89.9 ± 0.0</td><td class="num">90.4 ± 0.1</td></tr>
+        <tr><td>dijet</td><td class="num">92.0 ± 0.5</td><td class="num">66.2 ± 0.5</td><td class="num">89.7 ± 0.0</td><td class="num">90.1 ± 0.1</td></tr>
+        <tr><td>vbf</td><td class="num">92.4 ± 0.4</td><td class="num">65.1 ± 1.3</td><td class="num">89.3 ± 0.4</td><td class="num">89.8 ± 0.4</td></tr>
+        <tr><td>zjets</td><td class="num">89.6 ± 0.3</td><td class="num">66.5 ± 0.6</td><td class="num">89.3 ± 0.1</td><td class="num">89.6 ± 0.2</td></tr>
+        <tr><td><em>TRKPTZ</em></td><td class="num"><em>90.4</em></td><td class="num"><em>61.2</em></td><td class="num"><em>86.6</em></td><td class="num"><em>87.0</em></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p><strong>15 of 16 cells beat TRKPTZ.</strong> The single exception is zjets → vbf (89.6 against 90.4), failing in exactly the expected direction: a model trained only where the forward jets are pileup does not quite carry to where they are the signal.</p>
+
+  <p><strong>ttbar-trained is best or tied-best in every column</strong>, beating the VBF-trained model by 1.6 points on Z+jets. Against the pooled all-four model measured over four seeds, training on ttbar <em>alone</em> is statistically indistinguishable from training on everything — the new sample is a sufficient training topology by itself, and VBF is the worst single source for Z+jets.</p>
+
+  <p>These results were only readable because each point ran three split seeds: the vbf → zjets cell carries ±1.3, which a single-seed run would have reported as a clean number.</p>
+</section>
+
+<section>
+  <h2 class="sec" id="item7">Do the two model families fail on the same events?</h2>
+  <p class="sec-note">Deep Sets pools constituent tracks; the GBDT reads per-cluster summaries. If their errors are decorrelated there is something to combine.</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Sample</th><th class="num">Deep Sets</th><th class="num">GBDT</th><th class="num">stack</th><th class="num">union</th><th class="num">φ(err)</th></tr></thead>
+      <tbody>
+        <tr><td>vbf</td><td class="num">92.7</td><td class="num">93.2</td><td class="num">92.9</td><td class="num">94.2</td><td class="num">0.803</td></tr>
+        <tr class="hi"><td>zjets</td><td class="num">66.4</td><td class="num">65.0</td><td class="num">65.3</td><td class="num"><strong>70.3</strong></td><td class="num"><strong>0.795</strong></td></tr>
+        <tr><td>dijet</td><td class="num">89.5</td><td class="num">89.4</td><td class="num">89.5</td><td class="num">91.1</td><td class="num">0.823</td></tr>
+        <tr><td>ttbar</td><td class="num">90.0</td><td class="num">89.9</td><td class="num">90.1</td><td class="num">91.7</td><td class="num">0.806</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p><strong>φ ≈ 0.80 on every sample</strong> — the two families fail on substantially the same events. On Z+jets both are wrong on 29.7%, while the exclusive rescues are only 5.3% (Deep Sets alone) and 4.0% (GBDT alone).</p>
+
+  <p>The union ceiling is 70.3% against Deep Sets' 66.4, so the absolute maximum any combiner could add is <strong>3.9 points</strong> — and the rank-average stack realises none of it, landing at 65.3, below Deep Sets alone. <span class="chip null">closed</span></p>
+
+  <p>Worth noting the GBDT <em>beats</em> Deep Sets on VBF (93.2 vs 92.7) and loses on Z+jets (65.0 vs 66.4): the track-level representation earns its place exactly where the problem is hard.</p>
+</section>
+
+<section>
+  <h2 class="sec">Is the information there at all?</h2>
+  <p class="sec-note">The verdict experiment. Given only the candidate Deep Sets chose and the one it should have, can any classifier tell them apart?</p>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Sample</th><th class="num">Pairs</th><th class="num">Hard pairs</th><th class="num">Random pairs</th><th class="num">Control</th></tr></thead>
+      <tbody>
+        <tr class="hi"><td>zjets</td><td class="num">2,848</td><td class="num"><strong>84.2%</strong></td><td class="num">85.9%</td><td class="num">100.0%</td></tr>
+        <tr><td>vbf</td><td class="num">1,351</td><td class="num"><strong>76.7%</strong></td><td class="num">94.9%</td><td class="num">100.0%</td></tr>
+        <tr><td>dijet</td><td class="num">1,979</td><td class="num"><strong>81.3%</strong></td><td class="num">93.1%</td><td class="num">100.0%</td></tr>
+        <tr><td>ttbar</td><td class="num">1,983</td><td class="num"><strong>84.1%</strong></td><td class="num">93.7%</td><td class="num">100.0%</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="call good">
+    <span class="label">Yes — and this overturns the expected conclusion</span>
+    <p>Every sample sits far above the 50% coin flip, with the control at exactly 100.0% so the probe is demonstrably working. A GBDT on cluster summaries alone separates the two candidates <strong>84% of the time on Z+jets</strong>. The discriminating information <em>is</em> present in reconstructed features, and Deep Sets is not using all of it in its final ordering.</p>
+  </div>
+
+  <p>The Deep Sets score is deliberately excluded from the probe's inputs. The pairs are built as <em>(what the model chose, what it should have chosen)</em>, so by construction the model scores the wrong one higher — feeding that in would let the probe hit ~100% with the rule "pick whichever the model liked less", which is leakage of the construction rather than physics.</p>
+
+  <p>The Z+jets/VBF contrast is structural. VBF's random pairs are far easier than its hard ones (94.9 vs 76.7), so VBF failures are a genuinely confusable minority. Z+jets is nearly flat (85.9 vs 84.2) — its pairs are uniformly hard, consistent with a sample whose forward jets are mostly pileup and where little is cleanly separable.</p>
+</section>
+
+<section>
+  <h2 class="sec">The jet hypothesis, closed</h2>
+  <p class="sec-note">WAVeS assumes forward jets are hard-scatter objects. Before building a jet tagger to fix that assumption, measure what a perfect one would be worth. Truth used only to compute the ceiling — nothing here is a model input.</p>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Rung</th><th class="num">vbf</th><th class="num">zjets</th><th class="num">dijet</th><th class="num">ttbar</th></tr></thead>
+      <tbody>
+        <tr><td>TRKPTZ</td><td class="num">89.9</td><td class="num">61.2</td><td class="num">86.6</td><td class="num">86.7</td></tr>
+        <tr><td>WAVeS (as shipped)</td><td class="num">90.7</td><td class="num">59.4</td><td class="num">86.2</td><td class="num">86.1</td></tr>
+        <tr class="hi"><td>Deep Sets</td><td class="num"><strong>92.7</strong></td><td class="num"><strong>66.4</strong></td><td class="num"><strong>89.5</strong></td><td class="num"><strong>90.0</strong></td></tr>
+        <tr><td>Σ pT, tracks in PU jets</td><td class="num">79.8</td><td class="num">54.1</td><td class="num">77.0</td><td class="num">76.8</td></tr>
+        <tr><td>Σ pT, tracks in HS jets</td><td class="num">88.8</td><td class="num flat">50.5</td><td class="num">83.1</td><td class="num">82.9</td></tr>
+        <tr><td>WAVeS-form, HS jets only</td><td class="num">90.0</td><td class="num flat">51.4</td><td class="num">84.1</td><td class="num">84.2</td></tr>
+        <tr><td>Σ pT · truth, per track</td><td class="num">94.8</td><td class="num">79.4</td><td class="num">93.4</td><td class="num">94.1</td></tr>
+        <tr><td>Oracle (|Δt| argmin)</td><td class="num">98.1</td><td class="num">92.6</td><td class="num">97.7</td><td class="num">98.0</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="call bad">
+    <span class="label">Perfect jet identity makes Z+jets worse, not better</span>
+    <p>Restricting WAVeS to truth-matched hard-scatter jets scores <strong>51.4</strong> against Deep Sets' 66.4 — <strong>15 points down</strong>, using information no reconstructed tagger could ever have. The per-track truth tagger reaches 79.4 on the same events, so the recoverable information is real; it simply is not organised by jet.</p>
+  </div>
+
+  <p>This kills two lines at once. A reco jet HS/PU tagger cannot help if the truth version hurts, and <strong>supervising attention on truth jet identity</strong> — the <span class="mono">hgtdtransformer</span>-style idea of using truth only in the attention so evaluation stays reco-only — would be supervising toward a target measured to be worse than what the model already does unaided.</p>
+
+  <p>The mechanism is visible in the control row. Tracks in <em>pileup</em> jets score 54.1, tracks in <em>hard-scatter</em> jets 50.5 — the PU rung is the <em>better</em> of the two. In a sample whose forward jets are overwhelmingly pileup-supplied, "near a hard-scatter forward jet" selects a small, unrepresentative population, while the discriminating tracks are distributed without regard to jets at all. Jet <em>proximity</em> was never carrying the signal, so refining jet <em>identity</em> was never going to.</p>
+</section>
+
+<section>
+  <h2 class="sec">Splitting the cluster time by jet association</h2>
+  <p class="sec-note">If Z+jets forward jets are mostly pileup, the hard-scatter content should sit <em>outside</em> them. Two uncertainty-weighted times per cluster — in-jet and out-of-jet — plus each one's Δt to truth.</p>
+
+  <div class="lrow"><span class="llabel">coverage</span><div>Only <strong>19.5%</strong> of Z+jets clusters have both halves. <strong>78.6%</strong> are out-of-jet only — no constituent track inside any jet — and 1.9% in-jet only.</div></div>
+  <div class="lrow"><span class="llabel">closer to truth</span><div>out-of-jet <strong>52.6%</strong> vs in-jet 47.4%. The inversion is real: on VBF the in-jet half wins, as it must where the hard scatter <em>is</em> the forward jets.</div></div>
+  <div class="lrow"><span class="llabel">|t<sub>in</sub> − t<sub>out</sub>|</span><div>21.5 ps on within-60 ps clusters against 29.3 ps outside — a <strong>1.36×</strong> separation. Usable as a feature, modest.</div></div>
+  <div class="lrow"><span class="llabel">ceiling</span><div>full cluster 36.1% → best-of-two oracle <strong>38.8%</strong>. Perfectly choosing the better half is worth <strong>+2.7 points</strong>.</div></div>
+
+  <div class="call note">
+    <span class="label">Real, and small</span>
+    <p>The predicted inversion is confirmed — but at 52.6/47.4 it is barely a preference, and it applies to a fifth of clusters. The disagreement between the halves is the more useful part: it is a cluster-level inconsistency statistic that does not require choosing a side. Both are exported and are now model inputs; neither is a headline lever.</p>
+  </div>
+</section>
+
+<section>
+  <h2 class="sec">The vertices we were throwing away</h2>
+  <p class="sec-note">Prompted by re-reading the sample description: <span class="mono">RecoVtx_z</span> is a full array, and only index 0 — the primary — was ever read.</p>
+
+  <p>The failure gallery found that <strong>74 of 100</strong> wrongly-picked Z+jets clusters have truth purity exactly zero: they are pileup clusters. A pileup cluster is, close to definitionally, one sitting on a reconstructed pileup vertex — and ITk reconstructs those vertices already. That question had never been asked of the data.</p>
+
+  <div class="call note">
+    <span class="label">The headline number was mostly an artefact — the conditional test is the result</span>
+    <p><span class="mono">closest_vtx_is_pv</span> separates 82.7% vs 25.0% raw, which looks decisive. Held at fixed |Δz| it collapses to a <strong>1.17–1.46×</strong> lift and <em>inverts</em> to 0.84 in the outermost bin. It was restating "this cluster is near the primary" — which <span class="mono">delta_z</span> already says and TRKPTZ already exploits. It is exported but deliberately <strong>not</strong> a model input.</p>
+  </div>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>|Δz| bin</th><th class="num">n</th><th class="num">P(ok)</th><th class="num">ratio &lt; 1</th><th class="num">ratio &gt; 1</th><th class="num">Lift</th></tr></thead>
+      <tbody>
+        <tr><td>&lt; 0.1 mm</td><td class="num">7,074</td><td class="num">0.641</td><td class="num">0.634</td><td class="num">0.643</td><td class="num flat">0.99</td></tr>
+        <tr><td>0.1–0.25</td><td class="num">6,910</td><td class="num">0.484</td><td class="num">0.493</td><td class="num">0.482</td><td class="num flat">1.02</td></tr>
+        <tr><td>0.25–0.5</td><td class="num">6,954</td><td class="num">0.241</td><td class="num">0.289</td><td class="num">0.236</td><td class="num">1.22</td></tr>
+        <tr class="hi"><td>0.5–1</td><td class="num">9,216</td><td class="num">0.086</td><td class="num">0.149</td><td class="num">0.084</td><td class="num up">1.78</td></tr>
+        <tr class="hi"><td>1–2</td><td class="num">11,288</td><td class="num">0.027</td><td class="num">0.056</td><td class="num">0.027</td><td class="num up">2.10</td></tr>
+        <tr class="hi"><td>&gt; 2</td><td class="num">18,990</td><td class="num">0.012</td><td class="num">0.029</td><td class="num">0.012</td><td class="num up">2.34</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="call good">
+    <span class="label">pv_pu_dz_ratio strengthens exactly where the model fails</span>
+    <p>Zero lift near the primary — correctly, since everything there is close to it — rising to <strong>2.34×</strong> beyond 2 mm. That is the opposite pattern to <span class="mono">closest_vtx_is_pv</span>, and the useful one: the clusters we wrongly pick are <em>displaced</em>, and this asks something |Δz| structurally cannot — <strong>is another reconstructed vertex claiming this z?</strong></p>
+  </div>
+
+  <p>Two features survive the conditional test and are broadcast into the track rows, which is all Deep Sets ever sees: <span class="mono">pv_pu_dz_ratio</span> and <span class="mono">dz_to_nearest_pu_vtx</span>. The density counts (<span class="mono">n_pu_vtx_within_1mm/2mm</span>, <span class="mono">local_vtx_density</span>) are flat at 1.00× — event properties, not cluster discriminants — and are exported for the Z+jets check only. <span class="mono">TRACK_FEATURES</span> goes 22 → 29, also promoting the already-exported <span class="mono">loo_pull</span>, <span class="mono">is_in_any_jet</span> and <span class="mono">dr_nearest_anyjet</span>.</p>
+
+  <div class="call note">
+    <span class="label">Local VBF only</span>
+    <p>Every number above is the local VBF sample. Z+jets has more pileup vertices and is where the failure mode lives, so the mechanism should be <em>stronger</em> there — but that is a prediction, not a measurement. The full re-export (7 samples × 2 selections, 152 jobs) is running now; the retrain against it is the test.</p>
+  </div>
+</section>
+
+<section>
+  <h2 class="sec">The ranker D justified — and why it lost</h2>
+  <p class="sec-note">Study D said the information was present, so a ranking stage was an evidence-backed build. It was built. End-to-end core fraction is the only number that counts.</p>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Sample</th><th class="num">Ranker</th><th class="num">Deep Sets</th><th class="num">Δ</th><th class="num">TRKPTZ</th><th class="num">Oracle</th></tr></thead>
+      <tbody>
+        <tr class="hi"><td>zjets</td><td class="num">61.6</td><td class="num">65.8</td><td class="num flat">−4.1</td><td class="num">60.5</td><td class="num">92.4</td></tr>
+        <tr><td>vbf</td><td class="num">91.6</td><td class="num">92.8</td><td class="num flat">−1.2</td><td class="num">89.9</td><td class="num">98.0</td></tr>
+        <tr><td>dijet</td><td class="num">88.0</td><td class="num">89.6</td><td class="num flat">−1.5</td><td class="num">86.7</td><td class="num">97.6</td></tr>
+        <tr><td>ttbar</td><td class="num">88.4</td><td class="num">89.9</td><td class="num flat">−1.5</td><td class="num">86.8</td><td class="num">98.0</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="call bad">
+    <span class="label">A design error, not a refutation of D</span>
+    <p>The ranker was trained to order pairs by <strong>|Δt|</strong> — which candidate is closer to truth — while the metric rewards <em>any</em> candidate inside ±60 ps. Those are different objectives, and on Z+jets they diverge most: ordering correctly among candidates that are all outside the window earns nothing. Deep Sets' existing multi-positive listwise loss already puts softmax mass on <em>every</em> qualifying candidate, so it was the metric-aligned objective all along and the ranker replaced it with a worse one.</p>
+  </div>
+
+  <p>D is not overturned — 84.2% pairwise separability stands, on pairs built as <em>(chosen, correct)</em>. What the result adds is that <strong>curated-pair accuracy does not convert into deployment gain by itself</strong>, which the earlier stage-2 re-ranker at −0.6 had already hinted. A metric-aligned retry — label by the 60-ps criterion, train only on <span class="mono">(good, bad)</span> pairs — remains open, but it is now a backlog item rather than the headline direction.</p>
+</section>
+
+<section>
+  <h2 class="sec">What the model actually does wrong</h2>
+  <p class="sec-note">100 failing Z+jets events dumped with every candidate, sampled rather than taken in file order.</p>
+
+  <div class="lrow"><span class="llabel">purity 0</span><div><strong>74 of 100</strong> wrongly-picked clusters have truth purity exactly zero — not a marginal HS cluster mis-ordered, but a pure pileup cluster chosen outright.</div></div>
+  <div class="lrow"><span class="llabel">largest Σ pT</span><div><strong>63%</strong> of picks are the highest-Σ pT candidate in their event. The model reproduces the Σ pT bias that TRKPTZ and WAVeS are both built on.</div></div>
+  <div class="lrow"><span class="llabel">reachable</span><div>These are <em>recoverable</em> failures: a candidate within 60 ps existed and a different one was chosen.</div></div>
+
+  <p>This is what motivated asking about reconstructed pileup vertices. If the dominant error is picking a pure-pileup cluster, the most direct question available is whether that cluster sits on a vertex ITk already reconstructed — and until now nothing in the feature set could answer it.</p>
+</section>
+
+<section>
+  <h2 class="sec">The features, measured</h2>
+  <p class="sec-note">Paired A/B on the 2026-08-28 re-export, canonical selection, 4 samples, 5 init seeds per arm. Identical split <em>and</em> identical init seed between arms, so only the input columns differ.</p>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>arm</th><th class="num">dijet</th><th class="num">ttbar</th><th class="num">vbf</th><th class="num">zjets</th></tr></thead>
+      <tbody>
+        <tr><td>base (22 features)</td><td class="num">90.00</td><td class="num">90.30</td><td class="num">93.30</td><td class="num">66.94</td></tr>
+        <tr><td>+ vertex (29)</td><td class="num">−0.02</td><td class="num flat">−0.06</td><td class="num flat">−0.10</td><td class="num up"><strong>+0.34 ± 0.11</strong></td></tr>
+        <tr><td>+ jet/loo (25)</td><td class="num">−0.04</td><td class="num flat">−0.08</td><td class="num up">+0.12</td><td class="num flat">−0.16</td></tr>
+        <tr class="hi"><td>full (32)</td><td class="num">−0.08</td><td class="num">−0.04</td><td class="num">+0.10</td><td class="num up"><strong>+0.40 ± 0.16</strong></td></tr>
+        <tr><td>TRKPTZ</td><td class="num">86.60</td><td class="num">87.00</td><td class="num">90.40</td><td class="num">61.20</td></tr>
+        <tr><td>oracle</td><td class="num">97.70</td><td class="num">98.00</td><td class="num">98.30</td><td class="num">92.60</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="call good">
+    <span class="label">The two feature groups are sample-antagonistic</span>
+    <p>The vertex features help <strong>only</strong> Z+jets (+0.34, 5/5 seeds up) and are mildly negative on the other three — 0/5 seeds up on both vbf and ttbar. The jet/loo trio does the exact reverse: <strong>+0.12 on vbf with 5/5 up, −0.16 on Z+jets with 0/5 up</strong>. Both are consistent in direction across every seed, so neither is noise.</p>
+  </div>
+
+  <p>The mechanism accounts for it exactly. Vertex relations answer "is a reconstructed pileup vertex claiming this z?", which only matters where the failure is picking a displaced pure-pileup cluster — <strong>65.9%</strong> of Z+jets recoverable failures and rare elsewhere. Jet association only matters where the hard scatter <em>is</em> the forward jets, which is VBF and emphatically not Z+jets.</p>
+
+  <p>This is also why an earlier ablation on the local VBF sample pointed the other way: there the jet/loo group carried everything (+0.38) and the vertex features were a clean null on top of it (−0.02, 0/5 seeds). That was the correct reading of a sample that does not have the failure the vertex features target — and the wrong basis for a general conclusion.</p>
+
+  <div class="call note">
+    <span class="label">Real, reproducible, and small</span>
+    <p><strong>+0.40 on a 25.7-point Z+jets gap closes about 1.6% of it.</strong> The features were worth exporting and the mechanism is confirmed, but this does not move Z+jets meaningfully. The gap remains dominated by the 13.2-point time-quality term that no selector reaches, plus a selection problem that the rank distribution characterises as top-3 discrimination rather than search. <span class="mono">base</span> reproducing the published 67.1 baseline at 66.94 confirms the harness before any of this is layered on.</p>
+  </div>
+</section>
+
+<section>
+  <h2 class="sec">Where the right answer actually sits</h2>
+  <p class="sec-note">All 36,531 canonical Z+jets events, scored with TRKPTZ — the physics baseline, whose failures the learned selector inherits.</p>
+
+  <div class="lrow"><span class="llabel">correct</span><div>22,601 events, <strong>61.9%</strong></div></div>
+  <div class="lrow"><span class="llabel">recoverable</span><div>11,225, <strong>30.7%</strong> — a qualifying cluster existed and a different one was chosen</div></div>
+  <div class="lrow"><span class="llabel">no candidate</span><div>2,705, 7.4% — nothing within ±60 ps exists; this is what sets the 92.6% ceiling</div></div>
+
+  <div class="call good">
+    <span class="label">The correct cluster is the runner-up 52% of the time</span>
+    <p>Ranking every candidate by TRKPTZ's own score, the right answer sits at <strong>rank 1</strong> — the very next one down — in 52.0% of recoverable failures, and inside the <strong>top three in 87.0%</strong>. Not one of the 11,225 has its answer beyond rank 9, in events carrying 5.7 candidates on average.</p>
+  </div>
+
+  <p>That is partly an artefact of candidate count — the rank-1 share falls from 100% in 2-candidate events to <strong>44.5%</strong> at nine or more, still well above the ~12% of a random ordering. But second place is <em>not</em> a near miss: the correct cluster scores a median <strong>0.556</strong> of the winner's TRKPTZ value, with only 10.7% inside 10% of it.</p>
+
+  <div class="call bad">
+    <span class="label">The wrong cluster wins on both terms at once</span>
+    <p>TRKPTZ is Σp<sub>T</sub>·e<sup>−1.5|Δz|</sup>. The cluster it picks has <strong>1.47× the pT</strong> (more in 71.3% of cases) <em>and</em> sits <strong>closer to the primary in z</strong> (closer in 69.0%), at 0.297 mm against the correct cluster's 0.524 mm. By every reconstructed proxy the score has available, the pileup cluster looks more like a hard-scatter vertex than the real one does.</p>
+  </div>
+
+  <p>The z half of that has a specific cause. At a median of <strong>110 reconstructed vertices per event</strong>, the nearest pileup vertex to the primary sits <strong>0.024 mm</strong> away, and <em>every</em> event has one within 0.3 mm — while the correct cluster sits at a median 0.796 mm. The pileup population is denser in z than the hard-scatter cluster's own spread, so <span class="mono">e<sup>−1.5|Δz|</sup></span> systematically rewards pileup: in <strong>77.9%</strong> of recoverable failures the correct answer is the <em>more distant</em> cluster. The z term is not mis-weighted, it is being applied to an axis with no separation left on it.</p>
+
+  <p>That also bounds what the vertex features could ever have bought. "Is a pileup vertex claiming this z?" returns yes essentially always, which is consistent with the measured <strong>+0.34</strong>. What remains is timing — the one axis on which these two clusters genuinely differ, and precisely what the 13.2-point time-quality term quantifies.</p>
+
+  <p>Failure is <strong>U-shaped in multiplicity</strong>, and the ends fail for opposite reasons. Below 2 forward tracks, 58.9% fail and every one is a no-candidate failure — no selection decision is being made at all. Above 20 tracks the no-candidate share collapses to 5.7% while total failure returns to 39.3%, i.e. pure selection failure. Since <strong>25,662 of 36,531</strong> events sit in that top bin, that is the dominant mode in this sample. Full breakdown in the <a href="https://claude.ai/code/artifact/412f8033-449b-4026-bb89-922e2e44bfaf">failure gallery</a>.</p>
+</section>
+
+<section>
+  <h2 class="sec">Where this goes next</h2>
+  <p class="sec-note">Four lines closed by measurement, one open and in flight.</p>
+
+  <ol class="steps">
+    <li><span class="snum">1</span><div class="sbody">
+      <h4>Vertex-relational features — done, +0.40 on Z+jets</h4>
+      <p><strong>Answered.</strong> The re-export landed, the paired A/B ran on all four samples, and the result is above: the vertex features work on Z+jets and only Z+jets, worth +0.34 alone and +0.40 in the full set. Small against a 25.7-point gap, and the mechanism is confirmed rather than merely plausible.</p>
+      <p>The unexpected part is the antagonism — each group helps exactly one sample and costs the others, so a single pooled feature set is a compromise. Whether a per-sample or gated model beats it is open, but specialising trades away the cross-topology transfer that was one of the learned selector's clearest wins.</p>
+    </div></li>
+    <li><span class="snum">2</span><div class="sbody">
+      <h4>Quantify the half that cannot be closed</h4>
+      <p>The 13.2-point time-quality term is a result in its own right and is measured at the canonical selection, not inferred. Stated properly — the ML recovers the available selection information to within X, and the remainder is a timing limit of the present reconstruction — it is a stronger claim than any further architecture would produce.</p>
+    </div></li>
+    <li><span class="snum">3</span><div class="sbody">
+      <h4>Metric-aligned pairwise retry</h4>
+      <p>Backlog. Label by the 60-ps criterion rather than |Δt| ordering, and train only on <span class="mono">(good, bad)</span> pairs. Worth doing only if item 1 does not move the number, since Deep Sets' listwise loss is already metric-aligned and the burden is on the pairwise form to beat it.</p>
+    </div></li>
+    <li><span class="snum">4</span><div class="sbody">
+      <h4>Revisit the Z+jets selection itself</h4>
+      <p>Open question rather than a plan. The failing events are ones where the forward-jet requirement admits an event with almost no hard-scatter forward activity to select on. Requiring ≥1 forward HS track would raise the number by changing the population rather than the algorithm — which is a legitimate result only if stated as such.</p>
+    </div></li>
+  </ol>
+
+  <div class="call note">
+    <span class="label">Closed by measurement, not abandoned</span>
+    <p><strong>Jet HS/PU tagger</strong> — the truth version scores 15 points <em>below</em> Deep Sets on Z+jets. <strong>Truth-jet attention supervision</strong> — same measurement; it would supervise toward a worse target. <strong>In/out-of-jet split</strong> — the inversion is real but worth +2.7 points at a perfect-choice ceiling, on the 19.5% of clusters that have both halves. <strong>|Δt|-ordered pairwise ranking</strong> — objective mismatch, −4.1. Each was cheap to settle because the ceiling was computed before the model was built.</p>
+  </div>
+
+  <div class="call note">
+    <span class="label">Two corrections to the plan we started from</span>
+    <p>The oracle decomposition, proposed as the highest-value first step, <strong>was already in hand</strong>: the oracle is exactly P(a candidate within 60 ps exists), so Category D is 7.4% and the 25.5 points were always net of it. And the timing-quality variables proposed as missing — σ<sub>t</sub>, timing pulls, timing RMS, χ²<sub>t</sub> — are all already exported, with per-track time, timeRes, t_pull_cluster and nhgtd_hits already model inputs. Sum-pooling represents Σ1/σ² exactly, so cluster time uncertainty was never outside the architecture's reach.</p>
+  </div>
+</section>
+
+<section>
+  <h2 class="sec">Infrastructure worth not re-learning</h2>
+  <p class="sec-note">Each of these cost real time to find.</p>
+  <ul class="bullets">
+    <li><strong>The group key is <span class="mono">(sample_id, file_idx, event_num)</span>.</strong> Each export shard restarts <span class="mono">event_num</span> at 0, so the old two-column key merged unrelated events into one ranking group once shards were combined — and every row still looked valid.</li>
+    <li><strong><span class="mono">hadd</span> for the exports, <span class="mono">hist_merge</span> for the <span class="mono">*_hist</span> files.</strong> Opposite rules, same reason: <span class="mono">TParameter</span> scalars have no <span class="mono">Merge()</span>, and the exports have none while the histogram files do.</li>
+    <li><strong>A negative <span class="mono">--vbs-deta</span> is a third mode</strong>, not a smaller threshold — it drops the VBS <em>pair</em> requirement, which no combination of the two thresholds can express.</li>
+    <li><strong>An unmatchable GPU request idles forever</strong> rather than falling back to CPU. The pool has 8 GPU slots; they were not obtainable, and jobs sat idle until the request was removed.</li>
+    <li><strong>Condor is bit-deterministic here.</strong> Four runs at one seed agree to every printed digit, so there is no infrastructure noise to budget for — only split and init variance.</li>
+  </ul>
+</section>
+
+<footer>
+  <p>Branch <span class="mono">ml/cluster-selection</span>. Runbook and full numbers in <span class="mono">results/PLAN.md</span>; the previous round's superseded numbers in <span class="mono">results/README.md</span>, under a banner explaining why they are not comparable.</p>
+  <p>Model results at the canonical selection (<span class="mono">--vbs-deta=0 --vbs-mjj=500</span>) on re-exported data carrying the corrected group key. The six per-sample event counts reproduce <span class="mono">results/baseline_deta0p0_mjj500p0.md</span> exactly. Vertex-feature separations are the local VBF sample and are labelled as such wherever they appear.</p>
+</footer>
+
+</div>
