@@ -1,0 +1,80 @@
+# ---------------------------------------------------------------------------
+# vbs_region_mjj.sub — condor submit template: one job per sample.
+#
+# Runs util/vbs_region_mjj.cxx, which produces the VBS-topology composition of
+# the selection as a function of m_jj: a stacked histogram, one column per m_jj
+# bin, every column normalised to 1 (see the file header for what the four
+# regions are and why they must partition the events exactly).
+#
+# Unlike clustering_hist / rpt_v5_hist this is NOT a histogramming stage --
+# it is a single executable that writes its own PDF, so there is no separate
+# plotting step to run afterwards. The .root file comes back alongside the PDF
+# purely so the plot can be restyled or re-binned locally without resubmitting.
+#
+# Setup (once):
+#   cd build && cmake .. && make vbs_region_mjj    # build BEFORE submitting
+#   chmod +x condor/run_analysis.sh
+#
+# Submit (from inside condor/, so the relative paths below resolve):
+#   cd condor && condor_submit -dump dryrun.ad vbs_region_mjj.sub   # validate
+#   cd condor && condor_submit vbs_region_mjj.sub
+#
+# Execute hosts don't share a filesystem with the submit host on this pool, so
+# the built executable is staged in via transfer_input_files and the outputs are
+# staged back via transfer_output_files. The ntuples are read from the absolute
+# /data/mcardiff/... path baked into --sample=, so they aren't transferred.
+#
+# This queues 3 jobs, one per --sample value.
+# ---------------------------------------------------------------------------
+universe                 = vanilla
+executable               = run_analysis.sh
+
+# The `4` is forwarded as --threads=4 by run_analysis.sh. vbs_region_mjj
+# parallelizes its event loop via TTreeProcessorMT (verified bit-identical
+# between 1 and 8 threads on local VBF), and request_cpus below must track this
+# value -- condor's cgroup throttles any threads spawned beyond what was
+# requested, silently eating the speedup.
+#
+# NOTE the executable does NOT need --vbs-mjj=0 --vbs-deta=0 passed here, even
+# though the plot deliberately has no VBF topology selection: it zeroes both
+# knobs internally (see main() in util/vbs_region_mjj.cxx). That is on purpose --
+# a forgotten flag on a grid submission would not fail, it would return a
+# plausible-looking plot in which every low-m_jj event had been classified NONE.
+arguments                = vbs_region_mjj $(sample) 4
+
+should_transfer_files    = YES
+when_to_transfer_output  = ON_EXIT
+transfer_input_files     = ../build/vbs_region_mjj
+
+# Two outputs per job: the histogram file (OUTPUT_DIR/<sample>_...root, via
+# histFilePath) and the plot (OUTPUT_DIR/diagnostics/<sample>_...pdf, via
+# plotFilePath). OUTPUT_DIR is the bare sample name, so both are nested.
+transfer_output_files    = $(sample)/$(sample)_vbs_region_mjj.root, $(sample)/diagnostics/$(sample)_vbs_region_mjj.pdf
+
+# Condor flattens nested transfer_output_files paths to their basename when
+# staging back, so without a remap both files would land loose in condor/ rather
+# than under $(sample)/. The basenames are already sample-prefixed, so the three
+# queued jobs cannot overwrite each other -- the remap is purely to reproduce the
+# local directory layout on the submit side.
+#
+# The remap's LHS must be a BARE FILENAME -- per condor_submit(1), "You cannot
+# specify directories to be remapped." A nested path there silently matches
+# nothing and falls back to the flattening it was meant to prevent (this has
+# already bitten the rpt_v5_hist jobs once; see CLAUDE.md's Grid Submission
+# section). Directories ARE allowed on the RHS and are created as needed.
+transfer_output_remaps   = "$(sample)_vbs_region_mjj.root=$(sample)/$(sample)_vbs_region_mjj.root;$(sample)_vbs_region_mjj.pdf=$(sample)/diagnostics/$(sample)_vbs_region_mjj.pdf"
+
+getenv                   = True
+
+# CERN-style job-length hint; harmless no-op on pools that don't read it.
++JobFlavour              = "workday"
+
+request_cpus             = 4
+request_memory           = 4GB
+request_disk             = 2GB
+
+output                   = logs/vbs_region_mjj_$(sample).$(ClusterId).$(ProcId).out
+error                    = logs/vbs_region_mjj_$(sample).$(ClusterId).$(ProcId).err
+log                      = logs/vbs_region_mjj_$(sample).$(ClusterId).$(ProcId).log
+
+queue sample in (vbf, zjets, dijet)
