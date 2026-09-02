@@ -149,5 +149,5 @@ Training/eval infrastructure retained in-tree: `python/train_deepsets.py`,
 `util/export_training_data.cxx` (see CLAUDE.md, ML Data Export). The ~35
 one-off study scripts behind the results in this directory were removed from
 `python/` after their findings were captured here and in the per-study
-documents — recover any of them from git history if a measurement needs
-rerunning.
+documents — their last state is commit `8fda07c` on `ml/cluster-selection`
+(removed in `9802d6b`); recover from there if a measurement needs rerunning.
