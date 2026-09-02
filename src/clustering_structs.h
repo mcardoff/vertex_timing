@@ -120,6 +120,35 @@ namespace MyUtl {
     std::unique_ptr<TTreeReaderArray<char>> trackLeptonID;
     std::vector<char> removedJet;
 
+    // ---- Extended branches, bound only when EXTENDED_BRANCHES is set -------
+    // The vertex fit's OWN track-to-vertex assignment and per-track fit weight,
+    // plus Athena's per-vertex SumPt^2 and the truth vertex labels. This is
+    // strictly better information than any z-distance proxy: measured on local
+    // VBF in the forward region, tracks the fit puts on vertex 0 are 58.0%
+    // truly hard-scatter against ~32% for the incumbent z-significance cut, and
+    // tracks it puts on a pileup vertex are 98.5% truly pileup. It separates
+    // where |dz| cannot -- at ~110 reco vertices per event the nearest pileup
+    // vertex sits 0.024 mm from the primary.
+    std::unique_ptr<TTreeReaderArray<int>>   trackRecoVtxIdx;
+    std::unique_ptr<TTreeReaderArray<float>> trackRecoVtxWeight;
+    std::unique_ptr<TTreeReaderArray<float>> recoVtxSumPt2;
+    std::unique_ptr<TTreeReaderArray<bool>>  recoVtxIsHS;   // TRUTH
+    std::unique_ptr<TTreeReaderArray<bool>>  recoVtxIsPU;   // TRUTH
+    // Track fit quality and silicon hit content, beyond the single
+    // Track_quality flag the analysis currently uses.
+    std::unique_ptr<TTreeReaderArray<float>> trackChi2, trackNdof;
+    std::unique_ptr<TTreeReaderArray<unsigned char>>
+        trackNPixHits, trackNPixHoles, trackNPixShared, trackNPixSplit,
+        trackNSctHits, trackNSctHoles, trackNSctShared,
+        trackNInnerHits, trackNNextInnerHits;
+    std::unique_ptr<TTreeReaderArray<float>>
+        trackBtagD0, trackBtagD0Unc, trackBtagZ0Sin, trackBtagZ0SinUnc;
+    // Off-diagonal covariances involving z0. The analysis uses only the
+    // diagonal var_z0; these carry the correlations that a proper z0
+    // uncertainty at a displaced vertex would need.
+    std::unique_ptr<TTreeReaderArray<float>>
+        trackCovD0Z0, trackCovZ0Theta, trackCovZ0Phi0, trackCovZ0Qp;
+
   BranchPointerWrapper(TTreeReader& r)
     : reader (r),
       weight (r, "weight"),
@@ -152,7 +181,62 @@ namespace MyUtl {
       // so other samples' readers never register a branch their ntuples lack.
       if (OVERLAP_REMOVAL)
         trackLeptonID = std::make_unique<TTreeReaderArray<char>>(r, "Track_leptonID");
+      if (EXTENDED_BRANCHES) {
+        // Bind only branches the sample actually has -- productions differ,
+        // and Track_btagIp_* is absent from every grid sample.
+        auto F = [&r](const char* n) -> std::unique_ptr<TTreeReaderArray<float>> {
+          return hasBranch(n) ? std::make_unique<TTreeReaderArray<float>>(r, n)
+                              : nullptr; };
+        auto U = [&r](const char* n) -> std::unique_ptr<TTreeReaderArray<unsigned char>> {
+          return hasBranch(n) ? std::make_unique<TTreeReaderArray<unsigned char>>(r, n)
+                              : nullptr; };
+        if (hasBranch("Track_recoVtx_idx"))
+          trackRecoVtxIdx  = std::make_unique<TTreeReaderArray<int>>(r, "Track_recoVtx_idx");
+        trackRecoVtxWeight = F("Track_recoVtx_weight");
+        recoVtxSumPt2      = F("RecoVtx_sumPt2");
+        if (hasBranch("RecoVtx_isHS"))
+          recoVtxIsHS      = std::make_unique<TTreeReaderArray<bool>>(r, "RecoVtx_isHS");
+        if (hasBranch("RecoVtx_isPU"))
+          recoVtxIsPU      = std::make_unique<TTreeReaderArray<bool>>(r, "RecoVtx_isPU");
+        trackChi2          = F("Track_chi2");
+        trackNdof          = F("Track_ndof");
+        trackNPixHits      = U("Track_numberOfPixelHits");
+        trackNPixHoles     = U("Track_numberOfPixelHoles");
+        trackNPixShared    = U("Track_numberOfPixelSharedHits");
+        trackNPixSplit     = U("Track_numberOfPixelSplitHits");
+        trackNSctHits      = U("Track_numberOfSCTHits");
+        trackNSctHoles     = U("Track_numberOfSCTHoles");
+        trackNSctShared    = U("Track_numberOfSCTSharedHits");
+        trackNInnerHits    = U("Track_numberOfInnermostPixelLayerHits");
+        trackNNextInnerHits= U("Track_numberOfNextToInnermostPixelLayerHits");
+        trackBtagD0        = F("Track_btagIp_d0");
+        trackBtagD0Unc     = F("Track_btagIp_d0Uncertainty");
+        trackBtagZ0Sin     = F("Track_btagIp_z0SinTheta");
+        trackBtagZ0SinUnc  = F("Track_btagIp_z0SinThetaUncertainty");
+        trackCovD0Z0       = F("Track_cov_d0z0");
+        trackCovZ0Theta    = F("Track_cov_z0theta");
+        trackCovZ0Phi0     = F("Track_cov_z0phi0");
+        trackCovZ0Qp       = F("Track_cov_z0qOverP");
+      }
     }
+
+    // -----------------------------------------------------------------------
+    // Extended-branch accessors. Each returns a NaN/sentinel when the branch is
+    // not bound, so a caller never has to test EXTENDED_BRANCHES itself and a
+    // run without it produces missing values rather than a crash.
+    // -----------------------------------------------------------------------
+    int   recoVtxOf(int t) const {
+      return trackRecoVtxIdx && t < (int)trackRecoVtxIdx->GetSize()
+             ? (*trackRecoVtxIdx)[t] : -999; }
+    float recoVtxWeightOf(int t) const {
+      return trackRecoVtxWeight && t < (int)trackRecoVtxWeight->GetSize()
+             ? (*trackRecoVtxWeight)[t] : std::numeric_limits<float>::quiet_NaN(); }
+    float vtxSumPt2(int v) const {
+      return recoVtxSumPt2 && v >= 0 && v < (int)recoVtxSumPt2->GetSize()
+             ? (*recoVtxSumPt2)[v] : std::numeric_limits<float>::quiet_NaN(); }
+    bool  vtxIsHS(int v) const {
+      return recoVtxIsHS && v >= 0 && v < (int)recoVtxIsHS->GetSize()
+             ? (*recoVtxIsHS)[v] : false; }
 
     // -----------------------------------------------------------------------
     // leptonPdg
@@ -315,8 +399,12 @@ namespace MyUtl {
     //   or manufactured by a pileup jet.
     //
     //   All fields keep their -1 sentinel when no opposite-hemisphere pair
-    //   exists; passJetPtCut relies on dEta staying -1 there so a no-pair event
-    //   fails even when the |Δη| requirement is disabled via --vbs-deta=0.
+    //   exists; passJetPtCut relies on dEta and mjj staying -1 there so a
+    //   no-pair event fails even when a threshold is lowered to 0. Lowering a
+    //   threshold therefore relaxes only that quantity's MAGNITUDE cut — the
+    //   pair requirement itself survives. To drop the pair requirement too,
+    //   pass a NEGATIVE --vbs-deta, which passJetPtCut treats as "no VBS pair
+    //   required" and which bypasses both comparisons.
     // -----------------------------------------------------------------------
     struct VbsPair {
       double mjj  = -1.0;
@@ -509,6 +597,100 @@ namespace MyUtl {
     }
 
     // -----------------------------------------------------------------------
+    // classifyEventRegion
+    //   Event-level region membership -- see the EventRegion doc comment in
+    //   clustering_constants.h for what each region means and why this exists
+    //   alongside the pair-level classifyVbsRegion.
+    //
+    //   Uses the paper's dR-cone labels (isJetPaperHS / isJetPaperPU), the same
+    //   definition the R_pT histogram fill uses, so region membership and the
+    //   signal/background split inside a region cannot disagree.
+    //
+    //   Tried and rejected: isJetTruthHS (the ntuple's own truthHSJet_idx
+    //   link). It is strictly binary, which looked attractive -- no "neither"
+    //   jets -- but it tags 73.5% of forward jets above 30 GeV as hard-scatter
+    //   against the paper definition's far more conservative labelling, so
+    //   almost every event ended up with a forward HS jet and no forward
+    //   pileup jet: 99.93% of events landed in a "HGTD can contribute" region,
+    //   which is true under that definition and useless as a statement. NOT a
+    //   soft-truth-jet artefact -- requiring the linked truth jet above 10 GeV
+    //   moves it only to 72.6%, and above 30 GeV to 68.3%.
+    //
+    //   Consequence of the paper labels: they are NOT complements, so a jet
+    //   can be neither HS nor PU (it contributes to no count below). Events
+    //   still partition exactly across the four regions; individual jets need
+    //   not.
+    //
+    //   Jets considered are exactly collectPtPassingJets' -- above MIN_JET_PT
+    //   and not lepton-overlap-removed -- so region membership can never
+    //   disagree with the jets the rest of the selection sees.
+    //
+    //   outCounts, when given, receives {nFwdHS, nFwdPU, nCenHS, nAnyHS} so a
+    //   caller can report the sub-case breakdown without re-deriving it.
+    // -----------------------------------------------------------------------
+    EventRegion classifyEventRegion(double fwdEtaMin, double fwdEtaMax,
+                                    double centralEtaMax,
+                                    int* outCounts = nullptr) const {
+      std::vector<int> passPtIdx;
+      int nPt = 0, nPtEta = 0;
+      this->collectPtPassingJets(passPtIdx, nPt, nPtEta);
+
+      int nFwdHS = 0, nFwdPU = 0, nCenHS = 0, nAnyHS = 0, nFwdHSTrk = 0;
+      // Truth forward hard-scatter TRACKS -- what a forward t0 is built from.
+      // Truth vertex 0 is the hard scatter by construction. This is a track
+      // count, not a jet count, on purpose: a jet needs 30 GeV, so an event can
+      // carry no hard-scatter jet and still have forward hard-scatter tracks a
+      // t0 could be built from.
+      for (int t = 0; t < (int)this->trackPt.GetSize(); ++t) {
+        if (this->trackToTruthvtx[t] != 0)    continue;
+        if (this->trackPt[t] <= MIN_TRACK_PT) continue;
+        const double ae = std::abs((double)this->trackEta[t]);
+        if (ae > fwdEtaMin && ae < fwdEtaMax) ++nFwdHSTrk;
+      }
+      for (int j : passPtIdx) {
+        const double e   = std::abs((double)this->topoJetEta[j]);
+        const double phi = this->topoJetPhi[j];
+        const double eta = this->topoJetEta[j];
+        const bool   hs  = this->isJetPaperHS(eta, phi);
+        const bool   pu  = this->isJetPaperPU(eta, phi);
+        const bool  fwd  = (e > fwdEtaMin && e < fwdEtaMax);
+        const bool  cen  = (e < centralEtaMax);
+        if (hs) {
+          ++nAnyHS;
+          if (fwd) ++nFwdHS;
+          else if (cen) ++nCenHS;
+        } else if (pu && fwd) {
+          ++nFwdPU;
+        }
+      }
+      if (outCounts) {
+        outCounts[0] = nFwdHS; outCounts[1] = nFwdPU;
+        outCounts[2] = nCenHS; outCounts[3] = nAnyHS;
+        outCounts[4] = nFwdHSTrk;
+      }
+
+      // Every reachable region requires a forward PU jet -- something for
+      // timing to actually act against. A forward HS jet with NO forward
+      // pileup is deliberately NOT reachable: timing would only confirm a tag
+      // that had no competitor to be confused with, and on local VBF that
+      // single case is 72.7% of events, which alone drove the "HGTD can
+      // contribute" fraction to 98.9% and made the split meaningless.
+      if (nFwdPU >= 1) {
+        if (nFwdHS >= 1) return EventRegion::R1;        // both timeable
+        if (nCenHS >= 1) return EventRegion::R2;        // only the fake timeable
+        // Fake with no hard-scatter JET anywhere. Whether timing has anything
+        // to work with then turns on a forward hard-scatter TRACK existing:
+        // with none, the only forward tracks belong to the pileup jet, so the
+        // reconstructed forward t0 IS that pileup vertex's time and the gate
+        // ends up judging the fake against a t0 the fake itself set.
+        if (nAnyHS == 0)
+          return nFwdHSTrk >= 1 ? EventRegion::CAN_HELP : EventRegion::NO_T0;
+        // else: the only hard-scatter jet sits beyond fwdEtaMax -- falls through.
+      }
+      return EventRegion::MAY_NOT;
+    }
+
+    // -----------------------------------------------------------------------
     // passJetPtCut
     //   Requires at least MIN_PASSPT_JETS reco jets above MIN_JET_PT,
     //   at least MIN_PASSETA_JETS of which are in the forward HGTD acceptance,
@@ -526,8 +708,27 @@ namespace MyUtl {
       bool passesPt   = passptcount   >= MIN_PASSPT_JETS;
       bool passesEta  = passptetacount >= MIN_PASSETA_JETS;
       VbsPair pair    = calcBestVbsPair(passPtIdx);
-      bool passesDEta = pair.dEta >= VBS_JET_D_ETA;
-      bool passesMjj  = pair.mjj  >= VBS_JET_MJJ;
+
+      // A NEGATIVE VBS_JET_D_ETA disables the VBS candidate-PAIR requirement
+      // outright, and must bypass BOTH tests below -- not just the |Deta| one.
+      //
+      // Every field of VbsPair keeps its -1 sentinel when no opposite-hemisphere
+      // pair exists, so `pair.dEta >= 0` and `pair.mjj >= 0` still REJECT a
+      // no-pair event. Lowering a threshold to 0 therefore only drops that
+      // quantity's MAGNITUDE cut and leaves the pair requirement standing --
+      // which is the thing that actually rejects Z+jets, since it rarely makes
+      // two >30 GeV jets in opposite hemispheres on its own. Measured when this
+      // was found: --vbs-deta=0 moved zjets from 67,074 to 69,745 accepted
+      // events, +4%, where removing the pair requirement was expected to be
+      // worth several-fold.
+      //
+      // Bypassing only passesDEta would reproduce that bug exactly, because the
+      // default m_jj >= 200 GeV would then reject every no-pair event on its
+      // own. There is deliberately no separate negative-mjj spelling: the pair
+      // either is required or is not, and one flag says which.
+      const bool vbsPairDisabled = VBS_JET_D_ETA < 0.0;
+      bool passesDEta = vbsPairDisabled || (pair.dEta >= VBS_JET_D_ETA);
+      bool passesMjj  = vbsPairDisabled || (pair.mjj  >= VBS_JET_MJJ);
       return passesPt && passesEta && passesDEta && passesMjj;
     }
 
@@ -672,6 +873,34 @@ namespace MyUtl {
       return returnScore;
     }
 
+    // -----------------------------------------------------------------------
+    // closerToPuThanPv
+    //   True when the track's z₀ sits nearer to SOME reconstructed pileup
+    //   vertex than to the primary.  Reco-only: RecoVtx_z[0] is taken as the
+    //   primary (the selection already requires the PV be reconstructed, see
+    //   passBasicCuts' MAX_VTX_DZ test) and every other entry is treated as
+    //   pileup.  No truth is consulted.
+    //
+    //   Mirrors vertexRelation() in util/export_training_data.cxx, which is
+    //   where the training column `closer_to_pu_than_pv` comes from — keep the
+    //   two in step, since the whole point of the derived scores below is to
+    //   test that column inside the C++ selector.
+    //
+    //   Returns false when the event has no pileup vertex at all: with nothing
+    //   to be closer TO, the track cannot be closer to pileup, and a "true"
+    //   there would silently veto every track in a single-vertex event.
+    // -----------------------------------------------------------------------
+    bool closerToPuThanPv(int trkIdx) const {
+      const int nVtx = (int)this->recoVtxZ.GetSize();
+      if (nVtx < 2) return false;
+      const double z = this->trackZ0[trkIdx];
+      const double dPV = std::abs(z - this->recoVtxZ[0]);
+      double dPU = 1e9;
+      for (int v = 1; v < nVtx; ++v)
+        dPU = std::min(dPU, (double)std::abs(z - this->recoVtxZ[v]));
+      return dPU < dPV;
+    }
+
   };
 
   // ---------------------------------------------------------------------------
@@ -808,6 +1037,83 @@ namespace MyUtl {
           this->scores.at(Score::TRKPT.id) * std::exp(-1.5 * std::abs(rawDeltaZ));
       }
 
+      // TRKPTZ_PV / TRKPTZ_PU: the same exp(−1.5|Δz|) envelope as TRKPTZ, but
+      // with the pT sum restricted to one side of the per-track vertex-
+      // proximity flag.  Deliberately reuses the Δz already computed above so
+      // the ONLY difference from TRKPTZ is which tracks enter the sum.
+      {
+        double sumPV = 0.0, sumPU = 0.0;
+        for (int trk : this->trackIndices) {
+          if (branch->closerToPuThanPv(trk)) sumPU += branch->trackPt[trk];
+          else                               sumPV += branch->trackPt[trk];
+        }
+        // Same Δz branch as TRKPTZ above: values[1] when clustering carried z₀
+        // as a second dimension, the calcFeatures value otherwise.
+        const double dzTerm = (this->values.size() > 1)
+          ? std::exp(-1.5 * std::abs(this->values.at(1) - branch->recoVtxZ[0]))
+          : std::exp(-1.5 * std::abs(rawDeltaZ));
+        this->scores[Score::TRKPTZ_PV.id] = sumPV * dzTerm;
+        this->scores[Score::TRKPTZ_PU.id] = sumPU * dzTerm;
+        this->scores[Score::TRKPTZ_PUW.id] =
+          (sumPV + PU_SIDE_PT_WEIGHT * sumPU) * dzTerm;
+
+        // Per-track dz weighting: same cluster-level envelope, but each track's
+        // pT is damped by its OWN distance to the primary vertex.
+        double sumTz = 0.0;
+        for (int trk : this->trackIndices)
+          sumTz += branch->trackPt[trk]
+                 * std::exp(-TRACK_DZ_WEIGHT
+                            * std::abs(branch->trackZ0[trk] - branch->recoVtxZ[0]));
+        this->scores[Score::TRKPTZ_TZ.id] = sumTz * dzTerm;
+        // Identical value, so chooseCluster's argmax picks the same cluster;
+        // only Score::timeSource differs, which calculateTime acts on.
+        this->scores[Score::TRKPTZ_TZ_IJ.id] = sumTz * dzTerm;
+        this->scores[Score::TRKPTZ_TZ_OJ.id] = sumTz * dzTerm;
+        this->scores[Score::TRKPTZ_TZ_GIJ.id] = sumTz * dzTerm;
+
+        // Bounded jet-association term: the fraction of the cluster's pT carried
+        // by tracks within dR < 0.4 of a qualifying forward jet. Same jet
+        // qualification as calculateTime's IN_JET path.
+        double ptInJet = 0.0, ptAll = 0.0;
+        for (int trk : this->trackIndices) {
+          const double p = branch->trackPt[trk];
+          ptAll += p;
+          const double te = branch->trackEta[trk], tp = branch->trackPhi[trk];
+          for (int j = 0; j < (int)branch->topoJetPt.GetSize(); ++j) {
+            if (branch->isJetRemoved(j)) continue;
+            if (branch->topoJetPt[j] < MIN_JET_PT) continue;
+            const double je = branch->topoJetEta[j];
+            if (std::abs(je) < MIN_ABS_ETA_JET || std::abs(je) > MAX_ABS_ETA_JET) continue;
+            const double dphi = TVector2::Phi_mpi_pi(branch->topoJetPhi[j] - tp);
+            if (std::hypot(je - te, dphi) < 0.4) { ptInJet += p; break; }
+          }
+        }
+        const double fJet = (ptAll > 0.0) ? ptInJet / ptAll : 0.0;
+        this->scores[Score::TRKPTZ_TZJ.id] =
+          sumTz * dzTerm * (1.0 + JET_FRAC_WEIGHT * fJet);
+
+        // Precision term: SUM_t 1/var_d0 -- the cluster's combined transverse
+        // impact-parameter information, i.e. "amount of well-measured pT".
+        // d0 was chosen over its qP and z0 siblings by a head-to-head scan
+        // (see D0_PRECISION_WEIGHT in clustering_constants.h); the three are
+        // 0.86-0.95 correlated and stacking a second adds nothing.
+        double d0Info = 0.0, sumTzp = 0.0;
+        for (int trk : this->trackIndices) {
+          const double v = branch->trackVarD0[trk];
+          if (v > 0.0) d0Info += 1.0 / v;
+          sumTzp += branch->trackPt[trk]
+                  * std::exp(-TZP_TRACK_DZ_WEIGHT
+                             * std::abs(branch->trackZ0[trk] - branch->recoVtxZ[0]));
+        }
+        // TZP uses its OWN jointly-tuned constants (see clustering_constants.h);
+        // sumTz/dzTerm above keep the ladder rows' historical (0.7, 1.5).
+        const double dzTermTzp = (this->values.size() > 1)
+          ? std::exp(-TZP_CLUSTER_DZ_WEIGHT * std::abs(this->values.at(1) - branch->recoVtxZ[0]))
+          : std::exp(-TZP_CLUSTER_DZ_WEIGHT * std::abs(rawDeltaZ));
+        this->scores[Score::TRKPTZ_TZQ.id] =
+          sumTzp * dzTermTzp * std::pow(d0Info, 0.5 * TZP_D0_PRECISION);
+      }
+
       // WAVES: WAVeS-style score — Σ_i pT_i × pT_jet(i) / max(ΔR_i, DR_FLOOR)
       // multiplied by exp(−1.5|Δz_cluster|), where Δz is the pT-weighted cluster z centroid
       // minus the reco vertex z.  The cluster-level z-term is more effective than per-track
@@ -844,10 +1150,14 @@ namespace MyUtl {
               wavesSum * std::exp(-1.5 * std::abs(rawDeltaZ));
         else
           this->scores[Score::WAVES.id] = this->scores.at(Score::TRKPTZ.id);
+
       }
 
       // JET_T_REFINED: dedicated collection (jet-filtered tracks at 2σ iterative);
       // cluster selected by TRKPTZ via the aux-collection path in selectClusters().
+      // Same value as WAVES, so chooseCluster picks the identical cluster;
+      // the two rows differ only in Score::minSubsetTracks.
+      this->scores[Score::WAVES_GIJ.id] = this->scores.at(Score::WAVES.id);
       this->scores[Score::JET_T_REFINED.id] = this->scores.at(Score::TRKPTZ.id);
 
       // WAVeS oracle variants: selected by the WAVeS score; denominator gates
