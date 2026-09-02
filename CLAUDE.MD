@@ -48,6 +48,7 @@ vertex_timing/
 │   ├── assoc_study_hist.cxx      # Histogramming stage of the z-association study: one event loop, every
 │   │                             #   AssocRule evaluated against the same event
 │   ├── assoc_study_plot.cxx      # Report stage: console tables + CSV block + PDFs, no ntuple access
+│   ├── vbs_region_mjj.cxx        # VBS pair composition vs m_jj (R1/R2/both-HS/Other; mjj>=500, |dEta|>=2.5)
 │   ├── maxpt_jet_test.cxx        # A/B/C test of the MAX_TRACK_PT cap vs per-event leading-jet pT
 │   ├── track_dt.cxx              # Inclusive per-track HGTD-time-vs-truth-particle-time residual
 │   └── sweep_utilities.h         # Shared helpers for parameter-sweep executables (no sweep .cxx files currently present)
@@ -61,6 +62,9 @@ vertex_timing/
 │   │                             #   Machine Learning section below
 │   ├── scripts/                  # ONNX export/inspection Python utilities (historical; no active consumer in src/)
 │   └── docs/                     # Design docs, incl. older ML integration guides
+├── results/                       # Markdown/JSON/HTML records of every study on this branch —
+│                                 #   positive AND negative results, one file per study; the TZP
+│                                 #   section below indexes the load-bearing ones
 ├── condor/                        # HTCondor grid submission templates (see Grid Submission)
 │   ├── run_analysis.sh           # Generic job executable (any --sample/--threads-aware target)
 │   ├── clustering_dt.sub         # Submit file: one job per sample, for the legacy clustering_dt
@@ -127,8 +131,8 @@ primary workflow.
   ntuple access. Shared `Scenario`/binning/save-load logic lives in
   `util/rpt_v5_common.h`.
 
-  **Six scenarios**, in `makeScenarios()` order — the index is load-bearing,
-  since `fillJets` fills `sv[0..5]` positionally:
+  **Seven scenarios**, in `makeScenarios()` order — the index is load-bearing,
+  since `fillJets` fills `sv[0..6]` positionally:
 
   | idx | name | what it is |
   |---|------|------------|
@@ -138,6 +142,28 @@ primary workflow.
   | 3 | `waves`       | WAVeS-selected cluster time (in-jet refined) |
   | 4 | `waves_ideal` | ORACLE: re-clustered with 30 ps track times AND the cluster closest in time to truth |
   | 5 | `truth`       | vertex = Gaus(truth HS vtx, 10 ps), tracks = Gaus(own truth vtx, 30 ps) |
+  | 6 | `tzp`         | TZP-selected cluster + guarded in-jet time (appended last so 0–5 stay stable) |
+
+  **The `truth`/`waves_ideal` rows are NOT upper bounds for the real rows.**
+  Both live in a re-smeared world — every timed track redrawn at a flat 30 ps,
+  which is WORSE than HGTD's real per-hit resolutions (35/25/21 ps for 1/2/3
+  hits) — and `waves_ideal` additionally inherits WAVeS *selection*. On ttbar
+  the real `tzp` row genuinely sits above both at matched efficiency.
+
+  **Never compare `rejAtEff` cells across scenarios near the efficiency
+  ceiling.** The cells snap to bins whose ACTUAL efficiencies can sit up to
+  ~1.6% apart, which near the ceiling moves rejection by factors — an early
+  "+20% over waves on zjets" headline from those cells inverted to "~10–15%
+  BEHIND waves" once traced at matched efficiency (results/rpt_tzp.md carries
+  the correction). Trace the (eff, rej) curves and compare at matched
+  efficiency instead.
+
+  **Core fraction and RpT-gate quality are NOT the same objective.** On zjets
+  WAVeS has the worst core fraction of any selector (57.9%) and the best real
+  matched-efficiency RpT rejection: the 2.5σ gate passes untimed tracks
+  unconditionally and empties the timed component on a catastrophically wrong
+  t0, so it forgives WAVeS's failure mode and punishes slightly-wrong t0s.
+  What the RpT gate actually rewards in a t0 is an open question.
 
   **Four jet populations**, each filled for all six scenarios: two forward pT
   slices (`_lo` 30–40 GeV, `_hi` >40 GeV, both 2.4 < |eta| < 3.8), the same
@@ -454,11 +480,17 @@ best working point.
 **Vertex-time inflation is per sample AND per scenario**, resolved by
 `inflationFor(SAMPLE_NAME)` in `main()` before any worker thread starts:
 
-| scenario | vbf | zjets | dijet |
-|---|---|---|---|
-| hgtd | 1.48 | 1.61 | 1.53 |
-| trkptz | 1.39 | 1.63 | 1.45 |
-| waves | 1.38 | 1.65 | 1.46 |
+| scenario | vbf | zjets | dijet | ttbar |
+|---|---|---|---|---|
+| hgtd | 1.48 | 1.61 | 1.53 | (1.53) |
+| trkptz | 1.39 | 1.63 | 1.45 | (1.45) |
+| waves | 1.38 | 1.65 | 1.46 | (1.46) |
+| tzp | 1.38 | 1.65 | 1.46 | (1.46) |
+
+The ttbar column (parenthesised) is SEEDED from dijet, not measured — the
+2026-09-01 grid run measured tzp at 1.59/1.43/1.43 vs the seeds (2–4% off,
+sub-percent on the gate width), and the dijet-seeded ttbar row validated
+across every scenario.
 
 Measured off `PRINT_PULL_DIAG`'s ratio column; the run echoes `[calibration]`
 at startup and prints the freshly measured ratio beside the value in use, so a
@@ -945,6 +977,11 @@ Core fraction (novbs; mjj500 in parens; μ=0 controls −0.01 everywhere over 4.
 | vs deployed WAVeS | +0.2 | **+6.4** | +2.5 | +2.8 |
 
 Canonical zjets 61.87 → **64.31** with no ML and no per-sample configuration.
+Consumer side (rpt_v5, matched-efficiency reading — see the caveats in the
+rpt_v5 section): VBF >40 GeV rejection +3–4% over deployed WAVeS at 0.90;
+ttbar a wash among real scenarios but above the truth row; zjets RpT stays
+~10–15% behind WAVeS at matched eff despite the +6.4 core-fraction margin —
+the core-fraction/RpT dissociation above.
 Full trail: `results/{trkptz_pv_augmentation, injet_decomposition,
 sample_independent_timing, guarded_allsamples, qoverp_term, score_grid_search,
 t0_integration, failure_modes, tiebreak_scan, jet_term_consistency,
