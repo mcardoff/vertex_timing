@@ -19,8 +19,8 @@
 //
 // Denominator: every event the rest of the selection admits -- lepton selection
 // / overlap veto / passBasicCuts / >=MIN_PASSPT_JETS above MIN_JET_PT /
-// >=MIN_PASSETA_JETS forward -- that HAS an opposite-hemisphere candidate pair,
-// with NO |Deta| requirement. The m_jj axis starts at the 500 GeV working point
+// >=MIN_PASSETA_JETS forward -- that HAS an opposite-hemisphere candidate pair
+// with |Delta eta| >= 2.5. The m_jj axis starts at the 500 GeV working point
 // and events below it are dropped and counted, so the plot describes the sample
 // the analysis actually runs on rather than one it never sees.
 //
@@ -108,6 +108,15 @@ namespace {
     500, 750, 1000, 1250, 1500, 1750, 2000, 2500, 3000, 4000
   };
 
+  // VBS candidate-pair |Delta eta| requirement for THIS plot. Applied as an
+  // explicit counted exclusion in the loop (like the m_jj axis floor), NOT via
+  // the VBS_JET_D_ETA global -- classifyVbsRegion consults that global
+  // internally and returns NONE on failure, which would silently break the
+  // local-vs-shared R1/R2 cross-check. The pair itself is still
+  // calcBestVbsPair's highest-m_jj opposite-hemisphere pair; the cut is on the
+  // chosen pair, it does not re-choose one that passes.
+  const double PLOT_MIN_DETA = 2.5;
+
   // ── Region eta window ────────────────────────────────────────────────────
   // Uses clustering_constants.h's MIN_ABS_ETA_JET / MAX_ABS_ETA_JET (2.38-4.00),
   // the same window event_processing.h classifies the VBF_R1 / VBF_R2 scores
@@ -177,7 +186,7 @@ int main(int argc, char** argv) {
 
   TH1D* hTot = new TH1D("mjj_raw_total", "", nbin, eddy);
 
-  long nSeen = 0, nSel = 0, nNoPair = 0, nBelowMjj = 0;
+  long nSeen = 0, nSel = 0, nNoPair = 0, nBelowMjj = 0, nBelowDeta = 0;
   long nDisagreeR1 = 0, nDisagreeR2 = 0;
   std::array<long, NCAT> nCat{};
 
@@ -261,6 +270,7 @@ int main(int argc, char** argv) {
     // Below the axis floor the event cannot be placed on this plot. Dropped
     // rather than piled into the first column, which would misreport it, and
     // counted so the drop is visible in the summary.
+    if (pair.dEta < PLOT_MIN_DETA)    { ++nBelowDeta; continue; }
     if (pair.mjj < MJJ_EDGES.front()) { ++nBelowMjj; continue; }
 
     const double m = folded(hTot, pair.mjj);
@@ -375,10 +385,13 @@ int main(int argc, char** argv) {
   printf("  Passing selection, with a pair   : %8ld  (%.2f%% of read)\n",
          nSel, nSeen ? 100.0 * nSel / nSeen : 0.0);
   printf("    excluded: no opp.-hemisphere pair : %8ld\n", nNoPair);
+  printf("    excluded: |dEta| below %.1f          : %8ld\n",
+         PLOT_MIN_DETA, nBelowDeta);
   printf("    excluded: m_jj below %.0f GeV        : %8ld\n",
          MJJ_EDGES.front(), nBelowMjj);
-  printf("  Plotted (denominator of every column): %8ld\n", nSel - nBelowMjj);
-  const long nPlot = nSel - nBelowMjj;
+  printf("  Plotted (denominator of every column): %8ld\n",
+         nSel - nBelowDeta - nBelowMjj);
+  const long nPlot = nSel - nBelowDeta - nBelowMjj;
   printf("\n  %-34s %10s %9s\n", "category", "events", "of plotted");
   printf("  %s\n", std::string(56, '-').c_str());
   long sum = 0;
