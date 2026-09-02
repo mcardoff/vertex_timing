@@ -55,6 +55,18 @@ inline auto buildAnalysisMap(
   // with the algorithm held fixed.
   m.emplace(Score::VBF_R1,      AnalysisObj(label, Score::VBF_R1));
   m.emplace(Score::VBF_R2,      AnalysisObj(label, Score::VBF_R2));
+  // TRKPTZ with the pT sum split on the per-track PV/PU proximity flag. Both
+  // orientations, so the flag's sense is settled by the run rather than assumed.
+  m.emplace(Score::TRKPTZ_PV,   AnalysisObj(label, Score::TRKPTZ_PV));
+  m.emplace(Score::TRKPTZ_PU,   AnalysisObj(label, Score::TRKPTZ_PU));
+  m.emplace(Score::TRKPTZ_PUW,  AnalysisObj(label, Score::TRKPTZ_PUW));
+  m.emplace(Score::TRKPTZ_TZ,   AnalysisObj(label, Score::TRKPTZ_TZ));
+  m.emplace(Score::TRKPTZ_TZ_IJ, AnalysisObj(label, Score::TRKPTZ_TZ_IJ));
+  m.emplace(Score::TRKPTZ_TZ_OJ, AnalysisObj(label, Score::TRKPTZ_TZ_OJ));
+  m.emplace(Score::TRKPTZ_TZ_GIJ, AnalysisObj(label, Score::TRKPTZ_TZ_GIJ));
+  m.emplace(Score::WAVES_GIJ,   AnalysisObj(label, Score::WAVES_GIJ));
+  m.emplace(Score::TRKPTZ_TZJ,  AnalysisObj(label, Score::TRKPTZ_TZJ));
+  m.emplace(Score::TRKPTZ_TZQ,  AnalysisObj(label, Score::TRKPTZ_TZQ));
 
   // Scores active only in the real-HGTD scenario
   if (scenario == Scenario::HGTD) {
@@ -118,6 +130,46 @@ inline void makeComparisonPlots(
 	      &mapHGTD.at(Score::VBF_R2),
 	    },
 	    {C03, C08, C02});
+
+  // Per-track dz weighting against the baseline it modifies, with WAVeS as the
+  // reference for what a jet-aware selector buys. TRKPTZ and TRKPTZ_TZ share
+  // the same clusters, the same cluster-level exp(-1.5|dz|) envelope and the
+  // same time estimator, and differ ONLY in the per-track pT weight -- so the
+  // separation between those two curves is exactly what the per-track term is
+  // worth, with nothing else moving.
+  moneyPlot(MyUtl::plotFilePath("comparisons", TString::Format("trkptz_tz_%s.pdf", key).Data()).c_str(), key, canvas,
+	    {
+	      &mapHGTD.at(Score::TRKPTZ),
+	      &mapHGTD.at(Score::TRKPTZ_TZ),
+	      &mapHGTD.at(Score::WAVES),
+	    },
+	    {C02, C08, C03});
+
+  // Where does the usable timing live? The same selector (TRKPTZ_TZ) reporting
+  // the full-cluster time, the in-jet subset, and its complement. Selection is
+  // bit-identical across all three -- updateScores copies one value into all
+  // three score ids -- so any separation is the TIMING alone.
+  moneyPlot(MyUtl::plotFilePath("comparisons", TString::Format("timesource_%s.pdf", key).Data()).c_str(), key, canvas,
+	    {
+	      &mapHGTD.at(Score::TRKPTZ_TZ),
+	      &mapHGTD.at(Score::TRKPTZ_TZ_IJ),
+	      &mapHGTD.at(Score::TRKPTZ_TZ_OJ),
+	    },
+	    {C08, C01, C02});
+
+  // The deployable comparison: baseline, the per-track dz weighting, the same
+  // plus the SAMPLE-INDEPENDENT guarded in-jet re-timing, and WAVeS as the
+  // incumbent to beat. Every curve here is a single algorithm with no per-sample
+  // configuration, so this is the set that could actually ship.
+  moneyPlot(MyUtl::plotFilePath("comparisons", TString::Format("guarded_%s.pdf", key).Data()).c_str(), key, canvas,
+	    {
+	      &mapHGTD.at(Score::TRKPTZ),
+	      &mapHGTD.at(Score::TRKPTZ_TZ),
+	      &mapHGTD.at(Score::TRKPTZ_TZ_GIJ),
+	      &mapHGTD.at(Score::WAVES),
+	      &mapHGTD.at(Score::TRKPTZ_TZQ),
+	    },
+	    {C02, C08, C01, C03, C04});
 
 }
 

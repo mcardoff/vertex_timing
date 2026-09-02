@@ -122,6 +122,28 @@ namespace MyUtl {
   // pileup jet manufactures a large mass).
   const  double VBS_JET_MJJ_DEFAULT = 200.0;
   inline double VBS_JET_MJJ          = VBS_JET_MJJ_DEFAULT;
+  // Bind the extended track-quality and vertex-fit branches (Track_recoVtx_idx,
+  // Track_chi2, the pixel/SCT hit counts, ...). OFF by default and set true only
+  // by util/export_training_data: those branches are not needed by the
+  // clustering or RpT analyses, and binding a branch a sample does not carry
+  // makes TTreeReader fail at read time. Keeping it opt-in means a sample
+  // missing them breaks only the exporter, not every executable.
+  inline bool EXTENDED_BRANCHES = false;
+
+  // Branch names present in the sample being read. Populated once by the
+  // caller (see export_training_data) from the first file of the chain;
+  // EMPTY means "assume everything is present", so nothing that does not
+  // populate it changes behaviour.
+  //
+  // This is not defensive programming for its own sake: the productions differ.
+  // The local VBF ntuple carries 241 branches, the grid samples 183-195, and
+  // Track_btagIp_* is absent from EVERY grid sample. Binding it unconditionally
+  // fails at read time, which would have taken out all 152 export jobs.
+  inline std::set<std::string> AVAILABLE_BRANCHES;
+  inline bool hasBranch(const char* n) {
+    return AVAILABLE_BRANCHES.empty() || AVAILABLE_BRANCHES.count(n) > 0;
+  }
+
   const double MIN_JET_PT         = 30.0;  // self explanatory
   const double MAX_VTX_DZ         = 2.0;   // max error for reco HS vertex z
   const double MIN_HGTD_ETA       = 2.38;  // HGTD Min eta
@@ -331,6 +353,36 @@ namespace MyUtl {
   enum class TrackFilterType { ALL, JET, HS_ONLY };
 
   // ---------------------------------------------------------------------------
+  // 3c-bis. TimeSource
+  //   Which subset of the SELECTED cluster's tracks its reported time is
+  //   computed from. Orthogonal to everything else on Score: it changes only
+  //   what time a chosen cluster reports, never which cluster is chosen, so a
+  //   pair of scores differing solely in this field isolates the re-timing.
+  //
+  //     FULL     the full cluster (values[0]) -- the precision-weighted mean
+  //              over every timed constituent. The historical default.
+  //     IN_JET   only tracks within dR < 0.4 of a qualifying forward jet.
+  //              Previously hard-coded into calculateTime for the WAVES family;
+  //              measured worth +0.82 on local VBF for ANY selector, and
+  //              -1.4 on Z+jets for any selector (see
+  //              results/injet_decomposition.md), so it is a knob and not a
+  //              property of one score.
+  //     OUT_JET  the complement -- only tracks NOT within dR < 0.4 of one.
+  //              Exists to answer where the usable timing actually lives: in
+  //              Z+jets the forward jets are usually PILEUP, so the in-jet
+  //              subset is the one that should be AVOIDED there.
+  //
+  //   All three fall back to the full-cluster time when the subset is empty,
+  //   matching the pre-existing WAVES behaviour.
+  // ---------------------------------------------------------------------------
+  // NB: the first enumerator is FULL, not RAW. <sys/ioctl_compat.h> on macOS
+  // defines RAW as a macro (0x00000020), and while the cmake build never pulls
+  // that header in, ROOT/cling does when python/runHGTD_Clustering.cxx is
+  // compiled -- so naming it RAW compiles fine here and silently breaks
+  // event_display.py with "expected identifier". Do not rename it back.
+  enum class TimeSource { FULL, IN_JET, OUT_JET };
+
+  // ---------------------------------------------------------------------------
   // 3d. VBS topology region
   //   The two topologies where forward timing is the deciding information.
   //   Classified from the VBS candidate pair by
@@ -352,6 +404,54 @@ namespace MyUtl {
   //   point at which overflow is collapsed into the last visible bin so that
   //   sparse high-multiplicity tails don't dominate the plots.
   // ---------------------------------------------------------------------------
+  // ── Event-level regions (classifyEventRegion, clustering_structs.h) ───────
+  // Supersedes the pair-level VbsRegion above for the R_pT study and the m_jj
+  // composition plot. Two things differ:
+  //
+  //   1. Scope. VbsRegion classifies the VBS CANDIDATE PAIR -- the single
+  //      highest-m_jj opposite-hemisphere pair. EventRegion classifies the
+  //      EVENT, over every jet in it, so an event is not mislabelled because
+  //      the pair search happened to pick two jets that misrepresent it.
+  //
+  //   Both use the paper's dR-cone HS/PU labels (isJetPaperHS/isJetPaperPU) --
+  //   the same definition the R_pT histogram fill uses, so region membership
+  //   and the signal/background split inside a region cannot disagree. Those
+  //   labels are NOT complements, so a jet can be neither and contribute to
+  //   no count; events still partition exactly, jets need not.
+  //
+  //   isJetTruthHS was tried here and rejected -- see the longer note on
+  //   classifyEventRegion in clustering_structs.h for the measured reason.
+  //
+  //   R1        >=1 forward HS and >=1 forward PU jet. Both are timeable, so
+  //             timing has to say WHICH forward jet is the hard-scatter one.
+  //   R2        no forward HS, >=1 forward PU, >=1 CENTRAL HS. Only the fake
+  //             is timeable; timing's job is to reject it.
+  //   CAN_HELP  everything else where timing still has real work:
+  //               - >=1 forward HS with NO forward PU: the genuine tag is
+  //                 timeable and timing confirms it. Covers the pileup being
+  //                 central, beyond |eta| MAX, or absent entirely -- one
+  //                 condition, since all three differ only in where the
+  //                 non-competing pileup sits.
+  //               - >=1 forward PU and NO hard-scatter jet anywhere in the
+  //                 event: nothing genuine to protect, but the fake is
+  //                 timeable, so timing can reject the event's forward
+  //                 activity outright.
+  //   MAY_NOT   no forward jet at all (nothing HGTD can measure), or forward
+  //             PU whose only hard-scatter counterpart sits beyond |eta| MAX
+  //             -- rare, and counted separately in the diagnostics so it stays
+  //             visible rather than silently folded in.
+  enum class EventRegion { R1, R2, CAN_HELP, NO_T0, MAY_NOT };
+
+  // NO_T0 is new, and it exists because CAN_HELP was making a claim the event
+  // could not support. Its "forward fake with no hard-scatter jet anywhere"
+  // branch is 59.79% of selected Z+jets, and in those events the ONLY forward
+  // tracks belong to the pileup jet -- so a forward t0 built from them IS that
+  // pileup vertex's time, and the gate then judges the fake against a t0 the
+  // fake itself determined. Splitting on whether any forward hard-scatter TRACK
+  // exists separates "there is a fake and something real to time it against"
+  // from "there is a fake and nothing else", which the jet-level test cannot
+  // see: a jet needs 30 GeV, a track needs MIN_TRACK_PT.
+
   const double DIFF_MIN = -1000.0, DIFF_MAX = 1000.0;
   const double DIFF_WIDTH = 5.0;
 
@@ -444,16 +544,35 @@ namespace MyUtl {
     // denominator fill to the gated block in processEventData's step H, they
     // just test different things.
     VbsRegion        regionGate        = VbsRegion::NONE;
+    // Which track subset the SELECTED cluster's time is computed from.
+    // Changes the reported time only, never the ranking -- see TimeSource.
+    TimeSource       timeSource        = TimeSource::FULL;
+    // Minimum tracks the IN_JET / OUT_JET subset must contain before its time is
+    // used; below this calculateTime falls back to the full-cluster time. 0
+    // reproduces the historical behaviour (fall back only on a completely empty
+    // subset), which is what the WAVES family keeps.
+    //
+    // This is what makes a jet-subset time SAMPLE-INDEPENDENT. Applying the
+    // in-jet time unconditionally is +0.82 on VBF and -1.43 on Z+jets, so it is
+    // only usable per-sample -- and Z+jets is the background to VBF H->inv, so a
+    // per-sample configuration would give signal and background different
+    // algorithms and manufacture separation. A per-EVENT threshold is a single
+    // fixed function of reco quantities: at 3 it fires on 70% of VBF events and
+    // 9% of Z+jets ones purely because Z+jets clusters rarely hold 3 in-jet
+    // tracks, giving +0.50 on VBF and +0.02 on Z+jets with ONE threshold.
+    int              minSubsetTracks   = 0;
 
     Score() = default;
     Score(int id_, std::string ln, const char* sn,
           bool own=false, bool pur=false, float thr=-1.f,
           double dc=-1.0, ClusteringMethod m=ClusteringMethod::ITERATIVE,
           bool z0=false, TrackFilterType f=TrackFilterType::ALL,
-          VbsRegion rg=VbsRegion::NONE)
+          VbsRegion rg=VbsRegion::NONE,
+          TimeSource ts=TimeSource::FULL, int mst=0)
       : id(id_), longName(std::move(ln)), shortName(sn),
         usesOwnCollection(own), requiresPurity(pur), threshold(thr),
-        distCut(dc), method(m), useZ0(z0), filter(f), regionGate(rg) {}
+        distCut(dc), method(m), useZ0(z0), filter(f), regionGate(rg),
+        timeSource(ts), minSubsetTracks(mst) {}
 
     bool operator<(const Score& o)  const { return id < o.id; }
     bool operator==(const Score& o) const { return id == o.id; }
@@ -483,6 +602,16 @@ namespace MyUtl {
     static const Score WAVES_MISAS;
     static const Score VBF_R1;
     static const Score VBF_R2;
+    static const Score TRKPTZ_PV;
+    static const Score TRKPTZ_PU;
+    static const Score TRKPTZ_PUW;
+    static const Score TRKPTZ_TZ;
+    static const Score TRKPTZ_TZ_IJ;
+    static const Score TRKPTZ_TZ_OJ;
+    static const Score TRKPTZ_TZ_GIJ;
+    static const Score WAVES_GIJ;
+    static const Score TRKPTZ_TZJ;
+    static const Score TRKPTZ_TZQ;
   };
 
   inline const std::string STR_TRKPTZ = "#Sigma p_{T}e^{-|#Delta z|}";
@@ -519,15 +648,15 @@ namespace MyUtl {
   // WAVES: WAVeS-style selection score — Σ pT·pT_jet/max(ΔR,floor) × exp(−1.5|Δz|).
   // Pure selection: picks the highest-scoring main-collection cluster and reports its
   // standard weighted-mean time and full-cluster purity (no in-jet-only recomputation).
-  inline const Score Score::WAVES  = { 18, "WAVeS Score",                      "WAVES",        false, false, -1.f };
+  inline const Score Score::WAVES  = { 18, "WAVeS Score", "WAVES", false, false, -1.f, -1.0, ClusteringMethod::ITERATIVE, false, TrackFilterType::ALL, VbsRegion::NONE, TimeSource::IN_JET };
   // JET_T_REFINED: clusters only jet-proximate tracks at DIST_CUT_T_REFINED (2σ iterative)
   inline const Score Score::JET_T_REFINED = { 19, "WAVeS 2#sigma t Re-clustering",  "WAVES_RECLUST", true,  false, -1.f,
                                               DIST_CUT_T_REFINED, ClusteringMethod::ITERATIVE,
                                               false, TrackFilterType::JET };
   // WAVeS oracle variants: selection by the WAVeS score, denominator gates applied
   // at fill time — cluster purity (MISCL-style) / HS timing purity (like TEST_MISAS)
-  inline const Score Score::WAVES_MISCL  = { 20, "WAVeS [Events with Pure Clusters]" , "WAVES Pure Clust.", false, true, -1.f };
-  inline const Score Score::WAVES_MISAS  = { 21, "WAVeS [Events with Perfect Timing]", "WAVES Perf. Time" , false, true, -1.f };
+  inline const Score Score::WAVES_MISCL  = { 20, "WAVeS [Events with Pure Clusters]", "WAVES Pure Clust.", false, true, -1.f, -1.0, ClusteringMethod::ITERATIVE, false, TrackFilterType::ALL, VbsRegion::NONE, TimeSource::IN_JET };
+  inline const Score Score::WAVES_MISAS  = { 21, "WAVeS [Events with Perfect Timing]", "WAVES Perf. Time", false, true, -1.f, -1.0, ClusteringMethod::ITERATIVE, false, TrackFilterType::ALL, VbsRegion::NONE, TimeSource::IN_JET };
   // VBS topology regions. Same construction as the WAVES_MISAS oracle -- WAVeS
   // selection and WAVeS in-jet-refined time, denominator restricted at fill
   // time -- except the gate is the event's VBS region rather than its timing
@@ -539,10 +668,197 @@ namespace MyUtl {
   // one-line change in Cluster::updateScores plus calculateTime's score list.
   inline const Score Score::VBF_R1 = { 22, "WAVeS [VBF R1: both tags fwd]"    , "VBF_R1", false, false, -1.f,
                                        -1.0, ClusteringMethod::ITERATIVE, false,
-                                       TrackFilterType::ALL, VbsRegion::R1 };
+                                       TrackFilterType::ALL, VbsRegion::R1, TimeSource::IN_JET };
   inline const Score Score::VBF_R2 = { 23, "WAVeS [VBF R2: fwd PU + cen. HS]" , "VBF_R2", false, false, -1.f,
                                        -1.0, ClusteringMethod::ITERATIVE, false,
-                                       TrackFilterType::ALL, VbsRegion::R2 };
+                                       TrackFilterType::ALL, VbsRegion::R2, TimeSource::IN_JET };
+
+  // TRKPTZ_PV / TRKPTZ_PU: TRKPTZ with the pT sum restricted by the per-track
+  // vertex-proximity flag (BranchPointerWrapper::closerToPuThanPv), i.e.
+  //   score = exp(−1.5|Δz_cluster|) · Σ_i { pT_i if <flag matches>, else 0 }
+  // Same main collection and same Δz term as TRKPTZ — ONLY the pT sum changes,
+  // so the pair isolates what the flag is worth to the selector.
+  //
+  // The two differ solely in orientation, and both are built because the flag's
+  // sense is easy to invert by accident: closer_to_pu_than_pv == 1 marks a track
+  // nearer a PILEUP vertex, so _PV (keep flag == 0) is the physically motivated
+  // reading and _PU (keep flag == 1) is its control. If the flag carries real
+  // information the two must land on opposite sides of the TRKPTZ baseline;
+  // if both track the baseline, the Δz factor is doing all the work.
+  inline const Score Score::TRKPTZ_PV = { 24, STR_TRKPTZ + " [PV-side tracks]", "TRKPTZ_PV", false, false, -1.f };
+  inline const Score Score::TRKPTZ_PU = { 25, STR_TRKPTZ + " [PU-side tracks]", "TRKPTZ_PU", false, false, -1.f };
+
+  // TRKPTZ_PUW: the veto above, softened into a down-weight —
+  //   score = exp(−1.5|Δz|) · ( Σ_PV-side pT  +  PU_SIDE_PT_WEIGHT · Σ_PU-side pT )
+  // so weight 1 reproduces TRKPTZ exactly and weight 0 reproduces TRKPTZ_PV.
+  //
+  // The hard veto is far too aggressive to use directly: the flag fires on 88.0%
+  // of pileup tracks but ALSO on 46.8% of genuine hard-scatter tracks (local VBF),
+  // which zeroes 56% of clusters outright and costs 1.2–1.3 points of core
+  // fraction. Down-weighting keeps the flag's real discrimination while leaving
+  // the hard-scatter pT sum intact enough to still rank clusters.
+  //
+  // 0.4 is the flat optimum of a w ∈ [0,1] scan on the local VBF sample
+  // (90.45% at w = 1 → 90.76% at w = 0.4 → 89.22% at w = 0); the curve is smooth
+  // and single-peaked, and anything in 0.2–0.6 is within 0.03 of the peak. It has
+  // NOT been re-scanned on zjets/dijet/ttbar — do that before trusting it there.
+  inline constexpr double PU_SIDE_PT_WEIGHT = 0.4;
+  inline const Score Score::TRKPTZ_PUW = { 26, STR_TRKPTZ + " [PU-side down-weighted]", "TRKPTZ_PUW", false, false, -1.f };
+
+  // TRKPTZ_TZ: TRKPTZ with each track's pT additionally weighted by that
+  // track's OWN distance to the primary vertex --
+  //   score = exp(-1.5|dz_cluster|) * SUM_t pT_t * exp(-TRACK_DZ_WEIGHT * |z0_t - z_PV|)
+  // The cluster-level term is KEPT, not replaced: the two are complementary,
+  // and dropping it is worth ~0.1-0.2 less on both samples scanned.
+  //
+  // 0.7 is the joint optimum of an a-scan run separately on local VBF and on
+  // Z+jets, which peak at the SAME value from very different baselines
+  // (VBF 90.45 -> 91.14, +0.68; Z+jets 62.12 -> 63.89, +1.76). Two independent
+  // topologies agreeing on the exponent is the main reason to believe this is
+  // a real effect rather than a per-sample fit. The curve is broad -- anything
+  // in 0.4-1.2 is within 0.1 of the peak on both.
+  //
+  // Raw |dz| in mm, NOT the z0 significance: the significance forms were
+  // scanned too and are consistently worse (best +1.21 vs +1.76 on Z+jets),
+  // which is the same conclusion the z-association study reached about
+  // sqrt(var_z0) mis-modelling the true z0 spread. 1/dz forms are worse still
+  // -- they diverge, over-rewarding a track that happens to sit on the vertex.
+  // Minimum in-jet tracks before the in-jet time is trusted. 3 is the smallest
+  // value that is >= the raw baseline on BOTH VBF and Z+jets simultaneously
+  // (VBF +0.50, Z+jets +0.02); 2 is worth +0.80 on VBF but -0.08 on Z+jets.
+  inline constexpr int MIN_INJET_TRACKS_FOR_TIME = 3;
+  // Weight of the BOUNDED jet-association term, score *= (1 + JET_FRAC_WEIGHT *
+  // frac_pT_in_forward_jet). 0 disables it and reproduces TRKPTZ_TZ exactly.
+  //
+  // Why bounded rather than WAVeS's form. On the events TRKPTZ_TZ loses, its own
+  // inputs carry nothing -- cluster |dz| separates the wrong pick from the true
+  // cluster at AUC 0.502 and sumpt at 0.466, i.e. no better than chance -- while
+  // every jet-association variable separates at 0.86-0.90 against a 0.978 truth
+  // ceiling. So jet association IS the missing information. But WAVeS already
+  // uses it and loses 1.40 on Z+jets, because it MULTIPLIES by jet pT
+  // (pT_trk^2 pT_jet^2 / dR), letting one high-pT pileup jet dominate the score.
+  // A fraction lives in [0,1], so a jet can at most scale a cluster by
+  // (1 + alpha) and can never run away with it.
+  //
+  // VERDICT: NOT RECOMMENDED as a default, and the default below is 0.
+  //
+  // The AUC ranking above was computed on the 543 events TRKPTZ_TZ loses -- a
+  // SELECTED subpopulation -- and a population-wide check does not support it:
+  //
+  //                       frac_pt_in_fwdjet AUC     switch ratio at alpha=1
+  //     over all clusters   (vs base 0.974)         (better:worse)
+  //     VBF                  0.882                   2.20  (+0.32 net)
+  //     Z+jets               0.612                   0.97  (-0.01 net)
+  //
+  // On VBF it is real but it is the WEAKEST of the variables available -- the
+  // existing score itself separates at 0.974 -- so the +0.32 is residual
+  // correlation, not new discriminating power. On Z+jets it is noise: it flips
+  // 1.3% of picks and gets them right 49.2% of the time. Its "safe on every
+  // sample" scan result was safe only because it does nothing there.
+  //
+  // Since Z+jets is the background to VBF H->inv, a signal-only +0.32 bought with
+  // an extra term is not a good trade. Left implemented and tunable so the
+  // measurement is reproducible, but off.
+// Exponent of the cluster momentum-precision term, score *= (1/sigma_qP)^b
+  // with sigma_qP = 1/sqrt(SUM_t 1/var_qOverP_t) -- the inverse-variance-
+  // combined q/P uncertainty of the cluster. 1/sigma_qP^2 is "amount of
+  // well-measured momentum", rising with both track count and per-track
+  // momentum quality, which is why it narrowly beats plain n_tracks^g or
+  // sumpt^g controls (worst-sample +0.21 vs +0.14 / +0.18 at the controls'
+  // best working points).
+  //
+  // Unlike the jet-fraction term above, this one PASSED the population
+  // consistency battery: the four-sample scan (novbs, ~2.0M events) is
+  // positive on every sample at both 0.4 and 0.8 --
+  //     beta   vbf    zjets  dijet  ttbar   worst
+  //     0.40  +0.19  +0.26  +0.20  +0.19   +0.19
+  //     0.80  +0.26  +0.24  +0.25  +0.21   +0.21
+  // -- with one global value and no per-sample configuration. 0.8 is the
+  // flat optimum; the curve turns over by 1.6 (zjets -0.03).
+  // SUPERSEDED by D0_PRECISION_WEIGHT below before ever reaching a grid run:
+  // the three precision siblings (z0/d0/qP; all 1/sqrt(SUM 1/var) over the
+  // same tracks, mutually correlated 0.86-0.95) were scanned head-to-head and
+  // d0 is the best single packaging on every sample --
+  //     alone on TZ+guard, worst-sample delta at each one's optimum:
+  //         d0 +0.30 (beta 1.2-1.6 plateau)  >  qP +0.22 (0.8)  >  z0 +0.09
+  //     d0@1.6 vs qP@0.8: vbf +0.04, zjets +0.15, dijet +0.05, ttbar +0.09
+  //     stacking z0 or qP ON TOP of d0 adds nothing (-0.04 / -0.09) -- they
+  //     are one signal, carried once.
+  inline constexpr double QP_PRECISION_WEIGHT = 0.8;   // unused; kept for the record
+  // Exponent of the d0-precision term, score *= (SUM_t 1/var_d0)^{b/2}.
+  // 1.2 is the centre of the 1.2-1.6 plateau (worst-sample +0.29/+0.30, all
+  // four samples positive); the curve turns over by 3.2.
+  inline constexpr double D0_PRECISION_WEIGHT = 1.2;   // 1-D optimum; superseded by the joint tune below
+
+  // Joint (alpha, beta, gamma) tune of the TZP score,
+  //   S = [SUM_t pT e^{-alpha |z0_t - z_PV|}] * e^{-beta |z_C - z_PV|} * (1/sigma_d0)^gamma.
+  // alpha and gamma were previously tuned 1-D with the others fixed, and beta
+  // (the cluster-level 1.5) had NEVER been tuned -- it is inherited from
+  // original TRKPTZ. Jointly the terms rebalance: a stronger per-track z-term
+  // makes the steep cluster-level term partly redundant (1.5 -> 0.6) and needs
+  // less precision weight (1.2 -> 0.45). 5x5x5 grid + edge extensions, all four
+  // novbs samples, maximin objective; the chosen point is interior on every
+  // axis and sits on a plateau (beta flat 0.45-0.75, gamma flat 0.3-0.6, alpha
+  // peaked at 1.0):
+  //     vs (0.7, 1.5, 1.2):  vbf +0.16  zjets +0.38  dijet +0.15  ttbar +0.15
+  // Per-sample optima buy at most +0.41 (zjets), so the one-global-point
+  // constraint costs little. These constants are TZP-ONLY: TRACK_DZ_WEIGHT and
+  // the 1.5 stay untouched for TRKPTZ and the historical ladder rows.
+  inline constexpr double TZP_TRACK_DZ_WEIGHT   = 1.0;
+  inline constexpr double TZP_CLUSTER_DZ_WEIGHT = 0.6;
+  inline constexpr double TZP_D0_PRECISION      = 0.45;
+  inline constexpr double JET_FRAC_WEIGHT = 0.0;
+  inline constexpr double TRACK_DZ_WEIGHT = 0.7;
+  inline const Score Score::TRKPTZ_TZ = { 27, STR_TRKPTZ + " [per-track #Deltaz]", "TRKPTZ_TZ", false, false, -1.f };
+  // Same SELECTION as TRKPTZ_TZ (updateScores copies its value verbatim, so the
+  // argmax is bit-identical), differing only in which subset of the chosen
+  // cluster's tracks the reported time is built from. Reading the three rows
+  // together answers "where does the usable timing live?" with the selector
+  // held fixed -- which is not answerable from the WAVES row, since that varies
+  // selection and timing at once.
+  inline const Score Score::TRKPTZ_TZ_IJ = { 28, STR_TRKPTZ + " [per-track #Deltaz, in-jet t]", "TRKPTZ_TZ_IJ",
+                                             false, false, -1.f, -1.0, ClusteringMethod::ITERATIVE,
+                                             false, TrackFilterType::ALL, VbsRegion::NONE, TimeSource::IN_JET };
+  inline const Score Score::TRKPTZ_TZ_OJ = { 29, STR_TRKPTZ + " [per-track #Deltaz, out-jet t]", "TRKPTZ_TZ_OJ",
+                                             false, false, -1.f, -1.0, ClusteringMethod::ITERATIVE,
+                                             false, TrackFilterType::ALL, VbsRegion::NONE, TimeSource::OUT_JET };
+  // The sample-independent version: in-jet time only when the subset is big
+  // enough to be worth trusting, full-cluster time otherwise. Same selection as
+  // TRKPTZ_TZ, so the difference from it is the guarded re-timing alone.
+  inline const Score Score::TRKPTZ_TZ_GIJ = { 30, STR_TRKPTZ + " [per-track #Deltaz, guarded in-jet t]",
+                                              "TRKPTZ_TZ_GIJ", false, false, -1.f, -1.0,
+                                              ClusteringMethod::ITERATIVE, false, TrackFilterType::ALL,
+                                              VbsRegion::NONE, TimeSource::IN_JET,
+                                              MIN_INJET_TRACKS_FOR_TIME };
+  // NB: the long name deliberately says 'qP', not 'q/P'. Histogram names
+  // embed the long name as the TFile key, and TFile::Get (and uproot)
+  // treat '/' in a key path as a DIRECTORY separator -- the write succeeds
+  // and every readback then fails with 'key not found'.
+  // TRKPTZ_TZ x (1/sigma_d0)^1.2 with the guarded in-jet time: the full
+  // sample-independent candidate. See QP_PRECISION_WEIGHT above for the
+  // four-sample validation.
+  inline const Score Score::TRKPTZ_TZQ = { 33, STR_TRKPTZ + " [per-track #Deltaz + d0 precision]",
+                                           "TRKPTZ_TZP", false, false, -1.f, -1.0,
+                                           ClusteringMethod::ITERATIVE, false,
+                                           TrackFilterType::ALL, VbsRegion::NONE,
+                                           TimeSource::IN_JET, MIN_INJET_TRACKS_FOR_TIME };
+  // WAVeS SELECTION with the guarded in-jet time. Deployed WAVeS (id 18) applies
+  // its in-jet re-timing unconditionally, and that re-timing is +0.82 on VBF but
+  // -1.43 on Z+jets for ANY selector -- so WAVeS inherits that Z+jets deficit.
+  // This row is the same selection with the same guard as TRKPTZ_TZ_GIJ, which
+  // isolates what guarding costs WAVeS on VBF against what it recovers elsewhere.
+  inline const Score Score::WAVES_GIJ = { 31, "WAVeS Score [guarded in-jet t]", "WAVES_GIJ",
+                                          false, false, -1.f, -1.0, ClusteringMethod::ITERATIVE,
+                                          false, TrackFilterType::ALL, VbsRegion::NONE,
+                                          TimeSource::IN_JET, MIN_INJET_TRACKS_FOR_TIME };
+  // TRKPTZ_TZ + the bounded jet term + the guarded in-jet time. The full
+  // sample-independent candidate: pT, z AND jet association, none of which can
+  // individually run away with the score.
+  inline const Score Score::TRKPTZ_TZJ = { 32, STR_TRKPTZ + " [per-track #Deltaz + jet frac]",
+                                           "TRKPTZ_TZJ", false, false, -1.f, -1.0,
+                                           ClusteringMethod::ITERATIVE, false,
+                                           TrackFilterType::ALL, VbsRegion::NONE,
+                                           TimeSource::IN_JET, MIN_INJET_TRACKS_FOR_TIME };
 
   // Scores with a dedicated collection (distCut ≥ 0 → buildsCollection() = true)
   inline const Score Score::CONE       = {  7, "Cone"                       , "CONE",     true , false, -1.f, DIST_CUT_CONE, ClusteringMethod::CONE };
@@ -555,6 +871,8 @@ namespace MyUtl {
     Score::CONE_BDT, Score::TEST_MISAS, Score::TEST_HS,
     Score::WAVES,    Score::JET_T_REFINED, Score::WAVES_MISCL, Score::WAVES_MISAS,
     Score::VBF_R1,   Score::VBF_R2,
+    Score::TRKPTZ_PV, Score::TRKPTZ_PU, Score::TRKPTZ_PUW, Score::TRKPTZ_TZ,
+    Score::TRKPTZ_TZ_IJ, Score::TRKPTZ_TZ_OJ, Score::TRKPTZ_TZ_GIJ, Score::WAVES_GIJ, Score::TRKPTZ_TZJ, Score::TRKPTZ_TZQ,
   };
 
   // ---------------------------------------------------------------------------
