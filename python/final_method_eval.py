@@ -3,7 +3,7 @@
 final_method_eval.py -- the zjets_seventy method, run in-domain on every mu=200
 sample plus the three mu=0 controls, for the cross-sample report.
 
-Same recipe per sample as python/zjets_seventy.py (two-round tagger, trunc-tagw
+Same recipe per sample as the original zjets_seventy.py (removed; in git history) (two-round tagger, trunc-tagw
 base answer, e2e t0 answer, pooled two-way meta), with two hardening changes:
 the round-2 neighbor self-merge is CHUNKED by event block (the unchunked form
 OOM'd on ttbar at ~12 GB), and all subprocess/e2e state lives under --workdir
