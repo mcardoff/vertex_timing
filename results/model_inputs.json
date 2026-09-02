@@ -1,0 +1,610 @@
+{
+ "tagger_r1": {
+  "n_features": 35,
+  "features": [
+   "pt",
+   "eta",
+   "phi",
+   "theta",
+   "z0",
+   "d0",
+   "qOverP",
+   "sigma_z0",
+   "sigma_d0",
+   "sigma_qOverP",
+   "time",
+   "timeRes",
+   "time_valid",
+   "quality",
+   "nhgtd_hits",
+   "z0_pull_pv",
+   "t_pull_cluster",
+   "loo_shift",
+   "loo_pull",
+   "dz_to_nearest_pu_vtx_trk",
+   "closer_to_pu_than_pv",
+   "dr_nearest_anyjet",
+   "pt_nearest_anyjet",
+   "is_in_any_jet",
+   "dr_nearest_fwdjet",
+   "pt_nearest_fwdjet",
+   "is_ghost_of_nearest",
+   "is_lepton",
+   "cluster_time",
+   "cluster_delta_z",
+   "cluster_dz_to_nearest_pu_vtx",
+   "cluster_pv_pu_dz_ratio",
+   "cluster_nearest_vtx_waves_rank",
+   "cluster_nearest_vtx_waves_frac",
+   "cluster_closest_vtx_is_pv"
+  ],
+  "n_rows": 2427834,
+  "top": [
+   {
+    "f": "closer_to_pu_than_pv",
+    "imp": 65.83
+   },
+   {
+    "f": "sigma_z0",
+    "imp": 5.95
+   },
+   {
+    "f": "cluster_closest_vtx_is_pv",
+    "imp": 4.49
+   },
+   {
+    "f": "z0_pull_pv",
+    "imp": 3.98
+   },
+   {
+    "f": "cluster_pv_pu_dz_ratio",
+    "imp": 2.74
+   },
+   {
+    "f": "z0",
+    "imp": 1.66
+   },
+   {
+    "f": "is_in_any_jet",
+    "imp": 1.66
+   },
+   {
+    "f": "sigma_d0",
+    "imp": 1.31
+   },
+   {
+    "f": "is_ghost_of_nearest",
+    "imp": 1.29
+   },
+   {
+    "f": "cluster_nearest_vtx_waves_rank",
+    "imp": 1.29
+   },
+   {
+    "f": "cluster_nearest_vtx_waves_frac",
+    "imp": 1.18
+   },
+   {
+    "f": "cluster_delta_z",
+    "imp": 0.97
+   },
+   {
+    "f": "d0",
+    "imp": 0.94
+   },
+   {
+    "f": "timeRes",
+    "imp": 0.67
+   },
+   {
+    "f": "loo_shift",
+    "imp": 0.63
+   }
+  ],
+  "hs_frac": 20.89
+ },
+ "tagger_r2": {
+  "n_features": 41,
+  "new_features": [
+   "nb_n60",
+   "nb_ph60",
+   "nb_n30",
+   "nb_ph30",
+   "nb_phz2",
+   "nb_phzt"
+  ],
+  "top": [
+   {
+    "f": "closer_to_pu_than_pv",
+    "imp": 25.98
+   },
+   {
+    "f": "nb_phzt",
+    "imp": 23.76
+   },
+   {
+    "f": "cluster_closest_vtx_is_pv",
+    "imp": 11.78
+   },
+   {
+    "f": "is_in_any_jet",
+    "imp": 5.33
+   },
+   {
+    "f": "nb_phz2",
+    "imp": 3.7
+   },
+   {
+    "f": "sigma_z0",
+    "imp": 3.36
+   },
+   {
+    "f": "nb_ph60",
+    "imp": 3.28
+   },
+   {
+    "f": "nb_n60",
+    "imp": 2.89
+   },
+   {
+    "f": "z0_pull_pv",
+    "imp": 2.54
+   },
+   {
+    "f": "nb_ph30",
+    "imp": 2.33
+   },
+   {
+    "f": "sigma_d0",
+    "imp": 1.22
+   },
+   {
+    "f": "timeRes",
+    "imp": 1.2
+   },
+   {
+    "f": "d0",
+    "imp": 1.15
+   },
+   {
+    "f": "nb_n30",
+    "imp": 1.08
+   },
+   {
+    "f": "nhgtd_hits",
+    "imp": 1.07
+   }
+  ],
+  "neighbor_share": 37.04
+ },
+ "stage1": {
+  "n_features": 126,
+  "features": [
+   "cluster_time",
+   "delta_z",
+   "delta_z_resunits",
+   "cluster_z_sigma",
+   "cluster_d0",
+   "cluster_d0_sigma",
+   "cluster_qOverP",
+   "cluster_qOverP_sigma",
+   "sumpt",
+   "cluster_time_sigma",
+   "n_tracks",
+   "sumpt2",
+   "maxpt",
+   "pt_2nd",
+   "pt_3rd",
+   "lead_pt_frac",
+   "meanpt",
+   "medianpt",
+   "n_pt_gt2",
+   "n_pt_gt5",
+   "max_abs_loo_shift",
+   "mean_abs_loo_shift",
+   "loo_shift_lead_pt",
+   "t_in_jet",
+   "t_in_jet_sigma",
+   "n_in_jet_timed",
+   "sumpt_in_jet_timed",
+   "t_out_jet",
+   "t_out_jet_sigma",
+   "n_out_jet_timed",
+   "sumpt_out_jet_timed",
+   "t_in_minus_out",
+   "time_chi2_ndf",
+   "max_abs_tpull",
+   "n_tpull_gt2",
+   "time_spread",
+   "min_timeRes",
+   "median_timeRes",
+   "max_timeRes",
+   "n_valid_time",
+   "frac_valid_time",
+   "sumpt_valid_time",
+   "z_chi2_ndf",
+   "max_abs_zpull",
+   "n_zpull_gt3",
+   "z_spread",
+   "median_z0_pull",
+   "dz_to_nearest_pu_vtx",
+   "closest_vtx_is_pv",
+   "n_pu_vtx_within_1mm",
+   "n_pu_vtx_within_2mm",
+   "local_vtx_density",
+   "clus_waves_canonical",
+   "nearest_vtx_sumpt2",
+   "nearest_vtx_waves",
+   "nearest_vtx_sumpt2_frac",
+   "nearest_vtx_waves_frac",
+   "nearest_vtx_sumpt2_rank",
+   "nearest_vtx_waves_rank",
+   "nearest_vtx_is_sumpt2_max",
+   "nearest_vtx_is_waves_max",
+   "evt_sumpt2_picks_pv",
+   "evt_waves_picks_pv",
+   "pv_pu_dz_ratio",
+   "mean_nhgtd",
+   "min_nhgtd",
+   "max_nhgtd",
+   "frac_nhgtd_ge2",
+   "sumpt_w_nhgtd",
+   "mean_quality",
+   "min_quality",
+   "mean_abs_eta",
+   "max_abs_eta",
+   "min_abs_eta",
+   "eta_spread",
+   "mean_d0_signif",
+   "max_abs_d0_signif",
+   "n_tracks_in_fwdjet",
+   "sumpt_in_fwdjet",
+   "frac_pt_in_fwdjet",
+   "min_dr_to_fwdjet",
+   "pt_of_nearest_fwdjet",
+   "max_matched_jetpt",
+   "n_ghost_tracks",
+   "sumpt_ghost",
+   "trkptz_score",
+   "waves_score",
+   "n_lepton_tracks",
+   "sumpt_lepton",
+   "dz_to_lepton_z0",
+   "dz_to_lepton_signif",
+   "n_clusters",
+   "sumpt_rank",
+   "sumpt_frac_of_event",
+   "sumpt_ratio_to_max",
+   "trkptz_rank",
+   "trkptz_ratio_to_max",
+   "is_max_sumpt",
+   "is_max_trkptz",
+   "dt_to_nearest_cluster",
+   "dz_to_nearest_cluster",
+   "n_clusters_within_60ps",
+   "n_forward_jets",
+   "lead_jet_pt",
+   "lead_jet_abseta",
+   "sublead_jet_pt",
+   "sublead_jet_abseta",
+   "n_fwd_tracks_reco",
+   "event_sumpt",
+   "n_reco_vertices",
+   "reco_vtx_z",
+   "hgtd_time",
+   "hgtd_valid",
+   "hgtd_time_res",
+   "dt_cluster_to_hgtd",
+   "t0_agg",
+   "sum_ph",
+   "dt_to_agg",
+   "ph_sum",
+   "ph_mean",
+   "ph_max",
+   "ph_pt_sum",
+   "n_ph05",
+   "t_tagw",
+   "ph_pt_frac",
+   "dt_tagw_agg"
+  ],
+  "n_rows": 526577,
+  "top": [
+   {
+    "f": "dt_tagw_agg",
+    "imp": 30.44
+   },
+   {
+    "f": "dt_to_agg",
+    "imp": 12.48
+   },
+   {
+    "f": "n_ph05",
+    "imp": 11.96
+   },
+   {
+    "f": "trkptz_ratio_to_max",
+    "imp": 6.0
+   },
+   {
+    "f": "ph_max",
+    "imp": 4.78
+   },
+   {
+    "f": "ph_sum",
+    "imp": 2.47
+   },
+   {
+    "f": "sumpt_ratio_to_max",
+    "imp": 2.18
+   },
+   {
+    "f": "cluster_time_sigma",
+    "imp": 1.38
+   },
+   {
+    "f": "dt_cluster_to_hgtd",
+    "imp": 1.02
+   },
+   {
+    "f": "t_tagw",
+    "imp": 1.01
+   },
+   {
+    "f": "sum_ph",
+    "imp": 0.93
+   },
+   {
+    "f": "frac_nhgtd_ge2",
+    "imp": 0.88
+   },
+   {
+    "f": "sumpt_w_nhgtd",
+    "imp": 0.69
+   },
+   {
+    "f": "ph_pt_sum",
+    "imp": 0.68
+   },
+   {
+    "f": "closest_vtx_is_pv",
+    "imp": 0.6
+   }
+  ],
+  "tagger_derived": [
+   "t0_agg",
+   "sum_ph",
+   "dt_to_agg",
+   "ph_sum",
+   "ph_mean",
+   "ph_max",
+   "ph_pt_sum",
+   "n_ph05",
+   "t_tagw",
+   "ph_pt_frac",
+   "dt_tagw_agg"
+  ],
+  "tagger_share": 65.97,
+  "trkptz_share": 0.19
+ },
+ "step3_ablation": {
+  "cluster_time_invvar": 62.12,
+  "tagw_no_winsor": 63.84,
+  "tagw_double_winsor": 64.03,
+  "note": "on the TRKPTZ-chosen cluster; selection identical, only the reported time differs"
+ },
+ "e2e": {
+  "n_features": 42,
+  "features": [
+   "pt",
+   "eta",
+   "phi",
+   "theta",
+   "z0",
+   "d0",
+   "qOverP",
+   "sigma_z0",
+   "sigma_d0",
+   "sigma_qOverP",
+   "time",
+   "timeRes",
+   "time_valid",
+   "quality",
+   "nhgtd_hits",
+   "z0_pull_pv",
+   "t_pull_cluster",
+   "loo_shift",
+   "loo_pull",
+   "dz_to_nearest_pu_vtx_trk",
+   "closer_to_pu_than_pv",
+   "dr_nearest_anyjet",
+   "pt_nearest_anyjet",
+   "is_in_any_jet",
+   "dr_nearest_fwdjet",
+   "pt_nearest_fwdjet",
+   "is_ghost_of_nearest",
+   "is_lepton",
+   "cluster_time",
+   "cluster_delta_z",
+   "cluster_dz_to_nearest_pu_vtx",
+   "cluster_pv_pu_dz_ratio",
+   "cluster_nearest_vtx_waves_rank",
+   "cluster_nearest_vtx_waves_frac",
+   "cluster_closest_vtx_is_pv",
+   "ph",
+   "nb_n60",
+   "nb_ph60",
+   "nb_n30",
+   "nb_ph30",
+   "nb_phz2",
+   "nb_phzt"
+  ],
+  "fold0_core_frac": 70.07,
+  "top": [
+   {
+    "f": "ph",
+    "drop": 21.833
+   },
+   {
+    "f": "nb_ph60",
+    "drop": 6.869
+   },
+   {
+    "f": "timeRes",
+    "drop": 1.717
+   },
+   {
+    "f": "sigma_qOverP",
+    "drop": 0.355
+   },
+   {
+    "f": "nhgtd_hits",
+    "drop": 0.325
+   },
+   {
+    "f": "sigma_d0",
+    "drop": 0.261
+   },
+   {
+    "f": "cluster_time",
+    "drop": 0.261
+   },
+   {
+    "f": "nb_ph30",
+    "drop": 0.231
+   },
+   {
+    "f": "time",
+    "drop": 0.209
+   },
+   {
+    "f": "nb_phzt",
+    "drop": 0.201
+   },
+   {
+    "f": "closer_to_pu_than_pv",
+    "drop": 0.179
+   },
+   {
+    "f": "cluster_nearest_vtx_waves_rank",
+    "drop": 0.162
+   },
+   {
+    "f": "nb_phz2",
+    "drop": 0.158
+   },
+   {
+    "f": "theta",
+    "drop": 0.141
+   },
+   {
+    "f": "sigma_z0",
+    "drop": 0.141
+   }
+  ]
+ },
+ "meta": {
+  "n_features": 34,
+  "features": [
+   "p",
+   "trkptz_score",
+   "waves_score",
+   "n_tracks",
+   "sumpt",
+   "delta_z",
+   "cluster_time_sigma",
+   "frac_valid_time",
+   "time_chi2_ndf",
+   "max_abs_tpull",
+   "n_clusters",
+   "t0_agg",
+   "sum_ph",
+   "dt_to_agg",
+   "ph_sum",
+   "ph_mean",
+   "ph_pt_frac",
+   "n_ph05",
+   "t_tagw",
+   "dt_tagw_agg",
+   "p_old",
+   "p2",
+   "p_gap",
+   "abs_dt_base_t0",
+   "abs_dt_base_ctime",
+   "maxp_near_t0",
+   "n_cl_near_t0",
+   "sump_near_t0",
+   "n_near_t0",
+   "ph_near_t0",
+   "n_near_base",
+   "ph_near_base",
+   "pick_nb_ph60_mean",
+   "pick_nb_ph60_max"
+  ],
+  "n_events": 93977,
+  "n_decisive": 6905,
+  "decisive_frac": 7.35,
+  "t0_wins_frac": 26.72,
+  "top": [
+   {
+    "f": "dt_tagw_agg",
+    "imp": 8.21
+   },
+   {
+    "f": "abs_dt_base_t0",
+    "imp": 5.72
+   },
+   {
+    "f": "p_gap",
+    "imp": 5.36
+   },
+   {
+    "f": "p_old",
+    "imp": 4.71
+   },
+   {
+    "f": "maxp_near_t0",
+    "imp": 3.51
+   },
+   {
+    "f": "n_ph05",
+    "imp": 3.37
+   },
+   {
+    "f": "n_cl_near_t0",
+    "imp": 3.31
+   },
+   {
+    "f": "sump_near_t0",
+    "imp": 3.31
+   },
+   {
+    "f": "p",
+    "imp": 3.26
+   },
+   {
+    "f": "dt_to_agg",
+    "imp": 3.11
+   },
+   {
+    "f": "max_abs_tpull",
+    "imp": 2.79
+   },
+   {
+    "f": "ph_pt_frac",
+    "imp": 2.78
+   },
+   {
+    "f": "sumpt",
+    "imp": 2.7
+   },
+   {
+    "f": "p2",
+    "imp": 2.68
+   },
+   {
+    "f": "ph_mean",
+    "imp": 2.66
+   }
+  ]
+ }
+}

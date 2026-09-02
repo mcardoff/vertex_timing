@@ -1,0 +1,308 @@
+<title>Timing Selection Across Samples</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,500;0,7..72,600;1,7..72,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --paper:#F6F8F9; --surface:#FFFFFF; --surface-2:#ECF1F3;
+  --ink:#14181B; --ink-2:#414B52; --ink-3:#77848C;
+  --rule:#DBE3E7; --rule-soft:#EAEFF2;
+  --accent:#0F6E7A; --accent-bg:#E2EFF1;
+  --gain:#1D6E4E; --gain-bg:#E4F0EA;
+  --warn:#96631A; --warn-bg:#F7EEDD;
+  --null:#9A3B33; --null-bg:#F6E7E5;
+  --shadow:0 1px 2px rgba(20,24,27,.04), 0 10px 26px -16px rgba(20,24,27,.20);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#0D1113; --surface:#151A1D; --surface-2:#1E2529;
+  --ink:#E6ECEF; --ink-2:#AEB9C0; --ink-3:#7C8992;
+  --rule:#2A3338; --rule-soft:#1F272B;
+  --accent:#5FBECB; --accent-bg:#0E2C31;
+  --gain:#5CBF8D; --gain-bg:#10301F;
+  --warn:#D6A24F; --warn-bg:#2E2413;
+  --null:#DD8377; --null-bg:#2F1917;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 26px -16px rgba(0,0,0,.75);
+}}
+:root[data-theme="dark"]{
+  --paper:#0D1113; --surface:#151A1D; --surface-2:#1E2529;
+  --ink:#E6ECEF; --ink-2:#AEB9C0; --ink-3:#7C8992;
+  --rule:#2A3338; --rule-soft:#1F272B;
+  --accent:#5FBECB; --accent-bg:#0E2C31;
+  --gain:#5CBF8D; --gain-bg:#10301F;
+  --warn:#D6A24F; --warn-bg:#2E2413;
+  --null:#DD8377; --null-bg:#2F1917;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 26px -16px rgba(0,0,0,.75);
+}
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font-family:"IBM Plex Sans",system-ui,sans-serif;
+ font-size:16.5px;line-height:1.62;margin:0;padding:0 1.4rem 5rem;-webkit-font-smoothing:antialiased}
+.wrap{max-width:52rem;margin:0 auto}
+header{padding:3.6rem 0 1.7rem;border-bottom:2px solid var(--ink)}
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:.7rem;letter-spacing:.15em;
+ text-transform:uppercase;color:var(--ink-3);display:flex;gap:1.1rem;flex-wrap:wrap;margin-bottom:1rem}
+h1{font-family:Literata,Georgia,serif;font-weight:600;font-size:clamp(2rem,5.2vw,2.9rem);
+ line-height:1.08;letter-spacing:-.015em;margin:0 0 .85rem;text-wrap:balance}
+.lede{font-size:1.09rem;color:var(--ink-2);margin:0;max-width:39rem}
+.lede strong{color:var(--ink);font-weight:600}
+section{margin-top:3.1rem}
+h2{font-family:Literata,Georgia,serif;font-size:1.48rem;font-weight:600;margin:0 0 .25rem;
+ letter-spacing:-.008em;text-wrap:balance}
+h3{font-size:1rem;font-weight:600;margin:1.9rem 0 .5rem;color:var(--ink)}
+.note{font-size:.9rem;color:var(--ink-3);margin:0 0 1.3rem;padding-bottom:.8rem;border-bottom:1px solid var(--rule)}
+p{margin:0 0 1rem}
+p:last-child{margin-bottom:0}
+.mono{font-family:"IBM Plex Mono",monospace;font-size:.87em}
+.tw{overflow-x:auto;margin:1.15rem 0;border:1px solid var(--rule);border-radius:3px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.9rem;min-width:33rem}
+th{text-align:left;font-family:"IBM Plex Mono",monospace;font-size:.65rem;letter-spacing:.09em;
+ text-transform:uppercase;color:var(--ink-3);padding:.7rem .85rem;background:var(--surface-2);
+ border-bottom:1px solid var(--rule);white-space:nowrap;font-weight:600}
+td{padding:.6rem .85rem;border-bottom:1px solid var(--rule-soft);color:var(--ink-2)}
+td:first-child{color:var(--ink);font-weight:500}
+tr:last-child td{border-bottom:0}
+.n{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+tr.hl td{background:var(--accent-bg)}
+.up{color:var(--gain);font-weight:600}
+.flat{color:var(--ink-3)}
+.fig{background:var(--surface);border:1px solid var(--rule);border-radius:3px;
+ padding:1.35rem 1.25rem 1rem;margin:1.3rem 0;box-shadow:var(--shadow)}
+.cap{font-size:.85rem;color:var(--ink-3);margin:.85rem 0 0;padding-top:.75rem;border-top:1px solid var(--rule-soft)}
+.key{display:flex;gap:1.2rem;flex-wrap:wrap;font-size:.8rem;color:var(--ink-2);
+ font-family:"IBM Plex Mono",monospace;margin:.7rem 0 0}
+.sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:.35rem;vertical-align:baseline}
+.box{border:1px solid var(--rule);border-left:3px solid var(--ink-3);border-radius:3px;
+ background:var(--surface);padding:1.05rem 1.2rem;margin:1.3rem 0}
+.box.g{border-left-color:var(--gain);background:var(--gain-bg)}
+.box.w{border-left-color:var(--warn);background:var(--warn-bg)}
+.box.b{border-left-color:var(--null);background:var(--null-bg)}
+.box.a{border-left-color:var(--accent);background:var(--accent-bg)}
+.box .k{font-family:"IBM Plex Mono",monospace;font-size:.66rem;font-weight:600;letter-spacing:.11em;
+ text-transform:uppercase;color:var(--ink-3);display:block;margin-bottom:.45rem}
+.box.g .k{color:var(--gain)}.box.w .k{color:var(--warn)}.box.b .k{color:var(--null)}.box.a .k{color:var(--accent)}
+.box p{margin:0;color:var(--ink)}
+.box p + p{margin-top:.6rem}
+ul{margin:0 0 1rem;padding-left:1.15rem}
+li{margin-bottom:.5rem;color:var(--ink-2)}
+li strong{color:var(--ink)}
+footer{margin-top:3.4rem;padding-top:1.2rem;border-top:1px solid var(--rule);font-size:.85rem;color:var(--ink-3)}
+@media(max-width:640px){body{font-size:15.5px;padding:0 1rem 3rem}}
+</style>
+
+<div class="wrap">
+<header>
+  <div class="eyebrow"><span>HGTD Vertex Timing</span><span>Cross-sample evaluation</span><span>31 Aug 2026</span></div>
+  <h1>Timing selection across samples</h1>
+  <p class="lede">The Z+jets method, run in-domain on every &mu;&nbsp;=&nbsp;200 sample and the three &mu;&nbsp;=&nbsp;0 controls. It improves <strong>every sample</strong> &mdash; from <strong>+4.14</strong> on dijet to <strong>+7.92</strong> on Z+jets &mdash; and stays quiet on the controls, where there is nothing to win. One caveat matters more than the numbers: the method emits a <em>time</em>, not a cluster, so the familiar oracle is no longer its ceiling.</p>
+</header>
+
+<section>
+  <h2>Results</h2>
+  <p class="note">Core fraction at &plusmn;60&nbsp;ps. Every verdict out-of-fold; 4-fold cross-fitting throughout. Condor cluster 2951035, 8 cores, 39.0&nbsp;GB peak, 2d07h CPU.</p>
+
+  <div class="fig"><svg viewBox="0 0 680 268" role="img" aria-label="Per-sample: TRKPTZ baseline, achieved core fraction, and the perfect-tagger ceiling" style="width:100%;height:auto">
+<line x1="97.1" y1="16" x2="97.1" y2="228.0" stroke="var(--rule)" stroke-width="1"/>
+<text x="97.1" y="248" text-anchor="middle" font-size="11" font-family="IBM Plex Mono,monospace" fill="var(--ink-3)">60%</text>
+<line x1="212.9" y1="16" x2="212.9" y2="228.0" stroke="var(--rule)" stroke-width="1"/>
+<text x="212.9" y="248" text-anchor="middle" font-size="11" font-family="IBM Plex Mono,monospace" fill="var(--ink-3)">70%</text>
+<line x1="328.6" y1="16" x2="328.6" y2="228.0" stroke="var(--rule)" stroke-width="1"/>
+<text x="328.6" y="248" text-anchor="middle" font-size="11" font-family="IBM Plex Mono,monospace" fill="var(--ink-3)">80%</text>
+<line x1="444.3" y1="16" x2="444.3" y2="228.0" stroke="var(--rule)" stroke-width="1"/>
+<text x="444.3" y="248" text-anchor="middle" font-size="11" font-family="IBM Plex Mono,monospace" fill="var(--ink-3)">90%</text>
+<line x1="560.0" y1="16" x2="560.0" y2="228.0" stroke="var(--rule)" stroke-width="1"/>
+<text x="560.0" y="248" text-anchor="middle" font-size="11" font-family="IBM Plex Mono,monospace" fill="var(--ink-3)">100%</text>
+<text x="62" y="46.5" text-anchor="end" font-size="13" font-weight="600" font-family="IBM Plex Mono,monospace" fill="var(--ink)">vbf</text>
+<rect x="505.2" y="35.5" width="20.4" height="14" fill="var(--ink-3)" opacity="0.16"/>
+<rect x="449.5" y="35.5" width="55.7" height="14" rx="2" fill="var(--gain)"/>
+<line x1="483.6" y1="32.5" x2="483.6" y2="52.5" stroke="var(--accent)" stroke-width="2" stroke-dasharray="3 2"/>
+<line x1="449.5" y1="33.5" x2="449.5" y2="51.5" stroke="var(--ink)" stroke-width="2"/>
+<line x1="525.5" y1="33.5" x2="525.5" y2="51.5" stroke="var(--ink-3)" stroke-width="2"/>
+<text x="568" y="41.5" font-size="12.5" font-weight="600" font-family="IBM Plex Mono,monospace" fill="var(--gain)">95.26%</text>
+<text x="568" y="54.5" font-size="10.5" font-family="IBM Plex Mono,monospace" fill="var(--ink-3)">+4.81</text>
+<text x="62" y="99.5" text-anchor="end" font-size="13" font-weight="600" font-family="IBM Plex Mono,monospace" fill="var(--ink)">zjets</text>
+<rect x="210.4" y="88.5" width="145.3" height="14" fill="var(--ink-3)" opacity="0.16"/>
+<rect x="118.8" y="88.5" width="91.6" height="14" rx="2" fill="var(--gain)"/>
+<line x1="181.3" y1="85.5" x2="181.3" y2="105.5" stroke="var(--accent)" stroke-width="2" stroke-dasharray="3 2"/>
+<line x1="118.8" y1="86.5" x2="118.8" y2="104.5" stroke="var(--ink)" stroke-width="2"/>
+<line x1="355.8" y1="86.5" x2="355.8" y2="104.5" stroke="var(--ink-3)" stroke-width="2"/>
+<text x="568" y="94.5" font-size="12.5" font-weight="600" font-family="IBM Plex Mono,monospace" fill="var(--gain)">69.79%</text>
+<text x="568" y="107.5" font-size="10.5" font-family="IBM Plex Mono,monospace" fill="var(--ink-3)">+7.92</text>
+<text x="62" y="152.5" text-anchor="end" font-size="13" font-weight="600" font-family="IBM Plex Mono,monospace" fill="var(--ink)">dijet</text>
+<rect x="456.1" y="141.5" width="53.0" height="14" fill="var(--ink-3)" opacity="0.16"/>
+<rect x="408.2" y="141.5" width="47.9" height="14" rx="2" fill="var(--gain)"/>
+<line x1="442.8" y1="138.5" x2="442.8" y2="158.5" stroke="var(--accent)" stroke-width="2" stroke-dasharray="3 2"/>
+<line x1="408.2" y1="139.5" x2="408.2" y2="157.5" stroke="var(--ink)" stroke-width="2"/>
+<line x1="509.1" y1="139.5" x2="509.1" y2="157.5" stroke="var(--ink-3)" stroke-width="2"/>
+<text x="568" y="147.5" font-size="12.5" font-weight="600" font-family="IBM Plex Mono,monospace" fill="var(--gain)">91.02%</text>
+<text x="568" y="160.5" font-size="10.5" font-family="IBM Plex Mono,monospace" fill="var(--ink-3)">+4.14</text>
+<text x="62" y="205.5" text-anchor="end" font-size="13" font-weight="600" font-family="IBM Plex Mono,monospace" fill="var(--ink)">ttbar</text>
+<rect x="464.5" y="194.5" width="51.0" height="14" fill="var(--ink-3)" opacity="0.16"/>
+<rect x="410.5" y="194.5" width="54.0" height="14" rx="2" fill="var(--gain)"/>
+<line x1="447.4" y1="191.5" x2="447.4" y2="211.5" stroke="var(--accent)" stroke-width="2" stroke-dasharray="3 2"/>
+<line x1="410.5" y1="192.5" x2="410.5" y2="210.5" stroke="var(--ink)" stroke-width="2"/>
+<line x1="515.6" y1="192.5" x2="515.6" y2="210.5" stroke="var(--ink-3)" stroke-width="2"/>
+<text x="568" y="200.5" font-size="12.5" font-weight="600" font-family="IBM Plex Mono,monospace" fill="var(--gain)">91.75%</text>
+<text x="568" y="213.5" font-size="10.5" font-family="IBM Plex Mono,monospace" fill="var(--ink-3)">+4.67</text>
+</svg>
+  <div class="key">
+    <span><span class="sw" style="background:var(--ink)"></span>TRKPTZ</span>
+    <span><span class="sw" style="background:var(--gain)"></span>gain from the method</span>
+    <span><span class="sw" style="background:var(--accent)"></span>Deep&nbsp;Sets</span>
+    <span><span class="sw" style="background:var(--ink-3);opacity:.4"></span>headroom to ceiling</span>
+  </div>
+  <p class="cap">The ceiling here is the <strong>perfect-tagger aggregate</strong> &mdash; a truncated mean over truth-tagged hard-scatter tracks &mdash; not the old best-cluster oracle. See &ldquo;On ceilings&rdquo; below for why that substitution is necessary.</p></div>
+
+  <div class="tw"><table>
+    <thead><tr><th>sample</th><th class="n">events</th><th class="n">TRKPTZ</th><th class="n">Deep Sets</th><th class="n">this method</th><th class="n">&Delta; vs TRKPTZ</th><th class="n">ceiling</th></tr></thead>
+    <tbody>
+      <tr><td>vbf</td><td class="n">519,115</td><td class="n">90.45</td><td class="n">93.40</td><td class="n"><strong>95.26</strong></td><td class="n up">+4.81</td><td class="n flat">97.02</td></tr>
+      <tr class="hl"><td>zjets</td><td class="n">36,531</td><td class="n">61.87</td><td class="n">67.27</td><td class="n"><strong>69.79</strong></td><td class="n up">+7.92</td><td class="n flat">82.35</td></tr>
+      <tr><td>dijet</td><td class="n">80,383</td><td class="n">86.88</td><td class="n">89.87</td><td class="n"><strong>91.02</strong></td><td class="n up">+4.14</td><td class="n flat">95.60</td></tr>
+      <tr><td>ttbar</td><td class="n">561,745</td><td class="n">87.08</td><td class="n">90.27</td><td class="n"><strong>91.75</strong></td><td class="n up">+4.67</td><td class="n flat">96.16</td></tr>
+      <tr><td>vbf_mu0</td><td class="n">2,097,581</td><td class="n">99.89</td><td class="n">&mdash;</td><td class="n">99.91</td><td class="n">+0.02</td><td class="n flat">&mdash;</td></tr>
+      <tr><td>zeejets_mu0</td><td class="n">4,524</td><td class="n">99.91</td><td class="n">&mdash;</td><td class="n">99.96</td><td class="n">+0.05</td><td class="n flat">&mdash;</td></tr>
+      <tr><td>ttbar_mu0</td><td class="n">941,956</td><td class="n">99.91</td><td class="n">&mdash;</td><td class="n">99.93</td><td class="n">+0.02</td><td class="n flat">&mdash;</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box g">
+    <span class="k">It beats Deep Sets on all four &mu;&nbsp;=&nbsp;200 samples</span>
+    <p>+1.86 vbf, <strong>+2.52 zjets</strong>, +1.15 dijet, +1.48 ttbar. Deep Sets was the strongest cluster-<em>selector</em> in this study; the margin here comes from not being a selector at all.</p>
+  </div>
+
+  <div class="box a">
+    <span class="k">The &mu;&nbsp;=&nbsp;0 controls behave</span>
+    <p>With no pileup TRKPTZ already sits at 99.9% and there is essentially nothing to recover. Across <strong>three million</strong> control events the method moves the number by +0.02 to +0.05 and never below baseline &mdash; it does not fire spuriously on distributions far outside where it was tuned.</p>
+  </div>
+</section>
+
+<section>
+  <h2>Where the gain comes from</h2>
+  <p class="note">Each rung is cumulative over TRKPTZ, measured separately per sample.</p>
+
+  <div class="fig"><svg viewBox="0 0 680 232" role="img" aria-label="Component ladder per sample" style="width:100%;height:auto">
+<line x1="100.0" y1="30" x2="100.0" y2="198.0" stroke="var(--rule)"/>
+<text x="100.0" y="216" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono,monospace" fill="var(--ink-3)">60%</text>
+<line x1="230.0" y1="30" x2="230.0" y2="198.0" stroke="var(--rule)"/>
+<text x="230.0" y="216" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono,monospace" fill="var(--ink-3)">70%</text>
+<line x1="360.0" y1="30" x2="360.0" y2="198.0" stroke="var(--rule)"/>
+<text x="360.0" y="216" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono,monospace" fill="var(--ink-3)">80%</text>
+<line x1="490.0" y1="30" x2="490.0" y2="198.0" stroke="var(--rule)"/>
+<text x="490.0" y="216" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono,monospace" fill="var(--ink-3)">90%</text>
+<line x1="620.0" y1="30" x2="620.0" y2="198.0" stroke="var(--rule)"/>
+<text x="620.0" y="216" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono,monospace" fill="var(--ink-3)">100%</text>
+<text x="64" y="55.0" text-anchor="end" font-size="12" font-weight="600" font-family="IBM Plex Mono,monospace" fill="var(--ink)">vbf</text>
+<line x1="495.9" y1="43.0" x2="495.9" y2="59.0" stroke="var(--ink)" stroke-width="2"/>
+<rect x="495.9" y="45.0" width="43.2" height="12" fill="var(--ink-3)" opacity="0.85"/>
+<rect x="539.0" y="45.0" width="15.9" height="12" fill="var(--accent)" opacity="0.85"/>
+<rect x="554.9" y="45.0" width="12.0" height="12" fill="var(--warn)" opacity="0.4"/>
+<circle cx="547.9" cy="51.0" r="3.5" fill="var(--warn)" stroke="var(--surface)" stroke-width="1.4"/>
+<text x="64" y="97.0" text-anchor="end" font-size="12" font-weight="600" font-family="IBM Plex Mono,monospace" fill="var(--ink)">zjets</text>
+<line x1="124.3" y1="85.0" x2="124.3" y2="101.0" stroke="var(--ink)" stroke-width="2"/>
+<rect x="124.3" y="87.0" width="76.8" height="12" fill="var(--ink-3)" opacity="0.85"/>
+<rect x="201.1" y="87.0" width="21.5" height="12" fill="var(--accent)" opacity="0.85"/>
+<rect x="222.6" y="87.0" width="43.7" height="12" fill="var(--warn)" opacity="0.4"/>
+<circle cx="213.4" cy="93.0" r="3.5" fill="var(--warn)" stroke="var(--surface)" stroke-width="1.4"/>
+<text x="64" y="139.0" text-anchor="end" font-size="12" font-weight="600" font-family="IBM Plex Mono,monospace" fill="var(--ink)">dijet</text>
+<line x1="449.4" y1="127.0" x2="449.4" y2="143.0" stroke="var(--ink)" stroke-width="2"/>
+<rect x="449.4" y="129.0" width="38.9" height="12" fill="var(--ink-3)" opacity="0.85"/>
+<rect x="488.3" y="129.0" width="11.8" height="12" fill="var(--accent)" opacity="0.85"/>
+<rect x="500.1" y="129.0" width="19.1" height="12" fill="var(--warn)" opacity="0.4"/>
+<circle cx="491.6" cy="135.0" r="3.5" fill="var(--warn)" stroke="var(--surface)" stroke-width="1.4"/>
+<text x="64" y="181.0" text-anchor="end" font-size="12" font-weight="600" font-family="IBM Plex Mono,monospace" fill="var(--ink)">ttbar</text>
+<line x1="452.0" y1="169.0" x2="452.0" y2="185.0" stroke="var(--ink)" stroke-width="2"/>
+<rect x="452.0" y="171.0" width="43.4" height="12" fill="var(--ink-3)" opacity="0.85"/>
+<rect x="495.5" y="171.0" width="13.6" height="12" fill="var(--accent)" opacity="0.85"/>
+<rect x="509.1" y="171.0" width="16.9" height="12" fill="var(--warn)" opacity="0.4"/>
+<circle cx="502.0" cy="177.0" r="3.5" fill="var(--warn)" stroke="var(--surface)" stroke-width="1.4"/>
+</svg>
+  <div class="key">
+    <span><span class="sw" style="background:var(--ink)"></span>TRKPTZ</span>
+    <span><span class="sw" style="background:var(--ink-3)"></span>argmax-p cluster time</span>
+    <span><span class="sw" style="background:var(--accent)"></span>trunc-tagw re-timing</span>
+    <span><span class="sw" style="background:var(--warn)"></span>e2e t&#8320; (marker)</span>
+    <span><span class="sw" style="background:var(--warn);opacity:.4"></span>union of both answers</span>
+  </div>
+  <p class="cap">The e2e t&#8320; is drawn as a marker, not a segment, because it is an <em>alternative</em> answer rather than a further improvement on the base &mdash; the union is what the meta then chooses between.</p></div>
+
+  <div class="tw"><table>
+    <thead><tr><th>rung</th><th class="n">vbf</th><th class="n">zjets</th><th class="n">dijet</th><th class="n">ttbar</th></tr></thead>
+    <tbody>
+      <tr><td>TRKPTZ</td><td class="n">90.45</td><td class="n">61.87</td><td class="n">86.88</td><td class="n">87.08</td></tr>
+      <tr><td>argmax-p cluster time</td><td class="n">93.77</td><td class="n">67.78</td><td class="n">89.87</td><td class="n">90.42</td></tr>
+      <tr><td>+ trunc-tagw re-timing <span class="mono">(base)</span></td><td class="n">94.99</td><td class="n">69.43</td><td class="n">90.78</td><td class="n">91.47</td></tr>
+      <tr><td>aggregate t&#8320;, formula</td><td class="n">93.55</td><td class="n">67.56</td><td class="n">89.52</td><td class="n">89.97</td></tr>
+      <tr><td>aggregate t&#8320;, end-to-end</td><td class="n">94.45</td><td class="n">68.72</td><td class="n">90.12</td><td class="n">90.92</td></tr>
+      <tr><td>union of base and t&#8320;</td><td class="n">95.91</td><td class="n">72.79</td><td class="n">92.25</td><td class="n">92.77</td></tr>
+      <tr class="hl"><td>pooled meta <span class="mono">(final)</span></td><td class="n"><strong>95.26</strong></td><td class="n"><strong>69.79</strong></td><td class="n"><strong>91.02</strong></td><td class="n"><strong>91.75</strong></td></tr>
+    </tbody>
+  </table></div>
+
+  <p>Three things generalise cleanly across every topology:</p>
+  <ul>
+    <li><strong>Learned selection beats the hand score</strong> by 3.0&ndash;5.9 points before any re-timing (row 2 vs row 1). Largest on Z+jets, as expected.</li>
+    <li><strong>Re-timing the chosen cluster is free money</strong> &mdash; +0.9 to +1.7 everywhere (row 3 vs row 2). Reweighting a cluster's tracks by the per-track hard-scatter tagger and Winsorising twice improves the time without touching which cluster was picked.</li>
+    <li><strong>The end-to-end t&#8320; beats its formula counterpart</strong> on all four (+0.6 to +1.2), and is a genuinely different answer &mdash; the union sits 1&ndash;3 points above either alone.</li>
+  </ul>
+
+  <div class="box w">
+    <span class="k">The meta captures roughly a third of the union spread</span>
+    <p>Union minus base is 0.9 (vbf), 3.4 (zjets), 1.5 (dijet), 1.3 (ttbar); the meta converts 0.27 / 0.36 / 0.24 / 0.28 of that. Choosing between two good answers remains the weakest link, and it is weakest precisely where the spread is largest.</p>
+  </div>
+</section>
+
+<section>
+  <h2>On ceilings</h2>
+  <p class="note">The number this study quoted for two years is no longer the right bound.</p>
+
+  <p>The familiar reference &mdash; best cluster by <span class="mono">|&Delta;t|</span>, giving 98.3 / 92.6 / 97.9 / 98.0 &mdash; assumes the answer <em>is</em> a cluster. This method emits a time built from tracks, so it is not bounded by the clustering at all. Two consequences, both worth stating plainly:</p>
+
+  <div class="tw"><table>
+    <thead><tr><th>candidate ceiling</th><th class="n">vbf</th><th class="n">zjets</th><th class="n">dijet</th><th class="n">ttbar</th><th>verdict</th></tr></thead>
+    <tbody>
+      <tr><td>naive best-cluster oracle</td><td class="n">98.29</td><td class="n">92.60</td><td class="n">97.88</td><td class="n">98.04</td><td>inflated &mdash; a best-of-N statistic</td></tr>
+      <tr><td>best cluster with real HS content</td><td class="n">86.02</td><td class="n">51.15</td><td class="n">81.54</td><td class="n">81.92</td><td><strong>now below what we achieve</strong></td></tr>
+      <tr class="hl"><td>perfect-tagger aggregate</td><td class="n">97.02</td><td class="n">82.35</td><td class="n">95.60</td><td class="n">96.16</td><td>the correct reference</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box b">
+    <span class="k">The method scores above the cluster-selection ceiling on every sample</span>
+    <p>Restricted to clusters that actually carry hard-scatter content, the best available cluster reaches 51.15% on Z+jets &mdash; and this method reaches <strong>69.79%</strong>. That is not a contradiction: it is direct evidence that the answer is no longer coming from a cluster. Any future comparison that quotes the best-cluster oracle as &ldquo;the ceiling&rdquo; is comparing against the wrong quantity.</p>
+  </div>
+
+  <p>Against the correct reference, the fraction of available headroom actually captured is <strong>73% (vbf)</strong>, 51% (ttbar), 47% (dijet), <strong>39% (zjets)</strong>. Z+jets remains both the biggest absolute gain and the largest remaining gap &mdash; 12.6 points of reachable headroom still on the table.</p>
+</section>
+
+<section>
+  <h2>Caveats</h2>
+  <p class="note">Things that would change a reader's confidence, stated rather than buried.</p>
+
+  <div class="box w">
+    <span class="k">Z+jets reproduces at 69.79 here, not the shipped 70.00</span>
+    <p>Two deliberate differences, neither tuned away. This pooled meta includes ttbar (the shipped configuration pooled zjets+vbf+dijet only), and the end-to-end t&#8320; came in at 68.72 against 69.01 on a different fold-seed draw. <strong>The base answer reproduces exactly at 69.43</strong> &mdash; the deterministic part, given the folds &mdash; which localises the 0.21 to meta composition and torch seed variance.</p>
+    <p>Read 69.8&ndash;70.0 as the honest interval for this configuration, not 70.00 as a fixed point.</p>
+  </div>
+
+  <ul>
+    <li><strong>The threshold plateau is flat</strong>, which is reassuring: 0.40&ndash;0.55 spans 69.69&ndash;69.79 on Z+jets and 95.22&ndash;95.26 on vbf. No cliff-edge tuning.</li>
+    <li><strong>Truth is used in three places</strong> and none of them at inference: the per-track tagger label (<span class="mono">truth_is_hs</span>), the stage-1 and meta labels (the 60&nbsp;ps criterion), and evaluation. A deployed version needs the tagger trained once on MC and frozen &mdash; that transfer is <em>not</em> measured here.</li>
+    <li><strong>Per-sample in-domain training.</strong> Each sample gets its own tagger and stage-1; only the meta is pooled. The earlier frozen-transfer study showed a VBF-trained guard transfers positively to every sample, but this stronger pipeline has not been transfer-tested.</li>
+    <li><strong>Z+jets uses novbs augmentation</strong> (94k events, folds hashed on the event key so a test event cannot leak through its novbs copy). The other samples train on canonical only.</li>
+    <li><strong>Statistical scale differs by 100&times;</strong> across samples: zeejets_mu0 has 4,524 events, so its +0.05 is two events. vbf and ttbar at ~0.5M are the tightest numbers here.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>What I would do next</h2>
+  <ul>
+    <li><strong>Freeze-and-transfer the tagger.</strong> The single largest gap between this and something deployable. Train the per-track tagger on one sample, freeze, and re-measure everywhere &mdash; the same experiment that validated the guarded metric.</li>
+    <li><strong>Attack the meta, not the answers.</strong> Two-thirds of the union spread goes uncaptured, and on Z+jets that is 2.2 points sitting between two answers we already compute.</li>
+    <li><strong>Re-baseline the group's ceiling language.</strong> The best-cluster oracle is quoted throughout the existing notes; for any time-producing method it overstates the target by 10&ndash;40 points depending on sample.</li>
+  </ul>
+</section>
+
+<footer>
+  <p>Branch <span class="mono">ml/cluster-selection</span>. Pipeline <span class="mono">python/zjets_seventy.py</span>; this evaluation <span class="mono">python/final_method_eval.py</span> (committed before running). Raw numbers in <span class="mono">results/final_method_eval.json</span> and <span class="mono">results/final_method_eval_results.md</span>.</p>
+  <p>All samples at the canonical selection (<span class="mono">--vbs-deta=0 --vbs-mjj=500</span>). Core fraction is the fraction of events whose reported vertex time falls within &plusmn;60&nbsp;ps of the truth hard-scatter time.</p>
+</footer>
+</div>

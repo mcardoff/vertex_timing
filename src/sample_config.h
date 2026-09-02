@@ -84,8 +84,7 @@ namespace MyUtl {
   //                              against the combined sample would confound
   //                              pileup with channel mix, so "zeejets" below
   //                              points at the 601189 subdirectory alone.
-  //   ttbar_mu0   601229 r15697  has no mu=200 counterpart yet; the ttbar
-  //                              directory exists but is empty.
+  //   ttbar_mu0   601229 r15697  pairs with "ttbar" (601229 r15700).
   inline SampleConfig resolveSample(int argc, char** argv) {
     static const std::map<std::string, SampleConfig> registry = {
       {"vbf",   {"/data/mcardiff/exotic_superntuples/highstats_vbf/",
@@ -133,6 +132,14 @@ namespace MyUtl {
       {"ttbar_mu0",   {"/data/mcardiff/exotic_superntuples/ttbar_mu0/",
                        "#sqrt{s} = 14 TeV, #mu = 0, t#bar{t} (1 lep)",
                        "ttbar_mu0", "ttbar_mu0", false}},
+
+      // ---- mu = 200 partner for ttbar_mu0 (601229 r15700) ------------------
+      // overlapRemoval stays false for the same reason as ttbar_mu0 above: the
+      // flag currently also switches on passLeptonSelection, whose OS-SF PAIR
+      // requirement would reject every SingleLep event.
+      {"ttbar",       {"/data/mcardiff/exotic_superntuples/ttbar/",
+                       "#sqrt{s} = 14 TeV, HL-LHC, t#bar{t} (1 lep)",
+                       "ttbar", "ttbar", false}},
     };
 
     const std::string prefix = "--sample=";
@@ -143,13 +150,55 @@ namespace MyUtl {
       auto it = registry.find(name);
       if (it == registry.end()) {
         std::cerr << "Unknown --sample value '" << name
-                  << "'. Valid options: vbf, zjets, zeejets, dijet, vbf_mu0, zeejets_mu0, ttbar_mu0.\n";
+                  << "'. Valid options: vbf, zjets, zeejets, dijet, ttbar, "
+                     "vbf_mu0, zeejets_mu0, ttbar_mu0.\n";
         std::exit(1);
       }
       return it->second;
     }
 
     return {"/Users/mcard/project/ntuple-hgtd/", "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv.", "../figs", "", false};
+  }
+
+  // ---------------------------------------------------------------------------
+  // sampleId
+  //   Stable small integer per sample, for datasets that carry a numeric sample
+  //   tag in every row (util/export_training_data.cxx) rather than relying on
+  //   the file they came from. Once several samples are concatenated, the row's
+  //   grouping key includes this, so the mapping must be STABLE ACROSS RELEASES:
+  //   only ever append. Renumbering silently re-labels every dataset already on
+  //   disk, and nothing downstream can detect it.
+  //
+  //   This deliberately lives beside the registry rather than in the exporter.
+  //   The exporter previously carried its own
+  //     name == "vbf" ? 0 : name == "zjets" ? 1 : name == "dijet" ? 2 : 3
+  //   ladder, which silently collapsed every sample added since -- ttbar,
+  //   ttbar_mu0, vbf_mu0, zeejets, zeejets_mu0 -- onto the single id 3. Because
+  //   the ranking group key is (sample_id, file_idx, event_num), that merged
+  //   unrelated events from five different samples into shared candidate groups.
+  //   Keeping the map next to the registry is what makes a newly registered
+  //   sample fail loudly (below) instead of aliasing onto an existing id.
+  // ---------------------------------------------------------------------------
+  inline int sampleId(const std::string& name) {
+    static const std::map<std::string, int> ids = {
+      {"",            -1},   // local/default run
+      {"vbf",          0},
+      {"zjets",        1},
+      {"dijet",        2},
+      {"zeejets",      3},
+      {"vbf_mu0",      4},
+      {"zeejets_mu0",  5},
+      {"ttbar_mu0",    6},
+      {"ttbar",        7},
+    };
+    auto it = ids.find(name);
+    if (it == ids.end()) {
+      std::cerr << "sampleId: no id registered for sample '" << name
+                << "'. Append one to the map in src/sample_config.h -- do NOT "
+                   "renumber the existing entries.\n";
+      std::exit(1);
+    }
+    return it->second;
   }
 
   // ---------------------------------------------------------------------------
@@ -167,11 +216,21 @@ namespace MyUtl {
   //   the comments on VBS_JET_D_ETA / VBS_JET_MJJ in clustering_constants.h
   //   for why each needs to be measurable/settable rather than assumed.
   //
+  //   A NEGATIVE --vbs-deta (e.g. --vbs-deta=-1) is a THIRD mode, not a smaller
+  //   threshold: it drops the VBS candidate-PAIR requirement outright, so an
+  //   event with no opposite-hemisphere jet pair is kept. Neither knob can
+  //   express this by being set to 0, because the pair's m_jj/|Deta| keep a -1
+  //   sentinel when no pair exists and so fail any >= 0 test -- see passJetPtCut.
+  //   This is the "novbs" loose selection, and it is the only way to widen the
+  //   Z+jets training population meaningfully: --vbs-deta=0 was measured worth
+  //   +4% (67,074 -> 69,745) where dropping the pair requirement was expected to
+  //   be worth several-fold.
+  //
   //   Each sets a SELECTION_TAG component whenever its value differs from its
   //   default, joined with '_' if both are non-default, so a loosened run
   //   writes e.g. <sample>_deta3p0_mjj0p0_<name>.root instead of colliding
   //   with the standard <sample>_<name>.root. Neither flag given => no tag =>
-  //   every existing path unchanged.
+  //   every existing path unchanged. The negative mode tags "novbs" alone.
   //
   //   Call once in main() alongside resolveSample(). Executables that never
   //   see either flag are unaffected.
@@ -180,7 +239,17 @@ namespace MyUtl {
     // Parses --<name>=<x> if present; returns false (default, val untouched)
     // if the flag never appears. Shared by both knobs below so a bad/missing
     // value is reported the same way for each.
-    auto parseFlag = [&](const char* name, double& val) -> bool {
+    //
+    // `allowNegative` is true for --vbs-deta ONLY, where a negative value is
+    // the documented spelling for "drop the VBS-pair requirement entirely".
+    // It stays false for --vbs-mjj: a negative mass threshold has no meaning,
+    // and there is deliberately one flag for disabling the pair, not two.
+    //
+    // Blanket-rejecting negatives here is what originally made this
+    // un-expressible -- the only input that could disable the requirement was
+    // refused by our own validation, so a "loosened" Z+jets export came back
+    // 4% larger instead of several-fold and looked like a physics result.
+    auto parseFlag = [&](const char* name, double& val, bool allowNegative = false) -> bool {
       const std::string prefix = std::string("--") + name + "=";
       for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -192,7 +261,7 @@ namespace MyUtl {
                     << "'; expected a number (e.g. --" << name << "=0).\n";
           std::exit(1);
         }
-        if (val < 0.0) {
+        if (val < 0.0 && !allowNegative) {
           std::cerr << "--" << name << " must be >= 0 (got " << val << ").\n";
           std::exit(1);
         }
@@ -210,14 +279,27 @@ namespace MyUtl {
     };
 
     double deta = VBS_JET_D_ETA, mjj = VBS_JET_MJJ;
-    if (parseFlag("vbs-deta", deta)) {
-      VBS_JET_D_ETA = deta;
-      if (std::abs(deta - VBS_JET_D_ETA_DEFAULT) > 1e-9) addTag("deta", deta);
+    if (parseFlag("vbs-deta", deta, /*allowNegative*/ true)) VBS_JET_D_ETA = deta;
+    if (parseFlag("vbs-mjj",  mjj))                          VBS_JET_MJJ   = mjj;
+
+    // A NEGATIVE --vbs-deta means "no VBS candidate pair required at all", which
+    // passJetPtCut implements by bypassing BOTH the |Deta| and m_jj tests -- see
+    // the comment there for why lowering a threshold to 0 does not achieve that.
+    //
+    // The tag is then "novbs" ALONE. Two reasons it is not composed with the
+    // others: it is tagged by MEANING, so --vbs-deta=-1 and --vbs-deta=-5 cannot
+    // write different filenames for what is the same selection; and appending an
+    // m_jj component would name a cut that is not being applied, so
+    // "novbs_mjj500p0" would describe a selection that does not exist.
+    if (VBS_JET_D_ETA < 0.0) {
+      SELECTION_TAG = "novbs";
+      std::cout << "[selection] VBS jet-pair requirement DISABLED"
+                << "  (tag: " << SELECTION_TAG << ")\n";
+      return;
     }
-    if (parseFlag("vbs-mjj", mjj)) {
-      VBS_JET_MJJ = mjj;
-      if (std::abs(mjj - VBS_JET_MJJ_DEFAULT) > 1e-9) addTag("mjj", mjj);
-    }
+
+    if (std::abs(VBS_JET_D_ETA - VBS_JET_D_ETA_DEFAULT) > 1e-9) addTag("deta", VBS_JET_D_ETA);
+    if (std::abs(VBS_JET_MJJ   - VBS_JET_MJJ_DEFAULT)   > 1e-9) addTag("mjj",  VBS_JET_MJJ);
 
     std::cout << "[selection] VBS |Deta| >= " << VBS_JET_D_ETA
               << ", m_jj >= " << VBS_JET_MJJ << " GeV"

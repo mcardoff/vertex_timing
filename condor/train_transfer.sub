@@ -1,0 +1,96 @@
+# ---------------------------------------------------------------------------
+# train_transfer.sub — item 6: does the learned selector transfer across
+# topologies, and does ttbar behave like a third independent case?
+#
+# This is the test WAVeS fails. WAVeS weights tracks by proximity to forward
+# jets, which assumes those jets are hard-scatter objects; on Z+jets they are
+# mostly pileup (the canonical measurement puts the forward dijet at ~94%
+# pileup-supplied), so it gains +0.7 on VBF and LOSES 1.9 on Z+jets. A learned
+# selector was topology-independent in the last round -- every off-diagonal beat
+# TRKPTZ -- and this re-establishes that at the canonical selection, now with a
+# fourth topology.
+#
+# ttbar at mu=200 is the genuinely new case and the reason this is worth
+# rerunning rather than citing. Its hard process makes no forward tagging jets,
+# so it stresses the same assumption Z+jets does, but through a different
+# mechanism: real heavy-flavour tracks in a busy final state rather than a
+# nearly-empty forward region. If the selector transfers there too, the
+# topology-independence claim gets a third independent leg rather than a repeat.
+#
+# Each job FITS on one sample and EVALUATES on all of them, so one job fills one
+# ROW of the transfer matrix and the diagonal comes along for free. Read the
+# per-sample table in each run's results.json; the column for sample X across
+# all rows is "how well does a selector trained on <row> do on X".
+#
+# The train budget is divided over the samples being fit on, not over every
+# sample loaded, so a single-sample row trains on the FULL --train-events rather
+# than a fifth of it -- an off-diagonal that looked bad only because it had less
+# data would answer a different question than the one being asked.
+#
+#   cd condor && condor_submit train_transfer.sub && condor_q
+#
+# The all-samples row (the pooled model) is NOT queued here -- that is the plain
+# train_deepsets.sub run, and duplicating it would just cost a slot.
+# ---------------------------------------------------------------------------
+universe                = vanilla
+executable              = run_training.sh
+
+INPUT_DIR = /data/mcardiff/training
+SELECTION = canonical
+TAG       = tx_$(SELECTION)_$(trainon)_s$(seed)
+
+# The model is FROZEN -- no architecture flags. --train-samples changes only
+# which samples contribute gradient; every sample still streams its test events,
+# so every column of the matrix is filled from this one pass.
+arguments = train_deepsets.py $(INPUT_DIR) runs/$(TAG) --selection $(SELECTION) --train-samples $(trainon) --epochs 15 --seed $(seed) --torch-threads 4
+
+should_transfer_files   = YES
+when_to_transfer_output = ON_EXIT
+transfer_input_files    = ../python/train_deepsets.py
+transfer_output_files   = runs/$(TAG)
+transfer_output_remaps  = "$(TAG)=runs/$(TAG)"
+
+getenv                  = True
++JobFlavour             = "tomorrow"
+
+request_cpus            = 4
+request_memory          = 16GB
+request_disk            = 8GB
+# 0. This was briefly set to 1 and the jobs SAT IDLE INDEFINITELY, then started
+# running the instant it went back to 0. The pool DOES have GPU slots -- 8 of
+# them, by condor_status -constraint 'TotalGpus > 0' -- so the lesson is not
+# "there are no GPUs" but that those 8 were not obtainable for these jobs, and
+# an unmatchable GPU request waits forever rather than falling back to CPU.
+# Before setting this to 1 again, check that a slot is actually FREE and that
+# nothing else in the requirements excludes it, not merely that GPUs exist.
+#
+# Nothing is lost by running on CPU. The 15-epoch runs spend ~120 s in epochs
+# (8 s each) inside a ~10 min job; the other ~8 min is streaming GB-scale ROOT
+# files, which a GPU does not touch. The GPU was never going to be the win here.
+request_gpus            = 0
+
+output = logs/train_$(TAG).$(ClusterId).$(ProcId).out
+error  = logs/train_$(TAG).$(ClusterId).$(ProcId).err
+log    = logs/train_$(TAG).$(ClusterId).$(ProcId).log
+
+# One row per training topology. Single values only -- condor splits
+# `queue ... from (...)` on COMMAS, so a multi-sample list like "vbf,dijet"
+# would be torn into two columns and silently mis-bound. A leave-one-out row
+# needs its own submit file with the list written as a literal in `arguments`.
+# Three split seeds per row, for the same reason as the learning curve: an
+# off-diagonal that beats TRKPTZ by a point is not a transfer result if the
+# split-to-split band is 1.9 points on the sample in question. Average the three.
+queue trainon,seed from (
+  vbf,   0
+  vbf,   1
+  vbf,   2
+  zjets, 0
+  zjets, 1
+  zjets, 2
+  dijet, 0
+  dijet, 1
+  dijet, 2
+  ttbar, 0
+  ttbar, 1
+  ttbar, 2
+)

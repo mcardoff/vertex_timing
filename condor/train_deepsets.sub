@@ -1,0 +1,83 @@
+# ---------------------------------------------------------------------------
+# train_deepsets.sub — Deep Sets cluster-selection training as a condor job.
+#
+# Torch comes from an LCG view on cvmfs (see run_training.sh) -- python 3.13.11,
+# torch 2.11.0, uproot 5.7.1 -- so nothing needs installing in $HOME and the job
+# does not depend on the Jupyter container's python. run_training.sh picks the
+# CUDA view automatically when the slot has a GPU.
+#
+# The probe (condor/probe_env.sub) confirmed: $HOME and /data are both mounted on
+# workers, and ~/venvs/vtx is NOT usable there (its python is a dangling symlink
+# into the Jupyter container).
+#
+# Input ROOT files are read from an absolute /data path rather than transferred:
+# they are GB-scale, and /data is already how the ntuples are read on workers.
+# STAGE THEM FIRST:
+#   mkdir -p /data/mcardiff/training
+#   cp ~/project/vertex_timing/*/*_training.root /data/mcardiff/training/
+#
+#   cd condor && condor_submit train_deepsets.sub && condor_q
+#   # results land back in runs/<tag>/ next to this file
+# ---------------------------------------------------------------------------
+universe                = vanilla
+executable              = run_training.sh
+
+INPUT_DIR = /data/mcardiff/training
+TAG       = $(selection)
+
+# One row per configuration; add rows to the queue block to scan more.
+# --lambdas is no longer passed at all: the auxiliary head is OFF in the frozen
+# configuration (train_deepsets.py's parse_args carries the evidence), so the
+# default of "0" is what we want and naming it here would only invite drift.
+#
+# Kept as a warning for anything that DOES need a list: condor splits
+# `queue ... from (...)` rows on COMMAS, so a comma-containing value like
+# "0,0.1,0.3,1.0" is torn into separate columns and silently mis-bound. Pass such
+# a value as a literal in `arguments`, never as a queue variable.
+arguments = train_deepsets.py $(INPUT_DIR) runs/$(TAG) --selection $(selection) --epochs 15
+
+should_transfer_files   = YES
+when_to_transfer_output = ON_EXIT
+transfer_input_files    = ../python/train_deepsets.py
+transfer_output_files   = runs/$(TAG)
+# Condor flattens a nested transfer_output_files path to its basename on the way
+# back, and the LHS of a remap must be a BARE NAME -- condor_submit(1): "You
+# cannot specify directories to be remapped."
+transfer_output_remaps  = "$(TAG)=runs/$(TAG)"
+
+getenv                  = True
+# Override the view (or bypass it) if ever needed:
+# environment           = "LCG_VIEW=/cvmfs/sft.cern.ch/lcg/views/LCG_109/x86_64-el9-gcc15-opt"
+
++JobFlavour             = "tomorrow"
+
+# The model is ~24k parameters; the cost is streaming ~23M track rows and holding
+# the per-sample tensors, not the maths. request_gpus=0 by default -- set it to 1
+# only if the probe found GPU slots, since a GPU request that cannot match will
+# sit idle forever.
+request_cpus            = 4
+request_memory          = 16GB
+request_disk            = 8GB
+# 0. This was briefly set to 1 and the jobs SAT IDLE INDEFINITELY, then started
+# running the instant it went back to 0. The pool DOES have GPU slots -- 8 of
+# them, by condor_status -constraint 'TotalGpus > 0' -- so the lesson is not
+# "there are no GPUs" but that those 8 were not obtainable for these jobs, and
+# an unmatchable GPU request waits forever rather than falling back to CPU.
+# Before setting this to 1 again, check that a slot is actually FREE and that
+# nothing else in the requirements excludes it, not merely that GPUs exist.
+#
+# Nothing is lost by running on CPU. The 15-epoch runs spend ~120 s in epochs
+# (8 s each) inside a ~10 min job; the other ~8 min is streaming GB-scale ROOT
+# files, which a GPU does not touch. The GPU was never going to be the win here.
+request_gpus            = 0
+
+output = logs/train_$(TAG).$(ClusterId).$(ProcId).out
+error  = logs/train_$(TAG).$(ClusterId).$(ProcId).err
+log    = logs/train_$(TAG).$(ClusterId).$(ProcId).log
+
+# One row per selection. Both exports now exist:
+#   canonical  --vbs-mjj=500   the analysis definition the baseline is quoted at
+#   loose      --vbs-deta=-1   VBS pair requirement dropped; the wider population
+# Run canonical for any number that will be compared against
+# results/baseline_deta0p0_mjj500p0.md, and loose for the data-limitation study.
+queue selection in (canonical, loose)
