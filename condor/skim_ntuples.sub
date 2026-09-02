@@ -1,0 +1,81 @@
+# ---------------------------------------------------------------------------
+# skim_ntuples.sub — condor submit template: one SAMPLE per submit, split into
+# $(nshards) parallel shard jobs. Writes the skimmed+slimmed copy of a sample
+# to /data/mcardiff/skimmed_ntuples/<sample>/, once, so every later pass reads
+# a fraction of the bytes and a fraction of the files.
+#
+# WHY THIS IS A CONDOR JOB AND NOT A LOGIN-NODE LOOP. The four samples are
+# ~1.8 TB and the skimmer reads each file twice (selection pass, then copy
+# pass). /data/mcardiff is a symlink to /cold/user/mcardiff -- CephFS, cold
+# tier -- where the cost is per-file read round trips, not CPU: a login-node
+# run of 24 concurrent readers pushed cold reads from 0.3 s/file to 8 s/file
+# and the node to load 94. Condor spreads the readers over separate execute
+# nodes and separate network paths.
+#
+# Setup (once):
+#   cd build && cmake .. && make skim_ntuples
+#   chmod +x condor/run_analysis.sh
+#
+# Submit (from inside condor/, so the relative paths below resolve):
+#   condor_submit -a sample=vbf   -a nshards=12 skim_ntuples.sub
+#   condor_submit -a sample=dijet -a nshards=10 skim_ntuples.sub
+#   condor_submit -a sample=zjets -a nshards=20 skim_ntuples.sub
+#   condor_submit -a sample=ttbar -a nshards=24 skim_ntuples.sub
+#
+# NO OUTPUT IS TRANSFERRED BACK. Unlike every other .sub here, the job writes
+# straight to /data/mcardiff/skimmed_ntuples/<sample>/ -- an absolute ceph path
+# that execute hosts already mount, since that is how the ntuple INPUTS are
+# read (see run_analysis.sh's header). transfer_output_files is therefore
+# explicitly empty: with should_transfer_files = YES and no such line, condor
+# would stage back every new file in the scratch directory, and there are none
+# by design.
+#
+# Shard and chunk sizing are independent knobs:
+#   nshards        how many jobs split the sample's file list (--file-shard).
+#   filesperoutput how many INPUT files go into each OUTPUT file. This is the
+#                  knob that attacks the per-file round trip directly -- the
+#                  whole point is to end up with far fewer, larger files. 25
+#                  gives ~1 GB outputs on zjets and ~2 GB on vbf, and leaves
+#                  ~50-80 files per sample, which is still plenty to shard an
+#                  ANALYSIS run over afterwards.
+# ---------------------------------------------------------------------------
+universe                 = vanilla
+executable               = run_analysis.sh
+
+sample                   = vbf
+nshards                  = 12
+filesperoutput           = 25
+
+# run_analysis.sh forwards anything starting with "--" to the executable
+# verbatim, so no change to that script is needed. The "1" is <threads>:
+# skim_ntuples is single-threaded (it is I/O bound, and TTree::CopyTree is
+# not thread-safe against a shared output file), so request_cpus tracks it.
+arguments                = skim_ntuples $(sample) 1 --file-shard=$(ProcId)/$(nshards) --files-per-output=$(filesperoutput) --out-dir=/data/mcardiff/skimmed_ntuples/$(sample)
+
+should_transfer_files    = YES
+when_to_transfer_output  = ON_EXIT
+transfer_input_files     = ../build/skim_ntuples
+transfer_output_files    = ""
+
+getenv                   = True
+stream_output            = True
+stream_error             = True
++JobFlavour              = "tomorrow"
+
+# Single-threaded and streaming: memory is one chunk's TTree buffers, disk is
+# scratch only (the output goes to /data, not here).
+request_cpus             = 1
+request_memory           = 4GB
+request_disk             = 2GB
+
+output                   = logs/skim_$(sample).$(ClusterId).$(ProcId).out
+error                    = logs/skim_$(sample).$(ClusterId).$(ProcId).err
+log                      = logs/skim_$(sample).$(ClusterId).$(ProcId).log
+
+queue $(nshards)
+
+# After all shards land, point an analysis at the copy with --ntuple-dir=
+# (src/sample_config.h), which overrides ONLY the input directory and leaves
+# the sample's label, output paths and overlap-removal flag alone:
+#   ./build/rpt_v5_hist --sample=zjets \
+#       --ntuple-dir=/data/mcardiff/skimmed_ntuples/zjets

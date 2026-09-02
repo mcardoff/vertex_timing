@@ -142,6 +142,22 @@ namespace MyUtl {
                        "ttbar", "ttbar", false}},
     };
 
+    // --ntuple-dir=<path> overrides ONLY the input directory, leaving the
+    // sample's label, output directory, sample name and overlap-removal flag
+    // alone. That is what makes it usable for the skimmed copies
+    // (util/skim_ntuples.cxx): a skimmed Z+jets run is still Z+jets in every
+    // respect that affects physics or output naming, it just reads different
+    // files. Applied after the registry lookup so it composes with --sample=,
+    // and it deliberately does NOT tag the output filename -- a skimmed run is
+    // meant to be indistinguishable from a full one, which is exactly the
+    // property the validation checks.
+    std::string dirOverride;
+    const std::string dirPrefix = "--ntuple-dir=";
+    for (int i = 1; i < argc; ++i) {
+      std::string arg = argv[i];
+      if (arg.rfind(dirPrefix, 0) == 0) dirOverride = arg.substr(dirPrefix.size());
+    }
+
     const std::string prefix = "--sample=";
     for (int i = 1; i < argc; ++i) {
       std::string arg = argv[i];
@@ -154,10 +170,15 @@ namespace MyUtl {
                      "vbf_mu0, zeejets_mu0, ttbar_mu0.\n";
         std::exit(1);
       }
-      return it->second;
+      SampleConfig cfg = it->second;
+      if (!dirOverride.empty()) cfg.ntupleDir = dirOverride;
+      return cfg;
     }
 
-    return {"/Users/mcard/project/ntuple-hgtd/", "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv.", "../figs", "", false};
+    SampleConfig def{"/Users/mcard/project/ntuple-hgtd/",
+                     "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv.", "../figs", "", false};
+    if (!dirOverride.empty()) def.ntupleDir = dirOverride;
+    return def;
   }
 
   // ---------------------------------------------------------------------------
