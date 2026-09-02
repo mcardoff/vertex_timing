@@ -119,6 +119,12 @@ int main(int argc, char** argv) {
   SAMPLE_NAME     = cfg.sampleName;
   OVERLAP_REMOVAL = cfg.overlapRemoval;
   const Long64_t maxEvents = resolveMaxEvents(argc, argv);
+  // MUST be set explicitly -- setupChain reads MyUtl::FILE_SHARD, and nothing
+  // populates it as a side effect of resolveSample. Omitting this does not
+  // error: --file-shard is silently ignored and every shard reads the WHOLE
+  // sample, so a sharded run quietly does N times the work and, if the outputs
+  // are merged, produces N copies of every row. Found exactly that way.
+  MyUtl::FILE_SHARD = MyUtl::resolveShard(argc, argv);
 
   // As vbs_region_mjj: strip the topology selection so the diagnostic sees the
   // whole paired population rather than redrawing its own cut.
