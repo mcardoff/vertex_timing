@@ -51,6 +51,10 @@ vertex_timing/
 │   ├── vbs_region_mjj.cxx        # VBS pair composition vs m_jj (R1/R2/both-HS/Other; mjj>=500, |dEta|>=2.5)
 │   ├── maxpt_jet_test.cxx        # A/B/C test of the MAX_TRACK_PT cap vs per-event leading-jet pT
 │   ├── track_dt.cxx              # Inclusive per-track HGTD-time-vs-truth-particle-time residual
+│   ├── skim_ntuples.cxx          # Writes the skimmed+slimmed sample copies under
+│   │                             #   /data/mcardiff/skimmed_ntuples/ (see Data Format)
+│   ├── vbs_region_diag.cxx       # Per-event VBS pair composition: does an R1/R2-shaped pair
+│   │                             #   EXIST, and did the m_jj picker choose it (3 zone conventions)
 │   └── sweep_utilities.h         # Shared helpers for parameter-sweep executables (no sweep .cxx files currently present)
 ├── python/                        # Interactive/visualisation scripts (run from within this dir)
 │   ├── event_display.py          # Event visualisation — calls runHGTD_Clustering.cxx, produces 2-page PDF
@@ -542,6 +546,131 @@ ROOT ntuples (tree name `"ntuple"`) with the branches bound in
 | Particles | `TruthPart_prodVtx_time` (bound as `particleT`) |
 | Event | `weight` |
 
+### Skimmed + slimmed copies (`/data/mcardiff/skimmed_ntuples/`)
+
+`util/skim_ntuples.cxx` writes a reduced copy of each sample, once, and every
+analysis pass reads that copy rather than the originals.
+
+**This is now the registry default, not an opt-in.** `resolveSample` resolves
+`vbf`, `zjets`, `dijet` and `ttbar` to `/data/mcardiff/skimmed_ntuples/<name>/`,
+so a bare `--sample=zjets` already reads the skim. `--ntuple-dir=` is the escape
+hatch BACK to the originals -- it overrides ONLY the input directory, leaving
+the sample's label, output paths, sample name and overlap-removal flag alone:
+
+```bash
+./build/rpt_v5_hist --sample=zjets      # skimmed copy (default)
+./build/rpt_v5_hist --sample=zjets \
+    --ntuple-dir=/data/mcardiff/exotic_superntuples/zjets/   # originals
+```
+
+Every run's `[chain] N files added from <dir>` line names the directory it
+actually read, so which tree produced a given output is answerable from its log
+alone. The raw path for each swapped sample is in a comment beside its registry
+entry.
+
+**Four samples are NOT skimmed** and still resolve to the originals: the three
+mu=0 entries, plus `zeejets` -- which cannot be skimmed the same way, because it
+selects a channel by pointing at ONE DSID subdirectory of the raw zjets tree,
+and the skim flattens a sample's whole input tree into one output directory. It
+needs its own `--sample=zeejets` skim run, not a path swap.
+
+**`skim_ntuples` refuses to skim a skim.** With the registry pointing at the
+copies, a bare `skim_ntuples --sample=zjets` would otherwise read
+`skimmed_ntuples/zjets` and write back into it, applying the selection twice.
+It now hard-errors on two independent checks -- input and output resolving to
+the same directory, and the first input file already carrying `skim_n_input` --
+so `condor/skim_ntuples.sub` passes an explicit `--ntuple-dir=$(rawdir)`.
+Override `rawdir` for `vbf` (`highstats_vbf`, not `vbf`).
+
+**Consequence for `export_training_data`.** Its group key is
+`(sample_id, file_idx, event_num)`, where `file_idx` indexes the sample's full
+sorted file list and `event_num` is the entry within that file. Both are defined
+against whichever tree was read, and the skim has 48 files where the raw sample
+had 1001. An export made entirely from skimmed input is self-consistent; an
+export that MIXES pre- and post-switch shards is not, and the collision is
+silent. Re-export whole, do not append.
+
+| sample | files | size | vs. original |
+|---|---|---|---|
+| vbf   | 1001 -> **48** | 448.5 -> **173.6 GB** | 20.9x fewer files, 2.58x smaller |
+| zjets | 2000 -> **80** | 612.0 -> **76.7 GB**  | 25.0x fewer files, 7.98x smaller |
+| dijet | 1400 -> **60** | 214.0 -> **47.7 GB**  | 23.3x fewer files, 4.49x smaller |
+| ttbar | 1000 -> **48** | 855.4 -> **389.3 GB** | 20.8x fewer files, 2.20x smaller |
+
+195 branches -> 58. Z+jets gains most because its Z->ll requirement keeps only
+26.5% of events; ttbar gains least because it has no lepton selection, so only
+the slim applies.
+
+**The file-count reduction matters more than the size reduction.** The cost of
+a pass is dominated by per-file read round trips, not bytes: `/data/mcardiff`
+is a symlink to `/cold/user/mcardiff` (CephFS, cold tier), a worker issues
+~155 read syscalls per file at ~45 KB each, and that syscall count at ceph
+latency IS the 0.3-1.2 s/file in "Job cost" below. Page cache is worth 26x on
+the same files (8.1 s/file cold vs 0.31 warm).
+
+**What the skim cuts is the LOOSEST COMMON DENOMINATOR**, and this is the part
+to be careful about, since a skimmed-away event is invisible to every
+executable forever:
+
+    a reco and a truth vertex exist, AND
+    |TruthVtx_z[0] - RecoVtx_z[0]| < MAX_VTX_DZ, AND
+    passLeptonSelection()
+
+`passBasicCuts()` ALSO requires `>= MIN_JETS` jets, and putting that in the
+skim was measurably wrong: `util/rpt_v5_hist.cxx` deliberately does not apply
+it, so the jet cut silently removed 20 of its events and shifted 28 of its
+histograms on a 3-file test. It is counted and reported, not cut on. Nothing
+topological is applied either -- freezing one study's VBS cuts into every other
+study's input is the trap the whole design avoids. **Any new cut added here
+must be one that every consumer already applies.**
+
+**Event counts change.** `meta_n_total` after the skim is the skimmed count, so
+an "N% of events pass" figure computed against it is a fraction of the skim,
+not of the sample. Each output file carries `skim_n_input`,
+`skim_n_pass_jets`, `skim_n_pass_vtx`, `skim_n_pass_lepton` and
+`skim_n_output` as `TParameter<Long64_t>` so the original denominators travel
+with the data.
+
+**The keep list is a contract with `BranchPointerWrapper`.** A branch added to
+that constructor must be added to `KEEP_ALWAYS` / `KEEP_LEPTON` /
+`KEEP_EXTENDED` in `util/skim_ntuples.cxx`, or the skimmed sample fails at
+first access. Branches absent from a given production (`Track_btagIp_*` is
+absent from every grid sample) are reported and skipped, matching
+`BranchPointerWrapper`'s own `hasBranch()` tolerance.
+
+Validated original-vs-skimmed on the same input files: `vbs_region_diag` all
+89 columns bit-identical (row-by-row after sorting), `rpt_v5_hist` all 84
+histograms bit-identical with 17 of 19 scalars equal -- the 2 that differ being
+`meta_n_total`/`meta_n_events_total`, as above. Regenerate with
+`condor/skim_ntuples.sub` (66 jobs, ~1 h; writes straight to `/data` and
+transfers nothing back).
+
+### dijet is JZ-sliced, and PV0 is not the hard scatter in the soft slices
+
+`dijet` is five JZ slices in one directory (JZ0 500 files, JZ1 400, JZ2 200,
+JZ3 200, JZ4 100). The analysis assumes `RecoVtx_z[0]` is the hard-scatter
+vertex, and in the soft slices it simply is not:
+
+| slice | `RecoVtx_z[0]` within 2 mm of truth HS | nearest reco vtx IS index 0 |
+|---|---|---|
+| JZ0 | 2.9% | 0.6% |
+| JZ1 | 38.9% | 35.2% |
+| JZ2 | 90.1% | 87.5% |
+| JZ3 | 98.4% | 97.9% |
+| JZ4 | 99.8% | 99.3% |
+
+File-count weighted that is 46.2%, matching the 46.5% `meta_n_pass_basic` of
+the saved rpt_v5 dijet run. So **the dijet result is effectively a JZ2+
+measurement** -- `passBasicCuts` discards ~97% of JZ0 and ~61% of JZ1. It is
+not that the hard scatter is unreconstructed: SOME reco vertex is within 2 mm
+in 94.7% of dijet events, it is just not at index 0.
+
+Two practical consequences. A dijet diagnostic run over the first few files
+sees JZ0 only (`setupChain` sorts by path and JZ0 sorts first) and will look
+catastrophically broken -- that is how this was found. And `--file-shard`
+partitions dijet unevenly in physics content, since a shard's files are spread
+across slices with very different survival rates.
+
 ## Event Display
 
 ```bash
@@ -624,6 +753,11 @@ earlier effort:
 ## Common Workflows
 
 ```bash
+# Run against the SKIMMED copies (the default choice for any grid sample --
+# 20-25x fewer files, see "Skimmed + slimmed copies" under Data Format):
+cd build && ./rpt_v5_hist --sample=zjets \
+    --ntuple-dir=/data/mcardiff/skimmed_ntuples/zjets
+
 # Full analysis (two-step: histogram once, then plot — see "Histogramming
 # vs. Plotting Split" above)
 cd build && ./clustering_hist && ./clustering_plot
@@ -663,6 +797,7 @@ Templates in `condor/` run `clustering_hist` / `rpt_v5_hist` on the UChicago AF 
 
 - **`condor/run_analysis.sh`** — generic executable, invoked as `run_analysis.sh <executable> <sample> [<threads>]`. Sources `atlasLocalSetup.sh` + `lsetup "root <version>"` (relaxing `set -e`/`-u` around just that call — those scripts reference unset internal variables like `ALRB_frontlineSite` and aren't strict-mode safe), then runs the transferred `<executable>` **directly from the job's scratch directory** with `--sample=<sample>` and, if given, `--threads=<N>`. No longer moves the binary into a fake `build/` subdir first (see `src/sample_config.h`'s output-path note below) — that indirection existed only to make the old `../<sample>` output convention resolve to the scratch root; the grid-sample output paths are cwd-relative now, so it's unnecessary and was a latent risk (if that step were ever skipped, `../<sample>` would climb out of the scratch directory into its parent, which may not be writable). Unchanged by the histogramming/plotting split otherwise — generic enough for both the legacy and `*_hist` executables.
 - **`condor/clustering_hist.sub`** / **`condor/rpt_v5_hist.sub`** — one `.sub` file per histogramming executable, each queuing 3 jobs via `queue sample in (vbf, zjets, dijet)`. Submit each separately (own `condor_submit` call) to get independent job clusters. `arguments` passes `4` as the `<threads>` arg, matching `request_cpus = 4` — both `*_hist` executables parallelize their event loop via `TTreeProcessorMT` (see Multicore in Development Notes), and condor's cgroup throttles any threads spawned beyond `request_cpus`, so the two must track each other.
+- **`condor/skim_ntuples.sub`** — regenerates the skimmed+slimmed sample copies (see "Skimmed + slimmed copies" under Data Format). One sample per submit, `$(nshards)` jobs; writes straight to `/data/mcardiff/skimmed_ntuples/<sample>/` and sets `transfer_output_files = ""`, since the output goes to a ceph path the execute hosts already mount rather than back to the submit node. Belongs on condor rather than the login node: the four samples are ~2.1 TB read twice, and 24 concurrent readers on a login node pushed cold reads from 0.3 s/file to 8 s/file and the node to load 94.
 - **`condor/clustering_dt.sub`** / **`condor/rpt_v5.sub`** — legacy templates for the monolithic executables; still work, kept for reference/fallback, not the primary workflow.
 
 Execute hosts do **not** share a filesystem with the submit host on this pool — confirmed via a `TARGET.FileSystemDomain == MY.FileSystemDomain` match failure when `should_transfer_files = NO` was tried first (0 of 157 slots matched). The `*_hist.sub` files use `transfer_input_files` (stages the prebuilt binary in) and `transfer_output_files = $(sample)/$(sample)_<name>.root` (stages back a single small histogram file — much smaller than the full PDF tree the legacy `.sub` files' `transfer_output_files = $(sample)` transfers). Ntuple inputs are read via the absolute `/data/mcardiff/exotic_superntuples/...` path baked into `--sample=` (see `src/sample_config.h`), so they don't need transferring.
