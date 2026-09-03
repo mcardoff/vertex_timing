@@ -326,25 +326,30 @@ int main(int argc, char** argv) {
     // "forward". Same pair the all_ block picks -- the m_jj ranking does not
     // consult the zones -- so any difference between all_ and wide_ is purely
     // the region LABELLING, not a different pair.
-    fillBlock(passPtIdx, FWD_MAX_UNBOUNDED, R.wide);
+    const bool okWide = fillBlock(passPtIdx, FWD_MAX_UNBOUNDED, R.wide);
 
     if (!okAll && !okAcc) continue;
     ++nSel;
 
-    // Cross-check the unrestricted block against the shared classifier: what
-    // rpt_v5 and the clustering side actually fill must match what this
+    // Cross-check against the shared classifier: what the clustering side
+    // actually fills must match what this
     // reconstructs from the legs, or the diagnostic describes another region.
-    const bool locR1 = (R.all.legA_zone == 1 && R.all.legB_zone == 1) &&
-                       ((R.all.legA_hs && R.all.legB_pu) ||
-                        (R.all.legB_hs && R.all.legA_pu));
-    const bool locR2 = (R.all.legA_zone == 1 && R.all.legA_pu &&
-                        R.all.legB_zone == 0 && R.all.legB_hs) ||
-                       (R.all.legB_zone == 1 && R.all.legB_pu &&
-                        R.all.legA_zone == 0 && R.all.legA_hs);
+    // Cross-check against the SHARED classifier. That classifier now runs at
+    // VBS_FWD_ETA_MAX, so the block it must agree with is wide_, not all_ --
+    // pointing it at all_ would report a disagreement on every event whose
+    // pair holds a leg past 4.00, which is exactly the population this
+    // diagnostic exists to study.
+    const bool locR1 = (R.wide.legA_zone == 1 && R.wide.legB_zone == 1) &&
+                       ((R.wide.legA_hs && R.wide.legB_pu) ||
+                        (R.wide.legB_hs && R.wide.legA_pu));
+    const bool locR2 = (R.wide.legA_zone == 1 && R.wide.legA_pu &&
+                        R.wide.legB_zone == 0 && R.wide.legB_hs) ||
+                       (R.wide.legB_zone == 1 && R.wide.legB_pu &&
+                        R.wide.legA_zone == 0 && R.wide.legA_hs);
     const VbsRegion shared =
-        branch.classifyVbsRegion(MIN_ABS_ETA_JET, MAX_ABS_ETA_JET, MIN_ABS_ETA_JET);
-    if (okAll && (locR1 != (shared == VbsRegion::R1) ||
-                  locR2 != (shared == VbsRegion::R2))) ++nDisagree;
+        branch.classifyVbsRegion(MIN_ABS_ETA_JET, VBS_FWD_ETA_MAX, MIN_ABS_ETA_JET);
+    if (okWide && (locR1 != (shared == VbsRegion::R1) ||
+                   locR2 != (shared == VbsRegion::R2))) ++nDisagree;
 
     tree.Fill();
   }

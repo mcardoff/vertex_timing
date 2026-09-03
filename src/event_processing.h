@@ -744,12 +744,16 @@ namespace MyUtl {
 
     // ── G¾. VBS topology region for the VBF_R1 / VBF_R2 gates ───────────────
     // Computed once per event (it re-walks the jet list to find the candidate
-    // pair) and only when a region-gated score is actually active. The eta
-    // windows are the same ones rpt_v5_hist passes, so both analyses classify
-    // an event identically -- see classifyVbsRegion in clustering_structs.h.
+    // pair) and only when a region-gated score is actually active.
+    //
+    // "Forward" here is VBS_FWD_ETA_MAX (unbounded), not MAX_ABS_ETA_JET --
+    // see the constant for the measurement behind that. rpt_v5_hist passes its
+    // own JET_ETA_MIN/JET_ETA_MAX instead, so the two analyses do NOT classify
+    // an event identically; an earlier comment here claimed they did, which
+    // was already untrue (2.38/4.00 against 2.4/3.8) before this change.
     VbsRegion eventRegion = VbsRegion::NONE;
     if (analyses.count(Score::VBF_R1) || analyses.count(Score::VBF_R2))
-      eventRegion = branch->classifyVbsRegion(MIN_ABS_ETA_JET, MAX_ABS_ETA_JET,
+      eventRegion = branch->classifyVbsRegion(MIN_ABS_ETA_JET, VBS_FWD_ETA_MAX,
                                               MIN_ABS_ETA_JET);
 
     // ── H. Per-score histogram filling ──────────────────────────────────────

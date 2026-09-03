@@ -1023,10 +1023,18 @@ int main(int argc, char** argv) {
       // different --vbs-mjj runs produce byte-identical physics.
       //
       // Region membership itself comes from BranchPointerWrapper::
-      // classifyVbsRegion -- shared with the clustering side's VBF_R1/VBF_R2
-      // scores specifically so the two analyses cannot drift into meaning
-      // different event sets by the same name. It also owns the paper-HS/PU
-      // labelling that used to live in this file's local lambdas.
+      // classifyVbsRegion, which also owns the paper-HS/PU labelling that used
+      // to live in this file's local lambdas.
+      //
+      // The eta window passed here is JET_ETA_MIN/JET_ETA_MAX, NOT the
+      // clustering side's unbounded VBS_FWD_ETA_MAX, and that difference is
+      // deliberate: the lines below fill an R_pT histogram FOR each leg, and a
+      // leg past |eta| 4.00 is outside HGTD, so it would enter every timed
+      // scenario carrying its ITk-only R_pT and dilute the R1 rejection with
+      // jets timing never touched. Region membership on the clustering side is
+      // a topology statement; here it has to be a timeable-jet statement.
+      // (These two windows have never matched -- 2.4/3.8 against 2.38/4.00 --
+      // despite an older comment on both sides claiming they did.)
       {
         int fwdHS = -1, fwdPU = -1;
         auto region = branch.classifyVbsRegion(JET_ETA_MIN, JET_ETA_MAX,
