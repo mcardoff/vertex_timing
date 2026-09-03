@@ -166,6 +166,43 @@ int main(int argc, char** argv) {
     for (int i = 0; i < fl->GetEntries(); ++i)
       files.push_back(fl->At(i)->GetTitle());
 
+  // ---------------------------------------------------------------------
+  // Refuse to skim a skim.
+  //
+  // The registry now resolves vbf/zjets/dijet/ttbar to their SKIMMED copies
+  // (see sample_config.h), so a bare `skim_ntuples --sample=zjets` would read
+  // skimmed_ntuples/zjets and write straight back into it -- reading and
+  // rewriting the same directory, with the second selection pass silently
+  // applied on top of the first. Re-skimming needs an explicit
+  // `--ntuple-dir=<original>`.
+  //
+  // Checked two ways, because either alone has a hole: the path test misses an
+  // out-dir that merely aliases the input, and the marker test misses an empty
+  // or unreadable first file.
+  {
+    namespace fs = boost::filesystem;
+    boost::system::error_code ec1, ec2;
+    const fs::path inCanon  = fs::weakly_canonical(fs::path(cfg.ntupleDir), ec1);
+    const fs::path outCanon = fs::weakly_canonical(fs::path(outDir), ec2);
+    if (!ec1 && !ec2 && inCanon == outCanon) {
+      std::cerr << "[skim] REFUSING: input and output are the same directory ("
+                << inCanon.string() << ").\n"
+                   "       Pass --ntuple-dir=<original sample dir> to re-skim.\n";
+      return 1;
+    }
+    if (!files.empty()) {
+      std::unique_ptr<TFile> f(TFile::Open(files.front().c_str(), "READ"));
+      if (f && !f->IsZombie() && f->Get("skim_n_input")) {
+        std::cerr << "[skim] REFUSING: " << files.front()
+                  << " already carries skim_n_input, so this input is itself a "
+                     "skim.\n"
+                     "       Pass --ntuple-dir=<original sample dir> to "
+                     "re-skim from the originals.\n";
+        return 1;
+      }
+    }
+  }
+
   boost::filesystem::create_directories(outDir);
   const std::string tag = MyUtl::FILE_SHARD.active()
       ? "_shard" + std::to_string(MyUtl::FILE_SHARD.index) + "of" +

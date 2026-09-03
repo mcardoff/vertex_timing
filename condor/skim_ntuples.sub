@@ -50,7 +50,19 @@ filesperoutput           = 25
 # verbatim, so no change to that script is needed. The "1" is <threads>:
 # skim_ntuples is single-threaded (it is I/O bound, and TTree::CopyTree is
 # not thread-safe against a shared output file), so request_cpus tracks it.
-arguments                = skim_ntuples $(sample) 1 --file-shard=$(ProcId)/$(nshards) --files-per-output=$(filesperoutput) --out-dir=/data/mcardiff/skimmed_ntuples/$(sample)
+# --ntuple-dir is REQUIRED here, not optional: the registry now resolves the
+# already-skimmed samples to /data/mcardiff/skimmed_ntuples/, so without it a
+# re-run would read this job's own output. skim_ntuples refuses that outright,
+# so a forgotten flag fails the job rather than corrupting the copy -- but the
+# flag is what makes the re-run actually work.
+#
+# The default below matches the registry for every sample EXCEPT two, whose
+# raw directory is not named after them -- override rawdir on the command
+# line for those:
+#   vbf      -a rawdir=/data/mcardiff/exotic_superntuples/highstats_vbf/
+#   zeejets  a single DSID subdirectory of .../zjets/ -- see sample_config.h
+rawdir                   = /data/mcardiff/exotic_superntuples/$(sample)
+arguments                = skim_ntuples $(sample) 1 --file-shard=$(ProcId)/$(nshards) --files-per-output=$(filesperoutput) --out-dir=/data/mcardiff/skimmed_ntuples/$(sample) --ntuple-dir=$(rawdir)
 
 should_transfer_files    = YES
 when_to_transfer_output  = ON_EXIT

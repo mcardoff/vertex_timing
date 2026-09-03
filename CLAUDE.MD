@@ -548,15 +548,47 @@ ROOT ntuples (tree name `"ntuple"`) with the branches bound in
 
 ### Skimmed + slimmed copies (`/data/mcardiff/skimmed_ntuples/`)
 
-`util/skim_ntuples.cxx` writes a reduced copy of each sample, once, and
-**every analysis pass should read that copy** rather than the originals. Point
-any executable at one with `--ntuple-dir=` (which overrides ONLY the input
-directory, leaving the sample's label, output paths, sample name and
-overlap-removal flag alone):
+`util/skim_ntuples.cxx` writes a reduced copy of each sample, once, and every
+analysis pass reads that copy rather than the originals.
+
+**This is now the registry default, not an opt-in.** `resolveSample` resolves
+`vbf`, `zjets`, `dijet` and `ttbar` to `/data/mcardiff/skimmed_ntuples/<name>/`,
+so a bare `--sample=zjets` already reads the skim. `--ntuple-dir=` is the escape
+hatch BACK to the originals -- it overrides ONLY the input directory, leaving
+the sample's label, output paths, sample name and overlap-removal flag alone:
 
 ```bash
-./build/rpt_v5_hist --sample=zjets --ntuple-dir=/data/mcardiff/skimmed_ntuples/zjets
+./build/rpt_v5_hist --sample=zjets      # skimmed copy (default)
+./build/rpt_v5_hist --sample=zjets \
+    --ntuple-dir=/data/mcardiff/exotic_superntuples/zjets/   # originals
 ```
+
+Every run's `[chain] N files added from <dir>` line names the directory it
+actually read, so which tree produced a given output is answerable from its log
+alone. The raw path for each swapped sample is in a comment beside its registry
+entry.
+
+**Four samples are NOT skimmed** and still resolve to the originals: the three
+mu=0 entries, plus `zeejets` -- which cannot be skimmed the same way, because it
+selects a channel by pointing at ONE DSID subdirectory of the raw zjets tree,
+and the skim flattens a sample's whole input tree into one output directory. It
+needs its own `--sample=zeejets` skim run, not a path swap.
+
+**`skim_ntuples` refuses to skim a skim.** With the registry pointing at the
+copies, a bare `skim_ntuples --sample=zjets` would otherwise read
+`skimmed_ntuples/zjets` and write back into it, applying the selection twice.
+It now hard-errors on two independent checks -- input and output resolving to
+the same directory, and the first input file already carrying `skim_n_input` --
+so `condor/skim_ntuples.sub` passes an explicit `--ntuple-dir=$(rawdir)`.
+Override `rawdir` for `vbf` (`highstats_vbf`, not `vbf`).
+
+**Consequence for `export_training_data`.** Its group key is
+`(sample_id, file_idx, event_num)`, where `file_idx` indexes the sample's full
+sorted file list and `event_num` is the entry within that file. Both are defined
+against whichever tree was read, and the skim has 48 files where the raw sample
+had 1001. An export made entirely from skimmed input is self-consistent; an
+export that MIXES pre- and post-switch shards is not, and the collision is
+silent. Re-export whole, do not append.
 
 | sample | files | size | vs. original |
 |---|---|---|---|

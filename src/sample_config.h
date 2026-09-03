@@ -87,17 +87,30 @@ namespace MyUtl {
   //   ttbar_mu0   601229 r15697  pairs with "ttbar" (601229 r15700).
   inline SampleConfig resolveSample(int argc, char** argv) {
     static const std::map<std::string, SampleConfig> registry = {
-      {"vbf",   {"/data/mcardiff/exotic_superntuples/highstats_vbf/",
+      // These four read the SKIMMED copies (see "Skimmed + slimmed copies"
+      // in CLAUDE.MD). The originals they were made from are named beside
+      // each entry; `--ntuple-dir=<raw path>` switches any single run back.
+      // ntuple-dir=/data/mcardiff/exotic_superntuples/highstats_vbf/
+      {"vbf",   {"/data/mcardiff/skimmed_ntuples/vbf/",
                  "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv.", "vbf",   "vbf",   false}},
-      {"zjets", {"/data/mcardiff/exotic_superntuples/zjets/",
+      // ntuple-dir=/data/mcardiff/exotic_superntuples/zjets/
+      {"zjets", {"/data/mcardiff/skimmed_ntuples/zjets/",
                  "#sqrt{s} = 14 TeV, HL-LHC, Z+jets",               "zjets", "zjets", true}},
-      {"dijet", {"/data/mcardiff/exotic_superntuples/dijet/",
+      // ntuple-dir=/data/mcardiff/exotic_superntuples/dijet/
+      {"dijet", {"/data/mcardiff/skimmed_ntuples/dijet/",
                  "#sqrt{s} = 14 TeV, HL-LHC, Dijet",                "dijet", "dijet", false}},
 
       // Zee ONLY at mu=200, i.e. the channel-matched partner for zeejets_mu0.
       // "zjets" above deliberately keeps reading both DSIDs, so every previously
       // published zjets number stays reproducible; this entry exists purely so
       // the mu0-vs-mu200 comparison is like-for-like.
+      //
+      // NOT SKIMMABLE AS-IS, and this is why it still points at the originals
+      // while "zjets" above does not: it selects a channel by reading ONE DSID
+      // SUBDIRECTORY of the raw zjets tree, and the skim flattens every input
+      // file of a sample into one output directory, so the Zee/Zmumu split is
+      // not recoverable from skimmed_ntuples/zjets/. Skimming this needs its
+      // own `--sample=zeejets` skim run writing skimmed_ntuples/zeejets/.
       {"zeejets", {"/data/mcardiff/exotic_superntuples/zjets/"
                    "user.mcardiff.mc21_14TeV.601189.PhPy8EG_AZNLO_Zee.SuperNtuple."
                    "e8481_s4290_r15700.20260712_Output/",
@@ -116,6 +129,10 @@ namespace MyUtl {
       // satisfied by PILEUP jets. vbf_mu0 should pass normally, since forward
       // tagging jets are the VBF signature, which is why it is the one that can
       // support a timing measurement.
+      //
+      // The three mu=0 entries and "zeejets" above are NOT skimmed yet, so they
+      // still read the originals -- one `condor_submit -a sample=<name>` on
+      // condor/skim_ntuples.sub each, then swap the path here.
       {"vbf_mu0",     {"/data/mcardiff/exotic_superntuples/vbf_mu0/",
                        "#sqrt{s} = 14 TeV, #mu = 0, VBF H#rightarrowinv.",
                        "vbf_mu0", "vbf_mu0", false}},
@@ -137,7 +154,8 @@ namespace MyUtl {
       // overlapRemoval stays false for the same reason as ttbar_mu0 above: the
       // flag currently also switches on passLeptonSelection, whose OS-SF PAIR
       // requirement would reject every SingleLep event.
-      {"ttbar",       {"/data/mcardiff/exotic_superntuples/ttbar/",
+      // ntuple-dir=/data/mcardiff/exotic_superntuples/ttbar/
+      {"ttbar",       {"/data/mcardiff/skimmed_ntuples/ttbar/",
                        "#sqrt{s} = 14 TeV, HL-LHC, t#bar{t} (1 lep)",
                        "ttbar", "ttbar", false}},
     };
