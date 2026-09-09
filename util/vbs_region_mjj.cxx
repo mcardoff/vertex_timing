@@ -223,10 +223,11 @@ int main(int argc, char** argv) {
     if (!pair.valid()) { ++nNoPair; continue; }
     ++nSel;
 
-    // R1/R2 from the SHARED classifier, so the regions here cannot mean
-    // something different from the ones rpt_v5 and the clustering analysis fill.
+    // R1/R2 from the SHARED classifier, at the same unbounded-forward window
+    // the clustering analysis now uses (VBS_FWD_ETA_MAX). rpt_v5 stays on its
+    // own tighter window on purpose -- see the constant.
     const VbsRegion region =
-        branch.classifyVbsRegion(MIN_ABS_ETA_JET, MAX_ABS_ETA_JET, MIN_ABS_ETA_JET);
+        branch.classifyVbsRegion(MIN_ABS_ETA_JET, VBS_FWD_ETA_MAX, MIN_ABS_ETA_JET);
 
     const int a = pair.idxI, b = pair.idxJ;
 
@@ -236,7 +237,7 @@ int main(int argc, char** argv) {
     auto zone = [&](int j) {
       const double e = std::abs((double)branch.topoJetEta[j]);
       if (e < MIN_ABS_ETA_JET)                          return 0;  // central
-      if (e > MIN_ABS_ETA_JET && e < MAX_ABS_ETA_JET)   return 1;  // HGTD acc.
+      if (e > MIN_ABS_ETA_JET && e < VBS_FWD_ETA_MAX)   return 1;  // forward
       return 2;                                                    // beyond
     };
 
