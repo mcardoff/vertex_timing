@@ -542,6 +542,35 @@ ROOT ntuples (tree name `"ntuple"`) with the branches bound in
 | Particles | `TruthPart_prodVtx_time` (bound as `particleT`) |
 | Event | `weight` |
 
+## Data Locations (UChicago AF)
+
+**Rule: bulk data lives on `/data`, never in `$HOME`.** `/home` is a shared NFS
+export (23 T total, chronically ~80% full) and is quota'd per user; `/data` is
+CephFS with petabytes free. Merged products belong on `/data`; per-shard
+intermediates are disposable and should be deleted once the merge is verified.
+See "Cleaning up after a sharded campaign" below for the procedure and the
+2026-09-08 precedent (50 G recovered from one directory).
+
+| what | where | contents |
+|---|---|---|
+| Original superntuples | `/data/mcardiff/exotic_superntuples/<sample>/` | `highstats_vbf`, `zjets`, `dijet`, `ttbar`, `vbf_mu0`, `zeejets_mu0`, `ttbar_mu0` — the paths baked into `src/sample_config.h` |
+| **Skimmed ntuples** (2026-09-02) | `/data/mcardiff/skimmed_ntuples/<sample>/` | vbf 48 files / 162 G, zjets 80 / 72 G, dijet 60 / 45 G, ttbar 48 / 363 G (~642 G) |
+| ML exports, current | `/data/mcardiff/training_new/` | 14 files, 19 G — post-vertex-re-export column set |
+| ML exports, previous | `/data/mcardiff/training/` | 14 files, 15 G — pre-`archive_pre_vtx` column set, kept as the older generation |
+
+**Nothing in this repo reads `skimmed_ntuples/` yet.** `src/sample_config.h` as
+committed resolves `--sample=` to `exotic_superntuples/` and has no
+`--ntuple-dir` override. The skimming machinery — `util/skim_ntuples.cxx`,
+`condor/skim_ntuples.sub`, a `--ntuple-dir` flag in `sample_config.h`, and
+`util/vbs_region_diag.cxx` — exists only as uncommitted work in the AF working
+tree at `~/project/vertex_timing`. Push it to a branch before relying on it;
+until then a skimmed-input run is not reproducible from a clean checkout.
+
+Both ML export generations carry the same 14 `<sample>_{mjj500p0,novbs}_training.root`
+names, so always qualify which directory you mean. `training_new` files are
+~1.33x larger than their `training` counterparts — that ratio is the added
+vertex-fit/track-quality columns, not more events.
+
 ## Event Display
 
 ```bash
@@ -833,10 +862,60 @@ A useful accident: zjets accepted **64,950** in this 12-shard default run and
 invariant on real grid data at a different shard count, and that the new
 default is precisely the selection that run asked for.
 
-**Merging: glob on the shard count, not on `shard*`.** `condor/zjets/` now
-holds both the 32-shard and 12-shard sets (44 files); `*clustering_hist.shard*.root`
-matches both and would double-count every event. Use
-`*clustering_hist.shard*of12.root`.
+**Merging: glob on the shard count, not on `shard*`.** A sample directory can
+accumulate several shardings of the same data, and `*clustering_hist.shard*.root`
+matches all of them — merging that glob double-counts every event. Always pin
+the count: `*clustering_hist.shard*of12.root`.
+
+As of the 2026-09-08 prune **every stem holds exactly one sharding**, so the
+glob is currently safe; it will not stay that way the next time a sample is
+re-run at a different shard count. Surviving sets: dijet clustering `of4` +
+rpt_v5 `of6`, ttbar rpt_v5 `of16`, vbf clustering `of4` + rpt_v5 `of4`, zjets
+clustering `of12` + rpt_v5 `of14`.
+
+**Identify a shard generation by CONTENT, not by mtime and not by event count.**
+Two traps, both hit on 2026-09-08:
+- `meta_n_total` counts events *read*, so **any complete sharding sums to the
+  full sample** — dijet's `of4` and `of6` sets both summed to exactly 699,500,
+  matching the merged file, and the scalar discriminated nothing.
+- What does discriminate is the histogram set the code version wrote. The
+  pre-TZP `rpt_v5_hist` shards carry 91 keys and zero `tzp`-named histograms;
+  post-TZP shards and the merged files carry 103 keys including 12 `tzp` ones.
+  That is what proved dijet `of4` and zjets `of12` were superseded and could
+  not have been the merge source.
+
+**`vbf/vbf_rpt_v5_hist.root` predates TZP** (2026-08-27, merged from `of4`).
+dijet/zjets/ttbar were re-run 2026-09-01 with the tzp scenario; VBF was not, so
+plotting it yields six scenarios, not seven. It needs a fresh submission before
+VBF's RpT can be read beside the other three.
+
+### Cleaning up after a sharded campaign
+
+Shards and archives are intermediates. Once a merge is verified they are pure
+duplication of something already on `/data`, and on `/home` they are actively
+expensive. Precedent: on 2026-09-08 `condor/` held **50 G** — half the `$HOME`
+quota — and cleaning it left **73 M** with no loss.
+
+**Verify before deleting, and verify with entry counts, not sizes.** `hadd`
+header overhead makes a merged file's *size* match the shard sum approximately
+even when a shard was silently dropped, so size agreement proves nothing. The
+check that does: open the merged file and its shards, compare
+`clusters->GetEntries()` against the sum over the shard set, and require exact
+equality. All 14 exports in `training_new` passed (e.g. vbf_novbs 3,994,782 =
+3,994,782) before anything was removed. For an archived directory holding its
+own merged copy, compare `stat -c %s` against the `/data` copy — 14 were
+byte-identical.
+
+That pass also surfaces what is NOT duplicated: three
+`*_deta0p0_mjj500p0_training.root` files (vbf_mu0, ttbar_mu0, zeejets_mu0,
+~2.4 G) existed only inside the archives with no `/data` copy. They were the
+pre-vtx column set at a selection that `mjj500p0` now expresses identically, and
+were deleted deliberately after being flagged — the point is that a wholesale
+`rm -rf` of the archives would have destroyed them silently.
+
+What must survive a cleanup: the merged `*_hist.root` files (the `*_plot` stage
+inputs, ~9 M total), the PDF output subdirectories, the `.sub`/`.sh` templates,
+and `logs/`.
 
 **First sharded grid run** (cluster 2928803, zjets `clustering_hist`,
 32 shards, `--vbs-deta=0 --vbs-mjj=200`): **32/32 shards completed, none held**,
