@@ -149,7 +149,35 @@ namespace MyUtl {
   const double MIN_HGTD_ETA       = 2.38;  // HGTD Min eta
   const double MAX_HGTD_ETA       = 4.0;   // HGTD Max eta
   const double MIN_ABS_ETA_JET    = 2.38;  // "forward" jet min eta
-  const double MAX_ABS_ETA_JET    = 4.00;  // "forward" jet max eta
+  const double MAX_ABS_ETA_JET    = 4.00;  // "forward" jet max eta (HGTD acceptance)
+
+  // VBS_FWD_ETA_MAX -- "forward" for TOPOLOGY, deliberately unbounded.
+  //
+  // MAX_ABS_ETA_JET above is HGTD ACCEPTANCE: it answers "can timing act on
+  // this jet". VBS region membership was using the same number to answer a
+  // different question -- "is this a forward tagging jet" -- and the two are
+  // not the same question. calcBestVbsPair maximises m_jj, and m_jj ~
+  // cosh(dEta), so the winning pair systematically holds the most forward jet
+  // in the event; capping "forward" at 4.00 made every such pair land in
+  // neither zone and fall through to "Other".
+  //
+  // Measured (vbs_region_diag, m_jj >= 500, |dEta| >= 2.5): on Z+jets the
+  // status quo put 92.51% of pairs in Other and only 5.85% in R1+R2, with the
+  // chosen pair's more-forward leg sitting at a median |eta| of 4.17 -- i.e.
+  // just outside. Unbounding forward moves that to 11.32% (R1 2.39 -> 5.94,
+  // R2 3.46 -> 5.38). VBF 9.35 -> 22.01, dijet 15.30 -> 29.96.
+  //
+  // THE COST, stated plainly: a leg past |eta| 4.00 is outside HGTD, so region
+  // membership is now a statement about EVENT TOPOLOGY, not a promise that
+  // timing can act on both legs. Those two readings were the same thing while
+  // this was capped at acceptance, and they are not any more.
+  //
+  // rpt_v5_hist deliberately does NOT use this -- it passes its own
+  // JET_ETA_MIN/JET_ETA_MAX because it fills an R_pT histogram FOR each leg,
+  // and an untimeable leg would enter the timed scenarios as its ITk-only
+  // value and dilute the R1 rejection. See the note at its classifyVbsRegion
+  // call.
+  const double VBS_FWD_ETA_MAX    = 1e9;   // "forward" jet max eta, TOPOLOGY
   const double MIN_ABS_ETA_TRACK  = 2.38;  // "forward" track min eta 
   const double MAX_ABS_ETA_TRACK  = 4.00;  // "forward" track max eta
   const double MIN_TRACK_PT       = 1.0;   // clustered track_pt > 1.0 GeV
