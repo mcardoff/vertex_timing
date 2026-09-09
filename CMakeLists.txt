@@ -64,6 +64,8 @@ add_executable(vbs_region_mjj util/vbs_region_mjj.cxx)
 add_executable(ttreemt_prototype util/ttreemt_prototype.cxx)
 add_executable(assoc_study_hist util/assoc_study_hist.cxx)
 add_executable(assoc_study_plot util/assoc_study_plot.cxx)
+add_executable(vbs_region_diag util/vbs_region_diag.cxx)
+add_executable(skim_ntuples util/skim_ntuples.cxx)
 add_executable(hist_merge util/hist_merge.cxx)
 
 # Specify the include directories for your header files
@@ -85,7 +87,9 @@ foreach(_tgt
     track_dt
     vbs_mjj_diag
     vbs_region_mjj
+    vbs_region_diag
     ttreemt_prototype
+    skim_ntuples
     assoc_study_hist
     assoc_study_plot
     hist_merge
