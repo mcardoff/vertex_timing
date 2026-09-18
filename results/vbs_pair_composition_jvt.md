@@ -1,24 +1,35 @@
 # The VBS pair with pileup-jet tagging applied first
 
-`util/vbs_region_diag.cxx --jvt=none|loose|tight`, local VBF (33 files,
-112,400 events), 2026-09-18. Follows `vbs_pair_composition.md`, on Ariel's
-point that an analysis applies JVT and fJVT to the jets BEFORE it forms a
-tagging pair, so a composition measured on untagged jets describes a
-population no analysis sees.
+`util/vbs_region_diag.cxx --jvt=none|loose|tight`, 2026-09-18: local VBF
+(33 files, 112,400 events) and the skimmed grid Z+jets sample (80 files,
+530,962 events, condor clusters 3050292-94). Follows
+`vbs_pair_composition.md`, on Ariel's point that an analysis applies JVT and
+fJVT to the jets BEFORE it forms a tagging pair, so a composition measured on
+untagged jets describes a population no analysis sees.
 
-**Headline (VBF): the taggers remove pileup, not R1/R2.** What they remove is
-98.5% paper-PU on the JVT side and 86% on the fJVT side; the HS+HS share of
-the chosen pair rises from 56% to 71% (loose) and 78% (tight); and the
-pileup-only pairs fall from 5.2% to 2.8% and 1.9%. R1 and R2 shrink only
-modestly (11.9 → 10.9 → 9.4%, 6.9 → 6.7 → 6.1%), and event by event 70% of the
-R1 events and 67% of the R2 events are still R1/R2 after the loose point.
-The R1/R2 population Ariel asked about survives the taggers; it is the
-pileup-only "Other" that goes.
+**Headline, Z+jets: the standard taggers do not turn Z+jets into an R2
+sample. They remove the CENTRAL pileup and leave the forward pileup, so the
+surviving pairs are forward-forward pileup.** Under the loose point 59% of
+selected events are dropped outright (77% tight); the F-PU + C-PU cell
+collapses from 37.8% to 14.5% to 5.7% of pairs; but F-PU + F-PU GROWS as a
+share, 27.8 → 38.8 → 42.0%, because fJVT at μ = 200 keeps two thirds of
+forward pileup jets (PU efficiency 67% loose, 47% tight) while the central
+JVT keeps 15% / 1.8%. R2 does rise, 7.8 → 15.1 → 20.3% of pairs, but by
+removing its competition rather than by creation: 78% of post-loose R2
+events were R2 before the tagger, and the absolute R2 count falls 5,064 →
+4,055 → 3,143. Even tight leaves 60% of Z+jets pairs with no hard-scatter
+leg at all. The previous write-up's conclusion — the central HS leg is
+mostly not there — stands after tagging, with a second reason on top: the
+forward fake cannot be tagged away at this pileup.
 
-**This is VBF only.** The whole reason the previous study exists is that
-Z+jets is a PU+PU plot (70.7% of its pairs), and that is where the taggers
-should act hardest. The Z+jets and dijet runs need condor
-(`condor/vbs_region_diag.sub`) and have not been submitted.
+**VBF, the control: the taggers remove pileup and leave R1/R2 alone.** What
+they remove is 98.5% paper-PU on the JVT side and 86% on the fJVT side; the
+HS+HS share of the chosen pair rises from 56% to 71% (loose) and 78%
+(tight); pileup-only pairs fall from 5.2% to 2.8% and 1.9%. R1 and R2 shrink
+only modestly (11.9 → 10.9 → 9.4%, 6.9 → 6.7 → 6.1%), and event by event 70%
+of R1 events and 67% of R2 events are still R1/R2 after the loose point.
+
+dijet has not been run (same three submissions with `sample=dijet`).
 
 ## What is computed, and what it is not
 
@@ -133,15 +144,82 @@ Two readings:
   86% under loose). The taggers do not manufacture new R1/R2 events out of
   "Other"; they thin the existing ones.
 
+## Z+jets (skimmed grid sample, wide_ block, m_jj ≥ 200 GeV)
+
+The no-tagger column reproduces the previous write-up's 64,950 pairs exactly,
+so the skim and the earlier raw-sample run agree.
+
+| | no tagger | loose | tight |
+|---|---:|---:|---:|
+| selected events | 69,701 | 28,293 | 16,114 |
+| pairs in window | 64,950 | 26,883 | 15,517 |
+| F-PU + C-PU | 37.8% | 14.5% | 5.7% |
+| F-PU + F-PU | 27.8% | **38.8%** | **42.0%** |
+| R2 (F-PU + C-HS) | 7.8% | 15.1% | 20.3% |
+| R1 (F-HS + F-PU) | 3.3% | 5.5% | 6.8% |
+| F-HS + C-HS | 1.7% | 4.2% | 6.8% |
+| no HS leg | 79.9% | 68.6% | 60.3% |
+| two HS legs | 2.0% | 4.8% | 7.6% |
+| both legs forward | 36.3% | **51.8%** | **57.2%** |
+
+Jets removed (HS/PU by paper label): loose, JVT 37,294 (HS 479, PU 33,549),
+fJVT 14,080 (HS 291, PU 12,679); tight, JVT 24,484 (HS 542, PU 21,064), fJVT
+13,725 (HS 353, PU 12,305). The tight JVT count is LOWER than loose because
+the tight run drops more events before the count is taken.
+
+**Why the composition tilts forward.** The two taggers are not equally
+effective, and the gap is larger on Z+jets than on VBF:
+
+| Z+jets, fixed thresholds | HS eff | PU eff |
+|---|---:|---:|
+| JVT loose (R_pT ≥ 0.0167, central) | 90.8% | 15.3% |
+| JVT tight (R_pT ≥ 0.0767) | 80.9% | 1.8% |
+| fJVT loose (≤ 0.5, forward) | 84.1% | 66.8% |
+| fJVT tight (≤ 0.4) | 70.3% | 47.4% |
+
+So a central pileup jet is removed 85–98% of the time and a forward one
+33–53% of the time. Every cell with a central PU leg drains (F-PU + C-PU
+37.8 → 5.7%, F-HS + C-PU 4.8 → 1.1%, F-X + C-PU 3.2 → 0.6%) and every cell
+whose pileup is forward-only holds or grows as a share (F-PU + F-PU, F-PU +
+F-X, R1). "Both legs forward" goes from 36% to 57% of pairs. The thresholds
+are the VBF-calibrated ones held fixed; on Z+jets they sit ~1 point (loose)
+and ~4 points (tight) below their VBF hard-scatter efficiencies, and the
+fJVT forward HS efficiency is 9–16 points below VBF's, because Z+jets
+forward HS jets are softer and their fJVT median is 0.30 against VBF's 0.20.
+
+**Migration, none → loose** (rows: region before; columns: after):
+
+| | R1 | R2 | both HS | other | dropped | n |
+|---|---:|---:|---:|---:|---:|---:|
+| R1 | 63.3% | 0.8% | 2.7% | 6.5% | 25.9% | 2,165 |
+| R2 | 0.0% | 62.8% | 0.4% | 0.6% | 35.9% | 5,064 |
+| both HS | 0.0% | 0.3% | 83.6% | 0.4% | 15.6% | 1,279 |
+| other | 0.2% | 1.5% | 0.3% | 35.2% | 61.9% | 56,442 |
+
+Post-loose R2 is 78% pre-tagger R2 and 21% pre-tagger "other" (a pileup pair
+whose central PU leg was tagged and re-paired to a central HS jet); post-loose
+R1 is 93% pre-tagger R1. Under tight, R1 stays R1 43% and R2 stays R2 45%,
+with 47% / 54% dropped. The taggers thin R1/R2 on Z+jets faster than on VBF
+(26% / 36% dropped against 13% / 26%) because a Z+jets R1/R2 event rarely has
+a spare jet to re-pair to.
+
+Figures: `condor/zjets/zjets_vbs_jvt.png` (m_jj ≥ 200) and
+`condor/zjets/zjets_vbs_jvt_mjj500.png` (m_jj ≥ 500, |Δη| ≥ 2.5, where R1 /
+R2 go 5.8 → 8.0 → 9.2% / 5.5 → 8.5 → 10.4% and no-HS-leg 83.4 → 77.4 →
+73.3%).
+
 ## What this does NOT settle
 
-- **Z+jets.** Everything above is VBF, where 56% of pairs were already HS+HS
-  and the taggers had little to remove. On Z+jets, 79.7% of pairs had no HS
-  leg; the loose point should remove most of the 65.6% in the two pileup-only
-  cells, and the question that matters is what fraction of the SURVIVING pairs
-  is R2. Submit all three working points per sample:
-  `condor_submit -a sample=zjets [-a jvt=loose -a jvttag=_jvtLoose] vbs_region_diag.sub`,
-  then `python/vbs_jvt_plot.py --dir condor/zjets --sample zjets`.
+- **dijet.** Not run. Same three submissions with `sample=dijet`, then
+  `python/vbs_jvt_plot.py --dir condor/dijet --sample dijet`.
+- **Whether fJVT's weakness here is the proxy or the pileup.** The fJVT
+  computed is the published definition, but its inputs are the vertex fit's
+  track assignment at μ = 200 with ~100 vertices, and the max over that many
+  vertices inflates every jet's value. A real Athena fJVT on one file would
+  say whether 67% PU efficiency at the loose cut is what the tool does at
+  this pileup or an artefact of the reconstruction here. Until then the
+  Z+jets forward-forward residual should be read as "not removable by fJVT
+  as computed here", not as a property of the sample.
 - **The JVT proxy is not JVT.** If the numbers are going to be quoted as
   "with JVT", the ntuple production should be asked for the Jvt/fJvt
   decorations (or NNJvt for Run 3), and the proxies validated against them on
@@ -163,6 +241,14 @@ PYTHONNOUSERSITE=1 ~/.venv-hgtd/bin/python python/vbs_jvt_plot.py --dir figs --s
 PYTHONNOUSERSITE=1 ~/.venv-hgtd/bin/python python/vbs_jvt_migration.py --dir figs --sample local
 ```
 
-Each local run is ~25 s. The `--jvt=none` output was verified bit-identical
-to the pre-JVT diagnostic on all 95 pre-existing columns (48,640 rows), so
-nothing in the earlier write-up moved.
+Each local run is ~25 s; a Z+jets condor job is ~19 min single-threaded.
+The `--jvt=none` output was verified bit-identical to the pre-JVT diagnostic
+on all 95 pre-existing columns (48,640 rows), so nothing in the earlier
+write-up moved.
+
+**A trap that cost one submission.** The first three Z+jets jobs wrote 10 KB
+files with exit code 0 and zero events read: with `EXTENDED_BRANCHES` on, the
+wrapper bound `Track_btagIp_*`, which local VBF has and every grid sample
+lacks, and a TTreeReader with a missing branch iterates nothing rather than
+failing. `recordAvailableBranches` (shared with the exporter) now runs before
+binding, and the diagnostic exits 2 on zero events.

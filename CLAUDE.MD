@@ -1311,13 +1311,25 @@ The SuperNtuples carry **no Jvt/fJvt branch**, so `--jvt=loose|tight`
 computes both in-code from `Track_recoVtx_idx` + ghost tracks (R_pT as the
 JVT proxy, calibrated to the published 92% / 85% HS efficiencies on local
 VBF; fJVT per arXiv:1705.02211 with the published 0.5 / 0.4 cuts) and
-applies them BEFORE pairing. `results/vbs_pair_composition_jvt.md`, **VBF
-only so far**: removal is 98.5% pileup-pure on the JVT side, the HS+HS share
-of the pair rises 56 → 71 → 78%, and R1/R2 shrink only modestly (70% / 67% of
-R1 / R2 events are still R1 / R2 after the loose point). fJVT is weaker at
-μ = 200 than in its paper (the max over ~100 PU vertices inflates HS values).
-Z+jets and dijet need `condor/vbs_region_diag.sub`, not yet submitted. The
-`--jvt=none` output is bit-identical to the pre-JVT diagnostic.
+applies them BEFORE pairing. `results/vbs_pair_composition_jvt.md`:
+
+- **Z+jets: the taggers do not make it an R2 sample.** They remove central
+  pileup (JVT PU eff 15% / 1.8%) far better than forward pileup (fJVT PU eff
+  67% / 47% at μ = 200), so F-PU + C-PU drains 37.8 → 5.7% while F-PU + F-PU
+  GROWS 27.8 → 42.0% of pairs. R2 rises 7.8 → 20.3% by losing its
+  competition, not by creation (78% of post-loose R2 was R2 before); even
+  tight leaves 60% of pairs with no HS leg. 59% / 77% of selected events are
+  dropped. The no-tagger run reproduces the earlier 64,950 pairs exactly.
+- **VBF, the control:** removal is 98.5% pileup-pure on the JVT side, HS+HS
+  share of the pair rises 56 → 71 → 78%, R1/R2 shrink only modestly and 70% /
+  67% of R1 / R2 events are still R1 / R2 after the loose point.
+- dijet not run. `--jvt=none` is bit-identical to the pre-JVT diagnostic.
+
+**Anything setting `EXTENDED_BRANCHES` must call `recordAvailableBranches`
+(src/event_processing.h) after `setupChain` and before constructing the
+wrapper.** The grid samples lack `Track_btagIp_*`; a TTreeReader with a
+missing branch iterates ZERO entries and exits 0. The first Z+jets submission
+of this diagnostic produced three "successful" empty files that way.
 
 Results as of 2026-08-20, from `rpt_v5` (grid samples, |Deta| >= 0 and
 m_jj >= 500 GeV) and `failure_decomposition` (local VBF). Numbers are pileup
