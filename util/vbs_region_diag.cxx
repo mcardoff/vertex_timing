@@ -71,6 +71,14 @@
 // `jets` tree holds every pT-passing jet's discriminants BEFORE the cut, so a
 // threshold can be re-derived (python/vbs_jvt_calibrate.py) or scanned offline
 // without a rerun.
+//
+// --pair=mjj|lead picks the PAIR. mjj (default) is calcBestVbsPair: the
+// largest-m_jj opposite-hemisphere pair. lead is the Run-2 VBF H->inv
+// convention (arXiv:2202.07953, per the internal note): the two leading-pT
+// jets, full stop -- the paper then REQUIRES them in opposite hemispheres as
+// an event cut, so the pair carries a same_hemi flag and the plotting side
+// applies that cut rather than the picker. Tags the output _leadpair. The
+// alt_* per-shape pairs are picker-independent and unchanged.
 // -----------------------------------------------------------------------------
 #include <TChain.h>
 #include <TFile.h>
@@ -220,6 +228,7 @@ std::vector<JetDisc> computeJetDiscriminants(const BranchPointerWrapper& b) {
 struct PairBlock {
   float n_jets;
   float pair_mjj, pair_deta;
+  float pair_same_hemi;   // 1 if both legs have the same sign of eta (only reachable under --pair=lead)
   float legA_zone, legA_hs, legA_pu, legA_pt, legA_abseta;
   float legB_zone, legB_hs, legB_pu, legB_pt, legB_abseta;
   // Best pair of each shape present in the event, chosen or not.
@@ -297,6 +306,16 @@ int main(int argc, char** argv) {
     wpSel = hit;
   }
   const JvtWP& WP = *wpSel;
+  // --pair=mjj|lead: which two jets are "the VBF pair" (see the file header).
+  bool pairLead = false;
+  for (int i = 1; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a.rfind("--pair=", 0) != 0) continue;
+    const std::string w = a.substr(7);
+    if      (w == "lead") pairLead = true;
+    else if (w == "mjj")  pairLead = false;
+    else { std::cerr << "[diag] unknown --pair=" << w << " (mjj|lead)\n"; return 1; }
+  }
   // The discriminants need the vertex fit's track assignment, which lives in
   // the extended branch set. Must be set before the BranchPointerWrapper binds.
   EXTENDED_BRANCHES = true;
@@ -315,7 +334,8 @@ int main(int argc, char** argv) {
 
   std::string outPath = OUTPUT_DIR + "/" +
                         (SAMPLE_NAME.empty() ? std::string("local") : SAMPLE_NAME) +
-                        (noOR ? "_noOR" : "") + WP.tag + "_vbs_region_diag.root";
+                        (noOR ? "_noOR" : "") + WP.tag + (pairLead ? "_leadpair" : "") +
+                        "_vbs_region_diag.root";
   for (int i = 1; i < argc; ++i) {
     std::string a = argv[i];
     if (a.rfind("--out=", 0) == 0) outPath = a.substr(6);
@@ -328,7 +348,8 @@ int main(int argc, char** argv) {
     std::cout << " (R_pT >= " << WP.rptMin << " for |eta| < " << JVT_ETA_MAX
               << ", pT < " << JVT_PT_MAX << "; fJVT <= " << WP.fjvtMax << " for "
               << FJVT_ETA_MIN << " <= |eta| < " << FJVT_ETA_MAX << ", pT < " << FJVT_PT_MAX << ")";
-  std::cout << " out=" << outPath << "\n";
+  std::cout << " pair=" << (pairLead ? "leading two jets" : "max m_jj, opposite hemispheres")
+            << " out=" << outPath << "\n";
 
   TChain chain("ntuple");
   setupChain(chain, cfg.ntupleDir.c_str(), MyUtl::FILE_SHARD);
@@ -370,7 +391,7 @@ int main(int argc, char** argv) {
   auto branchBlock = [&](const char* pfx, PairBlock& B) {
     auto nm = [&](const char* f) { return std::string(pfx) + f; };
 #define BB(f) tree.Branch(nm(#f).c_str(), &B.f)
-    BB(n_jets); BB(pair_mjj); BB(pair_deta);
+    BB(n_jets); BB(pair_mjj); BB(pair_deta); BB(pair_same_hemi);
     BB(legA_zone); BB(legA_hs); BB(legA_pu); BB(legA_pt); BB(legA_abseta);
     BB(legB_zone); BB(legB_hs); BB(legB_pu); BB(legB_pt); BB(legB_abseta);
     BB(alt_r1_mjj); BB(alt_r2_mjj); BB(alt_pupu_mjj); BB(alt_bothhs_mjj);
@@ -512,6 +533,7 @@ int main(int argc, char** argv) {
       B = PairBlock{};
       B.n_jets = (float)idx.size();
       B.pair_mjj = B.pair_deta = -1.f;
+      B.pair_same_hemi = 0.f;
       B.alt_r1_mjj = B.alt_r2_mjj = B.alt_pupu_mjj = B.alt_bothhs_mjj = -1.f;
       B.alt_r2_fwd_abseta = B.alt_r2_cen_abseta = -1.f;
       B.alt_r1_hs_abseta  = B.alt_r1_pu_abseta  = -1.f;
@@ -536,7 +558,7 @@ int main(int argc, char** argv) {
           vi.SetPtEtaPhiM(branch.topoJetPt[i], ei, branch.topoJetPhi[i], 0.0);
           vj.SetPtEtaPhiM(branch.topoJetPt[j], ej, branch.topoJetPhi[j], 0.0);
           const double m = (vi + vj).M();
-          if (m > bestM) {
+          if (!pairLead && m > bestM) {
             bestM = m; bestA = (int)a; bestB = (int)b;
           }
           const bool r1 = (zn[a] == 1 && zn[b] == 1) &&
@@ -564,6 +586,22 @@ int main(int argc, char** argv) {
           if (pu[a] && pu[b] && m > B.alt_pupu_mjj)   B.alt_pupu_mjj   = (float)m;
           if (hs[a] && hs[b] && m > B.alt_bothhs_mjj) B.alt_bothhs_mjj = (float)m;
         }
+      }
+      if (pairLead && idx.size() >= 2) {
+        // The two leading-pT jets, whatever their hemispheres; the flag lets
+        // the plotting side apply the paper's opposite-hemisphere cut.
+        int a0 = -1, a1 = -1;
+        for (size_t k = 0; k < idx.size(); ++k) {
+          const float pt = branch.topoJetPt[idx[k]];
+          if      (a0 < 0 || pt > branch.topoJetPt[idx[a0]]) { a1 = a0; a0 = (int)k; }
+          else if (a1 < 0 || pt > branch.topoJetPt[idx[a1]]) { a1 = (int)k; }
+        }
+        bestA = a0; bestB = a1;
+        TLorentzVector vi, vj;
+        vi.SetPtEtaPhiM(branch.topoJetPt[idx[a0]], branch.topoJetEta[idx[a0]], branch.topoJetPhi[idx[a0]], 0.0);
+        vj.SetPtEtaPhiM(branch.topoJetPt[idx[a1]], branch.topoJetEta[idx[a1]], branch.topoJetPhi[idx[a1]], 0.0);
+        bestM = (vi + vj).M();
+        B.pair_same_hemi = (branch.topoJetEta[idx[a0]] * branch.topoJetEta[idx[a1]] >= 0) ? 1.f : 0.f;
       }
       if (bestA < 0) return false;
 
@@ -626,7 +664,7 @@ int main(int argc, char** argv) {
     // UNTAGGED jet list, so under a working point it disagrees on exactly the
     // events whose pair the tagger changed -- which is the measurement, not a
     // bug. Gated rather than reinterpreted so the counter keeps meaning "bug".
-    if (WP.rptMin < 0.0) {
+    if (WP.rptMin < 0.0 && !pairLead) {
       const VbsRegion shared =
           branch.classifyVbsRegion(MIN_ABS_ETA_JET, VBS_FWD_ETA_MAX, MIN_ABS_ETA_JET);
       if (okWide && (locR1 != (shared == VbsRegion::R1) ||
@@ -648,7 +686,8 @@ int main(int argc, char** argv) {
             << ", no pair (all jets) " << nNoPairAll
             << ", no pair (acceptance jets) " << nNoPairAcc
             << ", R1/R2 cross-check disagreements "
-            << (WP.rptMin < 0.0 ? std::to_string(nDisagree) : std::string("n/a under a working point")) << "\n";
+            << (WP.rptMin < 0.0 && !pairLead ? std::to_string(nDisagree)
+                                             : std::string("n/a (working point or lead pair)")) << "\n";
   std::cout << "[diag] jvt=" << WP.name << ": " << nJetsPre << " pT-passing jets, removed "
             << nRmJvt << " by JVT and " << nRmFjvt << " by fJVT; "
             << nEvtLostToWP << " events dropped below the jet requirements\n";
