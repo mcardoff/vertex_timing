@@ -129,7 +129,7 @@ tot.Draw("HIST")
 q = ROOT.TLatex(); q.SetTextFont(42); q.SetTextSize(0.075); q.SetTextAlign(21)
 for b in range(1, tot.GetNbinsX() + 1):
     v = tot.GetBinContent(b)
-    if v > 0: q.DrawLatex(tot.GetXaxis().GetBinCenter(b), v * (2.0 if b % 2 else 5.5), f"{int(v):,}")
+    if v > 0: q.DrawLatex(tot.GetXaxis().GetBinCenter(b), v * (5.5 if b % 2 else 2.0), f"{int(v):,}")
 pBot.RedrawAxis()
 
 c.Print(args.out + ".pdf"); c.Print(args.out + ".png")
