@@ -38,14 +38,22 @@ ap.add_argument("file")
 ap.add_argument("--label", default="#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv.")
 ap.add_argument("--tag", default="", help="third label line suffix, e.g. the working point")
 ap.add_argument("--deta", type=float, default=DETA_MIN)
+ap.add_argument("--opphemi", action="store_true",
+                help="require the two legs in opposite hemispheres (the Run-2 H->inv cut; "
+                     "always true for the m_jj picker, a real cut for --pair=lead outputs)")
 ap.add_argument("--out", required=True, help="output stem (.pdf and .png)")
 args = ap.parse_args()
 
 t = uproot.open(args.file)["events"]
-a = t.arrays(["wide_pair_mjj", "wide_pair_deta",
-              "wide_legA_hs", "wide_legA_pu", "wide_legA_abseta",
-              "wide_legB_hs", "wide_legB_pu", "wide_legB_abseta"], library="np")
+cols = ["wide_pair_mjj", "wide_pair_deta",
+        "wide_legA_hs", "wide_legA_pu", "wide_legA_abseta",
+        "wide_legB_hs", "wide_legB_pu", "wide_legB_abseta"]
+has_hemi = "wide_pair_same_hemi" in t.keys()
+a = t.arrays(cols + (["wide_pair_same_hemi"] if has_hemi else []), library="np")
 sel = (a["wide_pair_mjj"] >= MJJ_EDGES[0]) & (a["wide_pair_deta"] > args.deta)
+n_same = int((sel & (a["wide_pair_same_hemi"] > 0.5)).sum()) if has_hemi else 0
+if args.opphemi and has_hemi:
+    sel &= a["wide_pair_same_hemi"] < 0.5
 fA, fB = a["wide_legA_abseta"] >= SPLIT, a["wide_legB_abseta"] >= SPLIT
 hA, hB = a["wide_legA_hs"] > .5, a["wide_legB_hs"] > .5
 pA, pB = a["wide_legA_pu"] > .5, a["wide_legB_pu"] > .5
@@ -106,7 +114,8 @@ al = ROOT.TLatex(); al.SetNDC(); al.SetTextFont(42); al.SetTextSize(0.045)
 al.DrawLatex(0.305, 0.895, "Simulation Internal")
 ROOT.ATLASEnergyLabel(0.18, 0.85, args.label)
 p = ROOT.TLatex(); p.SetNDC(); p.SetTextFont(42); p.SetTextSize(0.028); p.SetTextColor(ROOT.kGray + 2)
-line3 = f"|#Delta#eta| > {args.deta:g},   forward = |#eta| #geq {SPLIT} (no upper edge, split at {SPLIT})"
+line3 = f"|#Delta#eta| > {args.deta:g}" + (",  #eta_{1}#eta_{2} < 0" if args.opphemi else "") \
+        + f",   forward = |#eta| #geq {SPLIT} (no upper edge, split at {SPLIT})"
 p.DrawLatex(0.18, 0.81, line3)
 p.DrawLatex(0.18, 0.78, (args.tag + "   " if args.tag else "") + f"#font[62]{{{n:,}}} events in the plot")
 leg = ROOT.TLegend(0.17, 0.545, 0.93, 0.765)
@@ -138,6 +147,7 @@ for b in range(1, tot.GetNbinsX() + 1):
 pBot.RedrawAxis()
 
 c.Print(args.out + ".pdf"); c.Print(args.out + ".png")
-print(f"{args.file}: {n:,} pairs with m_jj >= {MJJ_EDGES[0]} and |dEta| > {args.deta:g}; "
+print(f"{args.file}: {n:,} pairs with m_jj >= {MJJ_EDGES[0]} and |dEta| > {args.deta:g}"
+      + (f" ({n_same:,} same-hemisphere pairs {'removed' if args.opphemi else 'KEPT'})" if has_hemi else "") + "; "
       + ", ".join(f"{k} {100.0*(band[sel]==i).mean():.1f}%" for i, (k, _, _) in enumerate(BANDS)))
 print("wrote", args.out + ".pdf / .png")
