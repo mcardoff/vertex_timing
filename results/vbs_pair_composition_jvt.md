@@ -203,6 +203,12 @@ with 47% / 54% dropped. The taggers thin R1/R2 on Z+jets faster than on VBF
 (26% / 36% dropped against 13% / 26%) because a Z+jets R1/R2 event rarely has
 a spare jet to re-pair to.
 
+The original two-sample figure (ranked bars + 6×6 matrices, m_jj ≥ 500,
+|Δη| ≥ 2.5) rebuilt on the tagged data:
+`figs/vbs_pair_composition_jvtLoose.png` / `_jvtTight.png`, from
+`python/vbs_pair_composition_plot.py`. Under loose, F-PU + F-PU is 57.4% of
+Z+jets pairs on its own, against VBF's 47.2% in F-HS + C-HS.
+
 Figures: `condor/zjets/zjets_vbs_jvt.png` (m_jj ≥ 200) and
 `condor/zjets/zjets_vbs_jvt_mjj500.png` (m_jj ≥ 500, |Δη| ≥ 2.5, where R1 /
 R2 go 5.8 → 8.0 → 9.2% / 5.5 → 8.5 → 10.4% and no-HS-leg 83.4 → 77.4 →
