@@ -44,6 +44,33 @@
 //
 // No clustering and no time gates: the question is purely about jet content,
 // and dropping them keeps a full Z+jets pass cheap.
+//
+// JVT / fJVT (2026-09-18, on Ariel's feedback). An analysis applies the
+// standard pileup-jet taggers BEFORE it forms a tagging pair, so the
+// composition above describes a jet population no analysis actually sees. The
+// SuperNtuples carry no Jvt/fJvt decoration (241 branches, none match, on
+// either jet collection), so both are computed here from the vertex fit's own
+// track assignment (Track_recoVtx_idx) and each jet's ghost-associated tracks:
+//
+//   R_pT       = sum pT(ghost tracks fitted to vertex 0) / pT_jet   [1510.03823]
+//   corrJVF    = pT_PV / (pT_PV + pT_PU / (k n_PU^trk)),  k = 0.01  [stored only]
+//   fJVT       = max_{i>0} (p_T^miss,i . j_T) / pT_jet              [1705.02211]
+//   p_T^miss,i = -1/2 ( sum_{trk fitted to i, |eta|<2.5} p_T
+//                     + sum_{central jets whose dominant ghost vertex is i} p_T )
+//
+// JVT proper is a k-NN likelihood over (corrJVF, R_pT) that cannot be rebuilt
+// from the ntuple, so the "JVT" cut here is R_pT alone, with thresholds set so
+// the paper-HS efficiency on local-VBF central jets inside the JVT window
+// reproduces the published working-point efficiencies (JVT_WPS below). fJVT
+// thresholds are the published ones. Windows: JVT |eta| < 2.5 and pT < 60 GeV;
+// fJVT 2.5 <= |eta| < 4.5 and pT < 120 GeV. A jet outside both windows is never
+// removed; a jet with no ghost tracks has R_pT = 0 and fails JVT in its window.
+//
+// --jvt=none|loose|tight picks the working point. The default, none, is
+// bit-identical to the pre-JVT diagnostic apart from the added columns. The
+// `jets` tree holds every pT-passing jet's discriminants BEFORE the cut, so a
+// threshold can be re-derived (python/vbs_jvt_calibrate.py) or scanned offline
+// without a rerun.
 // -----------------------------------------------------------------------------
 #include <TChain.h>
 #include <TFile.h>
@@ -55,6 +82,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -81,6 +109,112 @@ int zoneOf(double absEta, double fwdMax) {
 }
 const double FWD_MAX_UNBOUNDED = 1e9;
 
+// ── JVT / fJVT proxies (see the file header) ────────────────────────────────
+const double JVT_ETA_MAX         = 2.5;    // JVT window: |eta| < 2.5 ...
+const double JVT_PT_MAX          = 60.0;   // ... and pT < 60 GeV
+const double FJVT_ETA_MIN        = 2.5;    // fJVT window: 2.5 <= |eta| < 4.5 ...
+const double FJVT_ETA_MAX        = 4.5;
+const double FJVT_PT_MAX         = 120.0;  // ... and pT < 120 GeV
+const double FJVT_CEN_JET_PT_MIN = 20.0;   // central jets entering p_T^miss,i
+const double FJVT_TRK_ETA_MAX    = 2.5;    // tracks entering p_T^miss,i
+const double CORRJVF_K           = 0.01;
+
+struct JvtWP {
+  const char* name;     // --jvt= value
+  const char* tag;      // output-file tag
+  double      rptMin;   // JVT proxy: keep a JVT-window jet iff R_pT >= this
+  double      fjvtMax;  // keep an fJVT-window jet iff fJVT <= this
+};
+// R_pT thresholds: calibrated on local-VBF paper-HS jets in the JVT window
+// (|eta| < 2.5, 30 < pT < 60 GeV) to the published JVT working-point HS
+// efficiencies -- loose <-> the default Run-2 "Medium" point (92%), tight <->
+// "Tight" (85%) -- by python/vbs_jvt_calibrate.py on the `jets` tree of a
+// --jvt=none run. fJVT: published Loose 0.5 / Tight 0.4.
+const JvtWP JVT_WPS[] = {
+  {"none",  "",          -1.0, 1e9},
+  {"loose", "_jvtLoose", 0.0167, 0.5},   // 92.0% HS eff on local VBF, PU eff 13.2%
+  {"tight", "_jvtTight", 0.0767, 0.4},   // 85.0% HS eff on local VBF, PU eff  1.9%
+};
+
+// One jet's discriminants, computed for EVERY jet in the array (not just the
+// pT-passing ones) because the fJVT of a forward jet depends on the central
+// jets' vertex assignment.
+struct JetDisc {
+  float rpt = 0.f, corrjvf = -1.f, fjvt = 0.f;
+  int   nGhost = 0, nGhostPV = 0;
+  bool  jvtWin = false, fjvtWin = false;
+};
+
+std::vector<JetDisc> computeJetDiscriminants(const BranchPointerWrapper& b) {
+  const int nJ = (int)b.topoJetPt.GetSize();
+  const int nV = (int)b.recoVtxZ.GetSize();
+  std::vector<JetDisc> D(nJ);
+
+  // Per-vertex transverse momentum of the tracks the fit assigned to it,
+  // central tracks only (fJVT's p_T^miss is a central quantity). Index -1 is
+  // "fitted to no vertex" (47% of tracks) and contributes nowhere.
+  std::vector<double> vpx(nV, 0.0), vpy(nV, 0.0);
+  int nPUtrk = 0;
+  for (int t = 0; t < (int)b.trackPt.GetSize(); ++t) {
+    const int v = b.recoVtxOf(t);
+    if (v < 0 || v >= nV) continue;
+    if (v > 0) ++nPUtrk;
+    if (std::abs((double)b.trackEta[t]) >= FJVT_TRK_ETA_MAX) continue;
+    vpx[v] += b.trackPt[t] * std::cos(b.trackPhi[t]);
+    vpy[v] += b.trackPt[t] * std::sin(b.trackPhi[t]);
+  }
+
+  // Per-jet ghost-track sums split by vertex; a central jet is then assigned
+  // to whichever vertex dominates its ghost pT, and if that is a PILEUP vertex
+  // the jet's pT enters that vertex's p_T^miss. PV-dominated (i.e. hard
+  // scatter) jets enter no PU vertex's balance. Overlap-removed jets are
+  // leptons and are skipped for the assignment only.
+  std::vector<double> perV(nV);
+  for (int j = 0; j < nJ; ++j) {
+    std::fill(perV.begin(), perV.end(), 0.0);
+    double sumPV = 0.0, sumPU = 0.0;
+    JetDisc& d = D[j];
+    d.nGhost = (int)b.topoJetGhostTrackIdx[j].size();
+    for (int idx : b.topoJetGhostTrackIdx[j]) {
+      const int v = b.recoVtxOf(idx);
+      if (v < 0 || v >= nV) continue;
+      perV[v] += b.trackPt[idx];
+      if (v == 0) { sumPV += b.trackPt[idx]; ++d.nGhostPV; }
+      else          sumPU += b.trackPt[idx];
+    }
+    const double pt = b.topoJetPt[j], aeta = std::abs((double)b.topoJetEta[j]);
+    d.rpt     = (float)(sumPV / pt);
+    d.corrjvf = (sumPV + sumPU > 0.0)
+              ? (float)(sumPV / (sumPV + sumPU / (CORRJVF_K * std::max(nPUtrk, 1))))
+              : -1.f;
+    d.jvtWin  = aeta < JVT_ETA_MAX && pt < JVT_PT_MAX;
+    d.fjvtWin = aeta >= FJVT_ETA_MIN && aeta < FJVT_ETA_MAX && pt < FJVT_PT_MAX;
+    if (aeta < FJVT_TRK_ETA_MAX && pt > FJVT_CEN_JET_PT_MIN && !b.isJetRemoved(j)) {
+      int vBest = -1; double best = 0.0;
+      for (int v = 0; v < nV; ++v) if (perV[v] > best) { best = perV[v]; vBest = v; }
+      if (vBest > 0) {
+        vpx[vBest] += pt * std::cos(b.topoJetPhi[j]);
+        vpy[vBest] += pt * std::sin(b.topoJetPhi[j]);
+      }
+    }
+  }
+
+  // fJVT: the pileup vertex whose missing transverse momentum points most
+  // along the jet, normalised to the jet pT. Computed for every jet; the
+  // window is applied by the caller.
+  for (int j = 0; j < nJ; ++j) {
+    const double pt = b.topoJetPt[j];
+    const double ux = std::cos(b.topoJetPhi[j]), uy = std::sin(b.topoJetPhi[j]);
+    double best = -std::numeric_limits<double>::infinity();
+    for (int v = 1; v < nV; ++v) {
+      const double proj = -0.5 * (vpx[v] * ux + vpy[v] * uy) / pt;
+      if (proj > best) best = proj;
+    }
+    D[j].fjvt = (nV > 1) ? (float)best : 0.f;
+  }
+  return D;
+}
+
 // Everything the diagnostic asks of one jet collection. Filled twice per event
 // -- see the file header -- so the two must stay structurally identical.
 struct PairBlock {
@@ -95,6 +229,9 @@ struct PairBlock {
   // ordering would not say.
   float alt_r2_fwd_abseta, alt_r2_fwd_pt, alt_r2_cen_abseta, alt_r2_cen_pt;
   float alt_r1_hs_abseta,  alt_r1_hs_pt,  alt_r1_pu_abseta,  alt_r1_pu_pt;
+  // The chosen legs' JVT/fJVT discriminants, filled under every working point
+  // (including none) so the offline side can see what a cut WOULD do.
+  float legA_rpt, legA_fjvt, legB_rpt, legB_fjvt;
 };
 
 struct Row {
@@ -119,7 +256,17 @@ struct Row {
   // truth jet" (Z+jets only) is jet-finding failing to place a jet there at
   // all, versus OR removing the jet that would have matched.
   float lead_truth_raw_match, lead_truth_raw_or_removed;
+  // What the active --jvt working point removed from the pT-passing list, by
+  // truth identity. All zero under --jvt=none.
+  float n_rm_jvt, n_rm_jvt_hs, n_rm_jvt_pu, n_rm_fjvt, n_rm_fjvt_hs, n_rm_fjvt_pu;
   PairBlock all, acc, wide;
+};
+
+// One row per pT-passing jet BEFORE the working-point cut, so thresholds can
+// be derived or scanned offline against the same population the cut sees.
+struct JetRow {
+  float file_idx, entry, pt, abseta, hs, pu;
+  float rpt, corrjvf, fjvt, n_ghost, n_ghost_pv, jvt_win, fjvt_win, removed;
 };
 
 }  // namespace
@@ -137,6 +284,22 @@ int main(int argc, char** argv) {
   bool noOR = false;
   for (int i = 1; i < argc; ++i) if (std::string(argv[i]) == "--no-or") noOR = true;
   if (noOR) OVERLAP_REMOVAL = false;
+  // --jvt=none|loose|tight: pileup-jet tagging applied to the pT-passing list
+  // before any pairing (see the file header). Tags the output file.
+  const JvtWP* wpSel = &JVT_WPS[0];
+  for (int i = 1; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a.rfind("--jvt=", 0) != 0) continue;
+    const std::string w = a.substr(6);
+    const JvtWP* hit = nullptr;
+    for (const auto& wp : JVT_WPS) if (w == wp.name) hit = &wp;
+    if (!hit) { std::cerr << "[diag] unknown --jvt=" << w << " (none|loose|tight)\n"; return 1; }
+    wpSel = hit;
+  }
+  const JvtWP& WP = *wpSel;
+  // The discriminants need the vertex fit's track assignment, which lives in
+  // the extended branch set. Must be set before the BranchPointerWrapper binds.
+  EXTENDED_BRANCHES = true;
   const Long64_t maxEvents = resolveMaxEvents(argc, argv);
   // MUST be set explicitly -- setupChain reads MyUtl::FILE_SHARD, and nothing
   // populates it as a side effect of resolveSample. Omitting this does not
@@ -152,7 +315,7 @@ int main(int argc, char** argv) {
 
   std::string outPath = OUTPUT_DIR + "/" +
                         (SAMPLE_NAME.empty() ? std::string("local") : SAMPLE_NAME) +
-                        (noOR ? "_noOR" : "") + "_vbs_region_diag.root";
+                        (noOR ? "_noOR" : "") + WP.tag + "_vbs_region_diag.root";
   for (int i = 1; i < argc; ++i) {
     std::string a = argv[i];
     if (a.rfind("--out=", 0) == 0) outPath = a.substr(6);
@@ -160,12 +323,23 @@ int main(int argc, char** argv) {
   boost::filesystem::create_directories(OUTPUT_DIR);
   std::cout << "[diag] sample=" << (SAMPLE_NAME.empty() ? "local" : SAMPLE_NAME)
             << (noOR ? " (OR disabled)" : "")
-            << " out=" << outPath << "\n";
+            << " jvt=" << WP.name;
+  if (WP.rptMin >= 0.0)
+    std::cout << " (R_pT >= " << WP.rptMin << " for |eta| < " << JVT_ETA_MAX
+              << ", pT < " << JVT_PT_MAX << "; fJVT <= " << WP.fjvtMax << " for "
+              << FJVT_ETA_MIN << " <= |eta| < " << FJVT_ETA_MAX << ", pT < " << FJVT_PT_MAX << ")";
+  std::cout << " out=" << outPath << "\n";
 
   TChain chain("ntuple");
   setupChain(chain, cfg.ntupleDir.c_str(), MyUtl::FILE_SHARD);
   TTreeReader reader(&chain);
   BranchPointerWrapper branch(reader);
+  if (!branch.trackRecoVtxIdx) {
+    std::cerr << "[diag] Track_recoVtx_idx is not in this sample -- the JVT/fJVT "
+                 "discriminants need the vertex fit's assignment; a silent fallback "
+                 "would give every jet R_pT = 0 and remove them all\n";
+    return 1;
+  }
 
   TFile out(outPath.c_str(), "RECREATE");
   TTree tree("events", "per-event VBS pair composition diagnostic");
@@ -178,7 +352,16 @@ int main(int argc, char** argv) {
   BR(n_fwd_hs_trk); BR(lead_pt); BR(lead_abseta);
   BR(n_truth_hs10); BR(lead_truth_hs_pt);
   BR(lead_truth_raw_match); BR(lead_truth_raw_or_removed);
+  BR(n_rm_jvt); BR(n_rm_jvt_hs); BR(n_rm_jvt_pu);
+  BR(n_rm_fjvt); BR(n_rm_fjvt_hs); BR(n_rm_fjvt_pu);
 #undef BR
+  TTree jtree("jets", "per-jet JVT/fJVT discriminants, every pT-passing jet before the cut");
+  JetRow J{};
+#define JB(n) jtree.Branch(#n, &J.n)
+  JB(file_idx); JB(entry); JB(pt); JB(abseta); JB(hs); JB(pu);
+  JB(rpt); JB(corrjvf); JB(fjvt); JB(n_ghost); JB(n_ghost_pv);
+  JB(jvt_win); JB(fjvt_win); JB(removed);
+#undef JB
   // Two identical blocks, distinguished only by their branch prefix.
   auto branchBlock = [&](const char* pfx, PairBlock& B) {
     auto nm = [&](const char* f) { return std::string(pfx) + f; };
@@ -189,6 +372,7 @@ int main(int argc, char** argv) {
     BB(alt_r1_mjj); BB(alt_r2_mjj); BB(alt_pupu_mjj); BB(alt_bothhs_mjj);
     BB(alt_r2_fwd_abseta); BB(alt_r2_fwd_pt); BB(alt_r2_cen_abseta); BB(alt_r2_cen_pt);
     BB(alt_r1_hs_abseta);  BB(alt_r1_hs_pt);  BB(alt_r1_pu_abseta);  BB(alt_r1_pu_pt);
+    BB(legA_rpt); BB(legA_fjvt); BB(legB_rpt); BB(legB_fjvt);
 #undef BB
   };
   branchBlock("all_",  R.all);
@@ -196,6 +380,7 @@ int main(int argc, char** argv) {
   branchBlock("wide_", R.wide);
 
   long nSeen = 0, nSel = 0, nNoPairAll = 0, nNoPairAcc = 0, nDisagree = 0;
+  long nJetsPre = 0, nRmJvt = 0, nRmFjvt = 0, nEvtLostToWP = 0;
 
   while (reader.Next()) {
     if (maxEvents > 0 && nSeen >= maxEvents) break;
@@ -221,6 +406,41 @@ int main(int argc, char** argv) {
       if (p != std::string::npos && d != std::string::npos)
         R.file_idx = (float)std::atoi(fp.substr(p + 1, d - p - 1).c_str()); }
     R.entry = (float)reader.GetTree()->GetReadEntry();
+
+    // ── JVT / fJVT: jets tree on the PRE-cut list, then the cut itself ──────
+    // The event-level jet requirements are re-applied to the post-cut list: an
+    // analysis counts only tagger-passing jets, so an event whose second jet
+    // the tagger removes has no pair to classify. Under --jvt=none both checks
+    // are the same check and nothing changes.
+    const std::vector<JetDisc> D = computeJetDiscriminants(branch);
+    std::vector<int> keptIdx; keptIdx.reserve(passPtIdx.size());
+    int nPtWP = 0, nPtEtaWP = 0;
+    for (int j : passPtIdx) {
+      const JetDisc& d = D[j];
+      const double eta = branch.topoJetEta[j], phi = branch.topoJetPhi[j];
+      const double aeta = std::abs(eta);
+      const bool hs = branch.isJetPaperHS(eta, phi);
+      const bool pu = branch.isJetPaperPU(eta, phi);
+      const bool rmJvt  = d.jvtWin  && d.rpt  <  WP.rptMin;
+      const bool rmFjvt = d.fjvtWin && d.fjvt >  WP.fjvtMax;   // windows are disjoint in |eta|
+      J = JetRow{};
+      J.file_idx = R.file_idx; J.entry = R.entry;
+      J.pt = branch.topoJetPt[j]; J.abseta = (float)aeta;
+      J.hs = hs ? 1.f : 0.f; J.pu = pu ? 1.f : 0.f;
+      J.rpt = d.rpt; J.corrjvf = d.corrjvf; J.fjvt = d.fjvt;
+      J.n_ghost = (float)d.nGhost; J.n_ghost_pv = (float)d.nGhostPV;
+      J.jvt_win = d.jvtWin ? 1.f : 0.f; J.fjvt_win = d.fjvtWin ? 1.f : 0.f;
+      J.removed = (rmJvt || rmFjvt) ? 1.f : 0.f;
+      jtree.Fill();
+      ++nJetsPre;
+      if (rmJvt)  { ++nRmJvt;  ++R.n_rm_jvt;  if (hs) ++R.n_rm_jvt_hs;  if (pu) ++R.n_rm_jvt_pu;  continue; }
+      if (rmFjvt) { ++nRmFjvt; ++R.n_rm_fjvt; if (hs) ++R.n_rm_fjvt_hs; if (pu) ++R.n_rm_fjvt_pu; continue; }
+      keptIdx.push_back(j);
+      ++nPtWP;
+      if (aeta > MIN_ABS_ETA_JET && aeta < MAX_ABS_ETA_JET) ++nPtEtaWP;
+    }
+    if (nPtWP < MIN_PASSPT_JETS || nPtEtaWP < MIN_PASSETA_JETS) { ++nEvtLostToWP; continue; }
+    passPtIdx.swap(keptIdx);
 
     // ── Event-wide paper-label content ──────────────────────────────────────
     // The same loop classifyEventRegion runs, kept here rather than called so
@@ -343,13 +563,17 @@ int main(int argc, char** argv) {
       }
       if (bestA < 0) return false;
 
-      auto leg = [&](size_t k, float& z, float& h, float& p, float& pt, float& ae) {
+      auto leg = [&](size_t k, float& z, float& h, float& p, float& pt, float& ae,
+                     float& rpt, float& fjvt) {
         z = (float)zn[k]; h = hs[k] ? 1.f : 0.f; p = pu[k] ? 1.f : 0.f;
         pt = branch.topoJetPt[idx[k]];
         ae = (float)std::abs((double)branch.topoJetEta[idx[k]]);
+        rpt = D[idx[k]].rpt; fjvt = D[idx[k]].fjvt;
       };
-      leg(bestA, B.legA_zone, B.legA_hs, B.legA_pu, B.legA_pt, B.legA_abseta);
-      leg(bestB, B.legB_zone, B.legB_hs, B.legB_pu, B.legB_pt, B.legB_abseta);
+      leg(bestA, B.legA_zone, B.legA_hs, B.legA_pu, B.legA_pt, B.legA_abseta,
+          B.legA_rpt, B.legA_fjvt);
+      leg(bestB, B.legB_zone, B.legB_hs, B.legB_pu, B.legB_pt, B.legB_abseta,
+          B.legB_rpt, B.legB_fjvt);
       B.pair_mjj  = (float)bestM;
       B.pair_deta = (float)std::abs((double)branch.topoJetEta[idx[bestA]] -
                                     (double)branch.topoJetEta[idx[bestB]]);
@@ -394,10 +618,16 @@ int main(int argc, char** argv) {
                         R.wide.legB_zone == 0 && R.wide.legB_hs) ||
                        (R.wide.legB_zone == 1 && R.wide.legB_pu &&
                         R.wide.legA_zone == 0 && R.wide.legA_hs);
-    const VbsRegion shared =
-        branch.classifyVbsRegion(MIN_ABS_ETA_JET, VBS_FWD_ETA_MAX, MIN_ABS_ETA_JET);
-    if (okWide && (locR1 != (shared == VbsRegion::R1) ||
-                   locR2 != (shared == VbsRegion::R2))) ++nDisagree;
+    // Only meaningful under --jvt=none: the shared classifier pairs from the
+    // UNTAGGED jet list, so under a working point it disagrees on exactly the
+    // events whose pair the tagger changed -- which is the measurement, not a
+    // bug. Gated rather than reinterpreted so the counter keeps meaning "bug".
+    if (WP.rptMin < 0.0) {
+      const VbsRegion shared =
+          branch.classifyVbsRegion(MIN_ABS_ETA_JET, VBS_FWD_ETA_MAX, MIN_ABS_ETA_JET);
+      if (okWide && (locR1 != (shared == VbsRegion::R1) ||
+                     locR2 != (shared == VbsRegion::R2))) ++nDisagree;
+    }
 
     tree.Fill();
   }
@@ -405,8 +635,13 @@ int main(int argc, char** argv) {
   std::cout << "\n[diag] seen " << nSeen << ", selected " << nSel
             << ", no pair (all jets) " << nNoPairAll
             << ", no pair (acceptance jets) " << nNoPairAcc
-            << ", R1/R2 cross-check disagreements " << nDisagree << "\n";
+            << ", R1/R2 cross-check disagreements "
+            << (WP.rptMin < 0.0 ? std::to_string(nDisagree) : std::string("n/a under a working point")) << "\n";
+  std::cout << "[diag] jvt=" << WP.name << ": " << nJetsPre << " pT-passing jets, removed "
+            << nRmJvt << " by JVT and " << nRmFjvt << " by fJVT; "
+            << nEvtLostToWP << " events dropped below the jet requirements\n";
   tree.Write();
+  jtree.Write();
   out.Close();
   std::cout << "[diag] wrote " << outPath << "\n";
   return 0;
