@@ -25,6 +25,31 @@ using boost::filesystem::directory_iterator;
 namespace MyUtl {
 
   // ---------------------------------------------------------------------------
+  // recordAvailableBranches
+  //   Populate AVAILABLE_BRANCHES (clustering_constants.h) from the FIRST file
+  //   of the chain, so BranchPointerWrapper's hasBranch() binds only branches
+  //   the sample really carries. Call after setupChain and BEFORE constructing
+  //   the wrapper. Opens one file.
+  //
+  //   Required by anything that sets EXTENDED_BRANCHES: the productions are
+  //   not uniform (local VBF 241 branches, grid samples 183-195, Track_btagIp_*
+  //   absent from every grid sample), and a TTreeReader with even one missing
+  //   branch does not fail -- it iterates ZERO entries and the executable
+  //   writes an empty output with exit code 0. vbs_region_diag's first Z+jets
+  //   submission did exactly that (2026-09-18), three jobs, all "successful".
+  // ---------------------------------------------------------------------------
+  inline void recordAvailableBranches(TChain& chain) {
+    auto* fl = chain.GetListOfFiles();
+    if (!fl || fl->GetEntries() == 0) return;
+    std::unique_ptr<TFile> f0(TFile::Open(fl->At(0)->GetTitle()));
+    if (!f0 || f0->IsZombie()) return;
+    if (auto* t0 = f0->Get<TTree>("ntuple"))
+      for (auto* o : *t0->GetListOfBranches())
+        AVAILABLE_BRANCHES.insert(o->GetName());
+    std::cout << "[branches] sample carries " << AVAILABLE_BRANCHES.size() << " branches\n";
+  }
+
+  // ---------------------------------------------------------------------------
   // 1. setupChain  [directory overload]
   //   Iterates over all files in ntupleDir and adds each to the TChain. A
   //   sub-directory is descended one level (files inside it are added; its
