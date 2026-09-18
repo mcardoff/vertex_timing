@@ -209,6 +209,13 @@ The original two-sample figure (ranked bars + 6×6 matrices, m_jj ≥ 500,
 `python/vbs_pair_composition_plot.py`. Under loose, F-PU + F-PU is 57.4% of
 Z+jets pairs on its own, against VBF's 47.2% in F-HS + C-HS.
 
+The seven-band stack vs m_jj (ROOT/ATLAS style, |Δη| > 2.5, columns
+normalised to 1) for each working point:
+`condor/zjets/zjets[_jvtLoose|_jvtTight]_vbs_region_stack.png` and
+`figs/local[...]_vbs_region_stack.png`, from `python/vbs_region_stack.py`.
+On Z+jets the "PU + PU, both forward" band is the only one that grows with
+tagging and with m_jj; above 2 TeV it is ~85% of every column.
+
 Figures: `condor/zjets/zjets_vbs_jvt.png` (m_jj ≥ 200) and
 `condor/zjets/zjets_vbs_jvt_mjj500.png` (m_jj ≥ 500, |Δη| ≥ 2.5, where R1 /
 R2 go 5.8 → 8.0 → 9.2% / 5.5 → 8.5 → 10.4% and no-HS-leg 83.4 → 77.4 →
