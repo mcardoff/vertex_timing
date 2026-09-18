@@ -120,15 +120,16 @@ tot.GetXaxis().SetTitle("m_{jj} [GeV]   (last bin includes overflow)")
 tot.GetYaxis().SetTitle("Events")
 tot.GetXaxis().SetTitleSize(0.13); tot.GetXaxis().SetLabelSize(0.11); tot.GetXaxis().SetTitleOffset(1.25)
 tot.GetYaxis().SetTitleSize(0.11); tot.GetYaxis().SetLabelSize(0.10); tot.GetYaxis().SetTitleOffset(0.5)
-tot.GetYaxis().SetNdivisions(505)
+tot.GetYaxis().SetNdivisions(503)
 lo = max(1.0, tot.GetMinimum(0.0) / 3.0); hi = tot.GetMaximum() * 60.0
 tot.SetMinimum(lo); tot.SetMaximum(hi)
 tot.Draw("HIST")
 # the per-column count, written above each bar
-q = ROOT.TLatex(); q.SetTextFont(42); q.SetTextSize(0.085); q.SetTextAlign(21)
+# staggered on alternate bins so the narrow 250 GeV columns do not collide
+q = ROOT.TLatex(); q.SetTextFont(42); q.SetTextSize(0.075); q.SetTextAlign(21)
 for b in range(1, tot.GetNbinsX() + 1):
     v = tot.GetBinContent(b)
-    if v > 0: q.DrawLatex(tot.GetXaxis().GetBinCenter(b), v * 2.2, f"{int(v):,}")
+    if v > 0: q.DrawLatex(tot.GetXaxis().GetBinCenter(b), v * (2.0 if b % 2 else 5.5), f"{int(v):,}")
 pBot.RedrawAxis()
 
 c.Print(args.out + ".pdf"); c.Print(args.out + ".png")
