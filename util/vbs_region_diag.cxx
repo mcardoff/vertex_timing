@@ -332,6 +332,10 @@ int main(int argc, char** argv) {
 
   TChain chain("ntuple");
   setupChain(chain, cfg.ntupleDir.c_str(), MyUtl::FILE_SHARD);
+  // Bind only the branches this sample has: with EXTENDED_BRANCHES on, the
+  // wrapper would otherwise bind Track_btagIp_* (absent from every grid
+  // sample) and the reader would silently iterate nothing.
+  recordAvailableBranches(chain);
   TTreeReader reader(&chain);
   BranchPointerWrapper branch(reader);
   if (!branch.trackRecoVtxIdx) {
@@ -632,6 +636,14 @@ int main(int argc, char** argv) {
     tree.Fill();
   }
 
+  if (nSeen == 0) {
+    // A TTreeReader with a missing branch (or an unreadable file) reports no
+    // error here: Next() just returns false. Fail rather than write an empty
+    // tree with exit code 0, which condor would count as success.
+    std::cerr << "[diag] ERROR: read 0 events -- check stderr for "
+                 "TTreeReaderArrayBase::GetBranchAndLeaf errors\n";
+    return 2;
+  }
   std::cout << "\n[diag] seen " << nSeen << ", selected " << nSel
             << ", no pair (all jets) " << nNoPairAll
             << ", no pair (acceptance jets) " << nNoPairAcc
