@@ -54,7 +54,9 @@ vertex_timing/
 │   ├── skim_ntuples.cxx          # Writes the skimmed+slimmed sample copies under
 │   │                             #   /data/mcardiff/skimmed_ntuples/ (see Data Format)
 │   ├── vbs_region_diag.cxx       # Per-event VBS pair composition: does an R1/R2-shaped pair
-│   │                             #   EXIST, and did the m_jj picker choose it (3 zone conventions)
+│   │                             #   EXIST, and did the m_jj picker choose it (3 zone conventions);
+│   │                             #   truth-side jet columns + --no-or; write-up in
+│   │                             #   results/vbs_pair_composition.md
 │   └── sweep_utilities.h         # Shared helpers for parameter-sweep executables (no sweep .cxx files currently present)
 ├── python/                        # Interactive/visualisation scripts (run from within this dir)
 │   ├── event_display.py          # Event visualisation — calls runHGTD_Clustering.cxx, produces 2-page PDF
@@ -752,6 +754,31 @@ Data Export section above), `python/train_deepsets.py` /
 scripts that produced the `results/` documents were **removed from `python/`
 once their findings were captured** — recover from git history if a
 measurement needs rerunning; do not rewrite them from scratch.
+
+### Event-graph GNN (2026-09, exploratory — see `results/gnn_event_graph.md`)
+
+`python/train_gnn.py` represents an event as a graph over its tracks (all-pairs
+edges, typed same-cluster / cross-cluster, so the existing partition is a prior
+the model can override rather than the topology). It never re-partitions; the
+time head emits per-track weights and `t_hat = Σ w_i t_i / Σ w_i` keeps the
+averaging structural. Both heads are residual from the incumbent with zero-init
+last layers, so epoch 0 IS TRKPTZ selection with inverse-variance timing.
+
+**Finding (VBF, local export, 5-seed paired sweep): message passing is worth
++0.80 ± 0.14 on the timing head and +0.26 ± 0.10 on selection.** Its value is
+trust estimation — a track's own features cannot say whether its time is
+reliable (timeRes separates HS from PU at AUC 0.508), but its neighbourhood
+can. Two thirds of the total gain over TRKPTZ is the listwise objective and
+pooled selector, not the graph.
+
+**Not established, and why this is exploratory rather than concluded:** VBF
+only, on the small local export (23k fit events). VBF carries 47% of HS timing
+weight inside jets against zjets' 10%, which is exactly the quantity governing
+whether jet-neighbourhood information means anything — expect the +0.80 to
+SHRINK on zjets. That is the falsifying test and it has not been run. Nor has
+`--no-residual`. The residual-init control fired on first use against the wrong
+denominator (whole test fold vs the 1,000-event tensor) — compute controls on
+the tensor's own events.
 
 ### Legacy DNN/TMVA artifacts (historical)
 

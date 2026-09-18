@@ -31,10 +31,9 @@ number in this study is quoted in -- but with no clustering ceiling above it.
 Optional AUXILIARY supervision, lambda-scanned (never fixed), with the same
 noise-aware verdict as train_deepsets.py:
   * truth_is_hs                 -- per-track, always available
-  * truth_nearest_fwdjet_is_hs  -- per-track jet identity, used when the exporter
-                                   provides it (see the TODO in
-                                   util/export_training_data.cxx); silently
-                                   skipped when absent.
+  * truth_nearest_fwdjet_is_hs  -- per-track jet identity, exported by
+                                   util/export_training_data.cxx; silently
+                                   skipped when absent from an older export.
 
 Examples
 --------
@@ -77,7 +76,7 @@ SAMPLE_NAME = {-1.0: "local", 0.0: "vbf", 1.0: "zjets", 2.0: "dijet",
                6.0: "ttbar_mu0", 7.0: "ttbar"}
 
 TRACK_LABEL = "truth_is_hs"
-JET_LABEL   = "truth_nearest_fwdjet_is_hs"       # optional; see exporter TODO
+JET_LABEL   = "truth_nearest_fwdjet_is_hs"       # absent from pre-2026-09 exports
 TRACK_FEATURES = ["pt", "eta", "theta", "z0", "d0", "qOverP",
                   "sigma_z0", "sigma_d0", "sigma_qOverP",
                   "time", "timeRes", "time_valid", "quality", "nhgtd_hits",
@@ -433,7 +432,7 @@ def main():
     missing = [c for c in (TRACK_LABEL, JET_LABEL) if c not in avail]
     if missing:
         log(f"\nauxiliary targets absent from this export (skipped): {missing}"
-            f"   -- see the TODO in util/export_training_data.cxx")
+            f"   -- re-export with the current util/export_training_data.cxx")
     log(f"auxiliary targets in use: {aux_cols or 'none'}")
 
     read = sorted(set(TRACK_FEATURES + EVT + ["track_idx"] + aux_cols))
