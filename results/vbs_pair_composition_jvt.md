@@ -221,6 +221,32 @@ Figures: `condor/zjets/zjets_vbs_jvt.png` (m_jj ≥ 200) and
 R2 go 5.8 → 8.0 → 9.2% / 5.5 → 8.5 → 10.4% and no-HS-leg 83.4 → 77.4 →
 73.3%).
 
+## Cross-check: the leading-two-jets pair (Run-2 H→inv convention)
+
+`--pair=lead` takes the two leading-pT jets as the VBF pair (arXiv:2202.07953
+per the internal note), with the paper's η₁η₂ < 0 applied as an event cut at
+plot time. Run for consistency only; **the analysis keeps the max-m_jj
+opposite-hemisphere picker.** At m_jj ≥ 500, |Δη| > 2.5, no tagging:
+
+| band | Z+jets, max-m_jj | Z+jets, leading-2 | VBF (local), max-m_jj | VBF, leading-2 |
+|---|---:|---:|---:|---:|
+| events in plot | 36,588 | 14,182 | 39,666 | 28,560 |
+| HS + HS | 1.6% | 3.4% | 59.8% | 83.3% |
+| R1 | 5.8% | 5.8% | 14.5% | 3.8% |
+| R2 | 5.5% | 10.0% | 6.6% | 3.3% |
+| PU + PU, both forward | 48.7% | 35.6% | 3.8% | 0.0% |
+| PU + PU, other η | 22.0% | 27.9% | 1.2% | 0.0% |
+
+The m_jj picker reaches past the leading jets for the widest pair, which on
+VBF manufactures R1 (a forward pileup jet at |η| ≈ 4 gives a large m_jj with
+a real forward jet — R1 is 4× higher under it) and on Z+jets lets more than
+twice as many events form a wide-enough pair at all. Under the leading-two
+picker Z+jets loses 61% of its events to |Δη| > 2.5 but is STILL 63%
+pileup-only, and tagging moves it the same way as before (loose: forward-
+forward pileup 35.6 → 51.6%, R2 10.0 → 11.8%). The conclusion does not
+depend on the picker. Figures: `*_leadpair_vbs_region_stack.png` beside the
+others.
+
 ## What this does NOT settle
 
 - **dijet.** Not run. Same three submissions with `sample=dijet`, then
