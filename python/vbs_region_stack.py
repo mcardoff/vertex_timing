@@ -80,25 +80,58 @@ for i, (key, lab, hexc) in enumerate(BANDS):
     h.SetFillColor(ROOT.TColor.GetColor(hexc)); h.SetLineColor(ROOT.kBlack); h.SetLineWidth(1)
     hists.append(h); stk.Add(h)
 
-c = ROOT.TCanvas("c", "c", 800, 600)
+# Two pads: the composition on top, the raw event population per column
+# underneath on a log scale -- without it the eye reads a clean fraction in a
+# column holding three events as though it meant something.
+c = ROOT.TCanvas("c", "c", 800, 780)
+pTop = ROOT.TPad("pTop", "", 0.0, 0.30, 1.0, 1.0)
+pBot = ROOT.TPad("pBot", "", 0.0, 0.00, 1.0, 0.30)
+pTop.SetBottomMargin(0.025); pTop.SetTopMargin(0.06)
+pBot.SetTopMargin(0.04);     pBot.SetBottomMargin(0.40)
+pTop.Draw(); pBot.Draw()
+
+pTop.cd()
 stk.Draw("HIST")
-stk.GetXaxis().SetTitle("m_{jj} [GeV]   (last bin includes overflow)")
+stk.GetXaxis().SetLabelSize(0)
+stk.GetXaxis().SetTitle("")
 stk.GetYaxis().SetTitle("Fraction of events")
+stk.GetYaxis().SetTitleOffset(1.25)
 stk.SetMaximum(2.2); stk.SetMinimum(0.0)
-c.Modified()
-ROOT.ATLASLabel(0.18, 0.90, "Simulation Internal")
-ROOT.ATLASEnergyLabel(0.18, 0.855, args.label)
+pTop.Modified()
+n = int(sel.sum())
+# ATLASLabel's text offset scales with the pad aspect, so on the tall pad the
+# gap after "ATLAS" opens up; draw the word with the helper and the rest by hand.
+ROOT.ATLASLabel(0.18, 0.895, "")
+al = ROOT.TLatex(); al.SetNDC(); al.SetTextFont(42); al.SetTextSize(0.045)
+al.DrawLatex(0.305, 0.895, "Simulation Internal")
+ROOT.ATLASEnergyLabel(0.18, 0.85, args.label)
 p = ROOT.TLatex(); p.SetNDC(); p.SetTextFont(42); p.SetTextSize(0.028); p.SetTextColor(ROOT.kGray + 2)
 line3 = f"|#Delta#eta| > {args.deta:g},   forward = |#eta| #geq {SPLIT} (no upper edge, split at {SPLIT})"
-p.DrawLatex(0.18, 0.815, line3)
-if args.tag:
-    p.DrawLatex(0.18, 0.785, args.tag)
-leg = ROOT.TLegend(0.17, 0.545, 0.93, 0.775)
+p.DrawLatex(0.18, 0.81, line3)
+p.DrawLatex(0.18, 0.78, (args.tag + "   " if args.tag else "") + f"#font[62]{{{n:,}}} events in the plot")
+leg = ROOT.TLegend(0.17, 0.545, 0.93, 0.765)
 ROOT.StyleLegend(leg); leg.SetNColumns(2)
 for h, (_, lab, _) in zip(hists, BANDS): leg.AddEntry(h, lab, "f")
 leg.Draw()
+
+pBot.cd(); pBot.SetLogy(True)
+tot.SetFillColor(ROOT.TColor.GetColor("#DCE6F2")); tot.SetLineColor(ROOT.kBlack); tot.SetLineWidth(1)
+tot.GetXaxis().SetTitle("m_{jj} [GeV]   (last bin includes overflow)")
+tot.GetYaxis().SetTitle("Events")
+tot.GetXaxis().SetTitleSize(0.13); tot.GetXaxis().SetLabelSize(0.11); tot.GetXaxis().SetTitleOffset(1.25)
+tot.GetYaxis().SetTitleSize(0.11); tot.GetYaxis().SetLabelSize(0.10); tot.GetYaxis().SetTitleOffset(0.5)
+tot.GetYaxis().SetNdivisions(505)
+lo = max(1.0, tot.GetMinimum(0.0) / 3.0); hi = tot.GetMaximum() * 60.0
+tot.SetMinimum(lo); tot.SetMaximum(hi)
+tot.Draw("HIST")
+# the per-column count, written above each bar
+q = ROOT.TLatex(); q.SetTextFont(42); q.SetTextSize(0.085); q.SetTextAlign(21)
+for b in range(1, tot.GetNbinsX() + 1):
+    v = tot.GetBinContent(b)
+    if v > 0: q.DrawLatex(tot.GetXaxis().GetBinCenter(b), v * 2.2, f"{int(v):,}")
+pBot.RedrawAxis()
+
 c.Print(args.out + ".pdf"); c.Print(args.out + ".png")
-n = int(sel.sum())
 print(f"{args.file}: {n:,} pairs with m_jj >= {MJJ_EDGES[0]} and |dEta| > {args.deta:g}; "
       + ", ".join(f"{k} {100.0*(band[sel]==i).mean():.1f}%" for i, (k, _, _) in enumerate(BANDS)))
 print("wrote", args.out + ".pdf / .png")
