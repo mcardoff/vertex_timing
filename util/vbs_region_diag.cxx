@@ -258,6 +258,15 @@ struct Row {
   // existed, or one existed and was too soft / unmatched. NOT gated on
   // passPtIdx -- this is every TruthHSJet in the event, reco selection or not.
   float n_truth_hs10, lead_truth_hs_pt;
+  float n_truth_hs30;          // truth HS jets above MIN_JET_PT: does the event HAVE a hard-scatter jet at all
+  // The Z candidate (Z+jets only; -1 elsewhere): the two highest-pT selected
+  // leptons forming an OS-SF pair, massless track kinematics. Stored, never
+  // cut on, so the analysis' pT(ll) > 200 GeV (the Z->ll stand-in for
+  // MET > 200 in the SR) can be applied offline at any threshold. The
+  // diagnostic's own selection has NO recoil requirement, which is the
+  // reason inclusive DY fills the VBS selection with pileup pairs -- see
+  // results/vbs_pair_composition_jvt.md.
+  float z_pt, z_mass, n_lep;
   // For the leading (highest-pT) truth HS jet specifically: does a RAW reco
   // jet -- from the full AntiKt4EMTopoJets array, before the pT>30 cut and
   // BEFORE lepton-overlap removal -- sit within dR<0.3 of it? And if so, was
@@ -375,7 +384,8 @@ int main(int argc, char** argv) {
   BR(n_fwd_hs); BR(n_fwd_pu); BR(n_cen_hs); BR(n_cen_pu); BR(n_any_hs); BR(n_neither);
   BR(n_beyond_hs); BR(n_beyond_pu);
   BR(n_fwd_hs_trk); BR(lead_pt); BR(lead_abseta);
-  BR(n_truth_hs10); BR(lead_truth_hs_pt);
+  BR(n_truth_hs10); BR(lead_truth_hs_pt); BR(n_truth_hs30);
+  BR(z_pt); BR(z_mass); BR(n_lep);
   BR(lead_truth_raw_match); BR(lead_truth_raw_or_removed);
   BR(n_rm_jvt); BR(n_rm_jvt_hs); BR(n_rm_jvt_pu);
   BR(n_rm_fjvt); BR(n_rm_fjvt_hs); BR(n_rm_fjvt_pu);
@@ -494,9 +504,32 @@ int main(int argc, char** argv) {
     }
     R.n_all_jets = (float)passPtIdx.size();
 
+    // Z candidate from the selected leptons (see the Row comment).
+    R.z_pt = R.z_mass = -1.f; R.n_lep = 0.f;
+    {
+      std::vector<int> lep;
+      if (branch.trackLeptonID)
+        for (int t = 0; t < (int)branch.trackLeptonID->GetSize(); ++t)
+          if (branch.isGoodLepton(t)) lep.push_back(t);
+      std::sort(lep.begin(), lep.end(), [&](int a, int b) { return branch.trackPt[a] > branch.trackPt[b]; });
+      R.n_lep = (float)lep.size();
+      bool done = false;
+      for (size_t a = 0; a < lep.size() && !done; ++a)
+        for (size_t b = a + 1; b < lep.size() && !done; ++b) {
+          const int pa = branch.leptonPdg(lep[a]), pb = branch.leptonPdg(lep[b]);
+          if (std::abs(pa) != std::abs(pb) || pa * pb >= 0) continue;
+          TLorentzVector la, lb;
+          la.SetPtEtaPhiM(branch.trackPt[lep[a]], branch.trackEta[lep[a]], branch.trackPhi[lep[a]], 0.0);
+          lb.SetPtEtaPhiM(branch.trackPt[lep[b]], branch.trackEta[lep[b]], branch.trackPhi[lep[b]], 0.0);
+          R.z_pt = (float)(la + lb).Pt(); R.z_mass = (float)(la + lb).M();
+          done = true;
+        }
+    }
+
     int leadTruthIdx = -1;
     for (int t = 0; t < (int)branch.truthHSJetPt.GetSize(); ++t) {
       const float tpt = branch.truthHSJetPt[t];
+      if (tpt > MIN_JET_PT) ++R.n_truth_hs30;
       if (tpt <= 10.0f) continue;
       ++R.n_truth_hs10;
       if (tpt > R.lead_truth_hs_pt) { R.lead_truth_hs_pt = tpt; leadTruthIdx = t; }
