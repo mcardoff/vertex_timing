@@ -107,6 +107,18 @@ struct Row {
   float n_beyond_hs, n_beyond_pu;
   float n_fwd_hs_trk;          // forward truth-HS tracks (the t0 question)
   float lead_pt, lead_abseta;
+  // Truth-side jet content, independent of any reco match: answers whether
+  // "no paper-HS reco jet anywhere" (n_any_hs == 0) means no truth jet
+  // existed, or one existed and was too soft / unmatched. NOT gated on
+  // passPtIdx -- this is every TruthHSJet in the event, reco selection or not.
+  float n_truth_hs10, lead_truth_hs_pt;
+  // For the leading (highest-pT) truth HS jet specifically: does a RAW reco
+  // jet -- from the full AntiKt4EMTopoJets array, before the pT>30 cut and
+  // BEFORE lepton-overlap removal -- sit within dR<0.3 of it? And if so, was
+  // that raw jet the one OR stripped? Answers whether an "unmatched hard
+  // truth jet" (Z+jets only) is jet-finding failing to place a jet there at
+  // all, versus OR removing the jet that would have matched.
+  float lead_truth_raw_match, lead_truth_raw_or_removed;
   PairBlock all, acc, wide;
 };
 
@@ -118,6 +130,13 @@ int main(int argc, char** argv) {
   OUTPUT_DIR      = cfg.outputDir;
   SAMPLE_NAME     = cfg.sampleName;
   OVERLAP_REMOVAL = cfg.overlapRemoval;
+  // --no-or: diagnostic-only override, so region composition can be measured
+  // with lepton-jet overlap removal switched off. Does NOT touch OUTPUT_DIR
+  // or the output filename -- rerun with and without and compare the two
+  // trees directly rather than relying on naming to keep them apart.
+  bool noOR = false;
+  for (int i = 1; i < argc; ++i) if (std::string(argv[i]) == "--no-or") noOR = true;
+  if (noOR) OVERLAP_REMOVAL = false;
   const Long64_t maxEvents = resolveMaxEvents(argc, argv);
   // MUST be set explicitly -- setupChain reads MyUtl::FILE_SHARD, and nothing
   // populates it as a side effect of resolveSample. Omitting this does not
@@ -133,13 +152,14 @@ int main(int argc, char** argv) {
 
   std::string outPath = OUTPUT_DIR + "/" +
                         (SAMPLE_NAME.empty() ? std::string("local") : SAMPLE_NAME) +
-                        "_vbs_region_diag.root";
+                        (noOR ? "_noOR" : "") + "_vbs_region_diag.root";
   for (int i = 1; i < argc; ++i) {
     std::string a = argv[i];
     if (a.rfind("--out=", 0) == 0) outPath = a.substr(6);
   }
   boost::filesystem::create_directories(OUTPUT_DIR);
   std::cout << "[diag] sample=" << (SAMPLE_NAME.empty() ? "local" : SAMPLE_NAME)
+            << (noOR ? " (OR disabled)" : "")
             << " out=" << outPath << "\n";
 
   TChain chain("ntuple");
@@ -156,6 +176,8 @@ int main(int argc, char** argv) {
   BR(n_fwd_hs); BR(n_fwd_pu); BR(n_cen_hs); BR(n_cen_pu); BR(n_any_hs); BR(n_neither);
   BR(n_beyond_hs); BR(n_beyond_pu);
   BR(n_fwd_hs_trk); BR(lead_pt); BR(lead_abseta);
+  BR(n_truth_hs10); BR(lead_truth_hs_pt);
+  BR(lead_truth_raw_match); BR(lead_truth_raw_or_removed);
 #undef BR
   // Two identical blocks, distinguished only by their branch prefix.
   auto branchBlock = [&](const char* pfx, PairBlock& B) {
@@ -226,6 +248,32 @@ int main(int argc, char** argv) {
       }
     }
     R.n_all_jets = (float)passPtIdx.size();
+
+    int leadTruthIdx = -1;
+    for (int t = 0; t < (int)branch.truthHSJetPt.GetSize(); ++t) {
+      const float tpt = branch.truthHSJetPt[t];
+      if (tpt <= 10.0f) continue;
+      ++R.n_truth_hs10;
+      if (tpt > R.lead_truth_hs_pt) { R.lead_truth_hs_pt = tpt; leadTruthIdx = t; }
+    }
+    // Raw-match test for the leading truth HS jet: scan EVERY reco jet in the
+    // full array (not passPtIdx), so this is independent of both the pT cut
+    // and lepton-overlap removal -- isJetRemoved is checked separately below,
+    // on whichever raw jet actually matches.
+    if (leadTruthIdx >= 0) {
+      const double tEta = branch.truthHSJetEta[leadTruthIdx];
+      const double tPhi = branch.truthHSJetPhi[leadTruthIdx];
+      for (int j = 0; j < (int)branch.topoJetPt.GetSize(); ++j) {
+        if (branch.topoJetPt[j] <= MIN_JET_PT) continue;
+        const double deta = branch.topoJetEta[j] - tEta;
+        const double dphi = TVector2::Phi_mpi_pi(branch.topoJetPhi[j] - tPhi);
+        if (std::hypot(deta, dphi) < 0.3) {
+          R.lead_truth_raw_match = 1.0f;
+          if (branch.isJetRemoved(j)) R.lead_truth_raw_or_removed = 1.0f;
+          break;
+        }
+      }
+    }
 
     for (int t = 0; t < (int)branch.trackPt.GetSize(); ++t) {
       if (branch.trackToTruthvtx[t] != 0)    continue;
