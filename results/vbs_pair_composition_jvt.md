@@ -247,6 +247,49 @@ forward pileup 35.6 → 51.6%, R2 10.0 → 11.8%). The conclusion does not
 depend on the picker. Figures: `*_leadpair_vbs_region_stack.png` beside the
 others.
 
+## Why Z+jets is forward-pileup pairs: the selection has no recoil requirement
+
+Ariel's suspicion of the F-PU + F-PU dominance was right, and the missing
+ingredient is ours: the diagnostic selects on jets alone and never asks the
+Z to recoil, whereas the analysis requires MET > 200 GeV (pT(ll) > 200 in the
+Z→ll control region). Three measurements, all at m_jj ≥ 500, |Δη| > 2.5:
+
+- **Most selected Z+jets events have no hard-scatter jet.** 64% have zero
+  reco paper-HS jets above 30 GeV, and only 49% have a truth HS jet above
+  30 GeV (VBF: 100%). The "VBS pair" is pileup because nothing else exists.
+- **Two forward pileup jets pass the VBS cuts on their own in 3.7% of ALL
+  events at μ = 200** (inclusive, hard scatter ignored: 0.37 forward PU jets
+  above 30 GeV per event, 7.5% of events with ≥2, and 49% of those form an
+  opposite-hemisphere pair with |Δη| > 2.5 and m_jj ≥ 500). Inclusive
+  Drell-Yan produces two hard jets at that mass less often, so pileup wins
+  by default — and the selection enriches it: selected Z+jets events carry
+  2.6 forward PU jets each against 0.37 inclusively. 36% of forward PU jets
+  link to no truth pileup jet at all (stochastic), which is the population
+  fJVT cannot balance against a vertex.
+- **A recoil cut removes the pileup pairs.** `z_pt` (two highest-pT OS-SF
+  selected leptons) is now stored per event; `vbs_region_stack.py
+  --zpt-min` applies it. Loose tagging:
+
+| pT(ll) > | events | F-PU+F-PU | PU+PU other | R2 | R1 | HS+HS | has a reco HS jet |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 0   | 18,059 | 57.4% | 6.9% |  8.5% |  8.1% |  3.2% | 40% |
+| 100 |    960 | 15.1% | 1.5% | 29.3% | 14.1% | 25.5% | 99% |
+| 200 |    162 |  6.8% | 0.6% | 36.4% |  9.3% | 34.0% | 99% |
+
+At the analysis' cut the surviving Z+jets is R2 + HS+HS, which is the
+physical expectation the earlier write-up said was missing — but 0.9% of
+the events survive, because inclusive Powheg DY has almost no Z above
+200 GeV. The same holds without tagging (225 events: R2 33.8%, HS+HS 24.0%,
+F-PU+F-PU 8.4%). Figures: `condor/zjets/zjets*_zpt{100,200}_vbs_region_stack.png`.
+
+**So the sample is missing three things**, two of them physics, one ours:
+(1) a hard second jet — Powheg NLO DY has ≤1 ME parton, Z+2 hard jets at
+large m_jj comes only from the shower; (2) EW Zjj — not in the sample and not
+simulated anywhere at 14 TeV (see `zjets-generator-provenance`); (3) the
+recoil requirement — this diagnostic's selection, now testable via `z_pt`.
+(1) and (2) are why the sample cannot show a realistic Z+jets background in
+the VBS region; (3) is why it shows pileup pairs in particular.
+
 ## What this does NOT settle
 
 - **dijet.** Not run. Same three submissions with `sample=dijet`, then

@@ -1325,6 +1325,14 @@ applies them BEFORE pairing. `results/vbs_pair_composition_jvt.md`:
 - **VBF, the control:** removal is 98.5% pileup-pure on the JVT side, HS+HS
   share of the pair rises 56 → 71 → 78%, R1/R2 shrink only modestly and 70% /
   67% of R1 / R2 events are still R1 / R2 after the loose point.
+- **The forward-pileup dominance is a selection artefact plus a sample
+  limitation.** The diagnostic has no recoil requirement; 64% of its selected
+  Z+jets events have no HS jet above 30 GeV, and two forward pileup jets pass
+  the VBS cuts alone in 3.7% of all μ = 200 events. With pT(ll) > 200 (the
+  analysis' MET cut in the Z→ll CR) the survivors are R2 36% + HS+HS 34% and
+  F-PU+F-PU 7% — but only 0.9% of events survive, since inclusive Powheg DY
+  has almost no Z above 200 GeV, and the sample has ≤1 ME parton and no EW
+  Zjj. `z_pt`/`z_mass` are stored per event; `vbs_region_stack.py --zpt-min`.
 - dijet not run. `--jvt=none` is bit-identical to the pre-JVT diagnostic.
 
 **Anything setting `EXTENDED_BRANCHES` must call `recordAvailableBranches`
