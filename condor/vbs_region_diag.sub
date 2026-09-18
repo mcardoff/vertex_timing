@@ -1,0 +1,70 @@
+# ---------------------------------------------------------------------------
+# vbs_region_diag.sub — condor submit template: one sample, one JVT working
+# point per submission.
+#
+# Runs util/vbs_region_diag.cxx (see its file header): the per-event VBS pair
+# composition diagnostic, with the standard pileup-jet taggers (JVT / fJVT,
+# computed in-code from the vertex fit's track assignment) applied BEFORE
+# pairing under --jvt=<wp>. Writes a single TTree file; the plots come from
+# python/vbs_jvt_plot.py locally afterwards, no further submission needed.
+#
+# Setup (once):
+#   cd build && cmake .. && make vbs_region_diag    # build BEFORE submitting
+#
+# Submit (from inside condor/, so the relative paths resolve). The three
+# working points are three submissions per sample, so each gets its own
+# ClusterId and its own log:
+#   cd condor
+#   condor_submit -a sample=zjets                                    vbs_region_diag.sub
+#   condor_submit -a sample=zjets -a jvt=loose -a jvttag=_jvtLoose   vbs_region_diag.sub
+#   condor_submit -a sample=zjets -a jvt=tight -a jvttag=_jvtTight   vbs_region_diag.sub
+#
+# Outputs land in condor/<sample>/<sample>[_jvtLoose|_jvtTight]_vbs_region_diag.root
+# -- the same names the executable writes locally, so
+#   python/vbs_jvt_plot.py --dir condor/<sample> --sample <sample>
+# finds all three.
+#
+# The executable is single-threaded (plain TTreeReader loop; a full Z+jets
+# pass is jet content only, ~minutes), so no <threads> argument and
+# request_cpus = 1. Reads the SKIMMED sample by default (the registry points
+# there); the skims keep Track_recoVtx_idx, which the discriminants need --
+# the executable hard-errors at startup if the branch is absent rather than
+# silently removing every jet.
+# ---------------------------------------------------------------------------
+universe                 = vanilla
+executable               = run_analysis.sh
+
+# Two macros that MUST agree, exactly like selargs/seltag on clustering_hist.sub:
+# --jvt= selects the working point and the executable tags its output name;
+# condor needs the same tag to know which file to bring back. A mismatch is
+# not silent -- the job completes and then goes on hold failing to transfer a
+# file that does not exist -- but condor_submit -dump shows the expanded name.
+#   jvt      jvttag
+#   none     (empty)
+#   loose    _jvtLoose
+#   tight    _jvtTight
+jvt                      = none
+jvttag                   =
+arguments                = vbs_region_diag $(sample) --jvt=$(jvt)
+
+should_transfer_files    = YES
+when_to_transfer_output  = ON_EXIT
+transfer_input_files     = ../build/vbs_region_diag
+
+transfer_output_files    = $(sample)/$(sample)$(jvttag)_vbs_region_diag.root
+# LHS must be a bare filename (see CLAUDE.md, Grid Submission); the RHS
+# recreates the <sample>/ nesting the local run uses.
+transfer_output_remaps   = "$(sample)$(jvttag)_vbs_region_diag.root=$(sample)/$(sample)$(jvttag)_vbs_region_diag.root"
+
+getenv                   = True
++JobFlavour              = "workday"
+
+request_cpus             = 1
+request_memory           = 4GB
+request_disk             = 2GB
+
+output                   = logs/vbs_region_diag_$(sample)_$(jvt).$(ClusterId).$(ProcId).out
+error                    = logs/vbs_region_diag_$(sample)_$(jvt).$(ClusterId).$(ProcId).err
+log                      = logs/vbs_region_diag_$(sample)_$(jvt).$(ClusterId).$(ProcId).log
+
+queue 1

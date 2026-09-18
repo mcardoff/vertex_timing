@@ -55,14 +55,19 @@ vertex_timing/
 │   │                             #   /data/mcardiff/skimmed_ntuples/ (see Data Format)
 │   ├── vbs_region_diag.cxx       # Per-event VBS pair composition: does an R1/R2-shaped pair
 │   │                             #   EXIST, and did the m_jj picker choose it (3 zone conventions);
-│   │                             #   truth-side jet columns + --no-or; write-up in
-│   │                             #   results/vbs_pair_composition.md
+│   │                             #   truth-side jet columns + --no-or; --jvt=none|loose|tight applies
+│   │                             #   in-code JVT (R_pT proxy) / fJVT before pairing and writes a
+│   │                             #   per-jet `jets` tree. Write-ups: results/vbs_pair_composition.md,
+│   │                             #   results/vbs_pair_composition_jvt.md
 │   └── sweep_utilities.h         # Shared helpers for parameter-sweep executables (no sweep .cxx files currently present)
 ├── python/                        # Interactive/visualisation scripts (run from within this dir)
 │   ├── event_display.py          # Event visualisation — calls runHGTD_Clustering.cxx, produces 2-page PDF
 │   ├── runHGTD_Clustering.cxx    # Interactive per-event clustering
 │   ├── clustering_animation.py   # Animates the iterative clustering algorithm for one event
-│   └── event_tinkering.py        # Quick event inspection and jet printing via uproot
+│   ├── event_tinkering.py        # Quick event inspection and jet printing via uproot
+│   ├── vbs_jvt_calibrate.py      # R_pT thresholds for vbs_region_diag's JVT working points, from its jets tree
+│   ├── vbs_jvt_plot.py           # 21-cell VBS pair composition under none/loose/tight, one sample
+│   └── vbs_jvt_migration.py      # Event-by-event R1/R2 migration between the none and tagged outputs
 ├── share/
 │   ├── models/                   # ML artifacts from a prior (currently inactive) DNN/BDT effort — see
 │   │                             #   Machine Learning section below
@@ -80,6 +85,7 @@ vertex_timing/
 │   ├── clustering_hist.sub       # Submit file: one job per sample, for clustering_hist (histogramming stage)
 │   ├── rpt_v5.sub                # Submit file: one job per sample, for the legacy rpt_v5
 │   ├── rpt_v5_hist.sub           # Submit file: one job per sample, for rpt_v5_hist (histogramming stage)
+│   ├── vbs_region_diag.sub       # One sample x one JVT working point per submit (jvt/jvttag macros must agree)
 │   └── logs/                     # condor stdout/stderr/log output
 ├── CMakeLists.txt
 └── build/                        # Build output (created by `cmake ..`)
@@ -1290,6 +1296,28 @@ classical_scoring_brainstorm, split_clustering}.md`. Key mechanisms:
   (3) event-level quantities cancel exactly in a within-event argmax;
   (4) `truth_n_hs_tracks` is PER CLUSTER — event totals are the SUM, and
   `.first()` silently reads one cluster's count.
+
+### VBS pair composition, and what JVT/fJVT do to it (2026-09-02 / 2026-09-18)
+
+`util/vbs_region_diag` classifies every selected event's chosen tagging pair
+by the truth identity and detector region of each leg (21 cells; R1 and R2
+are two of them). `results/vbs_pair_composition.md`: **Z+jets has no
+hard-scatter leg to pair with** — at m_jj >= 200, 79.7% of its pairs carry no
+paper-HS jet and the two pileup-only cells hold 65.6%, while VBF puts an HS
+jet on both legs 55% of the time on the same code. R2's scarcity on Z+jets is
+the central HS leg mostly not being there, not the m_jj picker outranking it.
+
+The SuperNtuples carry **no Jvt/fJvt branch**, so `--jvt=loose|tight`
+computes both in-code from `Track_recoVtx_idx` + ghost tracks (R_pT as the
+JVT proxy, calibrated to the published 92% / 85% HS efficiencies on local
+VBF; fJVT per arXiv:1705.02211 with the published 0.5 / 0.4 cuts) and
+applies them BEFORE pairing. `results/vbs_pair_composition_jvt.md`, **VBF
+only so far**: removal is 98.5% pileup-pure on the JVT side, the HS+HS share
+of the pair rises 56 → 71 → 78%, and R1/R2 shrink only modestly (70% / 67% of
+R1 / R2 events are still R1 / R2 after the loose point). fJVT is weaker at
+μ = 200 than in its paper (the max over ~100 PU vertices inflates HS values).
+Z+jets and dijet need `condor/vbs_region_diag.sub`, not yet submitted. The
+`--jvt=none` output is bit-identical to the pre-JVT diagnostic.
 
 Results as of 2026-08-20, from `rpt_v5` (grid samples, |Deta| >= 0 and
 m_jj >= 500 GeV) and `failure_decomposition` (local VBF). Numbers are pileup
