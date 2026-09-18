@@ -68,7 +68,8 @@ vertex_timing/
 │   ├── vbs_jvt_calibrate.py      # R_pT thresholds for vbs_region_diag's JVT working points, from its jets tree
 │   ├── vbs_jvt_plot.py           # 21-cell VBS pair composition under none/loose/tight, one sample
 │   ├── vbs_jvt_migration.py      # Event-by-event R1/R2 migration between the none and tagged outputs
-│   └── vbs_pair_composition_plot.py  # The two-sample 21-cell figure for ANY set of vbs_region_diag outputs
+│   ├── vbs_pair_composition_plot.py  # The two-sample 21-cell figure for ANY set of vbs_region_diag outputs
+│   └── vbs_region_stack.py       # Seven-band composition vs m_jj, ROOT/ATLAS style (PyROOT), any diag output
 ├── share/
 │   ├── models/                   # ML artifacts from a prior (currently inactive) DNN/BDT effort — see
 │   │                             #   Machine Learning section below
