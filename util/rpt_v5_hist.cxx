@@ -2,34 +2,34 @@
 //
 // Runs the same TTreeProcessorMT event loop and per-thread ThreadState merge
 // that the former monolithic rpt_v5.cxx did, then writes the merged
-// Hard-Scatter/Pile-Up RpT histograms (5 scenarios x 2 pT slices) plus the
-// scalar event-count/floor-counter accumulators to
-// <OUTPUT_DIR>/hists/rpt_v5_hist.root via histogram_io.h, instead of doing
-// any ROC/console-summary/PDF work directly. rpt_v5_plot.cxx reads that file
-// back and does all of that -- see CLAUDE.md's "Main Executables" section.
+// Hard-Scatter/Pile-Up RpT histograms plus the scalar event-count/floor-counter
+// accumulators via histogram_io.h, instead of doing any ROC/console-summary/PDF
+// work directly. rpt_v5_plot.cxx reads that file back and does all of that --
+// see CLAUDE.MD's "Main Executables" section.
 //
-// Scenarios:
-//   1. zonly        — z-significance tracks only, no time gate   ("ITk-only")
-//   2. hgtd         — ntuple RecoVtx_time / RecoVtx_timeRes gate  ("HGTD t_{0}")
-//   3. waves        — WAVeS-selected cluster time gate            ("WAVeS t_{0}")
-//   4. waves_misas  — WAVeS time gate, events gated on HS timing  ("WAVeS t_{0} + clean timing")
-//                     purity ≥ MISAS_PURITY_CUT (event filter)
-//   5. truth        — reco track times gated vs truth vertex t_{0} ("Truth t_{0}")
+// Scenarios: the seven rows of makeScenarios() (util/rpt_v5_common.h) --
+// zonly, hgtd, trkptz, waves, waves_ideal, truth, tzp. Their indices are
+// load-bearing (fillJets/fillRegion fill sv[0..6] positionally).
 //
-// No event-level selection besides the MISAS filter on scenario 4 — every forward
-// jet in the acceptance contributes an independent RpT measurement.
+// No event-level selection besides vertex quality (and Z->ll for Z+jets) --
+// every forward jet in the acceptance contributes an independent RpT
+// measurement. The VBS knobs (--vbs-deta/--vbs-mjj) gate the regions only.
 //
-// Two jet pT windows:
-//   Slice A: 30 < pT < 40 GeV
-//   Slice B: pT > 40 GeV
-// Jet eta acceptance: 2.4 < |eta| < 3.8 (forward, HGTD-covered), plus a
-// |eta| < 2.4 central baseline filled in the same run and pT slices.
+// Jet populations: 30-40 and >40 GeV at 2.4 < |eta| < 3.8 (forward,
+// HGTD-covered), the same two slices at |eta| < 2.4 (central baseline), and
+// the narrow VBS regions _r1/_r2 (both forward legs 2.4-3.8).
 //
-// Output: <OUTPUT_DIR>/hists/rpt_v5_hist.root
+// Outputs (sample/shard/selection tags applied by histFilePath):
+//   <prefix>rpt_v5_hist.root     histograms + scalars   -- merge with hist_merge
+//   <prefix>rpt_v5_regions.root  TTree "regions": one row per WIDE-window
+//                                (forward |eta| > 2.4, no upper edge) VBS-region
+//                                event, every scenario's per-leg R_pT and gate
+//                                inputs -- merge with hadd (see RegionRow)
 
 #include <TChain.h>
 #include <TH1.h>
 #include <TStyle.h>
+#include <TTree.h>
 #include <TTreeReader.h>
 #include <TTreeReaderArray.h>
 #include <TRandom3.h>
@@ -55,6 +55,7 @@
 #include "event_processing.h"
 #include "rpt_v5_common.h"
 #include "histogram_io.h"
+#include "idealised_timing.h"
 
 using namespace MyUtl;
 
@@ -74,9 +75,10 @@ static constexpr double CENTRAL_ETA_MAX = JET_ETA_MIN;
 // oracle.
 static constexpr float MISAS_PURITY_CUT = 0.75f;
 
-// Reference-study truth-t0 smearing (util/myJet_ana_fr.C).
-static constexpr double TRUTH_VTX_SMEAR = 10.0;  // ps, on the HS vertex time
-static constexpr double TRUTH_TRK_SMEAR = 30.0;  // ps, on each track's own vertex time
+// Reference-study truth-t0 smearing: TRUTH_VTX_SMEAR (10 ps) and
+// TRUTH_TRK_SMEAR (30 ps) now live in src/idealised_timing.h, alongside the
+// idealised-world generation itself, so the event-display macro can replay
+// exactly the draws these histograms were filled with.
 
 // Per-track time-gate half-width in σ.  A 2σ cut over-trims genuine HS tracks
 // when the vertex time is slightly mis-estimated, dragging the high-efficiency
@@ -303,6 +305,57 @@ static void mergeRegionCases(std::vector<RegionCase>& dst,
 }
 
 // -----------------------------------------------------------------------------
+// RegionRow — one WIDE-window VBS-region event, written to the side-file tree
+// <prefix>rpt_v5_regions.root (tree "regions").
+//
+// "Wide" means forward = |eta| > JET_ETA_MIN with NO upper edge (central
+// |eta| < CENTRAL_ETA_MAX): the same pair-level R1/R2 the VBS composition
+// plots use, so legs past |eta| 3.8 -- and past HGTD/ITk at 4.0, where a jet
+// has no tracks and R_pT is 0 under every scenario -- are included. The
+// _r1/_r2 HISTOGRAMS above keep the narrow 2.4-3.8 window (their ROCs need a
+// timeable HS leg); `core` flags the rows that are also in that narrow
+// region, which is a strict subset (same pair, same paper labels, only the
+// forward upper edge differs).
+//
+// One row per event, not per leg: R1 carries both forward legs, R2 its
+// forward PU leg plus the central HS leg's kinematics (rpt_hs_* = -1 there --
+// the central leg is outside HGTD and never a timed leg).
+//
+// The per-scenario arrays are index-aligned with makeScenarios() (checked at
+// startup against SCEN_NAMES) and are written as NAMED scalar branches
+// (rpt_hs_waves, t0_truth, ...), so readers never depend on the index.
+//
+// It lives in its own file because util/hist_merge.cxx refuses unknown key
+// types: shards of this file are merged with hadd (TTrees only), the
+// histogram file with hist_merge.
+// -----------------------------------------------------------------------------
+static constexpr int N_SCEN = 7;
+static const char* const SCEN_NAMES[N_SCEN] = {
+  "zonly", "hgtd", "trkptz", "waves", "waves_ideal", "truth", "tzp"};
+
+struct RegionRow {
+  std::string file_path;
+  Long64_t    entry  = -1;
+  int         region = 0;      // 1 = R1, 2 = R2 (wide window)
+  bool        core   = false;  // also in the narrow 2.4-3.8 region
+  int         idx_hs = -1, idx_pu = -1;   // reco jet indices (R2: idx_hs central)
+  double      mjj = -1.0, deta = -1.0;
+  double      hs_pt = 0, hs_eta = 0, hs_phi = 0;
+  double      pu_pt = 0, pu_eta = 0, pu_phi = 0;
+  // z-associated ghost tracks within RPT_TRACK_JET_DR of each leg, and how
+  // many of them carry a valid HGTD time -- what timing can act on at all.
+  int         hs_ntrk = 0, hs_ntimed = 0, pu_ntrk = 0, pu_ntimed = 0;
+  // Jets > MIN_JET_PT (not overlap-removed) in MIN_ABS_ETA_JET..MAX_ABS_ETA_JET.
+  // vbs_region_diag's preselection requires >= 1; the regions here do not, so
+  // this is what reproduces the composition-plot counts exactly.
+  int         n_jets_fwd_acc = 0;
+  double      rpt_hs[N_SCEN] = {}, rpt_pu[N_SCEN] = {};
+  double      t0[N_SCEN] = {}, sig0[N_SCEN] = {}, infl[N_SCEN] = {};
+  bool        ok[N_SCEN] = {};
+  double      t_truth = 0.0;       // unsmeared TruthVtx_time[0]
+};
+
+// -----------------------------------------------------------------------------
 // EventCase — a display candidate for the non-region categories.
 //   Separate from RegionCase because these rank on event-level timing quality
 //   rather than on a jet pair, and carry no leg indices: no --jet_idx is
@@ -377,6 +430,10 @@ struct ThreadState {
   // Event-display candidates, R1/R2 only (see RegionCase doc comment above).
   std::vector<RegionCase> cases_r1, cases_r2, cases_r2_fail;
   std::vector<EventCase>  cases_mis, cases_wwin;
+  // Wide-window region events for the side-file tree (see RegionRow), and a
+  // standing check that the narrow region really is a subset of the wide one.
+  std::vector<RegionRow> region_rows;
+  long n_narrow_not_subset = 0;
   // Per-scenario pull-width accumulators (see PRINT_PULL_DIAG).
   double pull_dt2_hgtd = 0, pull_var_hgtd = 0;
   double pull_dt2_trkptz = 0, pull_var_trkptz = 0;
@@ -421,6 +478,20 @@ int main(int argc, char** argv) {
   // src/clustering_hist.cxx's main(). Every worker thread's ThreadState
   // produces identically-named histograms, harmless only because of this.
   TH1::AddDirectory(kFALSE);
+
+  // SCEN_NAMES names the region tree's per-scenario branches, so it must stay
+  // index-aligned with makeScenarios(). Fail loudly rather than mislabel a
+  // column if a scenario is ever inserted or reordered.
+  {
+    auto chk = makeScenarios("_namecheck");
+    bool aligned = ((int)chk.size() == N_SCEN);
+    for (int k = 0; aligned && k < N_SCEN; ++k) aligned = (chk[k].name == SCEN_NAMES[k]);
+    for (auto& s : chk) { delete s.h_hs; delete s.h_pu; }
+    if (!aligned) {
+      std::cerr << "SCEN_NAMES is out of sync with makeScenarios() -- fix before running.\n";
+      return 1;
+    }
+  }
 
   // Flushed phase timestamps -- see the identical rationale in
   // src/clustering_hist.cxx and MyUtl::PhaseTimer.
@@ -747,66 +818,35 @@ int main(int argc, char** argv) {
       // them separately would mean clustering on one draw and gating on
       // another, which is what made the earlier version incoherent.
       //
-      // Only tracks HGTD actually timed are smeared -- idealising the time of a
-      // track the detector never measured would invent coverage it does not
-      // have, which the central baseline catches immediately.
-      //
-      // Mirrors getSmearedTrackTime's priority (particle production time, then
-      // truth vertex time, then a pileup draw) but uses this thread's RNG:
-      // that helper draws from the GLOBAL gRandom, which is a data race under
-      // TTreeProcessorMT -- the same class of bug as the TColor race.
-      {
-        UInt_t sd = (UInt_t)std::llround(std::abs(branch.truthVtxZ[0])    * 1e4)
-                  ^ ((UInt_t)std::llround(std::abs(branch.truthVtxTime[0]) * 1e3) << 11)
-                  ^ ((UInt_t)branch.trackZ0.GetSize() << 23);
-        state.rng.SetSeed(sd ? sd : 1u);
-      }
-      std::unordered_map<int, double> smTimes, smRes;
-      for (size_t i = 0; i < branch.trackZ0.GetSize(); ++i) {
-        if (branch.trackTimeValid[i] != 1) continue;
-        const int pi = branch.trackToParticle[i];
-        const int vi = branch.trackToTruthvtx[i];
-        double tPart;
-        if (pi != -1)      tPart = branch.particleT[pi];
-        else if (vi != -1) tPart = branch.truthVtxTime[vi];
-        else               tPart = state.rng.Gaus(branch.truthVtxTime[0], PILEUP_SMEAR);
-        smTimes.emplace((int)i, state.rng.Gaus(tPart, TRUTH_TRK_SMEAR));
-        smRes.emplace((int)i, TRUTH_TRK_SMEAR);
-      }
+      // The generation itself lives in src/idealised_timing.h (see its header
+      // for the seeding / draw-order contract), shared with the event-display
+      // macro so a display of the truth or waves_ideal row shows exactly the
+      // times these histograms were filled with.
+      const IdealisedTiming ideal = makeIdealisedTiming(&branch, state.rng);
+      const auto& smTimes = ideal.times;
 
-      // Re-cluster in the idealised world and re-select with the WAVeS score.
-      // The cluster structure depends on the track times, so reusing the t0
-      // built from the real times would evaluate good tracks against a vertex
-      // time derived from noisy ones. values[0] is the cluster's own weighted
-      // mean of the smeared times -- calculateTime() would recompute it from
-      // the REAL branch times and reintroduce exactly that mismatch.
+      // Re-cluster in the idealised world, then select the cluster closest in
+      // time to truth rather than the highest-scoring one (the second
+      // idealisation -- waves_ideal never uses the WAVeS score). The cluster
+      // structure depends on the track times, so reusing the t0 built from the
+      // real times would evaluate good tracks against a vertex time derived
+      // from noisy ones. values[0] is the cluster's own weighted mean of the
+      // smeared times. Ranked on |dt|, not purity: purity was tried and fails
+      // badly (HS jets at R_pT = 0 rise 3.0% -> 11.8%) -- see
+      // closestToTruthCluster.
       double t_wsm = 0.0, var_wsm = 0.0;
       bool   wsm_ok = false;
       {
-        auto cl_sm = makeSimpleClusters(trk_z, &branch, /*useSmearedTimes=*/true,
-                                        smTimes, smRes, /*checkTimeValid=*/true,
-                                        /*usez0=*/false);
-        doIterativeClustering(&cl_sm, DIST_CUT_CONE);
-        // Second idealisation: select the cluster closest in time to truth
-        // rather than the highest-scoring one. Ranked on |dt|, not purity --
-        // purity was tried and fails badly (HS jets at R_pT = 0 rise
-        // 3.0% -> 11.8%), because it measures where a track CAME FROM, not
-        // whether its time is right: a lone HS track with a mis-assigned HGTD
-        // hit forms a 100%-pure cluster at a wrong time and wins. dt rejects
-        // those by construction.
-        if (!cl_sm.empty()) {
-          size_t bi = 0; double bestDt = 1e50;
-          for (size_t i = 0; i < cl_sm.size(); ++i) {
-            const double dt = std::abs(cl_sm[i].values[0] - branch.truthVtxTime[0]);
-            if (dt < bestDt) { bestDt = dt; bi = i; }
-          }
+        const auto cl_sm = idealisedClusters(trk_z, &branch, ideal);
+        const int  bi    = closestToTruthCluster(cl_sm, branch.truthVtxTime[0]);
+        if (bi >= 0) {
           t_wsm   = cl_sm[bi].values[0];
           var_wsm = cl_sm[bi].sigmas[0] * cl_sm[bi].sigmas[0];
           wsm_ok  = true;
         }
       }
 
-      const double t_truth_vtx = state.rng.Gaus(branch.truthVtxTime[0], TRUTH_VTX_SMEAR);
+      const double t_truth_vtx = ideal.tTruthVtx;
 
       // Shared gate: idealised track times against whichever vertex time.
       auto smearedGate = [&](const std::vector<int>& base, double t_vtx,
@@ -1035,10 +1075,18 @@ int main(int argc, char** argv) {
       // a topology statement; here it has to be a timeable-jet statement.
       // (These two windows have never matched -- 2.4/3.8 against 2.38/4.00 --
       // despite an older comment on both sides claiming they did.)
+      //
+      // The narrow result is kept for the wide-window block below, which must
+      // contain it (see RegionRow).
+      VbsRegion narrowRegion = VbsRegion::NONE;
+      int narrowHS = -1, narrowPU = -1;
       {
         int fwdHS = -1, fwdPU = -1;
         auto region = branch.classifyVbsRegion(JET_ETA_MIN, JET_ETA_MAX,
                                                CENTRAL_ETA_MAX, &fwdHS, &fwdPU);
+        narrowRegion = region;
+        narrowHS = fwdHS;
+        narrowPU = fwdPU;
 
         if (region != VbsRegion::NONE) {
           // Fill one jet into a region's scenario set, as HS or PU.
@@ -1109,6 +1157,99 @@ int main(int argc, char** argv) {
                               branch.topoJetPt[fwdPU], branch.topoJetEta[fwdPU],
                               rZ, rW, rW, t_waves});
           }
+        }
+      }
+
+      // ── Wide-window VBS regions -> side-file tree (see RegionRow) ─────────
+      // Same classifier, same max-m_jj pair, same paper labels as the block
+      // above; only the forward upper edge is lifted to VBS_FWD_ETA_MAX, so
+      // legs past |eta| 3.8 are kept. Nothing here fills a histogram -- the
+      // narrow _r1/_r2 sets above are exactly as before.
+      {
+        int wHS = -1, wPU = -1;
+        BranchPointerWrapper::VbsPair wPair;
+        const VbsRegion wRegion = branch.classifyVbsRegion(
+            JET_ETA_MIN, VBS_FWD_ETA_MAX, CENTRAL_ETA_MAX, &wHS, &wPU, &wPair);
+
+        // Lifting an upper edge can only add events: a narrow-region event
+        // must be the same region with the same legs in the wide window.
+        const bool core = (narrowRegion != VbsRegion::NONE);
+        if (core && (narrowRegion != wRegion || narrowHS != wHS || narrowPU != wPU))
+          ++state.n_narrow_not_subset;
+
+        if (wRegion != VbsRegion::NONE) {
+          const bool isR1 = (wRegion == VbsRegion::R1);
+          // Index-aligned with makeScenarios() / SCEN_NAMES, and with the
+          // sets fillRegion above fills sv[0..6] from.
+          const std::unordered_set<int>* sets[N_SCEN] = {
+            &fwd.all, &fwd.hgtd, &fwd.trkptz, &fwd.waves,
+            &fwd.waves_ideal, &fwd.truth, &fwd.tzp};
+          // What each scenario gated against: t0, sigma_t0 BEFORE inflation,
+          // whether a gate applied at all, and the inflation used -- exactly
+          // the arguments of applyTimeGate / smearedGate above, so a display
+          // can reproduce the gate without re-deriving anything.
+          const double t0s[N_SCEN]   = {0.0, t_hgtd, t_trkptz, t_waves,
+                                        t_wsm, t_truth_vtx, t_tzp};
+          const double sig0s[N_SCEN] = {0.0, std::sqrt(var_hgtd), std::sqrt(var_trkptz),
+                                        std::sqrt(var_waves), std::sqrt(var_wsm),
+                                        TRUTH_VTX_SMEAR, std::sqrt(var_tzp)};
+          const bool   oks[N_SCEN]   = {false, hgtd_vtx_valid, trkptz_ok, waves_ok,
+                                        wsm_ok, true, tzp_ok};
+          const double infls[N_SCEN] = {0.0, INFL.hgtd, INFL.trkptz, INFL.waves,
+                                        INFL.waves, 1.0, INFL.tzp};
+
+          // z-associated ghost tracks in the R_pT cone, and the timed subset.
+          auto countTracks = [&](int j, int& ntrk, int& ntimed) {
+            ntrk = ntimed = 0;
+            for (int idx : branch.topoJetGhostTrackIdx[j]) {
+              if (!fwd.all.count(idx)) continue;
+              if (dR(branch.topoJetEta[j], branch.topoJetPhi[j],
+                     branch.trackEta[idx], branch.trackPhi[idx]) > RPT_TRACK_JET_DR) continue;
+              ++ntrk;
+              if (branch.trackTimeValid[idx] == 1) ++ntimed;
+            }
+          };
+          auto rptOf = [&](int j, const std::unordered_set<int>& s_set) {
+            return computeRpT(&branch, branch.topoJetGhostTrackIdx[j],
+                              branch.topoJetPt[j], branch.topoJetEta[j],
+                              branch.topoJetPhi[j], s_set);
+          };
+
+          RegionRow row;
+          row.file_path = filePath;
+          row.entry     = localEntry;
+          row.region    = isR1 ? 1 : 2;
+          row.core      = core;
+          row.idx_pu    = wPU;
+          // R2 has no forward HS leg; its HS leg is the pair's other (central) jet.
+          row.idx_hs    = isR1 ? wHS : (wPair.idxI == wPU ? wPair.idxJ : wPair.idxI);
+          row.mjj       = wPair.mjj;
+          row.deta      = wPair.dEta;
+          row.hs_pt  = branch.topoJetPt[row.idx_hs];
+          row.hs_eta = branch.topoJetEta[row.idx_hs];
+          row.hs_phi = branch.topoJetPhi[row.idx_hs];
+          row.pu_pt  = branch.topoJetPt[wPU];
+          row.pu_eta = branch.topoJetEta[wPU];
+          row.pu_phi = branch.topoJetPhi[wPU];
+          countTracks(wPU, row.pu_ntrk, row.pu_ntimed);
+          if (isR1) countTracks(wHS, row.hs_ntrk, row.hs_ntimed);
+          else      row.hs_ntrk = row.hs_ntimed = -1;  // central leg: never timed
+          {
+            std::vector<int> passPtIdx;
+            int nPt = 0, nPtEta = 0;
+            branch.collectPtPassingJets(passPtIdx, nPt, nPtEta);
+            row.n_jets_fwd_acc = nPtEta;
+          }
+          for (int k = 0; k < N_SCEN; ++k) {
+            row.rpt_pu[k] = rptOf(wPU, *sets[k]);
+            row.rpt_hs[k] = isR1 ? rptOf(wHS, *sets[k]) : -1.0;
+            row.t0[k]     = t0s[k];
+            row.sig0[k]   = sig0s[k];
+            row.ok[k]     = oks[k];
+            row.infl[k]   = infls[k];
+          }
+          row.t_truth = branch.truthVtxTime[0];
+          state.region_rows.push_back(std::move(row));
         }
       }
 
@@ -1183,6 +1324,10 @@ int main(int argc, char** argv) {
     mergeRegionCases(merged.cases_r2_fail, other.cases_r2_fail);
     mergeEventCases (merged.cases_mis,  other.cases_mis);
     mergeEventCases (merged.cases_wwin, other.cases_wwin);
+    merged.region_rows.insert(merged.region_rows.end(),
+                              std::make_move_iterator(other.region_rows.begin()),
+                              std::make_move_iterator(other.region_rows.end()));
+    merged.n_narrow_not_subset += other.n_narrow_not_subset;
   }
 
   std::cout << "\nFINISHED PROCESSING\n";
@@ -1216,6 +1361,81 @@ int main(int argc, char** argv) {
   writer.Close();
   std::cout << "Wrote histograms to " << histPath << "\n";
   phase.mark("histograms written");
+
+  // --- Wide-window region tree, side file (see RegionRow) ---
+  //     Always written, even empty, so the condor template can always name it.
+  //     Sorted so the file does not depend on how TTreeProcessorMT scheduled
+  //     entries across threads.
+  {
+    auto& rows = merged.region_rows;
+    std::sort(rows.begin(), rows.end(), [](const RegionRow& a, const RegionRow& b) {
+      return a.file_path != b.file_path ? a.file_path < b.file_path : a.entry < b.entry;
+    });
+    const std::string regPath = MyUtl::histFilePath("rpt_v5_regions.root");
+    TFile fout(regPath.c_str(), "RECREATE");
+    if (fout.IsZombie()) {
+      std::cerr << "Could not open " << regPath << " for writing.\n";
+      return 1;
+    }
+    TTree tree("regions", "rpt_v5 wide-window VBS-region events "
+                          "(forward |eta| > 2.4, no upper edge; one row per event)");
+    RegionRow r;
+    // Run constants, repeated per row so the tree is self-describing and
+    // survives hadd (which would keep only one copy of a TParameter).
+    double gate   = GATE_SIGMA;
+    bool   dzpara = RPT_USE_DZ_PARA;
+    double cutMjj = MyUtl::VBS_JET_MJJ, cutDeta = MyUtl::VBS_JET_D_ETA;
+    tree.Branch("file_path", &r.file_path);
+    tree.Branch("entry",  &r.entry,  "entry/L");
+    tree.Branch("region", &r.region, "region/I");
+    tree.Branch("core",   &r.core,   "core/O");
+    tree.Branch("idx_hs", &r.idx_hs, "idx_hs/I");
+    tree.Branch("idx_pu", &r.idx_pu, "idx_pu/I");
+    tree.Branch("mjj",    &r.mjj,    "mjj/D");
+    tree.Branch("deta",   &r.deta,   "deta/D");
+    tree.Branch("hs_pt",  &r.hs_pt,  "hs_pt/D");
+    tree.Branch("hs_eta", &r.hs_eta, "hs_eta/D");
+    tree.Branch("hs_phi", &r.hs_phi, "hs_phi/D");
+    tree.Branch("pu_pt",  &r.pu_pt,  "pu_pt/D");
+    tree.Branch("pu_eta", &r.pu_eta, "pu_eta/D");
+    tree.Branch("pu_phi", &r.pu_phi, "pu_phi/D");
+    tree.Branch("hs_ntrk",   &r.hs_ntrk,   "hs_ntrk/I");
+    tree.Branch("hs_ntimed", &r.hs_ntimed, "hs_ntimed/I");
+    tree.Branch("pu_ntrk",   &r.pu_ntrk,   "pu_ntrk/I");
+    tree.Branch("pu_ntimed", &r.pu_ntimed, "pu_ntimed/I");
+    tree.Branch("n_jets_fwd_acc", &r.n_jets_fwd_acc, "n_jets_fwd_acc/I");
+    for (int k = 0; k < N_SCEN; ++k) {
+      const std::string s = SCEN_NAMES[k];
+      tree.Branch(("rpt_hs_" + s).c_str(), &r.rpt_hs[k], ("rpt_hs_" + s + "/D").c_str());
+      tree.Branch(("rpt_pu_" + s).c_str(), &r.rpt_pu[k], ("rpt_pu_" + s + "/D").c_str());
+      tree.Branch(("t0_"     + s).c_str(), &r.t0[k],     ("t0_"     + s + "/D").c_str());
+      tree.Branch(("sig0_"   + s).c_str(), &r.sig0[k],   ("sig0_"   + s + "/D").c_str());
+      tree.Branch(("infl_"   + s).c_str(), &r.infl[k],   ("infl_"   + s + "/D").c_str());
+      tree.Branch(("ok_"     + s).c_str(), &r.ok[k],     ("ok_"     + s + "/O").c_str());
+    }
+    tree.Branch("t_truth",    &r.t_truth, "t_truth/D");
+    tree.Branch("gate_sigma", &gate,      "gate_sigma/D");
+    tree.Branch("rpt_dzpara", &dzpara,    "rpt_dzpara/O");
+    tree.Branch("vbs_mjj_cut",  &cutMjj,  "vbs_mjj_cut/D");
+    tree.Branch("vbs_deta_cut", &cutDeta, "vbs_deta_cut/D");
+    long nR1 = 0, nR2 = 0, nR1core = 0, nR2core = 0;
+    for (const auto& row : rows) {
+      r = row;
+      tree.Fill();
+      (row.region == 1 ? nR1 : nR2)++;
+      if (row.core) (row.region == 1 ? nR1core : nR2core)++;
+    }
+    tree.Write();
+    fout.Close();
+    std::printf("\n=== WIDE-WINDOW VBS REGIONS (forward |eta| > %.1f, no upper edge) ===\n",
+                JET_ETA_MIN);
+    std::printf("  R1 events : %8ld   (of which in the narrow 2.4-3.8 region: %ld)\n", nR1, nR1core);
+    std::printf("  R2 events : %8ld   (of which in the narrow 2.4-3.8 region: %ld)\n", nR2, nR2core);
+    std::printf("  narrow events NOT contained in the wide region: %ld  (must be 0)\n",
+                merged.n_narrow_not_subset);
+    std::cout << "Wrote region tree to " << regPath << "\n";
+  }
+  phase.mark("region tree written");
 
   // --- Z+jets event-selection breakdown (no-op elsewhere: n_pass_lepton_sel
   //     == n_pass_basic when OVERLAP_REMOVAL is unset). Printed directly here
