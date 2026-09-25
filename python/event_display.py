@@ -182,7 +182,10 @@ for idx in connected_tracks:
     track_pT  = branch.Track_pt[idx]
     track_z0  = branch.Track_z0[idx]
     track_vtx = branch.Track_truthVtx_idx[idx]
-    status    = branch.TruthVtx_isHS[track_vtx]
+    # -1 = no truth-vertex link. The grid productions store ONLY the hard-scatter
+    # truth vertex (one per event, so 98% of tracks are unlinked), and a bare
+    # [-1] wraps round to that vertex: every pileup track was drawn as HS.
+    status    = branch.TruthVtx_isHS[track_vtx] if track_vtx >= 0 else 0
 
     pz = track_pT * np.sinh(track_eta)
     signX = np.sign(track_eta) if track_eta != 0 else 1
