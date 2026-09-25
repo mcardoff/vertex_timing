@@ -635,6 +635,17 @@ ROOT ntuples (tree name `"ntuple"`) with the branches bound in
 | Particles | `TruthPart_prodVtx_time` (bound as `particleT`) |
 | Event | `weight` |
 
+**The grid productions keep ONLY the hard-scatter truth vertex.**
+- `TruthVtx_*` has exactly one entry per event on grid VBF and Z+jets, in the
+  raw and skimmed copies alike.
+- So 98% of tracks there have `Track_truthVtx_idx = -1`: pileup tracks are not
+  linked to anything.
+- The local VBF sample keeps ~200 truth vertices per event (4% unlinked).
+- Test HS as `Track_truthVtx_idx == 0`. Never index `TruthVtx_*` with a raw
+  track index without a `>= 0` guard: in Python `[-1]` wraps round to the HS
+  vertex. That made `event_display.py` draw every grid pileup track as HS
+  until 2026-09-25.
+
 ### Skimmed + slimmed copies (`/data/mcardiff/skimmed_ntuples/`)
 
 `util/skim_ntuples.cxx` writes a reduced copy of each sample, once, and every
