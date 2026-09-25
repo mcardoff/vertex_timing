@@ -343,6 +343,11 @@ static constexpr int N_SCEN = 7;
 static const char* const SCEN_NAMES[N_SCEN] = {
   "zonly", "hgtd", "trkptz", "waves", "waves_ideal", "truth", "tzp"};
 
+// The real-t0 scenarios whose gate outcomes are attributed (see RegionRow's
+// "why" columns): hgtd, trkptz, waves, as indices into SCEN_NAMES.
+static constexpr int N_WHY = 3;
+static constexpr int WHY_SCEN[N_WHY] = {1, 2, 3};
+
 struct RegionRow {
   std::string file_path;
   Long64_t    entry  = -1;
@@ -368,6 +373,23 @@ struct RegionRow {
   // display needs to show why a visibly larger jet is not a leg.
   double      hs_jvt_rpt = -1, hs_fjvt = -1, pu_jvt_rpt = -1, pu_fjvt = -1;
   std::vector<int> rm_jvt, rm_fjvt;
+  // WHY the gate moved pT, per real-t0 case (WHY_SCEN), judged against the
+  // truth HS vertex time ONLY -- one counterfactual: would this track's gate
+  // outcome change if t0 were t_HS (same sigma_t0 and inflation)? No pileup
+  // truth is needed, which the grid samples do not carry. Sums of track pT
+  // over the leg's R_pT cone (z-associated ghost tracks within dR < 0.2).
+  //   HS leg (R1), HS-vertex tracks the gate REMOVED:
+  //     t0far / t0near  kept with t0 = t_HS: the reco t0 caused it, split at
+  //                     |t0 - t_HS| = PASS_SIGMA (a wrong cluster vs an offset)
+  //     trk             removed even with t0 = t_HS: the track's own time is
+  //                     incompatible with the HS time
+  //   PU leg, non-HS tracks the gate KEPT:
+  //     untimed (all cases), not0 (this case had no t0: no gate at all),
+  //     intime (kept even with t0 = t_HS), t0far / t0near (removed with t0 = t_HS)
+  double hs_hspt = 0.0, pu_pupt = 0.0, pu_keep_untimed = 0.0;   // cone totals
+  double hs_rm_t0far[N_WHY] = {}, hs_rm_t0near[N_WHY] = {}, hs_rm_trk[N_WHY] = {};
+  double pu_keep_not0[N_WHY] = {}, pu_keep_intime[N_WHY] = {};
+  double pu_keep_t0far[N_WHY] = {}, pu_keep_t0near[N_WHY] = {};
 };
 
 // -----------------------------------------------------------------------------
@@ -1326,6 +1348,53 @@ int main(int argc, char** argv) {
             row.infl[k]   = infls[k];
           }
           row.t_truth = branch.truthVtxTime[0];
+
+          // Why the gate moved pT (see RegionRow). Same cone as computeRpT.
+          {
+            const double tHS = branch.truthVtxTime[0];
+            auto cone = [&](int j, auto&& fn) {
+              for (int idx : branch.topoJetGhostTrackIdx[j]) {
+                if (!fwd.all.count(idx)) continue;
+                if (dR(branch.topoJetEta[j], branch.topoJetPhi[j],
+                       branch.trackEta[idx], branch.trackPhi[idx]) > RPT_TRACK_JET_DR) continue;
+                fn(idx);
+              }
+            };
+            if (isR1)
+              cone(wHS, [&](int idx) {
+                if (branch.trackToTruthvtx[idx] == 0) row.hs_hspt += branch.trackPt[idx]; });
+            cone(wPU, [&](int idx) {
+              if (branch.trackToTruthvtx[idx] == 0) return;
+              row.pu_pupt += branch.trackPt[idx];
+              if (branch.trackTimeValid[idx] != 1) row.pu_keep_untimed += branch.trackPt[idx];
+            });
+            for (int w = 0; w < N_WHY; ++w) {
+              const int k = WHY_SCEN[w];
+              const std::unordered_set<int>& kept = *sets[k];
+              const double den0  = infls[k] * infls[k] * sig0s[k] * sig0s[k];
+              const bool   farT0 = std::abs(t0s[k] - tHS) >= PASS_SIGMA;
+              // The counterfactual: this case's gate with t0 moved to t_HS.
+              auto keptWithTrueT0 = [&](int idx) {
+                const double st = branch.trackTimeRes[idx];
+                return std::abs(branch.trackTime[idx] - tHS) / std::sqrt(den0 + st * st) < GATE_SIGMA;
+              };
+              if (isR1)
+                cone(wHS, [&](int idx) {
+                  if (branch.trackToTruthvtx[idx] != 0 || kept.count(idx)) return;
+                  const double pt = branch.trackPt[idx];   // an HS track the gate removed
+                  if (!keptWithTrueT0(idx)) row.hs_rm_trk[w] += pt;
+                  else (farT0 ? row.hs_rm_t0far[w] : row.hs_rm_t0near[w]) += pt;
+                });
+              cone(wPU, [&](int idx) {
+                if (branch.trackToTruthvtx[idx] == 0 || !kept.count(idx)) return;
+                if (branch.trackTimeValid[idx] != 1) return;   // pu_keep_untimed
+                const double pt = branch.trackPt[idx];     // a timed PU track that survived
+                if (!oks[k])                  row.pu_keep_not0[w]   += pt;
+                else if (keptWithTrueT0(idx)) row.pu_keep_intime[w] += pt;
+                else (farT0 ? row.pu_keep_t0far[w] : row.pu_keep_t0near[w]) += pt;
+              });
+            }
+          }
           if (JVT_ON) {
             row.pu_jvt_rpt = jetDisc[wPU].rpt;
             row.pu_fjvt    = jetDisc[wPU].fjvt;
@@ -1517,6 +1586,20 @@ int main(int argc, char** argv) {
     tree.Branch("pu_fjvt",    &r.pu_fjvt,    "pu_fjvt/D");
     tree.Branch("rm_jvt",     &r.rm_jvt);
     tree.Branch("rm_fjvt",    &r.rm_fjvt);
+    tree.Branch("hs_hspt",         &r.hs_hspt,         "hs_hspt/D");
+    tree.Branch("pu_pupt",         &r.pu_pupt,         "pu_pupt/D");
+    tree.Branch("pu_keep_untimed", &r.pu_keep_untimed, "pu_keep_untimed/D");
+    for (int w = 0; w < N_WHY; ++w) {
+      const std::string s = SCEN_NAMES[WHY_SCEN[w]];
+      auto B = [&](const char* stem, double* v) {
+        const std::string n = std::string(stem) + "_" + s;
+        tree.Branch(n.c_str(), v, (n + "/D").c_str());
+      };
+      B("hs_rm_t0far", &r.hs_rm_t0far[w]);     B("hs_rm_t0near", &r.hs_rm_t0near[w]);
+      B("hs_rm_trk",   &r.hs_rm_trk[w]);
+      B("pu_keep_not0", &r.pu_keep_not0[w]);   B("pu_keep_intime", &r.pu_keep_intime[w]);
+      B("pu_keep_t0far", &r.pu_keep_t0far[w]); B("pu_keep_t0near", &r.pu_keep_t0near[w]);
+    }
     long nR1 = 0, nR2 = 0, nR1core = 0, nR2core = 0;
     for (const auto& row : rows) {
       r = row;
