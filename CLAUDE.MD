@@ -25,6 +25,8 @@ vertex_timing/
 │   ├── histogram_io.h            # HistWriter/HistReader: TFile-based histogram+scalar I/O shared by the
 │   │                             #   *_hist/*_plot split executables (see "Main Executables" below)
 │   ├── event_processing.h        # setupChain, getAssociatedTracks, selectClusters, processEventData
+│   ├── idealised_timing.h        # rpt_v5's idealised world (truth / waves_ideal rows): per-event seed,
+│   │                             #   smeared track times, re-clustering -- shared with the display macro
 │   ├── plotting_utilities.h      # PlotObj / AnalysisObj + all plotting helpers (moneyPlot, inclusivePlot, ...)
 │   ├── AtlasLabels.h / AtlasStyle.h  # ATLAS plot style utilities
 │   ├── clustering_dt_common.h    # Shared by clustering_hist.cxx/clustering_plot.cxx: Scenario enum,
@@ -61,7 +63,7 @@ vertex_timing/
 │   │                             #   results/vbs_pair_composition_jvt.md
 │   └── sweep_utilities.h         # Shared helpers for parameter-sweep executables (no sweep .cxx files currently present)
 ├── python/                        # Interactive/visualisation scripts (run from within this dir)
-│   ├── event_display.py          # Event visualisation — calls runHGTD_Clustering.cxx, produces 2-page PDF
+│   ├── event_display.py          # Event visualisation — calls runHGTD_Clustering.cxx, produces 3-page PDF
 │   ├── runHGTD_Clustering.cxx    # Interactive per-event clustering
 │   ├── clustering_animation.py   # Animates the iterative clustering algorithm for one event
 │   ├── event_tinkering.py        # Quick event inspection and jet printing via uproot
@@ -69,7 +71,9 @@ vertex_timing/
 │   ├── vbs_jvt_plot.py           # 21-cell VBS pair composition under none/loose/tight, one sample
 │   ├── vbs_jvt_migration.py      # Event-by-event R1/R2 migration between the none and tagged outputs
 │   ├── vbs_pair_composition_plot.py  # The two-sample 21-cell figure for ANY set of vbs_region_diag outputs
-│   └── vbs_region_stack.py       # Seven-band composition vs m_jj, ROOT/ATLAS style (PyROOT), any diag output
+│   ├── vbs_region_stack.py       # Seven-band composition vs m_jj, ROOT/ATLAS style (PyROOT), any diag output
+│   ├── rpt_region_dists.py       # Wide-region R_pT, z-only vs timed per timing case, from rpt_v5_hist's region tree
+│   └── rpt_region_displays.py    # select | pick | render: 20 R1 + 20 R2 displays per case, RPT_CHECK-verified
 ├── share/
 │   ├── models/                   # ML artifacts from a prior (currently inactive) DNN/BDT effort — see
 │   │                             #   Machine Learning section below
@@ -158,14 +162,24 @@ primary workflow.
   | 2 | `trkptz`      | TRKPTZ-selected cluster time |
   | 3 | `waves`       | WAVeS-selected cluster time (in-jet refined) |
   | 4 | `waves_ideal` | ORACLE: re-clustered with 30 ps track times AND the cluster closest in time to truth |
-  | 5 | `truth`       | vertex = Gaus(truth HS vtx, 10 ps), tracks = Gaus(own truth vtx, 30 ps) |
+  | 5 | `truth`       | vertex = Gaus(truth HS vtx, 10 ps), tracks = Gaus(own truth time, 30 ps) |
   | 6 | `tzp`         | TZP-selected cluster + guarded in-jet time (appended last so 0–5 stay stable) |
+
+  "Own truth time" is the truth PARTICLE's production time where the track has
+  one, else its truth vertex time, else a Gaus(t_HS, 175 ps) pileup draw.
+  `waves_ideal` never uses the WAVeS score: it picks the smeared-world cluster
+  closest to truth, and its t0 is that cluster's plain mean (no in-jet
+  refinement). Both idealised worlds are generated in `src/idealised_timing.h`
+  (seed, draw order, re-clustering, truth-closest pick), shared with the
+  event-display macro so a display replays exactly the times the histograms
+  used.
 
   **The `truth`/`waves_ideal` rows are NOT upper bounds for the real rows.**
   Both live in a re-smeared world — every timed track redrawn at a flat 30 ps,
   which is WORSE than HGTD's real per-hit resolutions (35/25/21 ps for 1/2/3
-  hits) — and `waves_ideal` additionally inherits WAVeS *selection*. On ttbar
-  the real `tzp` row genuinely sits above both at matched efficiency.
+  hits) — and each idealises two things at once (`truth`: t0 AND track times;
+  `waves_ideal`: track times AND selection). On ttbar the real `tzp` row
+  genuinely sits above both at matched efficiency.
 
   **Never compare `rejAtEff` cells across scenarios near the efficiency
   ceiling.** The cells snap to bins whose ACTUAL efficiencies can sit up to
@@ -182,13 +196,57 @@ primary workflow.
   t0, so it forgives WAVeS's failure mode and punishes slightly-wrong t0s.
   What the RpT gate actually rewards in a t0 is an open question.
 
-  **Four jet populations**, each filled for all six scenarios: two forward pT
+  **Four jet populations**, each filled for all seven scenarios: two forward pT
   slices (`_lo` 30–40 GeV, `_hi` >40 GeV, both 2.4 < |eta| < 3.8), the same
   two at central |eta| < 2.4 (`_lo_cen`/`_hi_cen`), and the two VBS regions
-  (`_r1`/`_r2`). The central pair is an ITk-only baseline AND a standing
-  correctness check: |eta| < 2.4 is outside HGTD acceptance, so all six rows
+  (`_r1`/`_r2`, both forward legs 2.4 < |eta| < 3.8 -- the NARROW window).
+  The central pair is an ITk-only baseline AND a standing
+  correctness check: |eta| < 2.4 is outside HGTD acceptance, so all rows
   must agree there. That check has caught two real bugs (see Physics
   Findings).
+
+  **Wide-window region tree** (2026-09-25): beside the histogram file,
+  `rpt_v5_hist` writes `<prefix>rpt_v5_regions.root`, tree `regions`, one row
+  per event whose max-m_jj pair is R1/R2 with forward = |eta| > 2.4 and **no
+  upper edge**. These are the same event sets as the composition plots, legs
+  past 3.8 included. Per row it stores:
+  - every scenario's per-leg R_pT (`rpt_hs_<s>`, `rpt_pu_<s>`; R2's
+    `rpt_hs_*` = −1, since its HS leg is central);
+  - each scenario's exact gate inputs (`t0_<s>`, `sig0_<s>` before inflation,
+    `infl_<s>`, `ok_<s>`);
+  - leg kinematics, and the z-associated / timed track counts in each leg's
+    R_pT cone;
+  - `core`, flagging the rows that are also in the narrow `_r1/_r2` region
+    (a strict subset);
+  - `n_jets_fwd_acc`, the jets >30 GeV in 2.38 < |eta| < 4.0.
+  `vbs_region_diag`'s preselection requires ≥1 such jet, and requiring it
+  here reproduces the composition counts exactly. Without it R2 is ~40%
+  larger (local VBF: 4,744 vs 3,350), almost all of that from PU legs past
+  |eta| 4.0 with R_pT = 0 in every row.
+  Merge shards with `hadd` (TTrees only); `hist_merge` refuses the key type,
+  which is why it is a separate file. Standing checks, all passing on local
+  VBF: the core rows reproduce all 21 region histograms bin for bin
+  (`python/rpt_region_dists.py --hist-file` runs this every time), and zero
+  narrow events fall outside the wide region.
+  The narrow `_r1/_r2` histograms are kept for the region ROCs. A wide ROC is
+  not meaningful: HS legs past |eta| 4.0 have no tracks, which puts the
+  HS-efficiency ceiling below the 0.80 window.
+
+  **Region R_pT distributions and displays** (from that tree):
+  - `python/rpt_region_dists.py` draws, per timing case (TRKPTZ, WAVeS, HGTD,
+    and the `truth` / `waves_ideal` rows presented as "Truth vertex t0" /
+    "Ideal track time assignment"):
+    - R1-HS, R1-PU and R2-PU pages, z-only (filled) vs timed, with a ratio pad;
+    - an |eta|-band page (2.4–3.8 vs >3.8);
+    - a markdown summary table.
+  - `python/rpt_region_displays.py select|pick|render` produces 20 R1 + 20 R2
+    event displays per case. `pick` copies the events out of the skims (AF
+    only) so `render` can run on the laptop. Every display must pass
+    RPT_CHECK, and the idealised rows REPLAY_CHECK (see Event Display).
+  - Results, grid VBF + Z+jets: `results/rpt_region_distributions.md`.
+    Legs past |eta| 4.0 carry no tracks and are 57–58% of VBF PU legs. In R2,
+    WAVeS zeroes far fewer fakes than TRKPTZ (26% vs 40% on VBF). A
+    |Δmargin| ranking of R1 displays is mostly "timing hurt" events.
 
   Both idealised rows only smear tracks with `trackTimeValid == 1` — idealising
   the time of a track HGTD never measured invents coverage it does not have,
@@ -475,12 +533,13 @@ has so far only been run on the local VBF sample.
 
 RpT-specific, from `util/rpt_v5_hist.cxx`:
 ```cpp
-JET_ETA_MIN / MAX     = 2.4 / 3.8  // forward jet acceptance
+JET_ETA_MIN / MAX     = 2.4 / 3.8  // forward jet acceptance (inclusive slices + NARROW regions)
 CENTRAL_ETA_MAX       = 2.4        // central baseline, |eta| < this
 RPT_TRACK_JET_DR      = 0.2        // track must be within this of the jet axis
 DZ0_PARA_SCALE        = 1.4        // x getNewDzpara, FORWARD track-to-vertex association
 CENTRAL_Z_SIGNIF      = 5.0        // |z0-z_vtx|/sigma_z0, CENTRAL association
-GATE_SIGMA            = 2.5        // per-track time-gate half-width, in pulls
+GATE_SIGMA            = 3.0        // per-track time-gate half-width, in pulls (2.5 until 7d81111)
+// src/idealised_timing.h (shared with the event-display macro):
 TRUTH_VTX_SMEAR       = 10.0       // ps, truth-t0 row's vertex smear
 TRUTH_TRK_SMEAR       = 30.0       // ps, idealised per-track smear
 ```
@@ -706,11 +765,31 @@ more events.
 ## Event Display
 
 ```bash
-cd python && python event_display.py --file_num <NUM> --event_num <ENTRY> --extra_time <dt>
+cd python && python event_display.py --file_path <FILE.root> --event_num <ENTRY> --extra_time <dt>
 ```
 
 Internally calls `runHGTD_Clustering.cxx` and parses its stdout to produce a
-3-page PDF. Script lives in **`python/`** (not `share/scripts/`).
+3-page PDF. Script lives in **`python/`** (not `share/scripts/`), and must be
+run from there (the macro is invoked by relative name). `--file_num` no longer
+exists; `--file_path` takes the full path of any sample's file.
+
+**Region displays reproduce one rpt_v5 row exactly** (2026-09-25). The
+defaults are unchanged, but a display can be given that row's exact gate:
+- `--t0_sigma`: σ_t0 before inflation. Without it the display rebuilds σ from
+  its own cluster nearest `--extra_time`, which is only right for WAVeS.
+- `--infl`, `--gate_sigma`.
+- `--assoc_nsigma 2.5`: rpt_v5_hist's clustering input. The display default
+  is 3.0.
+- `--ideal_times --ideal_t0 truth|cluster`: the macro replays the idealised
+  world through `src/idealised_timing.h` and the gate uses those times.
+- `--legs HS,PU --leg_labels HS,PU`: the analysis pair, coloured by its paper
+  labels. The Python pair search ignores the Z+jets overlap removal, so pass
+  the pair explicitly.
+- `--expect_rpt`: the display recomputes both legs' R_pT and prints
+  `RPT_CHECK OK|MISMATCH`.
+
+`python/rpt_region_displays.py render` passes all of these from the region
+tree and fails on any mismatch, so do not hand-assemble region commands.
 
 The VBS candidate pair is marked with a muted steel-blue cross-hatch drawn
 UNDER the jet wedges (fill colour is already spoken for: green = truth HS,
@@ -994,6 +1073,8 @@ cvmfs setup against 257 s of actual work per job.
 The sort in `setupChain` is load-bearing, not tidiness: `directory_iterator` order is filesystem-defined and not guaranteed stable, so without it two shards could disagree about which file is "3rd" and silently double-process or skip data. It also makes an unsharded run deterministic, which it previously was not — harmless for full runs, but it changes *which* events a `--max-events` run sees.
 
 **`hadd` will not do this job.** It merges anything with a `Merge()` method and keeps the **first occurrence** of everything else. Every scalar `HistWriter` emits is a `TParameter` — event counts, rejection tallies, the pT accumulators `rpt_v5_plot` turns into untimed-fraction percentages — and `TParameter` has no `Merge()`. `hadd` would produce histograms summed over N shards alongside one shard's event counts, silently. `util/hist_merge.cxx` sums them explicitly, and refuses (rather than dropping) any key type it does not recognise.
+
+**`rpt_v5_hist` shards come in pairs.** Each shard also writes `<sample>_rpt_v5_regions.shard<i>of<N>.root`, the wide-window VBS-region tree, and `condor/rpt_v5_hist.sub` transfers and remaps both files. That file is TTree-only, so it is the export rule, not the histogram rule: merge it with `hadd -f`. `hist_merge` would refuse its key type.
 
 **Not every scalar is additive, though.** `meta_vbs_*` describe the RUN rather than accumulate during it, so `hist_merge` treats them like `meta_energy_label`: must agree across inputs, kept once. Summing them is not merely meaningless — m_jj = 200 in every shard summed to 2400 over 12 shards, which then tripped `HistReader::CheckSelection` and made every merged file unreadable by the plot stage. (Found exactly that way on the first three-sample run, by `CheckSelection` itself.) The `meta_vbs_` prefix IS the rule, so a future selection constant gets the right behaviour by being named that way.
 
