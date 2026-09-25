@@ -71,6 +71,9 @@ nshards                  = 4
 #                                                          default; every result
 #                                                          in CLAUDE.md predating
 #                                                          that was made this way
+#   --jvt=loose                       jvtLoose_         <- JVT + fJVT loose before
+#                                                          VBS pairing (regions only)
+#   --jvt=tight                       jvtTight_
 #
 # Verify before submitting -- `condor_submit -dump` prints the expanded
 # transfer_output_files, and running the executable locally with the same

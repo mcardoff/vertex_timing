@@ -513,18 +513,28 @@ namespace MyUtl {
     //   outPair, when given, receives the candidate pair itself (both indices,
     //   m_jj, |Deta|) whatever the region -- R2's central HS leg is only
     //   reachable that way.
+    //
+    //   jetKeep, when given, is a per-jet mask (indexed like the jet arrays)
+    //   applied to the pT-passing list BEFORE pairing: 0 removes the jet, as a
+    //   pileup-jet tagger does in an analysis (src/jet_tagging.h). nullptr is
+    //   the historical behaviour.
     // -----------------------------------------------------------------------
     VbsRegion classifyVbsRegion(double fwdEtaMin, double fwdEtaMax,
                                 double centralEtaMax,
                                 int* outFwdHS = nullptr,
                                 int* outFwdPU = nullptr,
-                                VbsPair* outPair = nullptr) const {
+                                VbsPair* outPair = nullptr,
+                                const std::vector<char>* jetKeep = nullptr) const {
       if (outFwdHS) *outFwdHS = -1;
       if (outFwdPU) *outFwdPU = -1;
 
       std::vector<int> passPtIdx;
       int nPt = 0, nPtEta = 0;
       this->collectPtPassingJets(passPtIdx, nPt, nPtEta);
+      if (jetKeep)
+        passPtIdx.erase(std::remove_if(passPtIdx.begin(), passPtIdx.end(), [&](int j) {
+                          return j >= (int)jetKeep->size() || !(*jetKeep)[j]; }),
+                        passPtIdx.end());
       VbsPair pair = this->calcBestVbsPair(passPtIdx);
       if (outPair) *outPair = pair;
       if (!pair.valid())              return VbsRegion::NONE;

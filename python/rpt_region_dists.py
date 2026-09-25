@@ -71,13 +71,17 @@ ap.add_argument("--require-fwd-acc-jet", action="store_true",
                      "event sets exactly (off by default: the regions are defined by the pair)")
 args = ap.parse_args()
 
-width = args.bin_width or (0.02 if args.sample in ("vbf", "local") else 0.05)
+# vbf / local, or a tagged variant such as vbf_jvtLoose
+width = args.bin_width or (0.02 if args.sample.split("_")[0] in ("vbf", "local") else 0.05)
 os.makedirs(os.path.join(args.out_dir, "png"), exist_ok=True)
 
+tree = uproot.open(args.file)["regions"]
+# jvt_wp exists from 2026-09-25; an older tree was necessarily untagged.
+has_jvt = "jvt_wp" in tree.keys()
 cols = (["region", "core", "hs_eta", "pu_eta", "n_jets_fwd_acc",
-         "vbs_mjj_cut", "vbs_deta_cut", "gate_sigma"]
+         "vbs_mjj_cut", "vbs_deta_cut", "gate_sigma"] + (["jvt_wp"] if has_jvt else [])
         + [f"rpt_{leg}_{s}" for leg in ("hs", "pu") for s in SCEN])
-a = uproot.open(args.file)["regions"].arrays(cols, library="np")
+a = tree.arrays(cols, library="np")
 if len(a["region"]) == 0:
     raise SystemExit(f"{args.file}: the regions tree is empty")
 
@@ -116,6 +120,10 @@ if deta_cut > 0:
 sel_text += ", p_{T}^{jet} > 30 GeV"
 if args.require_fwd_acc_jet:
     sel_text += ", #geq1 jet in 2.38 < |#eta| < 4.0"
+jvt_name = ["none", "loose", "tight"][int(a["jvt_wp"][0])] if has_jvt else "none"
+if jvt_name != "none":
+    # every page must say the pair was formed from tagger-passing jets only
+    sel_text += f", JVT + fJVT {jvt_name} before pairing"
 
 
 def mask(region, eta_col=None, lo=0.0, hi=np.inf):
