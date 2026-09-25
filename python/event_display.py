@@ -77,6 +77,10 @@ parser.add_argument('--source_label', type=str, default=None,
                          'when reading a picked copy)')
 parser.add_argument('--output_name', type=str, default=None,
                     help='output file stem (default event_display_<file>_<entry>)')
+parser.add_argument('--tagged_out', type=str, default=None,
+                    help='"IDX:JVT,IDX:fJVT,...": jets the pileup tagger removed '
+                         'before pairing. Drawn faded with a dotted edge and '
+                         'labelled, since they could not be a VBS leg.')
 parser.add_argument('--expect_rpt', type=str, default=None,
                     help='"z_hs,t_hs,z_pu,t_pu" from the analysis for the --legs pair '
                          '(nan to skip one); prints RPT_CHECK OK|MISMATCH')
@@ -256,6 +260,12 @@ if args.legs:
     if args.leg_labels:
         for _w, _l in zip(_want, args.leg_labels.split(',')):
             leg_label[_w] = _l.strip().upper()
+# Jets the pileup tagger removed before pairing (--tagged_out): reason by index.
+tagged_out = {}
+if args.tagged_out:
+    for _tok in args.tagged_out.split(','):
+        _i, _why = _tok.split(':')
+        tagged_out[int(_i)] = _why
 if vbs_pair[0] is None:
     for _a in range(len(jet_info)):
         for _b in range(_a + 1, len(jet_info)):
@@ -631,9 +641,13 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
         x_off2, y_off2 = jet_tup['x']+0.15*jet_tup['y'], jet_tup['y']-0.15*jet_tup['x']
         wedge_x = [reco_hs_z, reco_hs_z + x_off1, reco_hs_z + x_off2]
         wedge_y = [0, y_off1, y_off2]
+        _out = tagged_out.get(jet_tup['idx'])
         ax.fill(wedge_x, wedge_y,
-                color=jet_color, alpha=0.7 if highlighted else 0.5,
+                color=jet_color, alpha=0.7 if highlighted else (0.15 if _out else 0.5),
                 zorder=JET_FILL_Z)
+        if _out:
+            ax.fill(wedge_x, wedge_y, facecolor='none', edgecolor='black',
+                    linestyle=':', linewidth=1.5, zorder=JET_FILL_Z)
 
         # VBS candidate leg: cross-hatch drawn UNDER the wedge, showing through
         # the fill's own transparency. facecolor='none' keeps it an overlay on
@@ -655,6 +669,9 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
                           f"$\\rightarrow${_rt:.2f}]")
         if highlighted:
             label += "  ← target"
+        if _out:
+            label += f"  [fails {_out}]"
+            txt_color = 'grey'
         ax.text(reco_hs_z - 6.8, 0.9 - (1.2 + jet_i*0.1),
                 label, weight='bold', fontsize=12, color=txt_color)
 
@@ -663,7 +680,8 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
     ax.set_xlim(reco_hs_z - 7.0, reco_hs_z + 7.0)
     _title = f'Event# {event_num}: Reco Vertex# {0}'
     if args.case_label or args.source_label:
-        _title = '   |   '.join(_s for _s in (args.case_label, args.source_label) if _s)
+        # one line each: together they overrun the axes width and get clipped
+        _title = '\n'.join(_s for _s in (args.case_label, args.source_label) if _s)
     ax.set_title(_title)
     ax.set_xlabel('Z [mm]')
     ax.set_yticks([])
@@ -720,6 +738,11 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
     if args.jet_idx is not None:
         legend_handles.append(mpatches.Rectangle((0, 0), 1, 1, color='orange', alpha=0.7))
         legend_labels.append('Target jet')
+    if tagged_out:
+        legend_handles.append(mpatches.Rectangle((0, 0), 1, 1, facecolor='lightgrey',
+                                                 alpha=0.4, edgecolor='black',
+                                                 linestyle=':'))
+        legend_labels.append('Removed by JVT/fJVT before pairing')
     if vbs_pair[0] is not None:
         # Hatch-only swatch (no facecolor) -- it overlays the identity colours
         # rather than replacing them, and the legend should say so.
@@ -1007,7 +1030,7 @@ with PdfPages(filename) as pdf:
         ax_j = _eta_ax(jet_eta)
         circle = plt.Circle((jet_eta, jet['phi']), 0.4,
                              color=jet_color, fill=False,
-                             linewidth=lw, linestyle='-',
+                             linewidth=lw, linestyle=':' if jet['idx'] in tagged_out else '-',
                              alpha=0.9 if highlighted else 0.7, zorder=5)
         ax_j.add_patch(circle)
         label = f" {jet['pt']:.0f} GeV" + (" ← target" if highlighted else "")

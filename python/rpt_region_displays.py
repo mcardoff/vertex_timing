@@ -42,7 +42,7 @@ CASES = [
     ("truth",       "truth",       "Truth vertex t0",             "truth"),
     ("waves_ideal", "ideal_trk",   "Ideal track time assignment", "cluster"),
 ]
-FIELDS = ["sample", "case", "case_title", "region", "rank", "tag", "delta",
+FIELDS = ["sample", "case", "case_title", "region", "rank", "tag", "delta", "jvt_wp", "rm_jvt", "rm_fjvt",
           "file_path", "entry", "idx_hs", "idx_pu", "hs_pt", "hs_eta", "pu_pt", "pu_eta",
           "rpt_hs_z", "rpt_hs_t", "rpt_pu_z", "rpt_pu_t",
           "t0", "sig0", "infl", "gate_sigma", "ideal_times", "ideal_t0"]
@@ -53,7 +53,11 @@ def cmd_select(args):
              "pu_pt", "pu_eta", "n_jets_fwd_acc", "gate_sigma", "rpt_dzpara"]
             + [f"rpt_{leg}_{s}" for leg in ("hs", "pu") for s in SCEN]
             + [f"{q}_{s}" for q in ("t0", "sig0", "infl", "ok") for s in SCEN])
-    a = ROOT.RDataFrame("regions", args.file).AsNumpy(cols)
+    rdf = ROOT.RDataFrame("regions", args.file)
+    tagged = "jvt_wp" in [str(c) for c in rdf.GetColumnNames()]   # absent before 2026-09-25
+    if tagged:
+        cols += ["jvt_wp", "rm_jvt", "rm_fjvt"]
+    a = rdf.AsNumpy(cols)
     fp = [str(x) for x in a["file_path"]]
     n = len(fp)
     if n == 0:
@@ -102,7 +106,10 @@ def cmd_select(args):
                     rpt_hs_z=repr(zhs), rpt_hs_t=repr(ths), rpt_pu_z=repr(zpu), rpt_pu_t=repr(tpu),
                     t0=repr(float(a[f"t0_{s}"][i])), sig0=repr(float(a[f"sig0_{s}"][i])),
                     infl=repr(float(a[f"infl_{s}"][i])), gate_sigma=repr(float(a["gate_sigma"][i])),
-                    ideal_times=int(ideal_t0 is not None), ideal_t0=ideal_t0 or ""))
+                    ideal_times=int(ideal_t0 is not None), ideal_t0=ideal_t0 or "",
+                    jvt_wp=int(a["jvt_wp"][i]) if tagged else 0,
+                    rm_jvt=";".join(str(int(x)) for x in a["rm_jvt"][i]) if tagged else "",
+                    rm_fjvt=";".join(str(int(x)) for x in a["rm_fjvt"][i]) if tagged else ""))
     out = args.out or os.path.join(os.path.dirname(os.path.abspath(args.file)),
                                    f"{args.sample}_region_display_candidates.csv")
     with open(out, "w", newline="") as f:
@@ -170,6 +177,16 @@ def render_one(job):
            "--output_dir", out_dir, "--output_name", name]
     if int(r["ideal_times"]):
         cmd += ["--ideal_times", "--ideal_t0", r["ideal_t0"]]
+    # Jets the pileup tagger removed before pairing: drawn, but marked, so a
+    # visibly larger jet that is not a leg is explained on the display itself.
+    tagged_out = [f"{j}:JVT" for j in r.get("rm_jvt", "").split(";") if j] + \
+                 [f"{j}:fJVT" for j in r.get("rm_fjvt", "").split(";") if j]
+    if tagged_out:
+        cmd += ["--tagged_out", ",".join(tagged_out)]
+    if int(r.get("jvt_wp") or 0):
+        wp = ["none", "loose", "tight"][int(r["jvt_wp"])]
+        i = cmd.index("--source_label") + 1
+        cmd[i] += f"   |   JVT + fJVT {wp}"
     p = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True)
     log = os.path.join(out_dir, name + ".log")
     with open(log, "w") as f:

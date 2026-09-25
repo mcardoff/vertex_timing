@@ -56,6 +56,7 @@
 #include "rpt_v5_common.h"
 #include "histogram_io.h"
 #include "idealised_timing.h"
+#include "jet_tagging.h"
 
 using namespace MyUtl;
 
@@ -160,6 +161,15 @@ static Inflation inflationFor(const std::string& sample) {
 // Resolved once in main() before the event loop starts, then only read by the
 // worker threads -- write-once-before-fork, so no synchronisation is needed.
 static Inflation INFL = {1.48, 1.39, 1.38, 1.38};
+
+// --jvt=none|loose|tight: pileup-jet tagging (src/jet_tagging.h) applied to
+// the pT-passing jets BEFORE the VBS pair is formed, as an analysis would --
+// the same taggers and working points vbs_region_diag --jvt uses. It gates the
+// REGIONS only (the narrow _r1/_r2 histograms and the wide region tree), like
+// the --vbs-* knobs: the inclusive forward slices stay the selection-free
+// reference measurement. Resolved in main() before any worker starts.
+static const JvtWP* JVT_SEL = &JVT_WPS[0];
+static bool         JVT_ON  = false;
 
 // Set true to print the measured per-scenario pull widths after the event loop.
 static constexpr bool PRINT_PULL_DIAG = true;
@@ -353,6 +363,11 @@ struct RegionRow {
   double      t0[N_SCEN] = {}, sig0[N_SCEN] = {}, infl[N_SCEN] = {};
   bool        ok[N_SCEN] = {};
   double      t_truth = 0.0;       // unsmeared TruthVtx_time[0]
+  // --jvt: the legs' own tagger discriminants (-1 when no tagger is applied),
+  // and which pT-passing jets the tagger removed before pairing -- what a
+  // display needs to show why a visibly larger jet is not a leg.
+  double      hs_jvt_rpt = -1, hs_fjvt = -1, pu_jvt_rpt = -1, pu_fjvt = -1;
+  std::vector<int> rm_jvt, rm_fjvt;
 };
 
 // -----------------------------------------------------------------------------
@@ -520,6 +535,31 @@ int main(int argc, char** argv) {
     if (a == "--dzpara")     MyUtl::USE_DZ_PARA = true;   // clustering input
     if (a == "--rpt-signif") RPT_USE_DZ_PARA    = false;  // R_pT track list
   }
+  for (int i = 1; i < argc; ++i) {
+    const std::string a(argv[i]);
+    if (a.rfind("--jvt=", 0) != 0) continue;
+    const JvtWP* wp = jvtWPByName(a.substr(6));
+    if (!wp) { std::cerr << "unknown " << a << " (none|loose|tight)\n"; return 1; }
+    JVT_SEL = wp;
+  }
+  JVT_ON = (JVT_SEL->rptMin >= 0.0);
+  if (JVT_ON) {
+    // The discriminants need the vertex fit's track assignment, an EXTENDED
+    // branch; set before any BranchPointerWrapper binds.
+    MyUtl::EXTENDED_BRANCHES = true;
+    // A tagged run must not overwrite an untagged one: jvtLoose/jvtTight join
+    // SELECTION_TAG, so every output name (hist file and region tree) carries it.
+    const std::string tag = std::string(JVT_SEL->tag).substr(1);
+    MyUtl::SELECTION_TAG = MyUtl::SELECTION_TAG.empty() ? tag : MyUtl::SELECTION_TAG + "_" + tag;
+  }
+  std::cout << "[jvt] " << JVT_SEL->name;
+  if (JVT_ON)
+    std::cout << " before VBS pairing: keep R_pT(vtx fit) >= " << JVT_SEL->rptMin
+              << " for |eta| < " << JVT_ETA_MAX << ", pT < " << JVT_PT_MAX
+              << "; fJVT <= " << JVT_SEL->fjvtMax << " for " << FJVT_ETA_MIN
+              << " <= |eta| < " << FJVT_ETA_MAX << ", pT < " << FJVT_PT_MAX
+              << "  (tag: " << MyUtl::SELECTION_TAG << ")";
+  std::cout << '\n';
   std::cout << "[assoc] R_pT fwd: "
             << (RPT_USE_DZ_PARA ? "getNewDzpara x " + std::to_string(DZ0_PARA_SCALE)
                                 : "z0 significance < " + std::to_string(RPT_Z_SIGNIF))
@@ -545,6 +585,16 @@ int main(int argc, char** argv) {
   // 5-30 minutes of dead time -- to answer a question the file list already
   // answers. See setupChain's note in src/event_processing.h.
   setupChain(chain, sample.ntupleDir.c_str(), MyUtl::FILE_SHARD);
+  if (JVT_ON) {
+    // With EXTENDED_BRANCHES on, a branch the sample lacks (Track_btagIp_* on
+    // every grid sample) would make the reader iterate ZERO entries and exit 0.
+    recordAvailableBranches(chain);
+    if (!MyUtl::hasBranch("Track_recoVtx_idx")) {
+      std::cerr << "--jvt needs Track_recoVtx_idx, which this sample lacks; a silent "
+                   "fallback would give every jet a JVT R_pT of 0 and remove them all\n";
+      return 1;
+    }
+  }
   phase.mark("chain built");
   ROOT::EnableImplicitMT(nThreads);
 
@@ -1078,12 +1128,32 @@ int main(int argc, char** argv) {
       //
       // The narrow result is kept for the wide-window block below, which must
       // contain it (see RegionRow).
+      // Pileup-jet tagging before pairing (--jvt; see JVT_SEL). keepPtr stays
+      // nullptr without it, which is exactly the historical classification.
+      std::vector<JetDisc> jetDisc;
+      std::vector<char>    jvtKeep;
+      std::vector<int>     rmJvtIdx, rmFjvtIdx;   // pT-passing jets removed
+      if (JVT_ON) {
+        jetDisc = computeJetDiscriminants(branch);
+        jvtKeep.assign(jetDisc.size(), 1);
+        for (int j = 0; j < (int)jetDisc.size(); ++j) {
+          const bool rmJ = jvtRemoves(jetDisc[j], *JVT_SEL);
+          const bool rmF = !rmJ && fjvtRemoves(jetDisc[j], *JVT_SEL);
+          if (!rmJ && !rmF) continue;
+          jvtKeep[j] = 0;
+          if (branch.topoJetPt[j] > MIN_JET_PT && !branch.isJetRemoved(j))
+            (rmJ ? rmJvtIdx : rmFjvtIdx).push_back(j);
+        }
+      }
+      const std::vector<char>* keepPtr = JVT_ON ? &jvtKeep : nullptr;
+
       VbsRegion narrowRegion = VbsRegion::NONE;
       int narrowHS = -1, narrowPU = -1;
       {
         int fwdHS = -1, fwdPU = -1;
         auto region = branch.classifyVbsRegion(JET_ETA_MIN, JET_ETA_MAX,
-                                               CENTRAL_ETA_MAX, &fwdHS, &fwdPU);
+                                               CENTRAL_ETA_MAX, &fwdHS, &fwdPU,
+                                               nullptr, keepPtr);
         narrowRegion = region;
         narrowHS = fwdHS;
         narrowPU = fwdPU;
@@ -1169,7 +1239,7 @@ int main(int argc, char** argv) {
         int wHS = -1, wPU = -1;
         BranchPointerWrapper::VbsPair wPair;
         const VbsRegion wRegion = branch.classifyVbsRegion(
-            JET_ETA_MIN, VBS_FWD_ETA_MAX, CENTRAL_ETA_MAX, &wHS, &wPU, &wPair);
+            JET_ETA_MIN, VBS_FWD_ETA_MAX, CENTRAL_ETA_MAX, &wHS, &wPU, &wPair, keepPtr);
 
         // Lifting an upper edge can only add events: a narrow-region event
         // must be the same region with the same legs in the wide window.
@@ -1238,6 +1308,13 @@ int main(int argc, char** argv) {
             std::vector<int> passPtIdx;
             int nPt = 0, nPtEta = 0;
             branch.collectPtPassingJets(passPtIdx, nPt, nPtEta);
+            if (keepPtr) {        // count only the jets the tagger kept
+              nPtEta = 0;
+              for (int j : passPtIdx) {
+                const double ae = std::abs((double)branch.topoJetEta[j]);
+                if ((*keepPtr)[j] && ae > MIN_ABS_ETA_JET && ae < MAX_ABS_ETA_JET) ++nPtEta;
+              }
+            }
             row.n_jets_fwd_acc = nPtEta;
           }
           for (int k = 0; k < N_SCEN; ++k) {
@@ -1249,6 +1326,14 @@ int main(int argc, char** argv) {
             row.infl[k]   = infls[k];
           }
           row.t_truth = branch.truthVtxTime[0];
+          if (JVT_ON) {
+            row.pu_jvt_rpt = jetDisc[wPU].rpt;
+            row.pu_fjvt    = jetDisc[wPU].fjvt;
+            row.hs_jvt_rpt = jetDisc[row.idx_hs].rpt;
+            row.hs_fjvt    = jetDisc[row.idx_hs].fjvt;
+            row.rm_jvt     = rmJvtIdx;
+            row.rm_fjvt    = rmFjvtIdx;
+          }
           state.region_rows.push_back(std::move(row));
         }
       }
@@ -1358,6 +1443,11 @@ int main(int argc, char** argv) {
   writer.WriteScalar("meta_hs_tot_lo",    merged.hs_tot_lo);
   writer.WriteScalar("meta_hs_floor_lo",  merged.hs_floor_lo);
   writer.WriteRunMeta(MyUtl::ENERGY_LABEL, merged.n_total, MyUtl::VBS_JET_D_ETA, MyUtl::VBS_JET_MJJ);
+  // meta_vbs_ prefix: hist_merge requires it to agree across shards rather
+  // than summing it. Written only for a tagged run, so an untagged file's key
+  // set is exactly what it was before --jvt existed.
+  if (JVT_ON)
+    writer.WriteScalar("meta_vbs_jvt_wp", static_cast<Long64_t>(JVT_SEL - JVT_WPS));
   writer.Close();
   std::cout << "Wrote histograms to " << histPath << "\n";
   phase.mark("histograms written");
@@ -1418,6 +1508,15 @@ int main(int argc, char** argv) {
     tree.Branch("rpt_dzpara", &dzpara,    "rpt_dzpara/O");
     tree.Branch("vbs_mjj_cut",  &cutMjj,  "vbs_mjj_cut/D");
     tree.Branch("vbs_deta_cut", &cutDeta, "vbs_deta_cut/D");
+    // --jvt: 0 none, 1 loose, 2 tight (JVT_WPS order), and what it did.
+    int jvtWp = (int)(JVT_SEL - JVT_WPS);
+    tree.Branch("jvt_wp",     &jvtWp,        "jvt_wp/I");
+    tree.Branch("hs_jvt_rpt", &r.hs_jvt_rpt, "hs_jvt_rpt/D");
+    tree.Branch("hs_fjvt",    &r.hs_fjvt,    "hs_fjvt/D");
+    tree.Branch("pu_jvt_rpt", &r.pu_jvt_rpt, "pu_jvt_rpt/D");
+    tree.Branch("pu_fjvt",    &r.pu_fjvt,    "pu_fjvt/D");
+    tree.Branch("rm_jvt",     &r.rm_jvt);
+    tree.Branch("rm_fjvt",    &r.rm_fjvt);
     long nR1 = 0, nR2 = 0, nR1core = 0, nR2core = 0;
     for (const auto& row : rows) {
       r = row;

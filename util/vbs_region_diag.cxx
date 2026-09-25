@@ -45,7 +45,8 @@
 // No clustering and no time gates: the question is purely about jet content,
 // and dropping them keeps a full Z+jets pass cheap.
 //
-// JVT / fJVT (2026-09-18, on Ariel's feedback). An analysis applies the
+// JVT / fJVT (2026-09-18, on Ariel's feedback; implemented in
+// src/jet_tagging.h since 2026-09-25). An analysis applies the
 // standard pileup-jet taggers BEFORE it forms a tagging pair, so the
 // composition above describes a jet population no analysis actually sees. The
 // SuperNtuples carry no Jvt/fJvt decoration (241 branches, none match, on
@@ -100,6 +101,7 @@
 #include "clustering_structs.h"
 #include "clustering_functions.h"
 #include "event_processing.h"
+#include "jet_tagging.h"
 
 using namespace MyUtl;
 
@@ -117,111 +119,8 @@ int zoneOf(double absEta, double fwdMax) {
 }
 const double FWD_MAX_UNBOUNDED = 1e9;
 
-// ── JVT / fJVT proxies (see the file header) ────────────────────────────────
-const double JVT_ETA_MAX         = 2.5;    // JVT window: |eta| < 2.5 ...
-const double JVT_PT_MAX          = 60.0;   // ... and pT < 60 GeV
-const double FJVT_ETA_MIN        = 2.5;    // fJVT window: 2.5 <= |eta| < 4.5 ...
-const double FJVT_ETA_MAX        = 4.5;
-const double FJVT_PT_MAX         = 120.0;  // ... and pT < 120 GeV
-const double FJVT_CEN_JET_PT_MIN = 20.0;   // central jets entering p_T^miss,i
-const double FJVT_TRK_ETA_MAX    = 2.5;    // tracks entering p_T^miss,i
-const double CORRJVF_K           = 0.01;
-
-struct JvtWP {
-  const char* name;     // --jvt= value
-  const char* tag;      // output-file tag
-  double      rptMin;   // JVT proxy: keep a JVT-window jet iff R_pT >= this
-  double      fjvtMax;  // keep an fJVT-window jet iff fJVT <= this
-};
-// R_pT thresholds: calibrated on local-VBF paper-HS jets in the JVT window
-// (|eta| < 2.5, 30 < pT < 60 GeV) to the published JVT working-point HS
-// efficiencies -- loose <-> the default Run-2 "Medium" point (92%), tight <->
-// "Tight" (85%) -- by python/vbs_jvt_calibrate.py on the `jets` tree of a
-// --jvt=none run. fJVT: published Loose 0.5 / Tight 0.4.
-const JvtWP JVT_WPS[] = {
-  {"none",  "",          -1.0, 1e9},
-  {"loose", "_jvtLoose", 0.0167, 0.5},   // 92.0% HS eff on local VBF, PU eff 13.2%
-  {"tight", "_jvtTight", 0.0767, 0.4},   // 85.0% HS eff on local VBF, PU eff  1.9%
-};
-
-// One jet's discriminants, computed for EVERY jet in the array (not just the
-// pT-passing ones) because the fJVT of a forward jet depends on the central
-// jets' vertex assignment.
-struct JetDisc {
-  float rpt = 0.f, corrjvf = -1.f, fjvt = 0.f;
-  int   nGhost = 0, nGhostPV = 0;
-  bool  jvtWin = false, fjvtWin = false;
-};
-
-std::vector<JetDisc> computeJetDiscriminants(const BranchPointerWrapper& b) {
-  const int nJ = (int)b.topoJetPt.GetSize();
-  const int nV = (int)b.recoVtxZ.GetSize();
-  std::vector<JetDisc> D(nJ);
-
-  // Per-vertex transverse momentum of the tracks the fit assigned to it,
-  // central tracks only (fJVT's p_T^miss is a central quantity). Index -1 is
-  // "fitted to no vertex" (47% of tracks) and contributes nowhere.
-  std::vector<double> vpx(nV, 0.0), vpy(nV, 0.0);
-  int nPUtrk = 0;
-  for (int t = 0; t < (int)b.trackPt.GetSize(); ++t) {
-    const int v = b.recoVtxOf(t);
-    if (v < 0 || v >= nV) continue;
-    if (v > 0) ++nPUtrk;
-    if (std::abs((double)b.trackEta[t]) >= FJVT_TRK_ETA_MAX) continue;
-    vpx[v] += b.trackPt[t] * std::cos(b.trackPhi[t]);
-    vpy[v] += b.trackPt[t] * std::sin(b.trackPhi[t]);
-  }
-
-  // Per-jet ghost-track sums split by vertex; a central jet is then assigned
-  // to whichever vertex dominates its ghost pT, and if that is a PILEUP vertex
-  // the jet's pT enters that vertex's p_T^miss. PV-dominated (i.e. hard
-  // scatter) jets enter no PU vertex's balance. Overlap-removed jets are
-  // leptons and are skipped for the assignment only.
-  std::vector<double> perV(nV);
-  for (int j = 0; j < nJ; ++j) {
-    std::fill(perV.begin(), perV.end(), 0.0);
-    double sumPV = 0.0, sumPU = 0.0;
-    JetDisc& d = D[j];
-    d.nGhost = (int)b.topoJetGhostTrackIdx[j].size();
-    for (int idx : b.topoJetGhostTrackIdx[j]) {
-      const int v = b.recoVtxOf(idx);
-      if (v < 0 || v >= nV) continue;
-      perV[v] += b.trackPt[idx];
-      if (v == 0) { sumPV += b.trackPt[idx]; ++d.nGhostPV; }
-      else          sumPU += b.trackPt[idx];
-    }
-    const double pt = b.topoJetPt[j], aeta = std::abs((double)b.topoJetEta[j]);
-    d.rpt     = (float)(sumPV / pt);
-    d.corrjvf = (sumPV + sumPU > 0.0)
-              ? (float)(sumPV / (sumPV + sumPU / (CORRJVF_K * std::max(nPUtrk, 1))))
-              : -1.f;
-    d.jvtWin  = aeta < JVT_ETA_MAX && pt < JVT_PT_MAX;
-    d.fjvtWin = aeta >= FJVT_ETA_MIN && aeta < FJVT_ETA_MAX && pt < FJVT_PT_MAX;
-    if (aeta < FJVT_TRK_ETA_MAX && pt > FJVT_CEN_JET_PT_MIN && !b.isJetRemoved(j)) {
-      int vBest = -1; double best = 0.0;
-      for (int v = 0; v < nV; ++v) if (perV[v] > best) { best = perV[v]; vBest = v; }
-      if (vBest > 0) {
-        vpx[vBest] += pt * std::cos(b.topoJetPhi[j]);
-        vpy[vBest] += pt * std::sin(b.topoJetPhi[j]);
-      }
-    }
-  }
-
-  // fJVT: the pileup vertex whose missing transverse momentum points most
-  // along the jet, normalised to the jet pT. Computed for every jet; the
-  // window is applied by the caller.
-  for (int j = 0; j < nJ; ++j) {
-    const double pt = b.topoJetPt[j];
-    const double ux = std::cos(b.topoJetPhi[j]), uy = std::sin(b.topoJetPhi[j]);
-    double best = -std::numeric_limits<double>::infinity();
-    for (int v = 1; v < nV; ++v) {
-      const double proj = -0.5 * (vpx[v] * ux + vpy[v] * uy) / pt;
-      if (proj > best) best = proj;
-    }
-    D[j].fjvt = (nV > 1) ? (float)best : 0.f;
-  }
-  return D;
-}
+// JVT / fJVT proxies: src/jet_tagging.h (shared with rpt_v5_hist, so both
+// remove exactly the same jets before pairing).
 
 // Everything the diagnostic asks of one jet collection. Filled twice per event
 // -- see the file header -- so the two must stay structurally identical.
@@ -309,8 +208,7 @@ int main(int argc, char** argv) {
     const std::string a = argv[i];
     if (a.rfind("--jvt=", 0) != 0) continue;
     const std::string w = a.substr(6);
-    const JvtWP* hit = nullptr;
-    for (const auto& wp : JVT_WPS) if (w == wp.name) hit = &wp;
+    const JvtWP* hit = jvtWPByName(w);
     if (!hit) { std::cerr << "[diag] unknown --jvt=" << w << " (none|loose|tight)\n"; return 1; }
     wpSel = hit;
   }
@@ -456,8 +354,8 @@ int main(int argc, char** argv) {
       const double aeta = std::abs(eta);
       const bool hs = branch.isJetPaperHS(eta, phi);
       const bool pu = branch.isJetPaperPU(eta, phi);
-      const bool rmJvt  = d.jvtWin  && d.rpt  <  WP.rptMin;
-      const bool rmFjvt = d.fjvtWin && d.fjvt >  WP.fjvtMax;   // windows are disjoint in |eta|
+      const bool rmJvt  = jvtRemoves(d, WP);
+      const bool rmFjvt = fjvtRemoves(d, WP);   // windows are disjoint in |eta|
       J = JetRow{};
       J.file_idx = R.file_idx; J.entry = R.entry;
       J.pt = branch.topoJetPt[j]; J.abseta = (float)aeta;
