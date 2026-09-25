@@ -199,6 +199,46 @@ Legs in 2.4 < |eta| < 3.8; all legs in parentheses:
 The plots are `figs/rpt_regions/{vbf,zjets}_jvtLoose_rpt_region_dists.pdf`,
 PNGs in `figs/rpt_regions/png/`.
 
+## Why the gate gets tracks wrong
+
+`python/rpt_region_pies.py`, from the region tree's attribution columns
+(rpt_v5_hist c57a46f; clusters 3144559/60, JVT + fJVT loose). Figures:
+`figs/rpt_regions/{vbf,zjets}_jvtLoose_{hs_pt_removed,pu_pt_survives}_pie.(pdf|png)`.
+
+Every call is judged against the truth HS vertex time only, with one
+counterfactual: the same gate, with t0 moved to t_HS.
+
+**HS pT removed from HS jets** (R1 forward HS legs; share of the removed pT):
+
+| | TRKPTZ | WAVeS | HGTD t0 |
+|---|---:|---:|---:|
+| VBF: assigned track time incorrect | **68%** | **79%** | **61%** |
+| VBF: incorrect t0, wrong cluster / small offset | 24% / 8% | 17% / 5% | 28% / 11% |
+| Z+jets: assigned track time incorrect | **57%** | **64%** | **54%** |
+| Z+jets: incorrect t0, wrong cluster / small offset | 34% / 9% | 29% / 7% | 41% / 5% |
+
+The removed pT is 3–5% of the HS legs' HS-track pT. Most of it is lost to the
+track's own time, not to the vertex t0: the case for track-time-assignment
+studies. Z+jets shifts toward the t0, as expected for a sample whose
+hard-scatter tracks are fewer.
+
+**PU pT surviving in PU jets** (R1 + R2 forward PU legs; share of the kept
+PU-track pT):
+
+| | TRKPTZ | WAVeS | HGTD t0 |
+|---|---:|---:|---:|
+| VBF: no HGTD time / no vertex t0 | 36% / – | 32% / – | 33% / 14% |
+| VBF: time compatible with t_HS | 32% | 30% | 28% |
+| VBF: incorrect t0, wrong cluster / small offset | 29% / 3% | 35% / 2% | 23% / 2% |
+| Z+jets: no HGTD time / no vertex t0 | 34% / – | 27% / – | 29% / 23% |
+| Z+jets: time compatible with t_HS | 29% | 25% | 21% |
+| Z+jets: incorrect t0, wrong cluster / small offset | 35% / 3% | 46% / 2% | 27% / 0.5% |
+
+About a third of the surviving pileup pT carries no HGTD time at all. Another
+quarter to a third is in time with the hard scatter, where no t0 could remove
+it. WAVeS' larger wrong-cluster share on Z+jets (46%) is its R2 weakness
+again.
+
 ## Event displays
 
 There are 20 R1 and 20 R2 displays per case and sample: 400 in total, in
