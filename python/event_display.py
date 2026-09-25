@@ -41,6 +41,45 @@ parser.add_argument('--rpt_mine', type=float, required=False, default=None,
 parser.add_argument('--output_dir', type=str, required=False,
                     default='event_displays',
                     help='Directory to save the output PDF (created if absent)')
+# --- Reproducing one rpt_v5 scenario exactly (region displays) --------------
+# Each rpt_v5 row gates against its own (t0, sigma_t0, inflation) and, for the
+# truth / waves_ideal rows, against idealised track times. These flags let a
+# display apply exactly that gate instead of inferring it; the values come
+# from rpt_v5_hist's region tree (python/rpt_region_displays.py passes them).
+parser.add_argument('--t0_sigma', type=float, default=None,
+                    help='sigma of --extra_time for the gate (ps, before inflation). '
+                         'Given: used as is. Absent: rebuilt from the macro cluster '
+                         'nearest --extra_time (the WAVeS-only behaviour).')
+parser.add_argument('--gate_sigma', type=float, default=3.0,
+                    help='per-track gate half-width in pulls (rpt_v5_hist GATE_SIGMA)')
+parser.add_argument('--ideal_times', action='store_true',
+                    help='replay rpt_v5\'s idealised track times (src/idealised_timing.h): '
+                         'the gate and the time panels use them, with their flat resolution')
+parser.add_argument('--ideal_t0', choices=['truth', 'cluster'], default=None,
+                    help='with --ideal_times: which replayed t0 --extra_time must equal '
+                         '(truth = the smeared vertex time, cluster = the smeared-world '
+                         'cluster closest to truth); prints REPLAY_CHECK')
+parser.add_argument('--assoc_nsigma', type=float, default=3.0,
+                    help='z0-significance cut for the macro clustering (rpt_v5_hist uses 2.5)')
+parser.add_argument('--legs', type=str, default=None,
+                    help='"HS_IDX,PU_IDX": the analysis VBS pair (reco jet indices). '
+                         'Overrides the Python pair search, which skips the Z+jets '
+                         'lepton overlap removal.')
+parser.add_argument('--leg_labels', type=str, default=None,
+                    help='"HS,PU": truth labels of --legs (paper dR labels, as the '
+                         'regions use); the two legs are coloured by these')
+parser.add_argument('--case_label', type=str, default=None,
+                    help='title text naming the timing case')
+parser.add_argument('--t0_label', type=str, default='My Time',
+                    help='annotation text for the --extra_time arrow')
+parser.add_argument('--source_label', type=str, default=None,
+                    help='where the event really came from (e.g. the original file:entry '
+                         'when reading a picked copy)')
+parser.add_argument('--output_name', type=str, default=None,
+                    help='output file stem (default event_display_<file>_<entry>)')
+parser.add_argument('--expect_rpt', type=str, default=None,
+                    help='"z_hs,t_hs,z_pu,t_pu" from the analysis for the --legs pair '
+                         '(nan to skip one); prints RPT_CHECK OK|MISMATCH')
 args = parser.parse_args()
 
 event_num, file_path = args.event_num, args.file_path
@@ -53,6 +92,9 @@ IDEALEFF = False
 # for any sample's naming convention (unlike the old bare file_num).
 file_tag = os.path.splitext(os.path.basename(file_path))[0]
 filename = f'{args.output_dir}/event_display_{file_tag}_{event_num:04d}.pdf'
+if args.output_name:
+    _stem = args.output_name[:-4] if args.output_name.endswith('.pdf') else args.output_name
+    filename = f'{args.output_dir}/{_stem}.pdf'
 
 def generate_cluster_colors(n):
     """Generate n perceptually distinct colors using golden-ratio HSV spacing."""
@@ -189,24 +231,50 @@ VBS_HATCH = 'xx'
 VBS_HATCH_LW = 1.2
 JET_FILL_Z, VBS_HATCH_Z = 2, 1     # fill above hatch
 
+def _pair_mass(_ja, _jb):
+    # massless jets: m_jj^2 = 2 pT1 pT2 (cosh(deta) - cos(dphi))
+    _deta = _ja['eta'] - _jb['eta']
+    _dphi = np.arctan2(np.sin(_ja['phi'] - _jb['phi']),
+                       np.cos(_ja['phi'] - _jb['phi']))
+    _m2 = 2.0 * _ja['pt'] * _jb['pt'] * (np.cosh(_deta) - np.cos(_dphi))
+    return np.sqrt(max(_m2, 0.0)), abs(_deta)
+
 vbs_mjj, vbs_deta = -1.0, -1.0
 vbs_pair = (None, None)
-for _a in range(len(jet_info)):
-    for _b in range(_a + 1, len(jet_info)):
-        _ja, _jb = jet_info[_a], jet_info[_b]
-        if _ja['eta'] * _jb['eta'] >= 0:      # require opposite hemispheres
-            continue
-        # massless jets: m_jj^2 = 2 pT1 pT2 (cosh(deta) - cos(dphi))
-        _deta = _ja['eta'] - _jb['eta']
-        _dphi = np.arctan2(np.sin(_ja['phi'] - _jb['phi']),
-                           np.cos(_ja['phi'] - _jb['phi']))
-        _m2 = 2.0 * _ja['pt'] * _jb['pt'] * (np.cosh(_deta) - np.cos(_dphi))
-        _mjj = np.sqrt(max(_m2, 0.0))
-        if _mjj > vbs_mjj:
-            vbs_mjj, vbs_deta, vbs_pair = _mjj, abs(_deta), (_a, _b)
+# Region label per reco jet index, from --legs/--leg_labels (see plot_rz_display).
+leg_label = {}
+if args.legs:
+    # The analysis' own pair, passed in: exact on every sample, where the
+    # search below would differ on Z+jets.
+    _want = [int(_x) for _x in args.legs.split(',')]
+    _pos = {j['idx']: k for k, j in enumerate(jet_info)}
+    if all(_w in _pos for _w in _want):
+        vbs_pair = (_pos[_want[0]], _pos[_want[1]])
+        vbs_mjj, vbs_deta = _pair_mass(jet_info[vbs_pair[0]], jet_info[vbs_pair[1]])
+    else:
+        print(f"WARNING: --legs {args.legs} not among the >30 GeV jets; falling back to the pair search")
+    if args.leg_labels:
+        for _w, _l in zip(_want, args.leg_labels.split(',')):
+            leg_label[_w] = _l.strip().upper()
+if vbs_pair[0] is None:
+    for _a in range(len(jet_info)):
+        for _b in range(_a + 1, len(jet_info)):
+            _ja, _jb = jet_info[_a], jet_info[_b]
+            if _ja['eta'] * _jb['eta'] >= 0:      # require opposite hemispheres
+                continue
+            _mjj, _de = _pair_mass(_ja, _jb)
+            if _mjj > vbs_mjj:
+                vbs_mjj, vbs_deta, vbs_pair = _mjj, _de, (_a, _b)
 if vbs_pair[0] is not None:
     jet_info[vbs_pair[0]]['isVBS'] = True
     jet_info[vbs_pair[1]]['isVBS'] = True
+# A region leg's colour follows the region's own (paper dR) label; say so when
+# the ntuple's truth link would have coloured it differently.
+for _j in jet_info:
+    _l = leg_label.get(_j['idx'])
+    if _l in ('HS', 'PU') and (_j['isHS'] >= 1) != (_l == 'HS'):
+        print(f"LEG_LABEL_NOTE jet {_j['idx']}: region label {_l}, ntuple truth link "
+              f"{'HS' if _j['isHS'] >= 1 else 'not HS'} -- coloured by the region label")
 
 # --- R_pT per jet -------------------------------------------------------------
 # Ported from util/rpt_v5_hist.cxx so the number shown here is the same one the
@@ -279,24 +347,43 @@ for _j in jet_info:
 
 
 # --- ROOT Macro Execution and Clustering ---
+# With --ideal_times the macro also prints the replayed idealised world:
+# every timed track's smeared time, their flat resolution, the smeared vertex
+# time, and the smeared-world cluster the waves_ideal row selects.
+smeared_times, smeared_res = {}, None
+replay_ttruth = replay_tclosest = None
+cluster_times, cluster_zs = [], []
+track_clusters, track_times = [], []
+cluster_trkptz_scores, cluster_waves_scores = [], []
 try:
-    MACRO_CALL = f'runHGTD_Clustering.cxx("{file_path}",{event_num})'
+    MACRO_CALL = (f'runHGTD_Clustering.cxx("{file_path}",{event_num},'
+                  f'{args.assoc_nsigma},{"true" if args.ideal_times else "false"})')
     print(MACRO_CALL)
     result = subprocess.run(['root', '-l', '-q', '-b', MACRO_CALL],
                             check=True, capture_output=True, text=True)
 
     print(result.stdout)
-    track_clusters = []
-    cluster_times, cluster_zs = [], []
-    cluster_trkptz_scores, cluster_waves_scores = [], []
-    track_times = []
     current_block_idx = []
     current_block_times = []
     current_trkptz = None
     current_waves  = None
+    skip_block = False   # a cluster dropped by the 1000 ps cut takes its tracks with it
 
     for line in result.stdout.splitlines():
         line = line.strip()
+        if line.startswith("smeared:"):
+            _i, _t = line.split(":", 1)[1].split(",")
+            smeared_times[int(_i)] = float(_t)
+            continue
+        if line.startswith("smearres:"):
+            smeared_res = float(line.split(":", 1)[1])
+            continue
+        if line.startswith("ttruthvtx:"):
+            replay_ttruth = float(line.split(":", 1)[1])
+            continue
+        if line.startswith("tclosest:"):
+            replay_tclosest = tuple(float(_x) for _x in line.split(":", 1)[1].split())
+            continue
         if line == "---------":
             if current_block_idx:
                 track_clusters.append(current_block_idx)
@@ -307,12 +394,18 @@ try:
                 current_block_times = []
                 current_trkptz = None
                 current_waves  = None
+            skip_block = False
+            continue
+        if skip_block:
             continue
         if line.startswith("t:"):
             cl_time = float(line[2:])
             if np.abs(cl_time - truth_hs_t) < 1000:
                 cluster_times.append(cl_time)
             else:
+                # Dropping only the time but keeping the tracks would pair
+                # this block's tracks with the NEXT cluster's time.
+                skip_block = True
                 continue
         elif line.startswith("score_trkptz:"):
             current_trkptz = float(line.split(":", 1)[1])
@@ -351,17 +444,36 @@ except subprocess.CalledProcessError as e:
 # tracks as 1/sqrt(sum 1/sigma_i^2) -- the same inverse-variance combination
 # clustering_functions.h uses when merging, so it reproduces Cluster::sigmas[0]
 # rather than approximating it.
-GATE_SIGMA = 3.0  # keep in sync with util/rpt_v5_hist.cxx's GATE_SIGMA
-_sel = None
-if args.extra_time is not None and cluster_times:
-    _sel = min(range(len(cluster_times)),
-               key=lambda i: abs(cluster_times[i] - args.extra_time))
+#
+# --t0_sigma replaces that reconstruction outright: an HGTD, truth or
+# idealised t0 has no display cluster to borrow a sigma from, and rpt_v5_hist
+# writes the exact sigma every row used into its region tree.
+#
+# --ideal_times gates the REPLAYED idealised times (smeared_times, parsed from
+# the macro) at their flat resolution, exactly as rpt_v5_hist's smearedGate:
+# a track is gateable iff it has an idealised time, i.e. HGTD timed it.
+GATE_SIGMA = args.gate_sigma  # rpt_v5_hist's GATE_SIGMA (3.0); region tree carries it
+if args.ideal_times and smeared_res is None:
+    sys.exit("--ideal_times: the macro printed no idealised times")
+
+def _trk_time(_t):
+    return smeared_times[_t] if args.ideal_times else branch.Track_time[_t]
+
+def _trk_res(_t):
+    return smeared_res if args.ideal_times else branch.Track_timeRes[_t]
+
+def _trk_timed(_t):
+    return (_t in smeared_times) if args.ideal_times else branch.Track_hasValidTime[_t] == 1
 
 _t_vtx = _sig_vtx = None
-if _sel is not None and _sel < len(track_clusters):
+if args.extra_time is not None and args.t0_sigma is not None:
+    _t_vtx, _sig_vtx = args.extra_time, args.t0_sigma
+elif args.extra_time is not None and cluster_times:
+    _sel = min(range(len(cluster_times)),
+               key=lambda i: abs(cluster_times[i] - args.extra_time))
     _inv = 0.0
-    for _idx in track_clusters[_sel]:
-        _r = branch.Track_timeRes[_idx]
+    for _idx in track_clusters[_sel] if _sel < len(track_clusters) else []:
+        _r = _trk_res(_idx)
         if _r > 0:
             _inv += 1.0 / (_r * _r)
     if _inv > 0:
@@ -386,13 +498,38 @@ for _j in jet_info:
                          np.cos(_j['phi'] - branch.Track_phi[_t]))
         if np.sqrt(_de * _de + _dp * _dp) > RPT_TRACK_JET_DR:
             continue
-        if branch.Track_hasValidTime[_t] == 1:
-            _st = branch.Track_timeRes[_t]
+        if _trk_timed(_t):
+            _st = _trk_res(_t)
             _den = np.sqrt(args.infl * args.infl * _sig_vtx * _sig_vtx + _st * _st)
-            if _den > 0 and abs(branch.Track_time[_t] - _t_vtx) / _den > GATE_SIGMA:
+            # keep iff pull < GATE_SIGMA -- the C++ comparison, edge included
+            if not (_den > 0 and abs(_trk_time(_t) - _t_vtx) / _den < GATE_SIGMA):
                 continue
         _sumpt += branch.Track_pt[_t]
     _j['rpt_t'] = _sumpt / _j['pt']
+
+# --- Cross-checks against the analysis -----------------------------------------
+# One machine-readable line each, collected by python/rpt_region_displays.py:
+# a display that disagrees with the histograms it illustrates is worse than none.
+if args.ideal_t0:
+    _got = replay_ttruth if args.ideal_t0 == 'truth' else \
+           (replay_tclosest[0] if replay_tclosest else None)
+    if _got is not None and args.extra_time is not None and \
+            abs(_got - args.extra_time) <= 1e-6 * max(1.0, abs(_got)):
+        print(f"REPLAY_CHECK OK {args.ideal_t0} t0 {_got!r}")
+    else:
+        print(f"REPLAY_CHECK MISMATCH {args.ideal_t0} t0 replayed {_got!r} "
+              f"vs --extra_time {args.extra_time!r}")
+if args.expect_rpt:
+    if vbs_pair[0] is None or not args.legs:
+        print("RPT_CHECK MISMATCH no --legs pair to check")
+    else:
+        _exp = [float(_x) for _x in args.expect_rpt.split(',')]
+        _hs, _pu = jet_info[vbs_pair[0]], jet_info[vbs_pair[1]]
+        _got = [_hs['rpt'], _hs['rpt_t'], _pu['rpt'], _pu['rpt_t']]
+        _names = ['HS z-only', 'HS timed', 'PU z-only', 'PU timed']
+        _bad = [f"{_n}: expected {_e!r} got {_g!r}" for _n, _e, _g in zip(_names, _exp, _got)
+                if not np.isnan(_e) and (_g is None or abs(_g - _e) > 1e-9 * max(1.0, abs(_e)))]
+        print("RPT_CHECK " + ("OK" if not _bad else "MISMATCH " + "; ".join(_bad)))
 
 
 # --- Data for Histograms and Plotting ---
@@ -423,7 +560,8 @@ for i_trk, cluster in enumerate(track_clusters):
                             if branch.Track_hasValidTime[idx]==1 and branch.Track_nHGTDHits[idx] > 0 else 30
                             for idx in cluster])
     else:
-        time_errors.append([branch.Track_timeRes[idx] for idx in cluster])
+        # _trk_res: the idealised world's flat resolution under --ideal_times
+        time_errors.append([_trk_res(idx) for idx in cluster])
     z_errors.append(np.sqrt(this_var_z0))
     cluster_zs.append(zbar_num / zbar_den)
     pt_wghts.append([branch.Track_pt[idx] for idx in cluster])
@@ -452,6 +590,14 @@ print(f'REMOVED TRACKS ', pu_removed_tracks)
 ### END NEW STUFF
 
 # --- Plotting Functions and Generation ---
+def _is_hs(jet_tup):
+    """Truth colour of a jet: a --legs region leg by its region label, any
+    other jet by the ntuple's truth-HS link (the historical colouring)."""
+    _l = leg_label.get(jet_tup['idx'])
+    if _l in ('HS', 'PU'):
+        return _l == 'HS'
+    return jet_tup['isHS'] >= 1
+
 def draw_eta_reference_lines(ax, z_pos=reco_hs_z, eta_ref=2.4, line_length=50):
     """Draw Lines corresponding to |eta| = eta_ref wrt provided z position"""
     theta_ref = 2 * np.arctan(np.exp(-abs(eta_ref)))
@@ -480,7 +626,7 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
 
     for (jet_i, jet_tup) in enumerate(jet_info_list):
         highlighted = (args.jet_idx is not None and jet_tup.get('idx') == args.jet_idx)
-        jet_color = 'orange' if highlighted else ('green' if jet_tup['isHS'] >= 1 else 'grey')
+        jet_color = 'orange' if highlighted else ('green' if _is_hs(jet_tup) else 'grey')
         x_off1, y_off1 = jet_tup['x']-0.15*jet_tup['y'], jet_tup['y']+0.15*jet_tup['x']
         x_off2, y_off2 = jet_tup['x']+0.15*jet_tup['y'], jet_tup['y']-0.15*jet_tup['x']
         wedge_x = [reco_hs_z, reco_hs_z + x_off1, reco_hs_z + x_off2]
@@ -497,7 +643,7 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
                     edgecolor=VBS_HATCH_COLOR, alpha=VBS_HATCH_ALPHA,
                     hatch=VBS_HATCH, linewidth=VBS_HATCH_LW, zorder=VBS_HATCH_Z)
 
-        txt_color = 'orange' if highlighted else ('green' if jet_tup['isHS'] >= 1 else 'black')
+        txt_color = 'orange' if highlighted else ('green' if _is_hs(jet_tup) else 'black')
         label = f"Jet {jet_i+1}: $p_T$={jet_tup['pt']:.0f} GeV, $\eta$={jet_tup['eta']:.1f}"
         if jet_tup.get('isVBS'):
             _rz = jet_tup.get('rpt', float('nan'))
@@ -515,7 +661,10 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
     draw_eta_reference_lines(ax, reco_hs_z, 2.4)
     ax.set_ylim(-1.0, 1.0)
     ax.set_xlim(reco_hs_z - 7.0, reco_hs_z + 7.0)
-    ax.set_title(f'Event# {event_num}: Reco Vertex# {0}')
+    _title = f'Event# {event_num}: Reco Vertex# {0}'
+    if args.case_label or args.source_label:
+        _title = '   |   '.join(_s for _s in (args.case_label, args.source_label) if _s)
+    ax.set_title(_title)
     ax.set_xlabel('Z [mm]')
     ax.set_yticks([])
 
@@ -604,13 +753,18 @@ def add_annotation(ax, truth_text_y, reco_text_y):
                     arrowprops={'arrowstyle':'->','color':'black','lw':2})
         ax.axvline(x=reco_hs_t, ymin=y_min, ymax=y_max, color='black', lw=2)
 
-    if args.extra_time:
-        ax.annotate("My Time", xytext=(args.extra_time-2.5*x_step, y_min-6*y_step),
+    # `is not None`: a t0 of exactly 0.0 ps is a real time, not "absent".
+    if args.extra_time is not None:
+        ax.annotate(args.t0_label, xytext=(args.extra_time-2.5*x_step, y_min-6*y_step),
                     xy=(args.extra_time, reco_text_y),
                     ha='left', va='top', color='black',
                     arrowprops={'arrowstyle':'->','color':'black','lw':2})
 
 cluster_colors = generate_cluster_colors(len(track_clusters))
+
+# The time panels show the replayed idealised times under --ideal_times; say so.
+IDEAL_TAG = (f'  (idealised track times: truth $\\oplus$ {smeared_res:g} ps)'
+             if args.ideal_times else '')
 
 random.seed(42069)
 calo_time = random.gauss(truth_hs_t,90)
@@ -634,9 +788,11 @@ ranked_indices = sorted(range(len(pt_wghts)), key=_trkptz_or_fallback, reverse=T
 legend_indices = ranked_indices[:4]
 
 # Always include the cluster whose time is closest to the truth HS vertex time
-truth_closest_idx = min(range(len(cluster_times)), key=lambda i: np.abs(cluster_times[i] - truth_hs_t))
-if truth_closest_idx not in legend_indices:
-    legend_indices.append(truth_closest_idx)
+truth_closest_idx = None  # an event with no timed clusters draws empty time panels
+if cluster_times:
+    truth_closest_idx = min(range(len(cluster_times)), key=lambda i: np.abs(cluster_times[i] - truth_hs_t))
+    if truth_closest_idx not in legend_indices:
+        legend_indices.append(truth_closest_idx)
 
 legend_index_set = set(legend_indices)
 
@@ -705,7 +861,7 @@ with PdfPages(filename) as pdf:
     time_histo1.set_xlim(extended_min_time, extended_max_time)
     time_histo1.set_xlabel('Time (ps)')
     time_histo1.set_ylabel('Z (mm)')
-    time_histo1.set_title('Z-T Event Display')
+    time_histo1.set_title('Z-T Event Display' + IDEAL_TAG)
 
     # Legends
     cluster_legend = time_histo1.legend(
@@ -729,37 +885,44 @@ with PdfPages(filename) as pdf:
     plot_rz_display(event_display2, track_info, jet_info)
 
     # ---- Lower Region: Z-T Display ----
-    histvals, bin_edges, patches = time_histo2.hist(
-        hist_times, bins=50, stacked=True,
-        range=(extended_min_time, extended_max_time),
-        weights=pt_wghts, label='Track Time',
-        lw=1.5, alpha=1.0, color=cluster_colors)
+    # No timed clusters (possible when the t0 is not a cluster time, e.g. the
+    # HGTD or truth t0) leaves nothing to histogram; say so instead of crashing.
+    max_val = 1.0
+    if hist_times:
+        histvals, bin_edges, patches = time_histo2.hist(
+            hist_times, bins=50, stacked=True,
+            range=(extended_min_time, extended_max_time),
+            weights=pt_wghts, label='Track Time',
+            lw=1.5, alpha=1.0, color=cluster_colors)
 
-    max_val = histvals.max()
-    time_histo2.set_ylim(0, 1.1 * max_val)
+        max_val = histvals.max()
+        time_histo2.set_ylim(0, 1.1 * max_val)
 
-    flat_times = list(chain.from_iterable(hist_times))
-    flat_pt = list(chain.from_iterable(pt_wghts))
+        flat_times = list(chain.from_iterable(hist_times))
+        flat_pt = list(chain.from_iterable(pt_wghts))
 
-    # Hard Scatter times
-    for t in hs_times:
-        time_histo2.text(t, 0, '/', ha='center', va='top', fontsize=20, color='blue')
+        # Hard Scatter times
+        for t in hs_times:
+            time_histo2.text(t, 0, '/', ha='center', va='top', fontsize=20, color='blue')
 
-    # Hatch the bin for the highest pT track
-    max_pt_idx = np.argmax(flat_pt)
-    bin_idx = np.digitize(flat_times[max_pt_idx], bin_edges) - 1
+        # Hatch the bin for the highest pT track
+        max_pt_idx = np.argmax(flat_pt)
+        bin_idx = np.digitize(flat_times[max_pt_idx], bin_edges) - 1
 
-    max_pt_rect = mpatches.Rectangle(
-        (bin_edges[bin_idx], 0),
-        bin_edges[bin_idx+1] - bin_edges[bin_idx],
-        max(flat_pt), # Fixed height as a fraction of max bin height
-        linewidth=1.5,
-        facecolor='none',
-        edgecolor='black',
-        hatch='///',
-        label='Highest pT Track',
-        zorder=3)
-    time_histo2.add_patch(max_pt_rect)
+        max_pt_rect = mpatches.Rectangle(
+            (bin_edges[bin_idx], 0),
+            bin_edges[bin_idx+1] - bin_edges[bin_idx],
+            max(flat_pt), # Fixed height as a fraction of max bin height
+            linewidth=1.5,
+            facecolor='none',
+            edgecolor='black',
+            hatch='///',
+            label='Highest pT Track',
+            zorder=3)
+        time_histo2.add_patch(max_pt_rect)
+    else:
+        time_histo2.text(0.5, 0.5, 'no timed clusters', transform=time_histo2.transAxes,
+                         ha='center', va='center', fontsize=14, color='grey')
 
     # Cluster Times
     time_histo2.scatter(cluster_times, [0.1*max_val]*len(cluster_times),
@@ -782,7 +945,7 @@ with PdfPages(filename) as pdf:
     time_histo2.set_xlim(extended_min_time, extended_max_time)
     time_histo2.set_xlabel('Time (ps)')
     time_histo2.set_ylabel('Track $p_T$')
-    time_histo2.set_title('Time Histogram')
+    time_histo2.set_title('Time Histogram' + IDEAL_TAG)
 
     # Legends
     cluster_legend = time_histo2.legend(
@@ -839,7 +1002,7 @@ with PdfPages(filename) as pdf:
         if abs(jet_eta) + 0.4 < ETA_MIN or abs(jet_eta) - 0.4 > ETA_MAX:
             continue
         highlighted = (args.jet_idx is not None and jet.get('idx') == args.jet_idx)
-        jet_color = 'orange' if highlighted else ('green' if jet['isHS'] else 'grey')
+        jet_color = 'orange' if highlighted else ('green' if _is_hs(jet) else 'grey')
         lw = 3.0 if highlighted else 1.5
         ax_j = _eta_ax(jet_eta)
         circle = plt.Circle((jet_eta, jet['phi']), 0.4,
