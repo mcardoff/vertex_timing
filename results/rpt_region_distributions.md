@@ -11,6 +11,12 @@ The regions are shown as **distributions** — the same jets' R_pT without
 timing (ITk-only, z association only) and with it — instead of ROCs, for five
 timing cases. Legs past |eta| 3.8 are included. See "Definitions" below.
 
+**The presentation version applies JVT + fJVT (loose) before the VBS pair is
+formed**, as an analysis would. See "With JVT + fJVT loose" below, clusters
+3144162/3. It removes 27% of VBF R1 events and 16% of R2, but leaves every
+conclusion below unchanged to within a point. The untagged numbers that follow
+remain the tagger-free reference.
+
 **Headline, VBF.**
 - **Timeable core (2.4 < |eta| < 3.8):**
   - With z only, 83.7% of forward PU legs already have R_pT = 0.
@@ -119,6 +125,80 @@ Z+jets core R1 has only 171 PU legs with any z-only R_pT (VBF: 4,896), so its
 per-case differences are at the few-leg level. Its HS legs start lower
 (⟨R_pT⟩ 0.298 vs 0.374, 8.6% at zero vs 2.4%).
 
+## With JVT + fJVT loose
+
+`rpt_v5_hist --jvt=loose`, clusters 3144162 (VBF, 8 shards) and 3144163
+(Z+jets, 14 shards); outputs tagged `jvtLoose_`. The in-code taggers of
+`vbs_region_diag --jvt` (`src/jet_tagging.h`) remove failing jets from the
+pT-passing list **before** the max-m_jj pair is formed:
+- JVT: R_pT proxy (vertex-fit assignment) ≥ 0.0167 for |eta| < 2.5 and
+  pT < 60 GeV, the 92% HS-efficiency point.
+- fJVT: ≤ 0.5 for 2.5 ≤ |eta| < 4.5 and pT < 120 GeV.
+
+Only the regions change; the inclusive forward slices are tagger-free by
+design. A tagger removes at least one pT-passing jet in 69% of VBF region
+events (JVT) and 22% (fJVT).
+
+| events | R1 | R2 | R1, composition preselection | R2, composition preselection |
+|---|---:|---:|---:|---:|
+| VBF, no tagger | 82,519 | 62,081 | 79,054 | 43,613 |
+| VBF, JVT+fJVT loose | **60,050** | **52,098** | 57,152 | 34,472 |
+| Z+jets, no tagger | 2,324 | 8,161 | 2,165 | 5,064 |
+| Z+jets, JVT+fJVT loose | **1,606** | **7,274** | 1,473 | 4,055 |
+
+**The per-leg picture does not change.** fJVT does not use the leg's own
+tracks, and JVT acts only below |eta| 2.5. So the taggers change which events
+and pairs are in the regions, not what timing does to a leg that is there.
+Legs in 2.4 < |eta| < 3.8; all legs in parentheses:
+
+**VBF, JVT + fJVT loose**
+
+| case | R1 HS: ⟨R_pT⟩ z → t | R1 HS lowered / zeroed | R1 PU: R_pT=0 z → t | R2 PU: R_pT=0 z → t |
+|---|---|---|---|---|
+| TRKPTZ t0 | 0.370 → 0.350 | 29.6% / 1.4% (25.1% / 1.6%) | 82.8% → 90.2% (92.5% → 95.8%) | 82.8% → 89.8% (92.4% → 95.5%) |
+| WAVeS t0 | 0.370 → 0.354 | 26.7% / 0.5% (22.5% / 0.7%) | 82.8% → 89.9% (92.5% → 95.7%) | 82.8% → 87.4% (92.4% → 94.5%) |
+| HGTD t0 (Athena) | 0.370 → 0.349 | 29.6% / 1.0% (24.8% / 1.0%) | 82.8% → 89.9% (92.5% → 95.6%) | 82.8% → 87.7% (92.4% → 94.6%) |
+| Truth vertex t0 | 0.370 → 0.357 | 27.0% / 0.5% (23.1% / 0.6%) | 82.8% → 88.6% (92.5% → 95.1%) | 82.8% → 88.9% (92.4% → 95.1%) |
+| Ideal track time assignment | 0.370 → 0.356 | 27.4% / 0.5% (23.4% / 0.6%) | 82.8% → 88.6% (92.5% → 95.1%) | 82.8% → 88.7% (92.4% → 95.0%) |
+
+**Z+jets, JVT + fJVT loose**
+
+| case | R1 HS: ⟨R_pT⟩ z → t | R1 HS lowered / zeroed | R1 PU: R_pT=0 z → t | R2 PU: R_pT=0 z → t |
+|---|---|---|---|---|
+| TRKPTZ t0 | 0.296 → 0.279 | 21.3% / 3.3% (16.9% / 2.8%) | 82.8% → 89.7% (92.0% → 95.3%) | 82.4% → 89.5% (91.2% → 94.7%) |
+| WAVeS t0 | 0.296 → 0.286 | 16.4% / 1.0% (13.1% / 0.9%) | 82.8% → 89.2% (92.0% → 95.2%) | 82.4% → 86.3% (91.2% → 93.2%) |
+| HGTD t0 (Athena) | 0.296 → 0.282 | 17.8% / 1.4% (14.2% / 1.4%) | 82.8% → 88.2% (92.0% → 94.8%) | 82.4% → 87.5% (91.2% → 93.6%) |
+| Truth vertex t0 | 0.296 → 0.285 | 16.7% / 1.3% (13.3% / 1.2%) | 82.8% → 89.5% (92.0% → 95.1%) | 82.4% → 88.2% (91.2% → 94.1%) |
+| Ideal track time assignment | 0.296 → 0.285 | 16.1% / 1.1% (12.9% / 1.1%) | 82.8% → 88.9% (92.0% → 94.8%) | 82.4% → 87.9% (91.2% → 93.9%) |
+
+- **R2 WAVeS weakness survives tagging.** Of the core PU legs with z-only
+  R_pT > 0, share zeroed:
+
+  | | TRKPTZ | WAVeS | HGTD t0 |
+  |---|---:|---:|---:|
+  | VBF | 40% | 27% | 28% |
+  | Z+jets | 40% | 22% | 29% |
+
+- **The untimeable share grows slightly.** Legs past |eta| 4.0 are now 60% of
+  VBF R1 PU legs and 59% of R2 PU legs (58% / 57% untagged). fJVT reaches
+  4.5, but only below 120 GeV, and nothing tags beyond 4.5.
+
+**Checks (all pass):**
+- **Region-only changes.** In each tagged histogram file only the 21 region
+  histograms differ from the untagged one. The other 63 and every scalar are
+  identical; the only new key is `meta_vbs_jvt_wp`.
+- **Tree against histograms.** The tagged trees reproduce their 21 region
+  histograms bin for bin.
+- **Independent implementation.** With the composition preselection, the
+  Z+jets tree equals `vbs_region_diag --jvt=loose`'s grid composition exactly
+  (1,473 / 4,055), as it does on local VBF (4,183 / 2,579).
+- **Merges.** hadd rows equal the shard sums (VBF 112,148; Z+jets 8,880).
+- **Job logs.** All 22 jobs: working point logged, zero subset violations,
+  empty stderr.
+
+The plots are `figs/rpt_regions/{vbf,zjets}_jvtLoose_rpt_region_dists.pdf`,
+PNGs in `figs/rpt_regions/png/`.
+
 ## Event displays
 
 There are 20 R1 and 20 R2 displays per case and sample: 400 in total, in
@@ -154,6 +234,23 @@ The candidate lists are
 `condor/<sample>/<sample>_region_display_candidates.csv`. They carry every
 render argument, so a single display can be regenerated from its row.
 
+**JVT + fJVT loose displays.** 400 more are in
+`figs/rpt_regions/event_displays/<sample>_jvtLoose/<case>/<r1|r2>/`, selected
+from the tagged trees in the same way. **400/400 pass RPT_CHECK and
+REPLAY_CHECK.**
+- Jets the tagger removed before pairing are drawn faded with a dotted edge
+  and labelled `[fails JVT]` / `[fails fJVT]`. This explains, on the display
+  itself, why a visibly larger jet is not a leg.
+- 134 of 200 VBF displays and 120 of 200 Z+jets displays show at least one
+  such jet (33 each show an fJVT removal).
+- The second title line names the working point.
+- The R1 lists stay mostly failures:
+
+  | R1 displays tagged `hurt` (of 20) | TRKPTZ | WAVeS | HGTD | Truth t0 | Ideal |
+  |---|---:|---:|---:|---:|---:|
+  | VBF | 19 | 19 | 19 | 13 | 18 |
+  | Z+jets | 18 | 17 | 18 | 15 | 14 |
+
 ## Checks
 
 - **Refactor.** Moving the idealised timing into `src/idealised_timing.h` left
@@ -186,6 +283,10 @@ hadd -f condor/vbf/vbf_rpt_v5_regions.root condor/vbf/vbf_rpt_v5_regions.shard*o
 export PYTHONNOUSERSITE=1 PYTHONPATH=/opt/homebrew/Cellar/root/6.40.04/lib/root
 ~/.venv-hgtd/bin/python python/rpt_region_dists.py condor/vbf/vbf_rpt_v5_regions.root \
     --sample vbf --hist-file condor/vbf/vbf_rpt_v5_hist.root
+
+# JVT + fJVT loose: the same, with the tag (outputs vbf_jvtLoose_*; condor from condor/):
+#   condor_submit -a sample=vbf -a nshards=8 -a 'selargs=--jvt=loose' -a seltag=jvtLoose_ rpt_v5_hist.sub
+#   ... then the same merge/plot/select/pick/render with vbf_jvtLoose in every name and --sample vbf_jvtLoose
 
 # displays: select (laptop) -> pick (AF, needs the skims) -> render (laptop)
 ~/.venv-hgtd/bin/python python/rpt_region_displays.py select condor/vbf/vbf_rpt_v5_regions.root --sample vbf

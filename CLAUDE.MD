@@ -27,6 +27,8 @@ vertex_timing/
 │   ├── event_processing.h        # setupChain, getAssociatedTracks, selectClusters, processEventData
 │   ├── idealised_timing.h        # rpt_v5's idealised world (truth / waves_ideal rows): per-event seed,
 │   │                             #   smeared track times, re-clustering -- shared with the display macro
+│   ├── jet_tagging.h             # In-code JVT (R_pT proxy) / fJVT taggers + working points, shared by
+│   │                             #   vbs_region_diag --jvt and rpt_v5_hist --jvt
 │   ├── plotting_utilities.h      # PlotObj / AnalysisObj + all plotting helpers (moneyPlot, inclusivePlot, ...)
 │   ├── AtlasLabels.h / AtlasStyle.h  # ATLAS plot style utilities
 │   ├── clustering_dt_common.h    # Shared by clustering_hist.cxx/clustering_plot.cxx: Scenario enum,
@@ -223,6 +225,21 @@ primary workflow.
   here reproduces the composition counts exactly. Without it R2 is ~40%
   larger (local VBF: 4,744 vs 3,350), almost all of that from PU legs past
   |eta| 4.0 with R_pT = 0 in every row.
+  **`--jvt=none|loose|tight`** (2026-09-25) applies the in-code JVT/fJVT
+  taggers (`src/jet_tagging.h`, identical to `vbs_region_diag --jvt`) to the
+  pT-passing jets BEFORE the VBS pair is formed. It gates the regions only
+  (narrow histograms + wide tree), like the `--vbs-*` knobs; the inclusive
+  forward slices stay tagger-free. A tagged run:
+  - turns on EXTENDED_BRANCHES (+ `recordAvailableBranches`), and refuses a
+    sample without `Track_recoVtx_idx` rather than removing every jet;
+  - tags its outputs `jvtLoose_`/`jvtTight_` (SELECTION_TAG; condor
+    `selargs=--jvt=loose seltag=jvtLoose_`);
+  - writes `meta_vbs_jvt_wp`;
+  - fills `jvt_wp`, each leg's JVT R_pT / fJVT, and the removed jets
+    (`rm_jvt`, `rm_fjvt`, drawn by the displays) in the tree.
+  Validated on local VBF: `--jvt=none` is bit-identical to before, and
+  `--jvt=loose` reproduces `vbs_region_diag --jvt=loose`'s composition counts
+  exactly (R1 4,183, R2 2,579 with its preselection).
   Merge shards with `hadd` (TTrees only); `hist_merge` refuses the key type,
   which is why it is a separate file. Standing checks, all passing on local
   VBF: the core rows reproduce all 21 region histograms bin for bin
@@ -243,10 +260,13 @@ primary workflow.
     event displays per case. `pick` copies the events out of the skims (AF
     only) so `render` can run on the laptop. Every display must pass
     RPT_CHECK, and the idealised rows REPLAY_CHECK (see Event Display).
-  - Results, grid VBF + Z+jets: `results/rpt_region_distributions.md`.
-    Legs past |eta| 4.0 carry no tracks and are 57–58% of VBF PU legs. In R2,
-    WAVeS zeroes far fewer fakes than TRKPTZ (26% vs 40% on VBF). A
-    |Δmargin| ranking of R1 displays is mostly "timing hurt" events.
+  - Results, grid VBF + Z+jets, untagged and JVT+fJVT loose:
+    `results/rpt_region_distributions.md`.
+    - Legs past |eta| 4.0 carry no tracks and are 57–60% of VBF PU legs.
+    - In R2, WAVeS zeroes far fewer fakes than TRKPTZ (26–27% vs 40% on VBF).
+    - The loose tagger removes 27% of VBF R1 events and 16% of R2 but leaves
+      the per-leg picture unchanged.
+    - A |Δmargin| ranking of R1 displays is mostly "timing hurt" events.
 
   Both idealised rows only smear tracks with `trackTimeValid == 1` — idealising
   the time of a track HGTD never measured invents coverage it does not have,
@@ -1391,7 +1411,8 @@ jet on both legs 55% of the time on the same code. R2's scarcity on Z+jets is
 the central HS leg mostly not being there, not the m_jj picker outranking it.
 
 The SuperNtuples carry **no Jvt/fJvt branch**, so `--jvt=loose|tight`
-computes both in-code from `Track_recoVtx_idx` + ghost tracks (R_pT as the
+computes both in-code (`src/jet_tagging.h`, since 2026-09-25 shared with
+`rpt_v5_hist --jvt`) from `Track_recoVtx_idx` + ghost tracks (R_pT as the
 JVT proxy, calibrated to the published 92% / 85% HS efficiencies on local
 VBF; fJVT per arXiv:1705.02211 with the published 0.5 / 0.4 cuts) and
 applies them BEFORE pairing. `results/vbs_pair_composition_jvt.md`:
