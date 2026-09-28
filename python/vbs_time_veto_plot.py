@@ -7,9 +7,12 @@ region-plot selection) and applies, offline:
   * the recoil cut: truth E_T^miss > --met-min for the signal file (needs the
     raw-ntuple VBF run -- the skims have no truth record), pT(ll) > --zpt-min
     for the background file;
-  * the jet-time calibration: sigma_jet x f, f measured per file as
-    1.4826 x median |t_jet - t_HS| / sigma_jet over paper-HS legs (--jet-infl
-    auto), or fixed;
+  * the jet-time calibration: sigma_jet x f(n), n = tracks in the jet-time
+    estimate, f = 1.4826 x median |t_jet - t_HS| / sigma_jet over paper-HS
+    legs in bins of n. By default (--jet-infl sig-ntrk) f(n) is measured ONCE,
+    on the signal file, and applied to both files: the veto must be one
+    procedure for signal and background, and a per-file calibration would give
+    the background a looser veto than the signal (see results/vbs_time_veto.md);
   * the veto at --nsigma (default 3), per method:
       jj        reject iff BOTH legs are timed and
                 |t_A - t_B| / sqrt(sA^2 + sB^2) >= n
@@ -81,7 +84,10 @@ ap.add_argument("--bkg-label", default="#sqrt{s} = 14 TeV, HL-LHC, Z(#rightarrow
 ap.add_argument("--met-min", type=float, default=200.0, help="signal: truth E_T^miss cut (GeV); 0 = none")
 ap.add_argument("--zpt-min", type=float, default=200.0, help="background: pT(ll) cut (GeV); 0 = none")
 ap.add_argument("--nsigma", type=float, default=3.0)
-ap.add_argument("--jet-infl", default="auto", help="'auto' (per-file MAD of HS-leg pulls) or a number")
+ap.add_argument("--jet-infl", default="sig-ntrk",
+                help="sig-ntrk: f(n tracks) from the signal file's HS legs, for both files (default); "
+                     "sig: one global factor from the signal file; per-file / per-file-ntrk: each file its own; "
+                     "or a number")
 ap.add_argument("--min-trk", type=int, default=1, help="tracks a jet-time estimate needs for the leg to count as timed")
 ap.add_argument("--methods", default="jj,t0_trkptz,t0_waves,t0_hgtd,t0_truth",
                 help="drawn methods (the summary always has all); add jj_all / t0_tzp to draw them")
@@ -132,26 +138,74 @@ def load(path, recoil_col, recoil_min, what):
     return ev, e, info
 
 
-def jet_calibration(e_all):
-    pulls = []
+# bins of n = tracks in the core jet-time estimate: the pull width falls from
+# 2.3 (one track) to 1.3 (nine or more) on VBF, which a single factor averages over
+NBINS = [1, 2, 3, 4, 6, 9, 10**6]
+
+
+def mad(x):
+    return 1.4826 * float(np.median(np.abs(x)))
+
+
+def hs_pulls(e_all):
+    """(t_jet - t_HS) / sigma_jet and n for every paper-HS leg with a core time"""
+    p, n = [], []
     for L in "ab":
         m = e_all[f"{L}_hs"] & (e_all[f"{L}_core_n"] > 0)
-        pulls.append(np.abs(e_all[f"{L}_core_t"][m] - e_all["t0_truth"][m]) / e_all[f"{L}_core_sig"][m])
-    p = np.concatenate(pulls)
-    return 1.4826 * float(np.median(p)), len(p)
+        p.append((e_all[f"{L}_core_t"][m] - e_all["t0_truth"][m]) / e_all[f"{L}_core_sig"][m])
+        n.append(e_all[f"{L}_core_n"][m])
+    return np.concatenate(p), np.concatenate(n)
 
 
-def decisions(e, f, nsigma, min_trk):
-    """kept[method] -> bool per event, and which legs were timed (core)."""
+class Calib:
+    """sigma_jet -> f(n) x sigma_jet; `fac` None means one global factor."""
+    def __init__(self, glob, fac=None, source="fixed", nlegs=0):
+        self.glob, self.fac, self.source, self.nlegs = glob, fac, source, nlegs
+
+    def __call__(self, n):
+        if self.fac is None: return np.full(len(n), self.glob)
+        out = np.full(len(n), self.glob)
+        for (lo, hi), f in zip(zip(NBINS[:-1], NBINS[1:]), self.fac):
+            out[(n >= lo) & (n < hi)] = f
+        return out
+
+    def short(self):
+        if self.fac is None: return f"{self.glob:.2f}"
+        return f"f(n_{{trk}}): {self.fac[0]:.2f} (1 trk) - {self.fac[-1]:.2f} (#geq {NBINS[-2]})"
+
+    def md(self):
+        if self.fac is None: return f"x {self.glob:.3f} ({self.source})"
+        bins = ", ".join(f"n={lo}" + ("" if hi == lo + 1 else (f"-{hi - 1}" if hi < 10**6 else "+")) + f": {f:.2f}"
+                         for (lo, hi), f in zip(zip(NBINS[:-1], NBINS[1:]), self.fac))
+        return f"x f(n) from {self.source} ({self.nlegs:,} legs; {bins}; global {self.glob:.3f})"
+
+
+def measure(e_all, binned, source):
+    p, n = hs_pulls(e_all)
+    g = mad(p)
+    if not binned: return Calib(g, None, source, len(p))
+    fac = []
+    for lo, hi in zip(NBINS[:-1], NBINS[1:]):
+        m = (n >= lo) & (n < hi)
+        fac.append(mad(p[m]) if m.sum() >= 20 else g)
+    return Calib(g, fac, source, len(p))
+
+
+def decisions(e, calib, nsigma, min_trk):
+    """kept[method] -> bool per event, and which legs were timed (core).
+    The literal all-ghost estimator (jj_all) gets the global factor: its n is
+    ~23 tracks of mostly pileup, where the core's f(n) means nothing."""
     out = {}
     for est, key in [("core", "jj"), ("all", "jj_all")]:
-        tA, sA, hA = e[f"a_{est}_t"], f * e[f"a_{est}_sig"], e[f"a_{est}_n"] >= min_trk
-        tB, sB, hB = e[f"b_{est}_t"], f * e[f"b_{est}_sig"], e[f"b_{est}_n"] >= min_trk
+        fA = calib(e[f"a_{est}_n"]) if est == "core" else calib.glob
+        fB = calib(e[f"b_{est}_n"]) if est == "core" else calib.glob
+        tA, sA, hA = e[f"a_{est}_t"], fA * e[f"a_{est}_sig"], e[f"a_{est}_n"] >= min_trk
+        tB, sB, hB = e[f"b_{est}_t"], fB * e[f"b_{est}_sig"], e[f"b_{est}_n"] >= min_trk
         both = hA & hB
         den = np.sqrt(np.where(both, sA**2 + sB**2, 1.0))
         out[key] = ~(both & (np.abs(tA - tB) / den >= nsigma))
-    tA, sA, hA = e["a_core_t"], f * e["a_core_sig"], e["a_core_n"] >= min_trk
-    tB, sB, hB = e["b_core_t"], f * e["b_core_sig"], e["b_core_n"] >= min_trk
+    tA, sA, hA = e["a_core_t"], calib(e["a_core_n"]) * e["a_core_sig"], e["a_core_n"] >= min_trk
+    tB, sB, hB = e["b_core_t"], calib(e["b_core_n"]) * e["b_core_sig"], e["b_core_n"] >= min_trk
     for s in T0_SRC:
         ok, t0, s0 = e[f"ok_{s}"], e[f"t0_{s}"], e[f"infl_{s}"] * e[f"sig0_{s}"]
         rej = np.zeros(len(t0), bool)
@@ -212,22 +266,31 @@ def binned(e, kept, edges):
     return res
 
 
-samples = {}
+loaded = {}
 for role, path, col, cut, norm in [("sig", args.sig, "met_truth", args.met_min, args.sig_norm),
                                    ("bkg", args.bkg, "z_pt", args.zpt_min, args.bkg_norm)]:
-    if not path: continue
-    ev, e_all, info = load(path, col, cut, role)
-    if args.jet_infl == "auto":
-        f, nhs = jet_calibration(e_all)
-    else:
-        f, nhs = float(args.jet_infl), 0
-    kept, hA, hB = decisions(ev, f, args.nsigma, args.min_trk)
-    samples[role] = dict(e=ev, info=info, f=f, nhs=nhs, kept=kept, band=bands(ev), path=path,
+    if path: loaded[role] = (path, col, cut, norm) + load(path, col, cut, role)
+# one calibration for every file unless asked otherwise (see the docstring)
+own = {r: measure(v[5], True, f"{r} HS legs") for r, v in loaded.items()}   # each file's own, for the record
+mode = args.jet_infl
+if mode in ("sig-ntrk", "sig"):
+    src = "sig" if "sig" in loaded else "bkg"
+    c = measure(loaded[src][5], mode == "sig-ntrk", f"the {src} file's HS legs")
+    calibs = {r: c for r in loaded}
+elif mode in ("per-file", "per-file-ntrk"):
+    calibs = {r: measure(loaded[r][5], mode == "per-file-ntrk", f"the {r} file's own HS legs") for r in loaded}
+else:
+    calibs = {r: Calib(float(mode)) for r in loaded}
+samples = {}
+for role, (path, col, cut, norm, ev, e_all, info) in loaded.items():
+    cal = calibs[role]
+    kept, hA, hB = decisions(ev, cal, args.nsigma, args.min_trk)
+    samples[role] = dict(e=ev, info=info, calib=cal, own=own[role], kept=kept, band=bands(ev), path=path,
                          hA=hA, hB=hB, norm=norm, cutcol=col, cut=cut)
     w = ev["weight"].astype(float)
     print(f"[{role}] {path}: {info['njobs']} job(s), {info['n_read']:,} read, {info['n_selected']:,} selected, "
-          f"{len(w):,} after {col} > {cut:g}; jet-time sigma x {f:.3f}"
-          + (f" (MAD of {nhs:,} HS-leg pulls)" if nhs else " (fixed)"))
+          f"{len(w):,} after {col} > {cut:g}; jet-time sigma {cal.md()}; "
+          f"this file's own HS-leg width {own[role].glob:.3f}")
 
 # ── ROOT drawing ─────────────────────────────────────────────────────────────
 import ROOT
@@ -253,9 +316,17 @@ def sel_line(s):
     return ",  ".join(parts)
 
 
-def veto_line(f_text):
+def veto_line():
     return (f"veto if |#Deltat| / #sigma #geq {args.nsigma:g};  jet time: timed ghost tracks, #DeltaR < "
-            f"{JDR:g}, {JCUT:g}#sigma time clustering;  #sigma_{{jet}} #times {f_text}")
+            f"{JDR:g}, {JCUT:g}#sigma time clustering, highest-#Sigmap_{{T}} cluster")
+
+
+def calib_line(cal):
+    if cal.fac is None:
+        return f"#sigma_{{jet}} #times {cal.glob:.2f}" + ("" if cal.source == "fixed" else f"  (from {cal.source})")
+    src = cal.source.replace("the sig file's", "signal").replace("the bkg file's", "background")
+    return (f"#sigma_{{jet}} #times f(n_{{trk}}) from {src}: {cal.fac[0]:.2f} (1 track) #rightarrow "
+            f"{cal.fac[-1]:.2f} (#geq {NBINS[-2]} tracks), same for S and B")
 
 
 def graph(series, k, n_meth, key):
@@ -302,7 +373,7 @@ def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_
     highs = [v + hi for m in DRAWN for v, _, hi, _ in series[m] if np.isfinite(v)]
     ymin = max(0.0, np.floor((min(lows) - 0.03) * 10) / 10) if lows else 0.0
     ytop = max(max(highs) if highs else ref, ref)
-    frame.SetMinimum(ymin); frame.SetMaximum(ytop + (ytop - ymin) * 0.95)
+    frame.SetMinimum(ymin); frame.SetMaximum(ytop + (ytop - ymin) * (0.95 + 0.13 * max(0, len(lines) - 3)))
     frame.GetXaxis().SetLabelSize(0); frame.GetYaxis().SetTitle(ylab); frame.GetYaxis().SetTitleOffset(1.25)
     frame.Draw("AXIS")
     one = ROOT.TLine(EDGES[0], ref, EDGES[-1], ref); one.SetLineStyle(2); one.SetLineColor(ROOT.kGray + 1); one.Draw()
@@ -351,7 +422,7 @@ for role, ylab, label in [("sig", "Signal efficiency", args.sig_label), ("bkg", 
     extra = {m: fmt_pct(eff(w, s["kept"][m])[0]) for m in DRAWN}
     counts = [n for _, _, _, n in series[DRAWN[0]]]
     column_figure(f"{args.out}_{role}_eff_mjj", ylab, series, extra, label,
-                  [sel_line(s), veto_line(f"{s['f']:.2f}"), "all m_{jj} columns in brackets; generator-weighted"],
+                  [sel_line(s), veto_line(), calib_line(s["calib"]), "all m_{jj} columns in brackets; generator-weighted"],
                   counts, "MC events")
 
 # ── Yields and the summary ───────────────────────────────────────────────────
@@ -371,7 +442,8 @@ for role, s in samples.items():
     i = s["info"]
     md.append(f"- **{role}**: `{s['path']}` -- {i['njobs']} job(s), {i['n_read']:,} events read "
               f"(sum w {i['sumw_read']:.6g}), {i['n_selected']:,} selected, {len(s['e']['weight']):,} after "
-              f"{s['cutcol']} > {s['cut']:g}; jet-time sigma x {s['f']:.3f}; "
+              f"{s['cutcol']} > {s['cut']:g}; jet-time sigma {s['calib'].md()} (this file's own HS-leg width "
+              f"{s['own'].glob:.3f}); "
               f"normalisation: {NORM[s['norm']]['note'] if s['norm'] != 'none' else 'none'}"
               + (" (LOCAL sample: its own sum w, same cross-section assumed)" if i["sample"] == "local" and s["norm"] != "none" else ""))
 md.append("")
@@ -411,6 +483,23 @@ for role, s in samples.items():
     tA, tB = s["hA"], s["hB"]
     md += ["", f"timed legs (core, >= {args.min_trk} track): both {100 * w[tA & tB].sum() / w.sum():.1f}%, "
            f"one {100 * w[tA ^ tB].sum() / w.sum():.1f}%, neither {100 * w[~tA & ~tB].sum() / w.sum():.1f}% (weighted)", ""]
+if both:
+    # the analysis cuts at m_jj > X rather than using columns: cumulative thresholds
+    sg_, bk_ = samples["sig"], samples["bkg"]
+    ws_, wb_ = sg_["e"]["weight"].astype(float), bk_["e"]["weight"].astype(float)
+    md += ["**S/sqrt(B) relative to no veto, by m_jj threshold** (eps_S / sqrt(eps_B); "
+           "B MC events in brackets)", "",
+           "| m_jj > | B MC | " + " | ".join(ALL_METHODS) + " |", "|" + "---|" * (2 + len(ALL_METHODS))]
+    for x in EDGES[:-1]:
+        ms, mb = sg_["e"]["mjj"] > x, bk_["e"]["mjj"] > x
+        if mb.sum() == 0: continue
+        cells = []
+        for m in ALL_METHODS:
+            es = eff(ws_[ms], sg_["kept"][m][ms])[0]
+            eb = eff(wb_[mb], bk_["kept"][m][mb])[0]
+            cells.append(f"{es / np.sqrt(eb):.3f}" if eb > 0 else "inf")
+        md.append(f"| {x:g} GeV | {int(mb.sum())} | " + " | ".join(cells) + " |")
+    md.append("")
 open(args.out + "_summary.md", "w").write("\n".join(md) + "\n")
 print("\n".join(md))
 print("wrote", args.out + "_summary.md")
@@ -436,7 +525,9 @@ column_figure(f"{args.out}_s_over_sqrtb", "#varepsilon_{S} / #sqrt{#varepsilon_{
               f"S: {args.sig_label.split(', ')[-1]},  B: {args.bkg_label.split(', ')[-1]}",
               [f"S: {sel_line(sg)}",
                f"B: {sel_line(bk)}",
-               veto_line(f"{sg['f']:.2f} (S) / {bk['f']:.2f} (B)"),
+               veto_line(),
+               calib_line(sg["calib"]) if sg["calib"] is bk["calib"]
+               else f"#sigma_{{jet}}: {sg['calib'].short()} (S) / {bk['calib'].short()} (B)",
                "all m_{jj} columns in brackets; > 1 = the veto raises S/#sqrt{B}"],
               [n for _, _, _, n in binned(bk["e"], bk["kept"][DRAWN[0]], EDGES)], "B MC events")
 
@@ -444,8 +535,8 @@ column_figure(f"{args.out}_s_over_sqrtb", "#varepsilon_{S} / #sqrt{#varepsilon_{
 c = ROOT.TCanvas("c_to", "", 800, 700); KEEP.append(c)
 c.SetLeftMargin(0.15); c.SetRightMargin(0.05)
 scan = np.array([1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 8.0, 12.0])
-curves = {m: np.array([(eff(ws, decisions(sg["e"], sg["f"], ns, args.min_trk)[0][m])[0],
-                        eff(wb, decisions(bk["e"], bk["f"], ns, args.min_trk)[0][m])[0]) for ns in scan])
+curves = {m: np.array([(eff(ws, decisions(sg["e"], sg["calib"], ns, args.min_trk)[0][m])[0],
+                        eff(wb, decisions(bk["e"], bk["calib"], ns, args.min_trk)[0][m])[0]) for ns in scan])
           for m in DRAWN}
 xs = np.concatenate([p[:, 0] for p in curves.values()]); ys = np.concatenate([p[:, 1] for p in curves.values()])
 ylo = max(0.0, ys.min() - 0.05)
