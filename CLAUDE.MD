@@ -338,6 +338,13 @@ primary workflow.
     - Local VBF's event set equals `vbs_region_diag --jvt=loose`'s exactly.
   - **Job cost:** VBF raw, 20 shards, ~11 min each; Z+jets skim, 8 shards,
     ~3 min each.
+  - **Second method, jet removal + re-pairing (`rp_*`).** The event veto
+    rejects signal R1 events, and R1 is as common in VBF as in Z+jets. So the
+    tree now also carries every candidate jet (`jet_*`), and the plot script
+    removes the jets failing the t0 test and re-forms the pair. The forward-jet
+    preselection is not re-applied after removal. Local VBF: 90-92% of the
+    signal kept, against 84-86% for the event veto. The grid re-run for the
+    background is pending.
 
 ### ML Data Export
 - **export_training_data.cxx** (`util/`): Exports the cluster-SELECTION

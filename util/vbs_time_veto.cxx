@@ -73,7 +73,10 @@
 //
 // ── Outputs (histFilePath: sample-, selection- and shard-tagged) ─────────────
 //   <prefix>vbs_time_veto.root
-//     events  one row per selected event (see Row)
+//     events  one row per selected event (see Row): the legs' columns, and the
+//             jet_* arrays of every jet the pair was chosen from, so a timing
+//             tagger can drop jets and re-form the pair offline (--repair in
+//             python/vbs_time_veto_plot.py)
 //     meta    one row per job: cut flow and sum of weights of EVERY event read
 // TTrees only: merge shards with hadd (NOT hist_merge), and sum meta's rows.
 // -----------------------------------------------------------------------------
@@ -212,6 +215,14 @@ struct Row {
   Leg      a, b;
   double   t0[N_T0] = {}, sig0[N_T0] = {}, infl[N_T0] = {};
   bool     ok[N_T0] = {};
+  // EVERY jet the pair was chosen from -- the pT-passing, not-overlap-removed
+  // jets that survived --jvt -- so a timing tagger can remove jets and the pair
+  // be re-formed offline. Removing jets can only lower the maximum m_jj and the
+  // jet counts, so these events are a superset of any re-paired selection. The
+  // legs are the entries whose jet_idx equals a_idx / b_idx.
+  std::vector<int>    jet_idx, jet_hs, jet_pu, jet_n;
+  std::vector<float>  jet_pt, jet_eta, jet_phi;
+  std::vector<double> jet_t, jet_sig;   // core_ jet time; jet_n = 0: no time
 };
 
 // Jet-time calibration accumulator over paper-HS legs (see the printout).
@@ -364,6 +375,15 @@ int main(int argc, char** argv) {
   };
   legBranches("a_", R.a);
   legBranches("b_", R.b);
+  tree.Branch("jet_idx", &R.jet_idx);
+  tree.Branch("jet_pt",  &R.jet_pt);
+  tree.Branch("jet_eta", &R.jet_eta);
+  tree.Branch("jet_phi", &R.jet_phi);
+  tree.Branch("jet_hs",  &R.jet_hs);
+  tree.Branch("jet_pu",  &R.jet_pu);
+  tree.Branch("jet_t",   &R.jet_t);
+  tree.Branch("jet_sig", &R.jet_sig);
+  tree.Branch("jet_n",   &R.jet_n);
   for (int k = 0; k < N_T0; ++k) {
     const std::string s = T0_NAMES[k];
     tree.Branch(("t0_" + s).c_str(),   &R.t0[k],   ("t0_" + s + "/D").c_str());
@@ -476,6 +496,23 @@ int main(int argc, char** argv) {
         }
     }
 
+    // ── Every pairing candidate: kinematics, labels, core jet time ──────────
+    std::unordered_map<int, JetTime> coreTime;
+    for (int j : passPtIdx) {
+      const JetTime c = jetTimeCore(branch, j);
+      coreTime[j] = c;
+      const float eta = branch.topoJetEta[j], phi = branch.topoJetPhi[j];
+      R.jet_idx.push_back(j);
+      R.jet_pt.push_back(branch.topoJetPt[j]);
+      R.jet_eta.push_back(eta);
+      R.jet_phi.push_back(phi);
+      R.jet_hs.push_back(branch.isJetPaperHS(eta, phi) ? 1 : 0);
+      R.jet_pu.push_back(branch.isJetPaperPU(eta, phi) ? 1 : 0);
+      R.jet_t.push_back(c.t);
+      R.jet_sig.push_back(c.sig);
+      R.jet_n.push_back(c.n);
+    }
+
     // ── Legs ────────────────────────────────────────────────────────────────
     const double tHS = branch.truthVtxTime[0];
     auto fillLeg = [&](int j, Leg& L) {
@@ -486,7 +523,7 @@ int main(int argc, char** argv) {
       L.hs  = branch.isJetPaperHS(L.eta, L.phi);
       L.pu  = branch.isJetPaperPU(L.eta, L.phi);
       if (jvtOn) { L.jvt_rpt = D[j].rpt; L.fjvt = D[j].fjvt; }
-      const JetTime c = jetTimeCore(branch, j);
+      const JetTime& c = coreTime.at(j);
       L.core_t = c.t;  L.core_sig = c.sig;  L.core_n = c.n;  L.core_ncand = c.nCand;
       L.core_sumpt = c.sumPt;  L.core_hsfrac = c.hsFrac;
       const JetTime g = jetTimeAllGhost(branch, j);
