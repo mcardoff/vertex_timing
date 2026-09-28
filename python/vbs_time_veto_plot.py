@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Signal / background efficiency of the event-level VBS timing veto, weighted,
+"""Signal / background efficiency of event-level VBS timing tests, weighted,
 vs m_jj -- the region plots' columns, with efficiency in place of composition.
 
 Reads util/vbs_time_veto outputs (tree `events`, one row per event passing the
@@ -10,17 +10,31 @@ region-plot selection) and applies, offline:
   * the jet-time calibration: sigma_jet x f(n), n = tracks in the jet-time
     estimate, f = 1.4826 x median |t_jet - t_HS| / sigma_jet over paper-HS
     legs in bins of n. By default (--jet-infl sig-ntrk) f(n) is measured ONCE,
-    on the signal file, and applied to both files: the veto must be one
+    on the signal file, and applied to both files: the test must be one
     procedure for signal and background, and a per-file calibration would give
-    the background a looser veto than the signal (see results/vbs_time_veto.md);
-  * the veto at --nsigma (default 3), per method:
-      jj        reject iff BOTH legs are timed and
-                |t_A - t_B| / sqrt(sA^2 + sB^2) >= n
-      t0_<src>  reject iff the event has a t0 and ANY timed leg has
+    the background a looser test than the signal (see results/vbs_time_veto.md);
+  * a timing test at --nsigma (default 3), in two families:
+    EVENT VETO -- the pair stays, the event is rejected:
+      jj        both legs timed and |t_A - t_B| / sqrt(sA^2 + sB^2) >= n
+      t0_<src>  the event has a t0 and ANY timed leg has
                 |t_leg - t0| / sqrt(s_leg^2 + (infl sigma_t0)^2) >= n
-    where a leg is "timed" when its jet-time estimate has >= --min-trk tracks.
-Every efficiency is sum(w, kept) / sum(w, all) with the generator weight, and
-its error the weighted-binomial one.
+    JET REMOVAL + RE-PAIRING (needs the jet_* arrays, vbs_time_veto >= the
+    version that writes them) -- the jets failing the test go, the selection
+    is re-applied to the rest, and the pair is re-formed:
+      rp_<src>  every timed jet incompatible with t0 is removed; then >= 2
+                jets, the max-m_jj opposite-hemisphere pair, and the m_jj and
+                |Deta| cuts, as before. The region plots' ">= 1 jet in
+                2.38 < |eta| < 4.0" preselection defines the starting sample
+                and is NOT re-applied after removal (--repair-reapply-fwd
+                does): it is not an analysis cut, and re-applying it drops
+                ~4% of the signal whose valid pair survives (local VBF)
+      rp_jj     no jet is removed; the pair is the max-m_jj pair whose two
+                jets are time-compatible (untimed jets are compatible)
+    A jet is "timed" when its jet-time estimate has >= --min-trk tracks.
+Every efficiency is sum(w, kept) / sum(w, all) with the generator weight.
+Re-paired events move in m_jj: efficiencies are binned in each event's NO-VETO
+m_jj (the fraction of that column that survives anywhere), yields and S/sqrt(B)
+in the m_jj of the pair the event ends up with.
 
     PYTHONNOUSERSITE=1 PYTHONPATH=/opt/homebrew/Cellar/root/6.40.04/lib/root \\
     ~/.venv-hgtd/bin/python python/vbs_time_veto_plot.py \\
@@ -29,17 +43,22 @@ its error the weighted-binomial one.
         --tag "JVT + fJVT loose before pairing" --out figs/time_veto/jvtLoose
 
 Writes <out>_{sig,bkg}_eff_mjj.(pdf|png), and with both files
-<out>_s_over_sqrtb.(pdf|png) (eps_S / sqrt(eps_B): S/sqrt(B) relative to no veto),
-<out>_s_over_sqrtb_yields.(pdf|png) (S/sqrt(B) from the yields at --lumi) and
-<out>_tradeoff.(pdf|png), plus <out>_summary.md.
+<out>_s_over_sqrtb.(pdf|png) (S/sqrt(B) relative to no veto, per column),
+<out>_s_over_sqrtb_yields.(pdf|png) (S/sqrt(B) from the yields at --lumi),
+<out>_tradeoff.(pdf|png) and, with --compare, <out>_veto_vs_repair_tradeoff,
+plus <out>_summary.md.
 """
 import argparse, os
 import numpy as np
 import uproot
+import awkward as ak
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MJJ_EDGES = [200, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500, 3000, 4000]
 SPLIT = 2.4   # forward = |eta| >= this, as vbs_region_stack.py
+# the event preselection re-applied after jet removal: >= MIN_PASSPT_JETS jets,
+# >= 1 of them in MIN_ABS_ETA_JET < |eta| < MAX_ABS_ETA_JET (clustering_constants.h)
+MIN_PASSPT_JETS, MIN_ABS_ETA_JET, MAX_ABS_ETA_JET = 2, 2.38, 4.00
 
 # Normalisation to --lumi (3000 fb^-1 by default): yield = w * L * sigma * eff / sum(w_raw).
 # sigma x filter eff from AMI's 14 TeV evgen metadata (e8481), sum(w) over EVERY event of
@@ -60,20 +79,26 @@ NORM = {
 EXPECTED_COMPLETE = {"vbf": dict(n_read=1464400, sumw=6497726.944462), "zjets": dict(n_read=530962)}
 
 T0_SRC = ["trkptz", "waves", "hgtd", "tzp", "truth"]
-# (key, legend, colour, marker): the region talk's case colours; jet-jet in black
+# (legend, colour, marker): the region talk's case colours; jet-jet in black.
+# Event vetoes filled, jet removal + re-pairing open in the same colour.
 STYLE = {
-    "jj":        ("Jet vs jet (no t_{0})",                "#000000",    20),
-    "jj_all":    ("Jet vs jet, all timed ghost tracks",   "#8C8C8C",    24),
-    "t0_trkptz": ("Jet vs t_{0}: TRKPTZ",                 "kP10Red",    21),
-    "t0_waves":  ("Jet vs t_{0}: WAVeS",                  "kP10Yellow", 22),
-    "t0_hgtd":   ("Jet vs t_{0}: HGTD (Athena)",          "kP10Blue",   23),
-    "t0_tzp":    ("Jet vs t_{0}: TZP",                    "kP10Green",  33),
-    "t0_truth":  ("Jet vs t_{0}: truth (perfect t_{0})",  "kP10Brown",  34),
-    "none":      ("No timing veto",                       "#7F7F7F",    25),
+    "jj":        ("Jet vs jet (no t_{0})",                     "#000000",    20),
+    "jj_all":    ("Jet vs jet, all timed ghost tracks",        "#8C8C8C",    24),
+    "t0_trkptz": ("Jet vs t_{0}: TRKPTZ",                      "kP10Red",    21),
+    "t0_waves":  ("Jet vs t_{0}: WAVeS",                       "kP10Yellow", 22),
+    "t0_hgtd":   ("Jet vs t_{0}: HGTD (Athena)",               "kP10Blue",   23),
+    "t0_tzp":    ("Jet vs t_{0}: TZP",                         "kP10Green",  33),
+    "t0_truth":  ("Jet vs t_{0}: truth (perfect t_{0})",       "kP10Brown",  34),
+    "rp_jj":     ("Re-pair: time-compatible jets",             "#000000",    24),
+    "rp_trkptz": ("Jet removal: TRKPTZ t_{0}",                 "kP10Red",    25),
+    "rp_waves":  ("Jet removal: WAVeS t_{0}",                  "kP10Yellow", 26),
+    "rp_hgtd":   ("Jet removal: HGTD t_{0} (Athena)",          "kP10Blue",   32),
+    "rp_tzp":    ("Jet removal: TZP t_{0}",                    "kP10Green",  27),
+    "rp_truth":  ("Jet removal: truth t_{0}",                  "kP10Brown",  28),
+    "none":      ("No timing veto",                            "#7F7F7F",    25),
 }
-BANDS = ["R1: fwd HS + fwd PU", "R2: fwd PU + central HS", "HS + PU, other #eta config",
-         "HS + HS (genuine pair)", "PU + PU, both forward", "PU + PU, other #eta config",
-         "A leg carries neither label"]
+VETO_METHODS = ["jj", "jj_all"] + ["t0_" + s for s in T0_SRC]
+REPAIR_METHODS = ["rp_jj"] + ["rp_" + s for s in T0_SRC]
 BANDS_MD = ["R1: fwd HS + fwd PU", "R2: fwd PU + central HS", "HS + PU, other eta",
             "HS + HS", "PU + PU, both fwd", "PU + PU, other eta", "neither label"]
 
@@ -91,9 +116,15 @@ ap.add_argument("--jet-infl", default="sig-ntrk",
                 help="sig-ntrk: f(n tracks) from the signal file's HS legs, for both files (default); "
                      "sig: one global factor from the signal file; per-file / per-file-ntrk: each file its own; "
                      "or a number")
-ap.add_argument("--min-trk", type=int, default=1, help="tracks a jet-time estimate needs for the leg to count as timed")
+ap.add_argument("--min-trk", type=int, default=1, help="tracks a jet-time estimate needs for the jet to count as timed")
 ap.add_argument("--methods", default="jj,t0_trkptz,t0_waves,t0_hgtd,t0_truth",
-                help="drawn methods (the summary always has all); add jj_all / t0_tzp to draw them")
+                help="drawn methods, e.g. t0_trkptz,t0_waves (event veto) or rp_trkptz,rp_waves (jet "
+                     "removal + re-pairing); the summary always has every method the files support")
+ap.add_argument("--compare", default="",
+                help="comma-separated t0 sources (e.g. trkptz,waves,hgtd,truth): also draw event veto "
+                     "against jet removal + re-pairing for them (<out>_veto_vs_repair_tradeoff)")
+ap.add_argument("--repair-reapply-fwd", action="store_true",
+                help="after jet removal, re-require >= 1 jet in 2.38 < |eta| < 4.0 (the region plots' preselection)")
 ap.add_argument("--mjj-edges", default=",".join(str(e) for e in MJJ_EDGES))
 ap.add_argument("--lumi", type=float, default=3000.0, help="fb^-1")
 ap.add_argument("--bf-hinv", type=float, default=1.0,
@@ -107,13 +138,18 @@ if not args.sig and not args.bkg:
 EDGES = np.array([float(x) for x in args.mjj_edges.split(",")])
 DRAWN = args.methods.split(",")
 for m in DRAWN:
-    if m not in STYLE: raise SystemExit(f"unknown method {m}; choose from {list(STYLE)}")
-ALL_METHODS = ["jj", "jj_all"] + ["t0_" + s for s in T0_SRC]
+    if m not in STYLE or m == "none": raise SystemExit(f"unknown method {m}; choose from {[k for k in STYLE if k != 'none']}")
+COMPARE = [s for s in args.compare.split(",") if s]
+for s in COMPARE:
+    if s not in T0_SRC: raise SystemExit(f"--compare: unknown t0 source {s}; choose from {T0_SRC}")
 
 
 def load(path, recoil_col, recoil_min, what):
     t = uproot.open(path)
-    e = t["events"].arrays(library="np")
+    tree = t["events"]
+    keys = tree.keys()
+    e = tree.arrays([k for k in keys if not k.startswith("jet_")], library="np")
+    jets = tree.arrays([k for k in keys if k.startswith("jet_")], library="ak") if "jet_pt" in keys else None
     meta = t["meta"].arrays(library="np")
     info = {k: meta[k].sum() for k in ["n_read", "n_selected", "sumw_read"]}
     for k in ["jvt_wp", "vbs_mjj_cut", "vbs_deta_cut", "jet_time_dr", "jet_time_dist_cut"]:
@@ -137,9 +173,8 @@ def load(path, recoil_col, recoil_min, what):
         keep = e[recoil_col] > recoil_min
     else:
         keep = np.ones(len(e["weight"]), bool)
-    info["n_before_recoil"] = len(keep)
-    info["sumw_before_recoil"] = float(e["weight"].astype(float).sum())
     ev = {k: v[keep] for k, v in e.items()}
+    ev["jets"] = jets[keep] if jets is not None else None
     # the calibration uses EVERY selected event's HS legs, not only the recoil-passing ones
     return ev, e, info
 
@@ -169,11 +204,16 @@ class Calib:
         self.glob, self.fac, self.source, self.nlegs = glob, fac, source, nlegs
 
     def __call__(self, n):
+        n = np.asarray(n)
         if self.fac is None: return np.full(len(n), self.glob)
         out = np.full(len(n), self.glob)
         for (lo, hi), f in zip(zip(NBINS[:-1], NBINS[1:]), self.fac):
             out[(n >= lo) & (n < hi)] = f
         return out
+
+    def jagged(self, n):
+        """the same, for a jagged (per-jet) array of n"""
+        return ak.unflatten(self(ak.to_numpy(ak.flatten(n))), ak.num(n))
 
     def short(self):
         if self.fac is None: return f"{self.glob:.2f}"
@@ -197,8 +237,30 @@ def measure(e_all, binned, source):
     return Calib(g, fac, source, len(p))
 
 
+def band_of(fA, fB, hA, hB, pA, pB):
+    """vbs_region_stack.py's seven-band ladder; -1 where no band applies"""
+    r1 = fA & fB & ((hA & pB) | (hB & pA))
+    r2 = (fA & pA & ~fB & hB) | (fB & pB & ~fA & hA)
+    hspu = ((hA & pB) | (hB & pA)) & ~r1 & ~r2
+    hshs = hA & hB
+    ppff = pA & pB & fA & fB
+    ppo = pA & pB & ~ppff
+    nei = (~hA & ~pA) | (~hB & ~pB)
+    b = np.full(len(fA), -1)
+    for i, m in enumerate([r1, r2, hspu, hshs, ppff, ppo, nei]):
+        b[(b < 0) & m] = i
+    return b
+
+
+def bands(e):
+    b = band_of(np.abs(e["a_eta"]) >= SPLIT, np.abs(e["b_eta"]) >= SPLIT,
+                e["a_hs"], e["b_hs"], e["a_pu"], e["b_pu"])
+    assert (b >= 0).all(), "band ladder not exhaustive"
+    return b
+
+
 def decisions(e, calib, nsigma, min_trk):
-    """kept[method] -> bool per event, and which legs were timed (core).
+    """event vetoes: kept[method] -> bool per event, and which legs were timed (core).
     The literal all-ghost estimator (jj_all) gets the global factor: its n is
     ~23 tracks of mostly pileup, where the core's f(n) means nothing."""
     out = {}
@@ -221,21 +283,69 @@ def decisions(e, calib, nsigma, min_trk):
     return out, hA, hB
 
 
-def bands(e):
-    fA, fB = np.abs(e["a_eta"]) >= SPLIT, np.abs(e["b_eta"]) >= SPLIT
-    hA, hB, pA, pB = e["a_hs"], e["b_hs"], e["a_pu"], e["b_pu"]
-    r1 = fA & fB & ((hA & pB) | (hB & pA))
-    r2 = (fA & pA & ~fB & hB) | (fB & pB & ~fA & hA)
-    hspu = ((hA & pB) | (hB & pA)) & ~r1 & ~r2
-    hshs = hA & hB
-    ppff = pA & pB & fA & fB
-    ppo = pA & pB & ~ppff
-    nei = (~hA & ~pA) | (~hB & ~pB)
-    b = np.full(len(fA), -1)
-    for i, m in enumerate([r1, r2, hspu, hshs, ppff, ppo, nei]):
-        b[(b < 0) & m] = i
-    assert (b >= 0).all(), "band ladder not exhaustive"
-    return b
+def take(arr, idx):
+    """arr[event][idx[event]] as numpy; idx < 0 gives element 0 (callers mask those)"""
+    j = ak.from_regular(ak.Array(np.where(idx >= 0, idx, 0).reshape(-1, 1)))
+    return ak.to_numpy(ak.firsts(arr[j]))
+
+
+def best_pair(J, jet_ok=None, pair_ok=None):
+    """calcBestVbsPair over the jets with jet_ok: the max-m_jj opposite-hemisphere
+    pair, first one on ties, among pairs pair_ok(i, k) allows. Returns numpy
+    (mjj, i, k) with i, k local indices into the ORIGINAL jet list; -1 if none."""
+    loc = ak.local_index(J.jet_pt)
+    if jet_ok is not None: loc = loc[jet_ok]
+    comb = ak.combinations(loc, 2)
+    i, k = comb["0"], comb["1"]
+    pt = ak.values_astype(J.jet_pt, np.float64)
+    eta = ak.values_astype(J.jet_eta, np.float64)
+    phi = ak.values_astype(J.jet_phi, np.float64)
+    m2 = 2 * pt[i] * pt[k] * (np.cosh(eta[i] - eta[k]) - np.cos(phi[i] - phi[k]))
+    ok = eta[i] * eta[k] < 0
+    if pair_ok is not None: ok = ok & pair_ok(i, k)
+    mjj = ak.where(ok, np.sqrt(ak.where(m2 > 0, m2, 0.0)), -1.0)
+    b = ak.argmax(mjj, axis=1, keepdims=True)
+    return (ak.to_numpy(ak.fill_none(ak.firsts(mjj[b]), -1.0)),
+            ak.to_numpy(ak.fill_none(ak.firsts(i[b]), -1)),
+            ak.to_numpy(ak.fill_none(ak.firsts(k[b]), -1)))
+
+
+def repair(e, calib, nsigma, min_trk, source, cuts):
+    """Jet removal + re-pairing (see the docstring). Returns (kept, final m_jj,
+    final band) per event; final m_jj NaN and band -1 where not kept."""
+    J = e["jets"]
+    sig = calib.jagged(J.jet_n) * J.jet_sig
+    timed = J.jet_n >= min_trk
+    t = J.jet_t
+    if source == "jj":
+        jet_ok = None
+        def pair_ok(i, k):
+            both = timed[i] & timed[k]
+            pull = np.abs(t[i] - t[k]) / np.sqrt(sig[i] ** 2 + sig[k] ** 2)
+            return ~(both & (pull >= nsigma))
+    else:
+        s0 = e[f"infl_{source}"] * e[f"sig0_{source}"]
+        pull = np.abs(t - e[f"t0_{source}"]) / np.sqrt(sig ** 2 + s0 ** 2)
+        jet_ok = ~(timed & e[f"ok_{source}"] & (pull >= nsigma))
+        pair_ok = None
+    bm, bi, bk = best_pair(J, jet_ok, pair_ok)
+    keepj = jet_ok if jet_ok is not None else ak.ones_like(timed)
+    aeta = np.abs(J.jet_eta)
+    nk = ak.to_numpy(ak.sum(keepj, axis=1))
+    nf = ak.to_numpy(ak.sum(keepj & (aeta > MIN_ABS_ETA_JET) & (aeta < MAX_ABS_ETA_JET), axis=1))
+    # the original pair, found again: its stored double-precision m_jj is kept, so
+    # an event nothing was removed from is selected exactly as before
+    same = (bi == e["la"]) & (bk == e["lb"])
+    mjj = np.where(same, e["mjj"], bm)
+    eta_i, eta_k = take(J.jet_eta, bi), take(J.jet_eta, bk)
+    deta = np.abs(eta_i - eta_k)
+    kept = (nk >= MIN_PASSPT_JETS) & (bi >= 0) & (mjj >= cuts[0]) & (deta >= cuts[1])
+    if args.repair_reapply_fwd: kept &= nf >= 1
+    fi, fk = np.abs(eta_i) >= SPLIT, np.abs(eta_k) >= SPLIT
+    hi, hk = take(J.jet_hs, bi) > 0, take(J.jet_hs, bk) > 0
+    pi, pk = take(J.jet_pu, bi) > 0, take(J.jet_pu, bk) > 0
+    band = np.where(kept, band_of(fi, fk, hi, hk, pi, pk), -1)
+    return kept, np.where(kept, mjj, np.nan), band
 
 
 def eff(w, kept):
@@ -257,13 +367,15 @@ def eff(w, kept):
     return e, np.sqrt(var), max(e - (cen - half), 0.0), max(cen + half - e, 0.0)
 
 
-def mjj_index(e, edges):
-    return np.digitize(np.minimum(e["mjj"], 0.5 * (edges[-2] + edges[-1])), edges) - 1   # overflow -> top bin
+def mjj_index(mjj, edges):
+    """column of each event; overflow into the top bin, NaN (not kept) -> -1"""
+    idx = np.digitize(np.minimum(mjj, 0.5 * (edges[-2] + edges[-1])), edges) - 1
+    return np.where(np.isfinite(mjj), idx, -1)
 
 
 def binned(e, kept, edges):
-    """per m_jj column: (e, lo, hi, n MC events)"""
-    idx, w = mjj_index(e, edges), e["weight"].astype(float)
+    """per NO-VETO m_jj column: (e, lo, hi, n MC events)"""
+    idx, w = mjj_index(e["mjj"], edges), e["weight"].astype(float)
     res = []
     for b in range(len(edges) - 1):
         m = idx == b
@@ -276,6 +388,11 @@ loaded = {}
 for role, path, col, cut, norm in [("sig", args.sig, "met_truth", args.met_min, args.sig_norm),
                                    ("bkg", args.bkg, "z_pt", args.zpt_min, args.bkg_norm)]:
     if path: loaded[role] = (path, col, cut, norm) + load(path, col, cut, role)
+HAS_JETS = all(v[4]["jets"] is not None for v in loaded.values())
+ALL_METHODS = VETO_METHODS + (REPAIR_METHODS if HAS_JETS else [])
+for m in DRAWN + [f"rp_{s}" for s in COMPARE]:
+    if m.startswith("rp_") and not HAS_JETS:
+        raise SystemExit(f"{m} needs the jet_* arrays, which these files predate -- rerun util/vbs_time_veto")
 # one calibration for every file unless asked otherwise (see the docstring)
 own = {r: measure(v[5], True, f"{r} HS legs") for r, v in loaded.items()}   # each file's own, for the record
 mode = args.jet_infl
@@ -287,16 +404,48 @@ elif mode in ("per-file", "per-file-ntrk"):
     calibs = {r: measure(loaded[r][5], mode == "per-file-ntrk", f"the {r} file's own HS legs") for r in loaded}
 else:
     calibs = {r: Calib(float(mode)) for r in loaded}
+
+
+def outcomes(s, nsigma, methods):
+    """kept / final m_jj / final band for each method at a threshold"""
+    e, cal = s["e"], s["calib"]
+    kept, hA, hB = decisions(e, cal, nsigma, args.min_trk)
+    out = {}
+    for m in methods:
+        if m in kept:
+            out[m] = (kept[m], np.where(kept[m], e["mjj"], np.nan), np.where(kept[m], s["band"], -1))
+        else:
+            out[m] = repair(e, cal, nsigma, args.min_trk, m[3:], s["cuts"])
+    return out, hA, hB
+
+
 samples = {}
 for role, (path, col, cut, norm, ev, e_all, info) in loaded.items():
     cal = calibs[role]
-    kept, hA, hB = decisions(ev, cal, args.nsigma, args.min_trk)
-    samples[role] = dict(e=ev, info=info, calib=cal, own=own[role], kept=kept, band=bands(ev), path=path,
-                         hA=hA, hB=hB, norm=norm, cutcol=col, cut=cut)
+    s = dict(e=ev, info=info, calib=cal, own=own[role], band=bands(ev), path=path, norm=norm, cutcol=col, cut=cut,
+             cuts=(info["vbs_mjj_cut"], info["vbs_deta_cut"]))
+    if HAS_JETS:
+        J = ev["jets"]
+        ev["la"] = ak.to_numpy(ak.argmax(J.jet_idx == ev["a_idx"], axis=1))
+        ev["lb"] = ak.to_numpy(ak.argmax(J.jet_idx == ev["b_idx"], axis=1))
+        # the stored pair must be the one calcBestVbsPair finds in the arrays (the
+        # arrays are float, the C++ pairing double: only an exact m_jj tie could differ)
+        bm, bi, bk = best_pair(J)
+        bad = int(np.sum((bi != ev["la"]) | (bk != ev["lb"])))
+        print(f"[{role}] pair re-formed from the jet arrays == stored legs in {len(bi) - bad:,} of {len(bi):,} events"
+              + ("" if bad == 0 else "  WARNING: check the jet_* arrays"))
+    res, hA, hB = outcomes(s, args.nsigma, ALL_METHODS)
+    s["kept"] = {m: r[0] for m, r in res.items()}
+    s["mjjf"] = {m: r[1] for m, r in res.items()}
+    s["bandf"] = {m: r[2] for m, r in res.items()}
+    s["mjjf"]["none"], s["kept"]["none"], s["bandf"]["none"] = ev["mjj"], np.ones(len(ev["mjj"]), bool), s["band"]
+    s["hA"], s["hB"] = hA, hB
+    samples[role] = s
     w = ev["weight"].astype(float)
     print(f"[{role}] {path}: {info['njobs']} job(s), {info['n_read']:,} read, {info['n_selected']:,} selected, "
           f"{len(w):,} after {col} > {cut:g}; jet-time sigma {cal.md()}; "
-          f"this file's own HS-leg width {own[role].glob:.3f}")
+          f"this file's own HS-leg width {own[role].glob:.3f}"
+          + ("; jet arrays present: re-pairing available" if HAS_JETS else ""))
 
 # ── ROOT drawing ─────────────────────────────────────────────────────────────
 import ROOT
@@ -322,17 +471,26 @@ def sel_line(s):
     return ",  ".join(parts)
 
 
-def veto_line():
-    return (f"veto if |#Deltat| / #sigma #geq {args.nsigma:g};  jet time: timed ghost tracks, #DeltaR < "
-            f"{JDR:g}, {JCUT:g}#sigma time clustering, highest-#Sigmap_{{T}} cluster")
+def veto_line(methods=None):
+    methods = methods or DRAWN
+    rp = [m for m in methods if m.startswith("rp_")]
+    what = ("jets failing it are removed and the pair re-formed" if len(rp) == len(methods)
+            else "the event is vetoed if a pair jet fails it" if not rp
+            else "filled: event veto;  open: jets removed, pair re-formed")
+    return f"timing test |#Deltat| / #sigma #geq {args.nsigma:g}: {what}"
+
+
+def jet_line():
+    return (f"jet time: timed ghost tracks, #DeltaR < {JDR:g}, {JCUT:g}#sigma time clustering, "
+            f"highest-#Sigmap_{{T}} cluster")
 
 
 def calib_line(cal):
     if cal.fac is None:
         return f"#sigma_{{jet}} #times {cal.glob:.2f}" + ("" if cal.source == "fixed" else f"  (from {cal.source})")
-    src = cal.source.replace("the sig file's", "signal").replace("the bkg file's", "background")
-    return (f"#sigma_{{jet}} #times f(n_{{trk}}) from {src}: {cal.fac[0]:.2f} (1 track) #rightarrow "
-            f"{cal.fac[-1]:.2f} (#geq {NBINS[-2]} tracks), same for S and B")
+    src = "signal" if "sig" in cal.source else "background"
+    return (f"#sigma_{{jet}} #times {cal.fac[0]:.2f} (1 track) #rightarrow {cal.fac[-1]:.2f} (#geq {NBINS[-2]} tracks), "
+            f"measured on {src} HS jets, applied to S and B alike")
 
 
 def graph(series, k, n_meth, key):
@@ -364,7 +522,8 @@ def atlas_block(label, lines):
     return 0.81 - 0.036 * len(lines)
 
 
-def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_title, ref=1.0, methods=None):
+def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_title, ref=1.0, methods=None,
+                  xnote="last bin includes overflow"):
     """The region plots' layout: per-m_jj-column values on top (one dodged marker
     per method), the MC event count of each column underneath on a log scale.
     `ref` draws a dashed reference line (None: none); `methods` defaults to DRAWN."""
@@ -379,8 +538,11 @@ def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_
     frame = ROOT.TH1D("frame_" + os.path.basename(stem), "", len(EDGES) - 1, EDGES); KEEP.append(frame)
     lows = [v - lo for m in methods for v, lo, _, _ in series[m] if np.isfinite(v)]
     highs = [v + hi for m in methods for v, _, hi, _ in series[m] if np.isfinite(v)]
-    ymin = max(0.0, np.floor((min(lows) - 0.03) * 10) / 10) if lows else 0.0
     ytop = max([max(highs) if highs else 1.0] + ([ref] if ref is not None else []))
+    if ref is not None:   # efficiency-like: round down to the next 0.1
+        ymin = max(0.0, np.floor((min(lows) - 0.03) * 10) / 10) if lows else 0.0
+    else:                 # absolute: a margin below the lowest point
+        ymin = max(0.0, min(lows) - 0.06 * (ytop - min(lows))) if lows else 0.0
     frame.SetMinimum(ymin); frame.SetMaximum(ytop + (ytop - ymin) * (0.95 + 0.13 * max(0, len(lines) - 3)))
     frame.GetXaxis().SetLabelSize(0); frame.GetYaxis().SetTitle(ylab); frame.GetYaxis().SetTitleOffset(1.25)
     frame.Draw("AXIS")
@@ -388,7 +550,8 @@ def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_
         one = ROOT.TLine(EDGES[0], ref, EDGES[-1], ref); one.SetLineStyle(2); one.SetLineColor(ROOT.kGray + 1); one.Draw()
         KEEP.append(one)
     ytxt = atlas_block(label, lines)
-    leg = ROOT.TLegend(0.17, ytxt - 0.16, 0.93, ytxt - 0.005); ROOT.StyleLegend(leg); leg.SetNColumns(2); KEEP.append(leg)
+    nrow = (len(methods) + 1) // 2
+    leg = ROOT.TLegend(0.17, ytxt - 0.055 * nrow, 0.93, ytxt - 0.005); ROOT.StyleLegend(leg); leg.SetNColumns(2); KEEP.append(leg)
     for k, m in enumerate(methods):
         g = graph(series[m], k, len(methods), m)
         g.Draw("P SAME")
@@ -399,7 +562,7 @@ def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_
     tot = ROOT.TH1D("tot_" + os.path.basename(stem), "", len(EDGES) - 1, EDGES); KEEP.append(tot)
     for b, n in enumerate(counts): tot.SetBinContent(b + 1, n)
     tot.SetFillColor(ROOT.TColor.GetColor("#DCE6F2")); tot.SetLineColor(ROOT.kBlack); tot.SetLineWidth(1)
-    tot.GetXaxis().SetTitle("m_{jj} [GeV]   (last bin includes overflow)")
+    tot.GetXaxis().SetTitle(f"m_{{jj}} [GeV]   ({xnote})")
     tot.GetYaxis().SetTitle(count_title)
     tot.GetXaxis().SetTitleSize(0.13); tot.GetXaxis().SetLabelSize(0.11); tot.GetXaxis().SetTitleOffset(1.25)
     tot.GetYaxis().SetTitleSize(0.11); tot.GetYaxis().SetLabelSize(0.10); tot.GetYaxis().SetTitleOffset(0.5)
@@ -423,6 +586,7 @@ def fmt_pct(v): return f"  ({100 * v:.1f}%)"
 
 any_s = next(iter(samples.values()))
 JDR, JCUT = any_s["info"]["jet_time_dr"], any_s["info"]["jet_time_dist_cut"]
+ANY_RP = any(m.startswith("rp_") for m in DRAWN)
 for role, ylab, label in [("sig", "Signal efficiency", args.sig_label), ("bkg", "Background efficiency", args.bkg_label)]:
     if role not in samples: continue
     s = samples[role]
@@ -431,7 +595,9 @@ for role, ylab, label in [("sig", "Signal efficiency", args.sig_label), ("bkg", 
     extra = {m: fmt_pct(eff(w, s["kept"][m])[0]) for m in DRAWN}
     counts = [n for _, _, _, n in series[DRAWN[0]]]
     column_figure(f"{args.out}_{role}_eff_mjj", ylab, series, extra, label,
-                  [sel_line(s), veto_line(), calib_line(s["calib"]), "all m_{jj} columns in brackets; generator-weighted"],
+                  [sel_line(s), veto_line(), jet_line(), calib_line(s["calib"]),
+                   "all m_{jj} columns in brackets; generator-weighted"
+                   + ("; events binned in their no-veto m_{jj}" if ANY_RP else "")],
                   counts, "MC events")
 
 # ── Yields and the summary ───────────────────────────────────────────────────
@@ -444,9 +610,14 @@ def k_factor(s):
     return args.lumi * 1e3 * n["xs_pb"] / sumw * (args.bf_hinv if s["norm"] == "vbf" else 1.0)
 
 
-md = [f"# VBS timing veto: {os.path.basename(args.out)}", "",
-      f"veto at {args.nsigma:g} sigma; a leg is timed with >= {args.min_trk} track(s); "
-      f"yields at {args.lumi:g} fb^-1", ""]
+md = [f"# VBS timing tests: {os.path.basename(args.out)}", "",
+      f"timing test at {args.nsigma:g} sigma; a jet is timed with >= {args.min_trk} track(s); "
+      f"yields at {args.lumi:g} fb^-1", "",
+      "Methods: `jj` / `t0_<src>` veto the EVENT (pair unchanged); `rp_<src>` REMOVE the jets that fail "
+      "the t0 test and re-form the pair from the rest (event lost only if no pair passes the selection); "
+      "`rp_jj` keeps every jet and takes the max-m_jj time-compatible pair. After removal the "
+      "forward-jet preselection is " + ("re-applied" if args.repair_reapply_fwd else "NOT re-applied (--repair-reapply-fwd)")
+      + ".", ""]
 for role, s in samples.items():
     i = s["info"]
     md.append(f"- **{role}**: `{s['path']}` -- {i['njobs']} job(s), {i['n_read']:,} events read "
@@ -465,7 +636,7 @@ for m in ["none"] + ALL_METHODS:
     cells, Y = [], {}
     for role, s in samples.items():
         w = s["e"]["weight"].astype(float)
-        kept = np.ones(len(w), bool) if m == "none" else s["kept"][m]
+        kept = s["kept"][m]
         v, err, _, _ = eff(w, kept)
         cells.append(f"{100 * v:.1f} +- {100 * err:.1f}%")
         k = k_factor(s)
@@ -482,7 +653,7 @@ for m in ["none"] + ALL_METHODS:
 md.append("")
 for role, s in samples.items():
     w, B = s["e"]["weight"].astype(float), s["band"]
-    md += [f"**{role}: efficiency (%) by pair composition** (share = weighted fraction of the events)", "",
+    md += [f"**{role}: efficiency (%) by NO-VETO pair composition** (share = weighted fraction of the events)", "",
            "| composition | share | MC events | " + " | ".join(ALL_METHODS) + " |",
            "|" + "---|" * (3 + len(ALL_METHODS))]
     for i, name in enumerate(BANDS_MD):
@@ -493,22 +664,31 @@ for role, s in samples.items():
     tA, tB = s["hA"], s["hB"]
     md += ["", f"timed legs (core, >= {args.min_trk} track): both {100 * w[tA & tB].sum() / w.sum():.1f}%, "
            f"one {100 * w[tA ^ tB].sum() / w.sum():.1f}%, neither {100 * w[~tA & ~tB].sum() / w.sum():.1f}% (weighted)", ""]
+    if HAS_JETS:
+        rp = [m for m in ALL_METHODS if m.startswith("rp_")]
+        md += [f"**{role}: composition (%) of the pair each surviving event ends up with** "
+               "(weighted share of the no-veto yield; columns sum to that method's efficiency)", "",
+               "| final composition | none | " + " | ".join(rp) + " |", "|" + "---|" * (2 + len(rp))]
+        for i, name in enumerate(BANDS_MD):
+            md.append(f"| {name} | " + " | ".join(f"{100 * w[s['bandf'][m] == i].sum() / w.sum():.1f}"
+                                                   for m in ["none"] + rp) + " |")
+        md.append("")
 if both:
-    # the analysis cuts at m_jj > X rather than using columns: cumulative thresholds
+    # the analysis cuts at m_jj > X rather than using columns: cumulative thresholds, on
+    # each event's FINAL m_jj (re-paired events move), against the no-veto yield above X
     sg_, bk_ = samples["sig"], samples["bkg"]
     ws_, wb_ = sg_["e"]["weight"].astype(float), bk_["e"]["weight"].astype(float)
-    md += ["**S/sqrt(B) relative to no veto, by m_jj threshold** (eps_S / sqrt(eps_B); "
-           "B MC events in brackets)", "",
+    md += ["**S/sqrt(B) relative to no veto, by m_jj threshold** (final m_jj; no-veto B MC events in brackets)", "",
            "| m_jj > | B MC | " + " | ".join(ALL_METHODS) + " |", "|" + "---|" * (2 + len(ALL_METHODS))]
     for x in EDGES[:-1]:
-        ms, mb = sg_["e"]["mjj"] > x, bk_["e"]["mjj"] > x
-        if mb.sum() == 0: continue
+        s0, b0 = ws_[sg_["e"]["mjj"] > x].sum(), wb_[bk_["e"]["mjj"] > x].sum()
+        if b0 <= 0: continue
         cells = []
         for m in ALL_METHODS:
-            es = eff(ws_[ms], sg_["kept"][m][ms])[0]
-            eb = eff(wb_[mb], bk_["kept"][m][mb])[0]
-            cells.append(f"{es / np.sqrt(eb):.3f}" if eb > 0 else "inf")
-        md.append(f"| {x:g} GeV | {int(mb.sum())} | " + " | ".join(cells) + " |")
+            sm = ws_[sg_["kept"][m] & (sg_["mjjf"][m] > x)].sum()
+            bm_ = wb_[bk_["kept"][m] & (bk_["mjjf"][m] > x)].sum()
+            cells.append(f"{(sm / s0) / np.sqrt(bm_ / b0):.3f}" if bm_ > 0 else "inf")
+        md.append(f"| {x:g} GeV | {int((bk_['e']['mjj'] > x).sum())} | " + " | ".join(cells) + " |")
     md.append("")
 open(args.out + "_summary.md", "w").write("\n".join(md) + "\n")
 print("\n".join(md))
@@ -517,97 +697,140 @@ print("wrote", args.out + "_summary.md")
 if not both:
     raise SystemExit(0)
 sg, bk = samples["sig"], samples["bkg"]
+ws, wb = sg["e"]["weight"].astype(float), bk["e"]["weight"].astype(float)
+ks, kb = k_factor(sg), k_factor(bk)
 
-# ── eps_S / sqrt(eps_B) per m_jj column: the significance change from the veto ─
+
+def column_yields(s, w, k, m):
+    """per FINAL m_jj column: (yield, MC-stat error)"""
+    idx = mjj_index(s["mjjf"][m], EDGES)
+    out = []
+    for b in range(len(EDGES) - 1):
+        mm = (idx == b) & s["kept"][m]
+        out.append((k * w[mm].sum(), k * np.sqrt((w[mm] ** 2).sum())))
+    return out
+
+
+def label_lines(methods):
+    return [f"S: {sel_line(sg)}",
+            f"B: {sel_line(bk)}",
+            veto_line(methods),
+            jet_line(),
+            calib_line(sg["calib"]) if sg["calib"] is bk["calib"]
+            else f"#sigma_{{jet}}: {sg['calib'].short()} (S) / {bk['calib'].short()} (B)"]
+
+
+XNOTE = "final pair; last bin includes overflow" if ANY_RP else "last bin includes overflow"
+B_COUNTS = [int(np.sum(mjj_index(bk["e"]["mjj"], EDGES) == b)) for b in range(len(EDGES) - 1)]
+
+# ── S / sqrt(B) per m_jj column relative to no veto ──────────────────────────
+# (S/sqrt(B))_method / (S/sqrt(B))_no veto per column. For event vetoes the
+# column content does not move and this is exactly eps_S / sqrt(eps_B), with the
+# efficiencies' binomial errors; re-paired events move between columns, so for
+# those the ratio comes from the yields, with their MC-stat errors (conservative:
+# numerator and denominator share events).
 ratio = {}
 for m in DRAWN:
     ratio[m] = []
-    for (es, sl, sh, _), (eb, bl, bh, _) in zip(binned(sg["e"], sg["kept"][m], EDGES),
-                                               binned(bk["e"], bk["kept"][m], EDGES)):
-        if not (np.isfinite(es) and np.isfinite(eb)) or eb <= 0:
-            ratio[m].append((np.nan, np.nan, np.nan, 0)); continue
-        r = es / np.sqrt(eb)
-        err = r * np.hypot(0.5 * (sl + sh) / es, 0.25 * (bl + bh) / eb)
-        ratio[m].append((r, err, err, 0))
-ws, wb = sg["e"]["weight"].astype(float), bk["e"]["weight"].astype(float)
+    if not m.startswith("rp_"):
+        for (es, sl, sh, _), (eb, bl, bh, _) in zip(binned(sg["e"], sg["kept"][m], EDGES),
+                                                   binned(bk["e"], bk["kept"][m], EDGES)):
+            if not (np.isfinite(es) and np.isfinite(eb)) or eb <= 0:
+                ratio[m].append((np.nan, np.nan, np.nan, 0)); continue
+            r = es / np.sqrt(eb)
+            err = r * np.hypot(0.5 * (sl + sh) / es, 0.25 * (bl + bh) / eb)
+            ratio[m].append((r, err, err, 0))
+    else:
+        for (S, dS), (B, dB), (S0, _), (B0, _) in zip(column_yields(sg, ws, 1.0, m), column_yields(bk, wb, 1.0, m),
+                                                    column_yields(sg, ws, 1.0, "none"), column_yields(bk, wb, 1.0, "none")):
+            if S <= 0 or B <= 0 or S0 <= 0 or B0 <= 0:
+                ratio[m].append((np.nan, np.nan, np.nan, 0)); continue
+            r = (S / S0) / np.sqrt(B / B0)
+            err = r * np.hypot(dS / S, 0.5 * dB / B)
+            ratio[m].append((r, err, err, 0))
 extra = {m: f"  ({eff(ws, sg['kept'][m])[0] / np.sqrt(eff(wb, bk['kept'][m])[0]):.2f})" for m in DRAWN}
-column_figure(f"{args.out}_s_over_sqrtb", "#varepsilon_{S} / #sqrt{#varepsilon_{B}}", ratio, extra,
+column_figure(f"{args.out}_s_over_sqrtb", "(S/#sqrt{B}) / (S/#sqrt{B})_{no veto}", ratio, extra,
               f"S: {args.sig_label.split(', ')[-1]},  B: {args.bkg_label.split(', ')[-1]}",
-              [f"S: {sel_line(sg)}",
-               f"B: {sel_line(bk)}",
-               veto_line(),
-               calib_line(sg["calib"]) if sg["calib"] is bk["calib"]
-               else f"#sigma_{{jet}}: {sg['calib'].short()} (S) / {bk['calib'].short()} (B)",
-               "all m_{jj} columns in brackets; > 1 = the veto raises S/#sqrt{B}"],
-              [n for _, _, _, n in binned(bk["e"], bk["kept"][DRAWN[0]], EDGES)], "B MC events")
+              label_lines(DRAWN) + ["all m_{jj} columns in brackets; > 1 = the timing test raises S/#sqrt{B}"],
+              B_COUNTS, "B MC events", xnote=XNOTE)
 
 # ── S / sqrt(B) from the YIELDS per m_jj column (absolute, at --lumi) ───────
 # The same information as the ratio above -- that ratio is exactly this divided
 # by its no-veto value -- but on the absolute scale, which carries the two
 # normalisation assumptions (B(H->inv), Z->ll standing in for Z->nunu) that
 # cancel in the ratio. Errors: MC statistics of both yields.
-ks, kb = k_factor(sg), k_factor(bk)
 if ks and kb:
     SB_METHODS = ["none"] + DRAWN
-    idx_s, idx_b = mjj_index(sg["e"], EDGES), mjj_index(bk["e"], EDGES)
     absol, extra = {}, {}
     for m in SB_METHODS:
-        k_s = np.ones(len(ws), bool) if m == "none" else sg["kept"][m]
-        k_b = np.ones(len(wb), bool) if m == "none" else bk["kept"][m]
         absol[m] = []
-        for b in range(len(EDGES) - 1):
-            ms_, mb_ = (idx_s == b) & k_s, (idx_b == b) & k_b
-            S, B = ks * ws[ms_].sum(), kb * wb[mb_].sum()
+        for (S, dS), (B, dB) in zip(column_yields(sg, ws, ks, m), column_yields(bk, wb, kb, m)):
             if S <= 0 or B <= 0:
                 absol[m].append((np.nan, np.nan, np.nan, 0)); continue
-            dS, dB = ks * np.sqrt((ws[ms_] ** 2).sum()), kb * np.sqrt((wb[mb_] ** 2).sum())
             z = S / np.sqrt(B)
             err = z * np.hypot(dS / S, 0.5 * dB / B)
             absol[m].append((z, err, err, 0))
-        extra[m] = f"  ({ks * ws[k_s].sum() / np.sqrt(kb * wb[k_b].sum()):.0f})"
+        extra[m] = f"  ({ks * ws[sg['kept'][m]].sum() / np.sqrt(kb * wb[bk['kept'][m]].sum()):.0f})"
     column_figure(f"{args.out}_s_over_sqrtb_yields", "S / #sqrt{B}  per m_{jj} column", absol, extra,
                   f"S: {args.sig_label.split(', ')[-1]},  B: {args.bkg_label.split(', ')[-1]},  {args.lumi:g} fb^{{-1}}",
-                  [f"S: {sel_line(sg)}",
-                   f"B: {sel_line(bk)}",
-                   veto_line(),
-                   calib_line(sg["calib"]) if sg["calib"] is bk["calib"]
-                   else f"#sigma_{{jet}}: {sg['calib'].short()} (S) / {bk['calib'].short()} (B)",
-                   f"S at B(H#rightarrowinv) = {100 * args.bf_hinv:g}%;  B = Z(#rightarrowll)+jets alone (stand-in for "
+                  label_lines(DRAWN) +
+                  [f"S at B(H#rightarrowinv) = {100 * args.bf_hinv:g}%;  B = Z(#rightarrowll)+jets alone (stand-in for "
                    f"Z(#rightarrow#nu#nu));  all columns in brackets"],
-                  [n for _, _, _, n in binned(bk["e"], bk["kept"][DRAWN[0]], EDGES)], "B MC events",
-                  ref=None, methods=SB_METHODS)
+                  B_COUNTS, "B MC events", ref=None, methods=SB_METHODS, xnote=XNOTE)
+
 
 # ── The trade-off: eps_B vs eps_S as the threshold moves (all columns) ───────
-c = ROOT.TCanvas("c_to", "", 800, 700); KEEP.append(c)
-c.SetLeftMargin(0.15); c.SetRightMargin(0.05)
-scan = np.array([1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 8.0, 12.0])
-curves = {m: np.array([(eff(ws, decisions(sg["e"], sg["calib"], ns, args.min_trk)[0][m])[0],
-                        eff(wb, decisions(bk["e"], bk["calib"], ns, args.min_trk)[0][m])[0]) for ns in scan])
-          for m in DRAWN}
-xs = np.concatenate([p[:, 0] for p in curves.values()]); ys = np.concatenate([p[:, 1] for p in curves.values()])
-ylo = max(0.0, ys.min() - 0.05)
-fr = ROOT.TH1D("fr_to", "", 10, max(0.0, xs.min() - 0.03), 1.005); KEEP.append(fr)
-fr.SetMinimum(ylo); fr.SetMaximum(1.0 + (1.0 - ylo) * 0.6)
-fr.GetXaxis().SetTitle("Signal efficiency #varepsilon_{S}")
-fr.GetYaxis().SetTitle("Background efficiency #varepsilon_{B}")
-fr.Draw("AXIS")
-leg = ROOT.TLegend(0.18, 0.60, 0.60, 0.80); ROOT.StyleLegend(leg, 0.028); KEEP.append(leg)
-i3 = int(np.argmin(np.abs(scan - args.nsigma)))
-for m in DRAWN:
-    lab, col, mk = STYLE[m]
-    g = ROOT.TGraph(len(scan), curves[m][:, 0].copy(), curves[m][:, 1].copy()); KEEP.append(g)
-    g.SetLineColor(colour(col)); g.SetLineWidth(2); g.SetMarkerColor(colour(col)); g.SetMarkerStyle(mk); g.SetMarkerSize(0.8)
-    g.Draw("LP SAME")
-    g3 = ROOT.TGraph(1, curves[m][i3:i3 + 1, 0].copy(), curves[m][i3:i3 + 1, 1].copy()); KEEP.append(g3)
-    g3.SetMarkerColor(colour(col)); g3.SetMarkerStyle(mk); g3.SetMarkerSize(2.0); g3.Draw("P SAME")
-    leg.AddEntry(g, lab, "lp")
-leg.Draw()
-ROOT.ATLASLabel(0.18, 0.895, "")
-t = ROOT.TLatex(); t.SetNDC(); t.SetTextFont(42); t.SetTextSize(0.04); KEEP.append(t)
-t.DrawLatex(0.315, 0.895, "Simulation Internal")
-t2 = ROOT.TLatex(); t2.SetNDC(); t2.SetTextFont(42); t2.SetTextSize(0.026); t2.SetTextColor(ROOT.kGray + 2); KEEP.append(t2)
-t2.DrawLatex(0.18, 0.855, f"S: {sel_line(sg)}")
-t2.DrawLatex(0.18, 0.825, f"B: {sel_line(bk)}")
-t2.DrawLatex(0.18, 0.565, f"threshold scanned {scan[0]:g}-{scan[-1]:g}#sigma; large markers at {args.nsigma:g}#sigma")
-c.Print(args.out + "_tradeoff.pdf"); c.Print(args.out + "_tradeoff.png")
-print("wrote", args.out + "_tradeoff.pdf / .png")
+SCAN = np.array([1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 8.0, 12.0])
+
+
+def tradeoff_curves(methods):
+    curves = {m: [] for m in methods}
+    for ns in SCAN:
+        rs, rb = outcomes(sg, ns, methods)[0], outcomes(bk, ns, methods)[0]
+        for m in methods:
+            curves[m].append((eff(ws, rs[m][0])[0], eff(wb, rb[m][0])[0]))
+    return {m: np.array(v) for m, v in curves.items()}
+
+
+def tradeoff_figure(stem, methods, dashed=()):
+    curves = tradeoff_curves(methods)
+    c = ROOT.TCanvas("c_" + os.path.basename(stem), "", 800, 700); KEEP.append(c)
+    c.SetLeftMargin(0.15); c.SetRightMargin(0.05)
+    xs = np.concatenate([p[:, 0] for p in curves.values()]); ys = np.concatenate([p[:, 1] for p in curves.values()])
+    ylo = max(0.0, ys.min() - 0.05)
+    fr = ROOT.TH1D("fr_" + os.path.basename(stem), "", 10, max(0.0, xs.min() - 0.03), 1.005); KEEP.append(fr)
+    fr.SetMinimum(ylo); fr.SetMaximum(1.0 + (1.0 - ylo) * (0.7 + 0.08 * max(0, len(methods) - 5)))
+    fr.GetXaxis().SetTitle("Signal efficiency #varepsilon_{S}")
+    fr.GetYaxis().SetTitle("Background efficiency #varepsilon_{B}")
+    fr.Draw("AXIS")
+    leg = ROOT.TLegend(0.18, 0.77 - 0.04 * len(methods), 0.70, 0.77); ROOT.StyleLegend(leg, 0.026); KEEP.append(leg)
+    i3 = int(np.argmin(np.abs(SCAN - args.nsigma)))
+    for m in methods:
+        lab, col, mk = STYLE[m]
+        g = ROOT.TGraph(len(SCAN), curves[m][:, 0].copy(), curves[m][:, 1].copy()); KEEP.append(g)
+        g.SetLineColor(colour(col)); g.SetLineWidth(2); g.SetMarkerColor(colour(col)); g.SetMarkerStyle(mk); g.SetMarkerSize(0.8)
+        if m in dashed: g.SetLineStyle(2)
+        g.Draw("LP SAME")
+        g3 = ROOT.TGraph(1, curves[m][i3:i3 + 1, 0].copy(), curves[m][i3:i3 + 1, 1].copy()); KEEP.append(g3)
+        g3.SetMarkerColor(colour(col)); g3.SetMarkerStyle(mk); g3.SetMarkerSize(2.0); g3.Draw("P SAME")
+        leg.AddEntry(g, lab, "lp")
+    leg.Draw()
+    ROOT.ATLASLabel(0.18, 0.895, "")
+    t = ROOT.TLatex(); t.SetNDC(); t.SetTextFont(42); t.SetTextSize(0.04); KEEP.append(t)
+    t.DrawLatex(0.315, 0.895, "Simulation Internal")
+    t2 = ROOT.TLatex(); t2.SetNDC(); t2.SetTextFont(42); t2.SetTextSize(0.026); t2.SetTextColor(ROOT.kGray + 2); KEEP.append(t2)
+    t2.DrawLatex(0.18, 0.855, f"S: {sel_line(sg)}")
+    t2.DrawLatex(0.18, 0.825, f"B: {sel_line(bk)}")
+    t2.DrawLatex(0.18, 0.795, f"threshold scanned {SCAN[0]:g}-{SCAN[-1]:g}#sigma; large markers at {args.nsigma:g}#sigma"
+                 + (";  dashed: jets removed, pair re-formed" if dashed else ""))
+    c.Print(stem + ".pdf"); c.Print(stem + ".png")
+    print("wrote", stem + ".pdf / .png")
+    return curves
+
+
+tradeoff_figure(args.out + "_tradeoff", DRAWN, dashed=[m for m in DRAWN if m.startswith("rp_")])
+
+# ── Event veto against jet removal + re-pairing, same t0 sources ────────────
+if COMPARE:
+    cmp_methods = [f"t0_{s}" for s in COMPARE] + [f"rp_{s}" for s in COMPARE]
+    tradeoff_figure(args.out + "_veto_vs_repair_tradeoff", cmp_methods, dashed=[f"rp_{s}" for s in COMPARE])

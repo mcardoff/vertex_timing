@@ -167,6 +167,59 @@ The t0 veto removes half of the uncut Z+jets pairs, which are mostly pileup.
 It removes 30% after the analysis recoil cut. **The recoil cut takes away
 most of what timing is good at.**
 
+## Second method: remove the failing jets and re-pair (grid re-run pending)
+
+**Why.** With both recoil cuts at 100 GeV (`figs/time_veto/jvtLoose_recoil100_*`,
+1,372 Z+jets MC events), jet vs jet still lowers S/√B (×0.97), while the jet
+vs t0 vetoes gain 4–6%. The event veto has a structural problem:
+- R1 is as common in the signal (10.7%) as in Z+jets (9.9%). In VBF, the
+  max-m_jj pair picks up a forward pileup jet just as often.
+- Rejecting the EVENT therefore throws away signal whose genuine VBF jets are
+  still there.
+
+**The method.** Remove the jets that fail the timing test, then re-form the
+pair from the remaining jets, as JVT/fJVT do.
+- `util/vbs_time_veto` now also writes every jet the pair was chosen from:
+  the pT-passing, post-JVT jets, with kinematics, labels and core jet time
+  (`jet_*` arrays).
+- The plotting script re-pairs offline:
+  - `rp_<src>` removes every timed jet incompatible with that t0 at 3σ. It
+    then requires ≥ 2 jets, the max-m_jj opposite-hemisphere pair, and
+    m_jj ≥ 200.
+  - `rp_jj` removes nothing; it takes the max-m_jj pair whose two jets are
+    time-compatible.
+- **The forward-jet preselection is not re-applied after removal.** The
+  region plots' "≥ 1 jet in 2.38 < |η| < 4.0" defines the starting sample.
+  It is not an analysis cut, and re-applying it loses 4.1% of the signal even
+  though a valid pair survives (`--repair-reapply-fwd` re-applies it).
+- **Plot binning.** Re-paired events move in m_jj, so efficiencies are binned
+  in each event's no-veto m_jj. Yields and S/√B are binned in the final
+  pair's m_jj.
+
+**Validation (local VBF).**
+- The pair re-formed from the arrays equals the stored pair in all events.
+- At an infinite threshold every re-pair variant reproduces the no-veto
+  yields exactly.
+- The event-veto tables are unchanged, identical on the grid files.
+
+**Local VBF signal, truth MET > 100** (29,070 MC events):
+
+| t0 | event veto | jets removed, pair re-formed |
+|---|---:|---:|
+| TRKPTZ | 83.7% | 90.2% |
+| WAVeS | 85.6% | 91.9% |
+| HGTD (Athena) | 85.6% | 91.2% |
+| truth | 84.7% | 91.3% |
+
+Jet removal recovers about 6.5 points of signal, mostly in R1: 80–83% kept,
+against 63–67%. What it still loses is structural:
+- In ~6% of events, a genuine VBF jet fails the test and no other jet is left
+  to pair with.
+- ~1% have no opposite-hemisphere pair.
+
+The background needs the grid re-run, since the current grid files predate
+the jet arrays.
+
 ## The jet time
 
 "The ghost-associated tracks with valid time inside each jet", averaged as they
@@ -298,6 +351,9 @@ PYTHONNOUSERSITE=1 PYTHONPATH=/opt/homebrew/Cellar/root/6.40.04/lib/root \
   --sig condor/vbf/vbf_jvtLoose_vbs_time_veto.root --bkg condor/zjets/zjets_jvtLoose_vbs_time_veto.root \
   --tag "JVT + fJVT loose" --out figs/time_veto/jvtLoose
 # robustness: --jet-infl sig | per-file | 1, --min-trk 2, --zpt-min 100 / 0
+# jet removal + re-pairing against the event veto, recoil cuts at 100 GeV:
+#   ... --met-min 100 --zpt-min 100 --methods rp_trkptz,rp_waves,rp_hgtd,rp_truth \
+#       --compare trkptz,waves,hgtd,truth --out figs/time_veto/jvtLoose_recoil100_repair
 
 # local VBF development run: 33 files, 112,400 events
 cd build && ./vbs_time_veto --jvt=loose        # -> ../figs/hists/jvtLoose_vbs_time_veto.root
