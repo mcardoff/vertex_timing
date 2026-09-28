@@ -342,9 +342,13 @@ primary workflow.
     rejects signal R1 events, and R1 is as common in VBF as in Z+jets. So the
     tree now also carries every candidate jet (`jet_*`), and the plot script
     removes the jets failing the t0 test and re-forms the pair. The forward-jet
-    preselection is not re-applied after removal. Local VBF: 90-92% of the
-    signal kept, against 84-86% for the event veto. The grid re-run for the
-    background is pending.
+    preselection is not re-applied after removal.
+  - **Result (grid, recoil cuts at 100 GeV): jet removal does not beat the
+    event veto.** It keeps 90-92% of the signal (event veto 84-86%) but
+    78-85% of Z+jets (event veto 64-76%). S/sqrt(B) is x1.03-1.04 against
+    x1.04-1.06. Re-pairing recovers background as readily as signal.
+  - The event veto with a TRKPTZ / WAVeS / TZP t0 stays the best use of the
+    timing, about +5%.
 
 ### ML Data Export
 - **export_training_data.cxx** (`util/`): Exports the cluster-SELECTION
