@@ -29,7 +29,9 @@ its error the weighted-binomial one.
         --tag "JVT + fJVT loose before pairing" --out figs/time_veto/jvtLoose
 
 Writes <out>_{sig,bkg}_eff_mjj.(pdf|png), and with both files
-<out>_s_over_sqrtb.(pdf|png) and <out>_tradeoff.(pdf|png), plus <out>_summary.md.
+<out>_s_over_sqrtb.(pdf|png) (eps_S / sqrt(eps_B): S/sqrt(B) relative to no veto),
+<out>_s_over_sqrtb_yields.(pdf|png) (S/sqrt(B) from the yields at --lumi) and
+<out>_tradeoff.(pdf|png), plus <out>_summary.md.
 """
 import argparse, os
 import numpy as np
@@ -67,6 +69,7 @@ STYLE = {
     "t0_hgtd":   ("Jet vs t_{0}: HGTD (Athena)",          "kP10Blue",   23),
     "t0_tzp":    ("Jet vs t_{0}: TZP",                    "kP10Green",  33),
     "t0_truth":  ("Jet vs t_{0}: truth (perfect t_{0})",  "kP10Brown",  34),
+    "none":      ("No timing veto",                       "#7F7F7F",    25),
 }
 BANDS = ["R1: fwd HS + fwd PU", "R2: fwd PU + central HS", "HS + PU, other #eta config",
          "HS + HS (genuine pair)", "PU + PU, both forward", "PU + PU, other #eta config",
@@ -93,6 +96,9 @@ ap.add_argument("--methods", default="jj,t0_trkptz,t0_waves,t0_hgtd,t0_truth",
                 help="drawn methods (the summary always has all); add jj_all / t0_tzp to draw them")
 ap.add_argument("--mjj-edges", default=",".join(str(e) for e in MJJ_EDGES))
 ap.add_argument("--lumi", type=float, default=3000.0, help="fb^-1")
+ap.add_argument("--bf-hinv", type=float, default=1.0,
+                help="B(H->inv) the signal yields assume (the VBF sample is H->ZZ->4nu kinematics, "
+                     "normalised to sigma_VBF alone); scales S linearly, cancels in every relative number")
 ap.add_argument("--tag", default="", help="selection note for the third label line (e.g. the JVT working point)")
 ap.add_argument("--out", required=True, help="output stem")
 args = ap.parse_args()
@@ -358,9 +364,11 @@ def atlas_block(label, lines):
     return 0.81 - 0.036 * len(lines)
 
 
-def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_title, ref=1.0):
+def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_title, ref=1.0, methods=None):
     """The region plots' layout: per-m_jj-column values on top (one dodged marker
-    per method), the MC event count of each column underneath on a log scale."""
+    per method), the MC event count of each column underneath on a log scale.
+    `ref` draws a dashed reference line (None: none); `methods` defaults to DRAWN."""
+    methods = methods or DRAWN
     c = ROOT.TCanvas("c_" + os.path.basename(stem), "", 800, 780)
     pTop = ROOT.TPad("pTop", "", 0.0, 0.30, 1.0, 1.0)
     pBot = ROOT.TPad("pBot", "", 0.0, 0.00, 1.0, 0.30)
@@ -369,19 +377,20 @@ def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_
     pTop.Draw(); pBot.Draw(); KEEP.extend([c, pTop, pBot])
     pTop.cd()
     frame = ROOT.TH1D("frame_" + os.path.basename(stem), "", len(EDGES) - 1, EDGES); KEEP.append(frame)
-    lows = [v - lo for m in DRAWN for v, lo, _, _ in series[m] if np.isfinite(v)]
-    highs = [v + hi for m in DRAWN for v, _, hi, _ in series[m] if np.isfinite(v)]
+    lows = [v - lo for m in methods for v, lo, _, _ in series[m] if np.isfinite(v)]
+    highs = [v + hi for m in methods for v, _, hi, _ in series[m] if np.isfinite(v)]
     ymin = max(0.0, np.floor((min(lows) - 0.03) * 10) / 10) if lows else 0.0
-    ytop = max(max(highs) if highs else ref, ref)
+    ytop = max([max(highs) if highs else 1.0] + ([ref] if ref is not None else []))
     frame.SetMinimum(ymin); frame.SetMaximum(ytop + (ytop - ymin) * (0.95 + 0.13 * max(0, len(lines) - 3)))
     frame.GetXaxis().SetLabelSize(0); frame.GetYaxis().SetTitle(ylab); frame.GetYaxis().SetTitleOffset(1.25)
     frame.Draw("AXIS")
-    one = ROOT.TLine(EDGES[0], ref, EDGES[-1], ref); one.SetLineStyle(2); one.SetLineColor(ROOT.kGray + 1); one.Draw()
-    KEEP.append(one)
+    if ref is not None:
+        one = ROOT.TLine(EDGES[0], ref, EDGES[-1], ref); one.SetLineStyle(2); one.SetLineColor(ROOT.kGray + 1); one.Draw()
+        KEEP.append(one)
     ytxt = atlas_block(label, lines)
     leg = ROOT.TLegend(0.17, ytxt - 0.16, 0.93, ytxt - 0.005); ROOT.StyleLegend(leg); leg.SetNColumns(2); KEEP.append(leg)
-    for k, m in enumerate(DRAWN):
-        g = graph(series[m], k, len(DRAWN), m)
+    for k, m in enumerate(methods):
+        g = graph(series[m], k, len(methods), m)
         g.Draw("P SAME")
         leg.AddEntry(g, STYLE[m][0] + legend_extra.get(m, ""), "p")
     leg.Draw()
@@ -432,7 +441,7 @@ def k_factor(s):
     # the local sample is not the grid production: normalise it with its OWN sum of
     # weights (every event of it is read), assuming the same process cross-section
     sumw = s["info"]["sumw_read"] if s["info"]["sample"] == "local" else n["sumw"]
-    return args.lumi * 1e3 * n["xs_pb"] / sumw
+    return args.lumi * 1e3 * n["xs_pb"] / sumw * (args.bf_hinv if s["norm"] == "vbf" else 1.0)
 
 
 md = [f"# VBS timing veto: {os.path.basename(args.out)}", "",
@@ -445,6 +454,7 @@ for role, s in samples.items():
               f"{s['cutcol']} > {s['cut']:g}; jet-time sigma {s['calib'].md()} (this file's own HS-leg width "
               f"{s['own'].glob:.3f}); "
               f"normalisation: {NORM[s['norm']]['note'] if s['norm'] != 'none' else 'none'}"
+              + (f"; scaled to B(H->inv) = {100 * args.bf_hinv:g}%" if s["norm"] == "vbf" and args.bf_hinv != 1.0 else "")
               + (" (LOCAL sample: its own sum w, same cross-section assumed)" if i["sample"] == "local" and s["norm"] != "none" else ""))
 md.append("")
 both = len(samples) == 2
@@ -530,6 +540,42 @@ column_figure(f"{args.out}_s_over_sqrtb", "#varepsilon_{S} / #sqrt{#varepsilon_{
                else f"#sigma_{{jet}}: {sg['calib'].short()} (S) / {bk['calib'].short()} (B)",
                "all m_{jj} columns in brackets; > 1 = the veto raises S/#sqrt{B}"],
               [n for _, _, _, n in binned(bk["e"], bk["kept"][DRAWN[0]], EDGES)], "B MC events")
+
+# ── S / sqrt(B) from the YIELDS per m_jj column (absolute, at --lumi) ───────
+# The same information as the ratio above -- that ratio is exactly this divided
+# by its no-veto value -- but on the absolute scale, which carries the two
+# normalisation assumptions (B(H->inv), Z->ll standing in for Z->nunu) that
+# cancel in the ratio. Errors: MC statistics of both yields.
+ks, kb = k_factor(sg), k_factor(bk)
+if ks and kb:
+    SB_METHODS = ["none"] + DRAWN
+    idx_s, idx_b = mjj_index(sg["e"], EDGES), mjj_index(bk["e"], EDGES)
+    absol, extra = {}, {}
+    for m in SB_METHODS:
+        k_s = np.ones(len(ws), bool) if m == "none" else sg["kept"][m]
+        k_b = np.ones(len(wb), bool) if m == "none" else bk["kept"][m]
+        absol[m] = []
+        for b in range(len(EDGES) - 1):
+            ms_, mb_ = (idx_s == b) & k_s, (idx_b == b) & k_b
+            S, B = ks * ws[ms_].sum(), kb * wb[mb_].sum()
+            if S <= 0 or B <= 0:
+                absol[m].append((np.nan, np.nan, np.nan, 0)); continue
+            dS, dB = ks * np.sqrt((ws[ms_] ** 2).sum()), kb * np.sqrt((wb[mb_] ** 2).sum())
+            z = S / np.sqrt(B)
+            err = z * np.hypot(dS / S, 0.5 * dB / B)
+            absol[m].append((z, err, err, 0))
+        extra[m] = f"  ({ks * ws[k_s].sum() / np.sqrt(kb * wb[k_b].sum()):.0f})"
+    column_figure(f"{args.out}_s_over_sqrtb_yields", "S / #sqrt{B}  per m_{jj} column", absol, extra,
+                  f"S: {args.sig_label.split(', ')[-1]},  B: {args.bkg_label.split(', ')[-1]},  {args.lumi:g} fb^{{-1}}",
+                  [f"S: {sel_line(sg)}",
+                   f"B: {sel_line(bk)}",
+                   veto_line(),
+                   calib_line(sg["calib"]) if sg["calib"] is bk["calib"]
+                   else f"#sigma_{{jet}}: {sg['calib'].short()} (S) / {bk['calib'].short()} (B)",
+                   f"S at B(H#rightarrowinv) = {100 * args.bf_hinv:g}%;  B = Z(#rightarrowll)+jets alone (stand-in for "
+                   f"Z(#rightarrow#nu#nu));  all columns in brackets"],
+                  [n for _, _, _, n in binned(bk["e"], bk["kept"][DRAWN[0]], EDGES)], "B MC events",
+                  ref=None, methods=SB_METHODS)
 
 # ── The trade-off: eps_B vs eps_S as the threshold moves (all columns) ───────
 c = ROOT.TCanvas("c_to", "", 800, 700); KEEP.append(c)
