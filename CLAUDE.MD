@@ -63,6 +63,9 @@ vertex_timing/
 │   │                             #   in-code JVT (R_pT proxy) / fJVT before pairing and writes a
 │   │                             #   per-jet `jets` tree. Write-ups: results/vbs_pair_composition.md,
 │   │                             #   results/vbs_pair_composition_jvt.md
+│   ├── vbs_time_veto.cxx         # Event-level timing veto on the VBS pair, jet vs jet against jet vs
+│   │                             #   t0: per selected event, both tests' INGREDIENTS (jet times, every
+│   │                             #   t0), the weight, truth MET / pT(ll). Write-up: results/vbs_time_veto.md
 │   └── sweep_utilities.h         # Shared helpers for parameter-sweep executables (no sweep .cxx files currently present)
 ├── python/                        # Interactive/visualisation scripts (run from within this dir)
 │   ├── event_display.py          # Event visualisation — calls runHGTD_Clustering.cxx, produces 3-page PDF
@@ -75,7 +78,9 @@ vertex_timing/
 │   ├── vbs_pair_composition_plot.py  # The two-sample 21-cell figure for ANY set of vbs_region_diag outputs
 │   ├── vbs_region_stack.py       # Seven-band composition vs m_jj, ROOT/ATLAS style (PyROOT), any diag output
 │   ├── rpt_region_dists.py       # Wide-region R_pT, z-only vs timed per timing case, from rpt_v5_hist's region tree
-│   └── rpt_region_displays.py    # select | pick | render: 20 R1 + 20 R2 displays per case, RPT_CHECK-verified
+│   ├── rpt_region_displays.py    # select | pick | render: 20 R1 + 20 R2 displays per case, RPT_CHECK-verified
+│   └── vbs_time_veto_plot.py     # vbs_time_veto outputs -> weighted S/B efficiency vs m_jj per veto,
+│                                 #   S/sqrt(B), threshold trade-off, yield table (region-plot style)
 ├── share/
 │   ├── models/                   # ML artifacts from a prior (currently inactive) DNN/BDT effort — see
 │   │                             #   Machine Learning section below
@@ -94,6 +99,7 @@ vertex_timing/
 │   ├── rpt_v5.sub                # Submit file: one job per sample, for the legacy rpt_v5
 │   ├── rpt_v5_hist.sub           # Submit file: one job per sample, for rpt_v5_hist (histogramming stage)
 │   ├── vbs_region_diag.sub       # One sample x one JVT working point per submit (jvt/jvttag macros must agree)
+│   ├── vbs_time_veto.sub         # Sharded; VBF MUST read the RAW ntuples (inputargs=--ntuple-dir=...), Z+jets its skim
 │   └── logs/                     # condor stdout/stderr/log output
 ├── CMakeLists.txt
 └── build/                        # Build output (created by `cmake ..`)
@@ -283,6 +289,44 @@ primary workflow.
 - **rpt_v5.cxx** (`util/`): Legacy monolithic executable that
   `rpt_v5_hist`/`rpt_v5_plot` was validated against; still builds, but the
   split pair is the primary workflow going forward.
+
+### Event-level timing veto (2026-09-28, grid run pending)
+- **vbs_time_veto.cxx** (`util/`) + **python/vbs_time_veto_plot.py**: Friday
+  2026-09-25's question. R1 needs no t0: veto the event when the two tagging
+  jets' times are incompatible, |t_A - t_B| / sqrt(sA^2 + sB^2) >= 3. That is
+  compared with testing EACH timed leg against the event t0, which also reaches
+  R2. The metric is weighted signal (VBF) and background (Z+jets) efficiency
+  after the recoil cut. Results and method: `results/vbs_time_veto.md`.
+  - **The executable writes ingredients, never decisions.** For every event in
+    the region plots' selection it stores both legs' jet times, all five t0s
+    with sigma and inflation, the weight, and both recoil proxies. The
+    threshold, the jet-time calibration and the cut are applied offline, with
+    weights.
+  - **The jet time is the crux.** Averaging ALL timed ghost tracks, the literal
+    prescription, gives a pileup average: only 21% of an HS jet's are
+    hard-scatter, chi2/ndf ~ 65. It passes 25% of HS+HS pairs, against 21% of
+    R1. The default `core_` time keeps timed ghost tracks passing
+    passTrackKinematics within dR < 0.2, clusters them in time (iterative,
+    2 sigma), and takes the highest-sum-pT cluster. Its quoted sigma is still
+    ~1.5x narrow; the plot script measures that per file (MAD of the HS-leg
+    pulls) and applies it.
+  - **VBF must be read from the RAW ntuples.** Its recoil cut is truth
+    |sum pT(nu)| > 200 GeV, and the skims drop the truth record.
+    `condor/vbs_time_veto.sub` passes it via `inputargs=--ntuple-dir=...`. On a
+    skim, met_truth = -1 and the plot script refuses the cut. It also checks
+    completeness: VBF 1,464,400 events and the raw sum of weights; Z+jets
+    530,962 skim events.
+  - **Validated on local VBF.** The event set equals `vbs_region_diag
+    --jvt=loose`'s m_jj >= 200 set exactly (38,524). All four reco t0s equal
+    rpt_v5's region tree event by event. The Z+jets path (OR, Z->ll, pT(ll))
+    was checked on 107 picked grid events.
+  - **Local VBF result** (JVT + fJVT loose, truth MET > 200): jet vs jet keeps
+    94.2% of the signal; jet vs t0 keeps 84.7-86.3%, and 85.4% with a PERFECT
+    t0. That loss is the jet time's tail (7.9% of HS legs fail 3 sigma after
+    calibration), paid on every timed leg.
+  - At a fixed 3 sigma the two vetoes sit at different signal efficiencies, so
+    compare background at matched efficiency (the `_tradeoff` figure). Z+jets
+    at pT(ll) > 200 is only ~200 MC events.
 
 ### ML Data Export
 - **export_training_data.cxx** (`util/`): Exports the cluster-SELECTION
@@ -574,7 +618,8 @@ commented alternative, and an independent scan of ours reproduces it as the
 best working point.
 
 **Vertex-time inflation is per sample AND per scenario**, resolved by
-`inflationFor(SAMPLE_NAME)` in `main()` before any worker thread starts:
+`inflationFor(SAMPLE_NAME)` in `main()` before any worker thread starts. The
+table lives in `util/rpt_v5_common.h`, shared with `vbs_time_veto`:
 
 | scenario | vbf | zjets | dijet | ttbar |
 |---|---|---|---|---|

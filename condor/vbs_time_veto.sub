@@ -1,0 +1,83 @@
+# ---------------------------------------------------------------------------
+# vbs_time_veto.sub — condor submit template: one SAMPLE per submit, split
+# into $(nshards) single-threaded shard jobs.
+#
+# Runs util/vbs_time_veto.cxx (see its file header): for every event passing
+# the region-plot selection, the ingredients of the event-level timing veto on
+# the VBS pair -- jet-vs-jet and jet-vs-t0 time compatibility -- with the
+# generator weight and both recoil proxies. Writes TTrees only; efficiencies,
+# yields and figures come from python/vbs_time_veto_plot.py afterwards,
+# locally, with no further submission.
+#
+# Setup (once):
+#   cd build && cmake .. && make vbs_time_veto     # build BEFORE submitting
+#
+# Submit (from inside condor/, so the relative paths resolve).
+#
+# VBF MUST read the RAW ntuples: the signal's recoil cut is truth
+# E_T^miss = |sum pT(nu)| from the truth record, which the skims drop. On a
+# skim the executable writes met_truth = -1 and the plotting script refuses to
+# apply the cut. Z+jets reads its skim (pT(ll) is reco-level).
+#   cd condor
+#   condor_submit -a sample=vbf -a nshards=20 \
+#                 -a 'selargs=--jvt=loose' -a seltag=jvtLoose_ \
+#                 -a 'inputargs=--ntuple-dir=/data/mcardiff/exotic_superntuples/highstats_vbf/' \
+#                 vbs_time_veto.sub
+#   condor_submit -a sample=zjets -a nshards=8 \
+#                 -a 'selargs=--jvt=loose' -a seltag=jvtLoose_ vbs_time_veto.sub
+#
+# Merge each sample's shards -- TTrees only, so hadd (NOT hist_merge), and
+# pin the shard count in the glob (see CLAUDE.MD, "Merging"). From the repo root:
+#   hadd -f condor/vbf/vbf_jvtLoose_vbs_time_veto.root \
+#           condor/vbf/vbf_jvtLoose_vbs_time_veto.shard*of20.root
+#   hadd -f condor/zjets/zjets_jvtLoose_vbs_time_veto.root \
+#           condor/zjets/zjets_jvtLoose_vbs_time_veto.shard*of8.root
+# The `meta` tree gets one row per shard; the plotting script sums them and
+# checks the total against a complete sample (VBF: 1,464,400 events and the
+# raw sum of weights; Z+jets skim: 530,962 events).
+# ---------------------------------------------------------------------------
+universe                 = vanilla
+executable               = run_analysis.sh
+
+sample                   = vbf
+nshards                  = 20
+
+# Two macros that MUST agree, exactly as on rpt_v5_hist.sub: selargs changes
+# the selection and the executable stamps a matching tag onto its output name,
+# which transfer_output_files must then name. seltag includes its trailing _.
+#   selargs                   seltag
+#   (empty)  [no JVT/fJVT]    (empty)
+#   --jvt=loose               jvtLoose_     <- the presentation default
+#   --jvt=tight               jvtTight_
+#   --vbs-mjj=500             mjj500p0_     (joins as mjj500p0_jvtLoose_ with --jvt)
+selargs                  =
+seltag                   =
+# Input override that does NOT change the output name (resolveSample's
+# --ntuple-dir): the raw VBF directory, see above.
+inputargs                =
+
+arguments                = vbs_time_veto $(sample) --file-shard=$(ProcId)/$(nshards) $(selargs) $(inputargs)
+
+should_transfer_files    = YES
+when_to_transfer_output  = ON_EXIT
+transfer_input_files     = ../build/vbs_time_veto
+transfer_output_files    = $(sample)/$(sample)_$(seltag)vbs_time_veto.shard$(ProcId)of$(nshards).root
+# LHS must be a bare filename (CLAUDE.MD, Grid Submission); the RHS recreates
+# the <sample>/ nesting, under condor/ since that is the submit directory.
+transfer_output_remaps   = "$(sample)_$(seltag)vbs_time_veto.shard$(ProcId)of$(nshards).root=$(sample)/$(sample)_$(seltag)vbs_time_veto.shard$(ProcId)of$(nshards).root"
+
+getenv                   = True
+stream_output            = True
+stream_error             = True
++JobFlavour              = "workday"
+
+# Single-threaded: a plain TTreeReader loop, parallelised by the shards.
+request_cpus             = 1
+request_memory           = 4GB
+request_disk             = 2GB
+
+output                   = logs/vbs_time_veto_$(sample).$(ClusterId).$(ProcId).out
+error                    = logs/vbs_time_veto_$(sample).$(ClusterId).$(ProcId).err
+log                      = logs/vbs_time_veto_$(sample).$(ClusterId).$(ProcId).log
+
+queue $(nshards)
