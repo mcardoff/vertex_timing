@@ -290,43 +290,54 @@ primary workflow.
   `rpt_v5_hist`/`rpt_v5_plot` was validated against; still builds, but the
   split pair is the primary workflow going forward.
 
-### Event-level timing veto (2026-09-28, grid run pending)
+### Event-level timing veto (2026-09-28)
 - **vbs_time_veto.cxx** (`util/`) + **python/vbs_time_veto_plot.py**: Friday
   2026-09-25's question. R1 needs no t0: veto the event when the two tagging
   jets' times are incompatible, |t_A - t_B| / sqrt(sA^2 + sB^2) >= 3. That is
   compared with testing EACH timed leg against the event t0, which also reaches
-  R2. The metric is weighted signal (VBF) and background (Z+jets) efficiency
-  after the recoil cut. Results and method: `results/vbs_time_veto.md`.
+  R2. The metric is weighted signal (VBF, truth MET > 200) and background
+  (Z+jets, pT(ll) > 200) efficiency. Results: `results/vbs_time_veto.md`.
+  - **Answer (grid, JVT + fJVT loose): neither veto improves S/sqrt(B) after
+    the recoil cut.**
+    - Jet vs jet: eps_S 95.1%, eps_B 96.0%, S/sqrt(B) x 0.97. Only 6.5% of the
+      background has two timed legs, and R2 (a central leg) is 35% of it.
+    - Jet vs t0: eps_S ~86%, eps_B ~70%, x 1.02-1.04 (HGTD 0.98). That is
+      within the +-2.4% that 204 Z+jets MC events allow, but it beats jet vs
+      jet at matched eps_S.
+    - A PERFECT t0 does no better. The signal loss is the HS jet time's tail:
+      7% of HS legs fail 3 sigma against the true t_HS, half of them
+      single-track.
   - **The executable writes ingredients, never decisions.** For every event in
     the region plots' selection it stores both legs' jet times, all five t0s
-    with sigma and inflation, the weight, and both recoil proxies. The
-    threshold, the jet-time calibration and the cut are applied offline, with
-    weights.
+    with sigma and inflation, the weight, and both recoil proxies. Threshold,
+    jet-time calibration and cuts are applied offline, with weights.
   - **The jet time is the crux.** Averaging ALL timed ghost tracks, the literal
     prescription, gives a pileup average: only 21% of an HS jet's are
     hard-scatter, chi2/ndf ~ 65. It passes 25% of HS+HS pairs, against 21% of
     R1. The default `core_` time keeps timed ghost tracks passing
     passTrackKinematics within dR < 0.2, clusters them in time (iterative,
-    2 sigma), and takes the highest-sum-pT cluster. Its quoted sigma is still
-    ~1.5x narrow; the plot script measures that per file (MAD of the HS-leg
-    pulls) and applies it.
+    2 sigma), and takes the highest-sum-pT cluster.
+  - **The jet-time calibration is ONE procedure for S and B.** sigma_jet is
+    scaled by f(n tracks), measured on VBF HS legs: 2.34 at n = 1 falling to
+    1.31 at n >= 9. The same factors apply to both samples. A per-sample
+    calibration (global 1.51 VBF / 1.83 Z+jets) would give the background a
+    looser veto than the signal; `--jet-infl per-file` shows it moves nothing.
   - **VBF must be read from the RAW ntuples.** Its recoil cut is truth
     |sum pT(nu)| > 200 GeV, and the skims drop the truth record.
     `condor/vbs_time_veto.sub` passes it via `inputargs=--ntuple-dir=...`. On a
     skim, met_truth = -1 and the plot script refuses the cut. It also checks
-    completeness: VBF 1,464,400 events and the raw sum of weights; Z+jets
-    530,962 skim events.
-  - **Validated on local VBF.** The event set equals `vbs_region_diag
-    --jvt=loose`'s m_jj >= 200 set exactly (38,524). All four reco t0s equal
-    rpt_v5's region tree event by event. The Z+jets path (OR, Z->ll, pT(ll))
-    was checked on 107 picked grid events.
-  - **Local VBF result** (JVT + fJVT loose, truth MET > 200): jet vs jet keeps
-    94.2% of the signal; jet vs t0 keeps 84.7-86.3%, and 85.4% with a PERFECT
-    t0. That loss is the jet time's tail (7.9% of HS legs fail 3 sigma after
-    calibration), paid on every timed leg.
-  - At a fixed 3 sigma the two vetoes sit at different signal efficiencies, so
-    compare background at matched efficiency (the `_tradeoff` figure). Z+jets
-    at pT(ll) > 200 is only ~200 MC events.
+    completeness: VBF 1,464,400 events and the raw sum of weights (matched
+    exactly); Z+jets 530,962 skim events.
+  - **Validated.**
+    - Every reco t0 equals rpt_v5's JVT-loose region trees event by event
+      (91,624 VBF, 5,528 Z+jets). The VBF run read the raw files and the trees
+      the skims.
+    - Truth MET and pT(ll) equal last week's friend files.
+    - Z+jets' 26,883 selected / 204 after pT(ll) > 200 equal the region
+      stacks' `vbs_region_diag` counts.
+    - Local VBF's event set equals `vbs_region_diag --jvt=loose`'s exactly.
+  - **Job cost:** VBF raw, 20 shards, ~11 min each; Z+jets skim, 8 shards,
+    ~3 min each.
 
 ### ML Data Export
 - **export_training_data.cxx** (`util/`): Exports the cluster-SELECTION
