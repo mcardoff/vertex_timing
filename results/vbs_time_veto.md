@@ -272,7 +272,12 @@ vertex-t0 σ is.
 `figs/time_veto/`:
 - `jvtLoose_sig_eff_mjj`, `jvtLoose_bkg_eff_mjj`: efficiency per m_jj column,
   region-plot layout, MC events underneath.
-- `jvtLoose_s_over_sqrtb`: ε_S / √ε_B per column.
+- `jvtLoose_s_over_sqrtb`: ε_S / √ε_B per column. That is S/√B divided by
+  its no-veto value, so it cancels the two normalisation stand-ins
+  (B(H→inv) = 100%, Z→ℓℓ for Z→νν).
+- `jvtLoose_s_over_sqrtb_yields`: S/√B from the yields at 3000 fb⁻¹ per
+  column, with the no-veto value as its own marker. `--bf-hinv` scales the
+  signal to a realistic branching ratio.
 - `jvtLoose_tradeoff`: ε_B against ε_S, threshold scanned from 1σ to 12σ.
 - `local_jvtLoose_*`: the local-VBF development run.
 
