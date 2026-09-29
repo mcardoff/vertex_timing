@@ -25,7 +25,8 @@ NORM = {
 # yield: VBF must be read from the RAW ntuples (the truth record is needed for
 # E_T^miss), so its meta sum of weights must equal the raw sum above; Z+jets reads
 # the skims, whose event count after the vertex + Z->ll cuts is fixed.
-EXPECTED_COMPLETE = {"vbf": dict(n_read=1464400, sumw=6497726.944462), "zjets": dict(n_read=530962)}
+EXPECTED_COMPLETE = {"vbf": dict(n_read=1464400, sumw=6497726.944462), "zjets": dict(n_read=530962),
+                     "dijet": dict(n_read=699500)}   # dijet: the RAW JZ0-JZ4 ntuples (--sr-met=jets)
 
 T0_SRC = ["trkptz", "waves", "hgtd", "tzp", "truth"]
 # (legend, colour, marker): the region talk's case colours; jet-jet in black.

@@ -84,7 +84,9 @@ vertex_timing/
 │   │                             #   S/sqrt(B), threshold trade-off, yield table (region-plot style)
 │   ├── vbs_time_veto_sr.py       # vbs_time_veto --sr outputs -> the same tests INSIDE the VBF H->inv SR
 │   │                             #   (ANA-EXOT-2020-11-INT1 emulated), event veto vs jet removal
-│   └── vbs_time_veto_common.py   # shared by the two: normalisation, jet-time calibration, figure layouts
+│   ├── vbs_time_veto_common.py   # shared by the two: normalisation, jet-time calibration, figure layouts
+│   ├── vbf_hinv_sr.py            # the VBF H->inv SR selection + timing variants, shared by the SR scripts
+│   └── vbs_hspu_study.py         # pileup-tagged (HS+PU) SR background: VBF, Z+jets, dijet (fake MET from jets)
 ├── share/
 │   ├── models/                   # ML artifacts from a prior (currently inactive) DNN/BDT effort — see
 │   │                             #   Machine Learning section below
@@ -378,6 +380,23 @@ primary workflow.
       is validated byte- and pixel-identical.
     - Job cost: VBF raw ~22 min per shard (it reads the truth record for
       every event), Z+jets ~5 min.
+    - **HS+PU study (`python/vbs_hspu_study.py`).** It asks how often a
+      pileup jet is a tagging jet, and whether the t0 test catches it.
+      - Multijet = dijet raw with `--sr --sr-met=jets`: `met_jets` is
+        |sum pT| of the JVT-passing jets > 20 GeV, since truth MET is ~0.
+      - The JZ slices carry pT-biased weights (5e-9 to 1), so quote
+        effective counts; they are not normalised to each other.
+      - The multijet MC reaches the tagging-pair stages only: nothing
+        survives |dphi_jj| < 2 plus the jet veto.
+      - At the pair stage (MET > 100) the HS+PU share is Z+jets 44%,
+        JZ2 53%, JZ3 10%, JZ4 0%, and VBF 5%.
+      - Of the PU tagging jets, 1/3-1/2 lie beyond |eta| 4. The t0 test
+        catches ~2/3 of those in HGTD.
+      - **The event veto pays when the pileup-tagged background share f
+        exceeds f* ~ 20%** (WAVeS/truth; TRKPTZ 23%, HGTD 33%). The
+        direct per-sample points sit on that model.
+      - Our Z+jets at 34-44% overstates f (Powheg DY). Run 2 measured
+        6-13%.
 
 ### ML Data Export
 - **export_training_data.cxx** (`util/`): Exports the cluster-SELECTION
