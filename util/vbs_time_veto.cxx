@@ -71,6 +71,25 @@
 // util/rpt_v5_common.h). Plus truth: t0 = TruthVtx_time[0], sigma 0 -- a
 // perfect vertex time, i.e. the jet-time-limited ceiling of the t0 method.
 //
+// ── --sr: the VBF H->inv signal region instead ──────────────────────────────
+// The full Run 2 analysis' SR (ANA-EXOT-2020-11-INT1, Sec. 4.5.2) is applied
+// OFFLINE by python/vbs_time_veto_sr.py: its fJVT working point depends on
+// E_T^miss, and a timing tagger that removes jets re-forms the tagging pair
+// and re-runs the jet counting. So here only:
+//   * the same vertex / Z->ll preamble, then a recoil floor (--sr-recoil-min,
+//     default 100 GeV: met_truth, or z_pt for Z+jets; the SR needs > 160);
+//   * events that COULD enter the SR under any tagging or jet removal: some
+//     jet pair with pT > 80 / 50 GeV, opposite hemispheres, |Deta| > 3.8 and
+//     m_jj > 800 GeV, among ALL jets (no JVT). A removal never adds a jet, so
+//     the SR pair of any variant is such a pair;
+//   * the jet_* arrays hold EVERY jet not removed by the lepton overlap
+//     removal (the ntuple's >= 20 GeV, |eta| < 4.5), with the in-code JVT R_pT
+//     and fJVT (src/jet_tagging.h) and their windows, for the jet counting
+//     (25 GeV), the no-JVT jet sum (20 GeV) and fJVT on the leading two;
+//   * the legs are the two leading jets > 25 GeV passing JVT loose, the note's
+//     tagging pair before fJVT (a_idx = -1 if there are fewer than two).
+// Outputs are tagged sr_; --jvt and --vbs-* are refused (the SR fixes both).
+//
 // ── Outputs (histFilePath: sample-, selection- and shard-tagged) ─────────────
 //   <prefix>vbs_time_veto.root
 //     events  one row per selected event (see Row): the legs' columns, and the
@@ -121,6 +140,15 @@ constexpr double JET_TIME_DIST_CUT = 2.0;
 
 // The clustering input for the t0 rows -- rpt_v5_hist's, verbatim.
 constexpr double T0_ASSOC_NSIGMA = 2.5;
+
+// --sr: the SR's tagging-pair requirements (ANA-EXOT-2020-11-INT1 Sec. 4.5.2),
+// used here only to keep the events that could pass them.
+constexpr double SR_J1_PT     = 80.0;   // leading jet pT
+constexpr double SR_J2_PT     = 50.0;   // sub-leading jet pT
+constexpr double SR_DETA      = 3.8;    // tagging-pair |Deta|
+constexpr double SR_MJJ       = 800.0;  // tagging-pair m_jj
+constexpr double SR_JET_PT    = 25.0;   // jet counting, and the tagging-pair candidates
+constexpr double SR_JET_ETA   = 4.5;    // jet acceptance
 
 struct JetTime {
   double t = 0.0, sig = -1.0;   // sig < 0: no time
@@ -223,6 +251,9 @@ struct Row {
   std::vector<int>    jet_idx, jet_hs, jet_pu, jet_n;
   std::vector<float>  jet_pt, jet_eta, jet_phi;
   std::vector<double> jet_t, jet_sig;   // core_ jet time; jet_n = 0: no time
+  // --sr only: the tagger's discriminants and windows for every stored jet
+  std::vector<float>  jet_rpt, jet_fjvt;
+  std::vector<int>    jet_jvtwin, jet_fjvtwin;
 };
 
 // Jet-time calibration accumulator over paper-HS legs (see the printout).
@@ -281,9 +312,13 @@ int main(int argc, char** argv) {
   // vbs_region_diag / rpt_v5_hist (src/jet_tagging.h). Joins SELECTION_TAG.
   const JvtWP* wpSel = &JVT_WPS[0];
   std::string outOverride;
+  bool srMode = false;
+  float srRecoilMin = 100.f;
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
     if (a.rfind("--out=", 0) == 0) outOverride = a.substr(6);
+    if (a == "--sr") srMode = true;
+    if (a.rfind("--sr-recoil-min=", 0) == 0) srRecoilMin = std::stof(a.substr(16));
     if (a.rfind("--jvt=", 0) != 0) continue;
     const JvtWP* hit = jvtWPByName(a.substr(6));
     if (!hit) { std::cerr << "[veto] unknown " << a << " (none|loose|tight)\n"; return 1; }
@@ -297,15 +332,30 @@ int main(int argc, char** argv) {
     const std::string tag = std::string(WP.tag).substr(1);
     SELECTION_TAG = SELECTION_TAG.empty() ? tag : SELECTION_TAG + "_" + tag;
   }
+  // --sr: the legs pass JVT loose; fJVT and everything else is applied offline
+  const JvtWP& WPL = *jvtWPByName("loose");
+  if (srMode) {
+    if (!SELECTION_TAG.empty()) {
+      std::cerr << "[veto] --sr fixes the selection and the jet tagging: drop --jvt and --vbs-*\n";
+      return 1;
+    }
+    EXTENDED_BRANCHES = true;
+    SELECTION_TAG = "sr";
+  }
   const Inflation INFL = inflationFor(SAMPLE_NAME);
 
   const std::string outPath = outOverride.empty() ? histFilePath("vbs_time_veto.root") : outOverride;
   boost::filesystem::create_directories(boost::filesystem::path(outPath).parent_path().empty()
                                             ? boost::filesystem::path(".")
                                             : boost::filesystem::path(outPath).parent_path());
-  std::cout << "[veto] sample=" << (SAMPLE_NAME.empty() ? "local" : SAMPLE_NAME)
-            << " jvt=" << WP.name << " m_jj >= " << VBS_JET_MJJ << " |Deta| >= " << VBS_JET_D_ETA
-            << "  jet time: core = timed ghost tracks, " << MIN_TRACK_PT << "-" << MAX_TRACK_PT
+  std::cout << "[veto] sample=" << (SAMPLE_NAME.empty() ? "local" : SAMPLE_NAME);
+  if (srMode)
+    std::cout << " --sr: VBF H->inv SR candidates (a pair > " << SR_J1_PT << "/" << SR_J2_PT << " GeV, opposite "
+              << "hemispheres, |Deta| > " << SR_DETA << ", m_jj > " << SR_MJJ << "), recoil >= " << srRecoilMin
+              << " GeV, every jet stored";
+  else
+    std::cout << " jvt=" << WP.name << " m_jj >= " << VBS_JET_MJJ << " |Deta| >= " << VBS_JET_D_ETA;
+  std::cout << "  jet time: core = timed ghost tracks, " << MIN_TRACK_PT << "-" << MAX_TRACK_PT
             << " GeV, dR < " << JET_TIME_DR << ", " << JET_TIME_DIST_CUT
             << "-sigma time clustering, max sum-pT cluster\n";
   std::printf("[veto] t0 inflation (rpt_v5's, '%s'): hgtd %.2f trkptz %.2f waves %.2f tzp %.2f\n",
@@ -319,8 +369,8 @@ int main(int argc, char** argv) {
   // with EXTENDED_BRANCHES on a missing branch would otherwise make the reader
   // iterate ZERO entries and exit 0 (Track_btagIp_* on every grid sample).
   recordAvailableBranches(chain);
-  if (jvtOn && !hasBranch("Track_recoVtx_idx")) {
-    std::cerr << "[veto] --jvt needs Track_recoVtx_idx, which this sample lacks; a silent "
+  if ((jvtOn || srMode) && !hasBranch("Track_recoVtx_idx")) {
+    std::cerr << "[veto] --jvt / --sr need Track_recoVtx_idx, which this sample lacks; a silent "
                  "fallback would give every jet a JVT R_pT of 0 and remove them all\n";
     return 1;
   }
@@ -339,6 +389,9 @@ int main(int argc, char** argv) {
   std::cout << "[veto] truth MET: " << (hasTruthMet ? "from the truth record"
                                                     : "UNAVAILABLE (no truth record; met_truth = -1)")
             << "\n";
+  if (srMode && !OVERLAP_REMOVAL && !hasTruthMet)
+    std::cout << "[veto] --sr: this sample has no recoil proxy (no truth record, not Z+jets), "
+                 "so the recoil floor is NOT applied\n";
 
   TFile out(outPath.c_str(), "RECREATE");
   if (out.IsZombie()) { std::cerr << "[veto] cannot open " << outPath << "\n"; return 1; }
@@ -384,6 +437,12 @@ int main(int argc, char** argv) {
   tree.Branch("jet_t",   &R.jet_t);
   tree.Branch("jet_sig", &R.jet_sig);
   tree.Branch("jet_n",   &R.jet_n);
+  if (srMode) {
+    tree.Branch("jet_rpt",     &R.jet_rpt);
+    tree.Branch("jet_fjvt",    &R.jet_fjvt);
+    tree.Branch("jet_jvtwin",  &R.jet_jvtwin);
+    tree.Branch("jet_fjvtwin", &R.jet_fjvtwin);
+  }
   for (int k = 0; k < N_T0; ++k) {
     const std::string s = T0_NAMES[k];
     tree.Branch(("t0_" + s).c_str(),   &R.t0[k],   ("t0_" + s + "/D").c_str());
@@ -412,37 +471,120 @@ int main(int argc, char** argv) {
     ++nLep;
     if (!branch.passBasicCuts())       continue;
     ++nVtx;
-    std::vector<int> passPtIdx;
-    int nPt = 0, nPtEta = 0;
-    branch.collectPtPassingJets(passPtIdx, nPt, nPtEta);
-    if (nPt < MIN_PASSPT_JETS || nPtEta < MIN_PASSETA_JETS) continue;
-    ++nJets;
 
-    // ── Tagger before pairing, then the jet requirements again ──────────────
+    // Recoil proxies. --sr cuts on them before anything else; the region mode
+    // computes them only for selected events, so the truth record is read for
+    // those alone.
+    float metTruth = -1.f, zPt = -1.f, zMass = -1.f;
+    auto recoil = [&]() {
+      if (hasTruthMet) {
+        double px = 0.0, py = 0.0;
+        for (size_t p = 0; p < tpPdg->GetSize(); ++p) {
+          const long a = std::labs(std::lround((*tpPdg)[p]));
+          if (a != 12 && a != 14 && a != 16) continue;
+          px += (*tpPt)[p] * std::cos((*tpPhi)[p]);
+          py += (*tpPt)[p] * std::sin((*tpPhi)[p]);
+        }
+        metTruth = (float)std::hypot(px, py);
+      }
+      if (branch.trackLeptonID) {
+        // vbs_region_diag's z_pt: good leptons by pT, first OS-SF pair, massless.
+        std::vector<int> lep;
+        for (int t = 0; t < (int)branch.trackLeptonID->GetSize(); ++t)
+          if (branch.isGoodLepton(t)) lep.push_back(t);
+        std::sort(lep.begin(), lep.end(), [&](int x, int y) { return branch.trackPt[x] > branch.trackPt[y]; });
+        bool done = false;
+        for (size_t x = 0; x < lep.size() && !done; ++x)
+          for (size_t y = x + 1; y < lep.size() && !done; ++y) {
+            const int px_ = branch.leptonPdg(lep[x]), py_ = branch.leptonPdg(lep[y]);
+            if (std::abs(px_) != std::abs(py_) || px_ * py_ >= 0) continue;
+            TLorentzVector lx, ly;
+            lx.SetPtEtaPhiM(branch.trackPt[lep[x]], branch.trackEta[lep[x]], branch.trackPhi[lep[x]], 0.0);
+            ly.SetPtEtaPhiM(branch.trackPt[lep[y]], branch.trackEta[lep[y]], branch.trackPhi[lep[y]], 0.0);
+            zPt = (float)(lx + ly).Pt();
+            zMass = (float)(lx + ly).M();
+            done = true;
+          }
+      }
+    };
+
+    std::vector<int> passPtIdx;   // the pairing candidates; --sr: every stored jet, by pT
     std::vector<JetDisc> D;
     int nRmJvt = 0, nRmFjvt = 0;
-    if (jvtOn) {
-      D = computeJetDiscriminants(branch);
-      std::vector<int> kept;
-      int nPtWP = 0, nPtEtaWP = 0;
-      for (int j : passPtIdx) {
-        if (jvtRemoves(D[j], WP))  { ++nRmJvt;  continue; }
-        if (fjvtRemoves(D[j], WP)) { ++nRmFjvt; continue; }
-        kept.push_back(j);
-        ++nPtWP;
-        const double ae = std::abs((double)branch.topoJetEta[j]);
-        if (ae > MIN_ABS_ETA_JET && ae < MAX_ABS_ETA_JET) ++nPtEtaWP;
-      }
-      if (nPtWP < MIN_PASSPT_JETS || nPtEtaWP < MIN_PASSETA_JETS) continue;
-      passPtIdx.swap(kept);
-    }
-    ++nTagger;
+    int legI = -1, legJ = -1;
+    double pairMjj = -1.0, pairDeta = -1.0;
+    if (!srMode) {
+      int nPt = 0, nPtEta = 0;
+      branch.collectPtPassingJets(passPtIdx, nPt, nPtEta);
+      if (nPt < MIN_PASSPT_JETS || nPtEta < MIN_PASSETA_JETS) continue;
+      ++nJets;
 
-    // ── The pair: max m_jj, opposite hemispheres (vbs_region_diag's wide_) ───
-    const BranchPointerWrapper::VbsPair pair = branch.calcBestVbsPair(passPtIdx);
-    if (!pair.valid()) continue;
-    ++nPair;
-    if (pair.mjj < VBS_JET_MJJ || pair.dEta < VBS_JET_D_ETA) continue;
+      // ── Tagger before pairing, then the jet requirements again ────────────
+      if (jvtOn) {
+        D = computeJetDiscriminants(branch);
+        std::vector<int> kept;
+        int nPtWP = 0, nPtEtaWP = 0;
+        for (int j : passPtIdx) {
+          if (jvtRemoves(D[j], WP))  { ++nRmJvt;  continue; }
+          if (fjvtRemoves(D[j], WP)) { ++nRmFjvt; continue; }
+          kept.push_back(j);
+          ++nPtWP;
+          const double ae = std::abs((double)branch.topoJetEta[j]);
+          if (ae > MIN_ABS_ETA_JET && ae < MAX_ABS_ETA_JET) ++nPtEtaWP;
+        }
+        if (nPtWP < MIN_PASSPT_JETS || nPtEtaWP < MIN_PASSETA_JETS) continue;
+        passPtIdx.swap(kept);
+      }
+      ++nTagger;
+
+      // ── The pair: max m_jj, opposite hemispheres (vbs_region_diag's wide_) ─
+      const BranchPointerWrapper::VbsPair pair = branch.calcBestVbsPair(passPtIdx);
+      if (!pair.valid()) continue;
+      ++nPair;
+      if (pair.mjj < VBS_JET_MJJ || pair.dEta < VBS_JET_D_ETA) continue;
+      legI = pair.idxI;  legJ = pair.idxJ;  pairMjj = pair.mjj;  pairDeta = pair.dEta;
+      recoil();
+    } else {
+      // ── --sr: the recoil floor, then events that could enter the SR ───────
+      recoil();
+      const float r = OVERLAP_REMOVAL ? zPt : (hasTruthMet ? metTruth : srRecoilMin);
+      if (r < srRecoilMin) continue;
+      ++nJets;
+      for (int j = 0; j < (int)branch.topoJetPt.GetSize(); ++j)
+        if (!branch.isJetRemoved(j) && std::abs((double)branch.topoJetEta[j]) < SR_JET_ETA) passPtIdx.push_back(j);
+      std::sort(passPtIdx.begin(), passPtIdx.end(),
+                [&](int x, int y) { return branch.topoJetPt[x] > branch.topoJetPt[y]; });
+      auto mass = [&](int i, int k) {
+        TLorentzVector vi, vk;
+        vi.SetPtEtaPhiM(branch.topoJetPt[i], branch.topoJetEta[i], branch.topoJetPhi[i], 0.0);
+        vk.SetPtEtaPhiM(branch.topoJetPt[k], branch.topoJetEta[k], branch.topoJetPhi[k], 0.0);
+        return (vi + vk).M();
+      };
+      bool could = false;
+      for (size_t x = 0; x < passPtIdx.size() && !could; ++x) {
+        const int i = passPtIdx[x];
+        if (branch.topoJetPt[i] <= SR_J1_PT) break;   // sorted: no harder jet follows
+        for (int k : passPtIdx) {
+          const double ei = branch.topoJetEta[i], ek = branch.topoJetEta[k];
+          if (k == i || branch.topoJetPt[k] <= SR_J2_PT || ei * ek >= 0.0 || std::abs(ei - ek) <= SR_DETA) continue;
+          if (mass(i, k) > SR_MJJ) { could = true; break; }
+        }
+      }
+      if (!could) continue;
+      ++nTagger;
+      ++nPair;
+      D = computeJetDiscriminants(branch);
+      for (int j : passPtIdx) {
+        nRmJvt  += jvtRemoves(D[j], WPL);
+        nRmFjvt += fjvtRemoves(D[j], WPL);
+        if (branch.topoJetPt[j] <= SR_JET_PT || jvtRemoves(D[j], WPL)) continue;
+        if (legI < 0) legI = j; else if (legJ < 0) legJ = j;
+      }
+      if (legJ >= 0) {
+        pairMjj  = mass(legI, legJ);
+        pairDeta = std::abs((double)branch.topoJetEta[legI] - (double)branch.topoJetEta[legJ]);
+      }
+    }
     ++nSel;
     sumwSel += w;
 
@@ -455,46 +597,18 @@ int main(int argc, char** argv) {
       if (p != std::string::npos && d != std::string::npos)
         R.file_idx = std::atoi(R.file_path.substr(p + 1, d - p - 1).c_str()); }
     R.weight = (float)w;
-    R.mjj = pair.mjj;
-    R.deta = pair.dEta;
+    R.mjj = pairMjj;
+    R.deta = pairDeta;
     R.n_jets = (int)passPtIdx.size();
     for (int j : passPtIdx) {
       const double ae = std::abs((double)branch.topoJetEta[j]);
-      if (ae > MIN_ABS_ETA_JET && ae < MAX_ABS_ETA_JET) ++R.n_jets_fwd_acc;
+      if (branch.topoJetPt[j] > MIN_JET_PT && ae > MIN_ABS_ETA_JET && ae < MAX_ABS_ETA_JET) ++R.n_jets_fwd_acc;
     }
     R.n_rm_jvt = nRmJvt;
     R.n_rm_fjvt = nRmFjvt;
-
-    // Recoil proxies.
-    if (hasTruthMet) {
-      double px = 0.0, py = 0.0;
-      for (size_t p = 0; p < tpPdg->GetSize(); ++p) {
-        const long a = std::labs(std::lround((*tpPdg)[p]));
-        if (a != 12 && a != 14 && a != 16) continue;
-        px += (*tpPt)[p] * std::cos((*tpPhi)[p]);
-        py += (*tpPt)[p] * std::sin((*tpPhi)[p]);
-      }
-      R.met_truth = (float)std::hypot(px, py);
-    }
-    if (branch.trackLeptonID) {
-      // vbs_region_diag's z_pt: good leptons by pT, first OS-SF pair, massless.
-      std::vector<int> lep;
-      for (int t = 0; t < (int)branch.trackLeptonID->GetSize(); ++t)
-        if (branch.isGoodLepton(t)) lep.push_back(t);
-      std::sort(lep.begin(), lep.end(), [&](int x, int y) { return branch.trackPt[x] > branch.trackPt[y]; });
-      bool done = false;
-      for (size_t x = 0; x < lep.size() && !done; ++x)
-        for (size_t y = x + 1; y < lep.size() && !done; ++y) {
-          const int px_ = branch.leptonPdg(lep[x]), py_ = branch.leptonPdg(lep[y]);
-          if (std::abs(px_) != std::abs(py_) || px_ * py_ >= 0) continue;
-          TLorentzVector lx, ly;
-          lx.SetPtEtaPhiM(branch.trackPt[lep[x]], branch.trackEta[lep[x]], branch.trackPhi[lep[x]], 0.0);
-          ly.SetPtEtaPhiM(branch.trackPt[lep[y]], branch.trackEta[lep[y]], branch.trackPhi[lep[y]], 0.0);
-          R.z_pt = (float)(lx + ly).Pt();
-          R.z_mass = (float)(lx + ly).M();
-          done = true;
-        }
-    }
+    R.met_truth = metTruth;
+    R.z_pt = zPt;
+    R.z_mass = zMass;
 
     // ── Every pairing candidate: kinematics, labels, core jet time ──────────
     std::unordered_map<int, JetTime> coreTime;
@@ -511,6 +625,12 @@ int main(int argc, char** argv) {
       R.jet_t.push_back(c.t);
       R.jet_sig.push_back(c.sig);
       R.jet_n.push_back(c.n);
+      if (srMode) {
+        R.jet_rpt.push_back(D[j].rpt);
+        R.jet_fjvt.push_back(D[j].fjvt);
+        R.jet_jvtwin.push_back(D[j].jvtWin ? 1 : 0);
+        R.jet_fjvtwin.push_back(D[j].fjvtWin ? 1 : 0);
+      }
     }
 
     // ── Legs ────────────────────────────────────────────────────────────────
@@ -522,7 +642,7 @@ int main(int argc, char** argv) {
       L.phi = branch.topoJetPhi[j];
       L.hs  = branch.isJetPaperHS(L.eta, L.phi);
       L.pu  = branch.isJetPaperPU(L.eta, L.phi);
-      if (jvtOn) { L.jvt_rpt = D[j].rpt; L.fjvt = D[j].fjvt; }
+      if (!D.empty()) { L.jvt_rpt = D[j].rpt; L.fjvt = D[j].fjvt; }
       const JetTime& c = coreTime.at(j);
       L.core_t = c.t;  L.core_sig = c.sig;  L.core_n = c.n;  L.core_ncand = c.nCand;
       L.core_sumpt = c.sumPt;  L.core_hsfrac = c.hsFrac;
@@ -530,8 +650,8 @@ int main(int argc, char** argv) {
       L.all_t = g.t;  L.all_sig = g.sig;  L.all_n = g.n;  L.all_hsfrac = g.hsFrac;
       if (L.hs) { calCore.add(c, tHS); calAll.add(g, tHS); }
     };
-    fillLeg(pair.idxI, R.a);
-    fillLeg(pair.idxJ, R.b);
+    if (legI >= 0) fillLeg(legI, R.a);
+    if (legJ >= 0) fillLeg(legJ, R.b);
     const int nTimed = (R.a.core_n > 0) + (R.b.core_n > 0);
     if (nTimed == 2) ++nBothCore; else if (nTimed == 1) ++nOneCore;
 
@@ -578,8 +698,12 @@ int main(int argc, char** argv) {
 
   // ── meta: one row per job, so hadd'd shards sum ────────────────────────────
   TTree meta("meta", "per-job cut flow and sum of weights over EVERY event read");
-  int    jvtWp = (int)(wpSel - JVT_WPS);
-  double cutMjj = VBS_JET_MJJ, cutDeta = VBS_JET_D_ETA, jdr = JET_TIME_DR, jcut = JET_TIME_DIST_CUT;
+  // --sr removes no jet here (jvt_wp -1) and keeps SR candidates (the pair cuts)
+  int    jvtWp = srMode ? -1 : (int)(wpSel - JVT_WPS);
+  double cutMjj = srMode ? SR_MJJ : VBS_JET_MJJ, cutDeta = srMode ? SR_DETA : VBS_JET_D_ETA;
+  double jdr = JET_TIME_DR, jcut = JET_TIME_DIST_CUT;
+  bool   srFlag = srMode;
+  double srRecoil = srRecoilMin, legRptMin = WPL.rptMin;
   bool   truthMet = hasTruthMet;
   std::string sample = SAMPLE_NAME.empty() ? "local" : SAMPLE_NAME, ndir = cfg.ntupleDir;
   meta.Branch("n_read", &nRead, "n_read/L");
@@ -600,15 +724,26 @@ int main(int argc, char** argv) {
   meta.Branch("has_truth_met", &truthMet, "has_truth_met/O");
   meta.Branch("sample", &sample);
   meta.Branch("ntuple_dir", &ndir);
+  if (srMode) {
+    // n_pass_jets = past the recoil floor; n_pass_tagger = n_pass_pair = n_selected = SR candidates
+    meta.Branch("sr_mode", &srFlag, "sr_mode/O");
+    meta.Branch("sr_recoil_min", &srRecoil, "sr_recoil_min/D");
+    meta.Branch("leg_jvt_rpt_min", &legRptMin, "leg_jvt_rpt_min/D");
+  }
   meta.Fill();
   out.cd();
   tree.Write();
   meta.Write();
   out.Close();
 
-  std::printf("\n[veto] read %lld (sum w %.6g); Z->ll/OR %lld; vertex %lld; jets %lld; after --jvt=%s %lld; "
-              "pair %lld; selected %lld (m_jj >= %g)\n",
-              nRead, sumw, nLep, nVtx, nJets, WP.name, nTagger, nPair, nSel, VBS_JET_MJJ);
+  if (srMode)
+    std::printf("\n[veto] --sr: read %lld (sum w %.6g); Z->ll/OR %lld; vertex %lld; recoil >= %g GeV %lld; "
+                "SR candidates (stored) %lld\n",
+                nRead, sumw, nLep, nVtx, srRecoilMin, nJets, nSel);
+  else
+    std::printf("\n[veto] read %lld (sum w %.6g); Z->ll/OR %lld; vertex %lld; jets %lld; after --jvt=%s %lld; "
+                "pair %lld; selected %lld (m_jj >= %g)\n",
+                nRead, sumw, nLep, nVtx, nJets, WP.name, nTagger, nPair, nSel, VBS_JET_MJJ);
   std::printf("[veto] core jet time on both legs %lld (%.1f%%), one leg %lld (%.1f%%), neither %lld\n",
               nBothCore, nSel ? 100.0 * nBothCore / nSel : 0.0,
               nOneCore, nSel ? 100.0 * nOneCore / nSel : 0.0, nSel - nBothCore - nOneCore);

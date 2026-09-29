@@ -35,6 +35,15 @@
 # The `meta` tree gets one row per shard; the plotting script sums them and
 # checks the total against a complete sample (VBF: 1,464,400 events and the
 # raw sum of weights; Z+jets skim: 530,962 events).
+#
+# The VBF H->inv SIGNAL REGION instead (--sr: SR candidates, every jet stored;
+# python/vbs_time_veto_sr.py applies the ANA-EXOT-2020-11-INT1 selection):
+#   condor_submit -a sample=vbf -a nshards=20 -a selargs=--sr -a seltag=sr_ \
+#                 -a 'inputargs=--ntuple-dir=/data/mcardiff/exotic_superntuples/highstats_vbf/' \
+#                 vbs_time_veto.sub
+#   condor_submit -a sample=zjets -a nshards=8 -a selargs=--sr -a seltag=sr_ vbs_time_veto.sub
+#   hadd -f condor/vbf/vbf_sr_vbs_time_veto.root condor/vbf/vbf_sr_vbs_time_veto.shard*of20.root
+#   hadd -f condor/zjets/zjets_sr_vbs_time_veto.root condor/zjets/zjets_sr_vbs_time_veto.shard*of8.root
 # ---------------------------------------------------------------------------
 universe                 = vanilla
 executable               = run_analysis.sh
