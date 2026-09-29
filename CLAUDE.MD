@@ -65,7 +65,8 @@ vertex_timing/
 │   │                             #   results/vbs_pair_composition_jvt.md
 │   ├── vbs_time_veto.cxx         # Event-level timing veto on the VBS pair, jet vs jet against jet vs
 │   │                             #   t0: per selected event, both tests' INGREDIENTS (jet times, every
-│   │                             #   t0), the weight, truth MET / pT(ll). Write-up: results/vbs_time_veto.md
+│   │                             #   t0), the weight, truth MET / pT(ll). Write-up: results/vbs_time_veto.md.
+│   │                             #   --sr: VBF H->inv SR candidates instead, every jet + JVT/fJVT stored
 │   └── sweep_utilities.h         # Shared helpers for parameter-sweep executables (no sweep .cxx files currently present)
 ├── python/                        # Interactive/visualisation scripts (run from within this dir)
 │   ├── event_display.py          # Event visualisation — calls runHGTD_Clustering.cxx, produces 3-page PDF
@@ -79,8 +80,11 @@ vertex_timing/
 │   ├── vbs_region_stack.py       # Seven-band composition vs m_jj, ROOT/ATLAS style (PyROOT), any diag output
 │   ├── rpt_region_dists.py       # Wide-region R_pT, z-only vs timed per timing case, from rpt_v5_hist's region tree
 │   ├── rpt_region_displays.py    # select | pick | render: 20 R1 + 20 R2 displays per case, RPT_CHECK-verified
-│   └── vbs_time_veto_plot.py     # vbs_time_veto outputs -> weighted S/B efficiency vs m_jj per veto,
-│                                 #   S/sqrt(B), threshold trade-off, yield table (region-plot style)
+│   ├── vbs_time_veto_plot.py     # vbs_time_veto outputs -> weighted S/B efficiency vs m_jj per veto,
+│   │                             #   S/sqrt(B), threshold trade-off, yield table (region-plot style)
+│   ├── vbs_time_veto_sr.py       # vbs_time_veto --sr outputs -> the same tests INSIDE the VBF H->inv SR
+│   │                             #   (ANA-EXOT-2020-11-INT1 emulated), event veto vs jet removal
+│   └── vbs_time_veto_common.py   # shared by the two: normalisation, jet-time calibration, figure layouts
 ├── share/
 │   ├── models/                   # ML artifacts from a prior (currently inactive) DNN/BDT effort — see
 │   │                             #   Machine Learning section below
@@ -349,6 +353,31 @@ primary workflow.
     x1.04-1.06. Re-pairing recovers background as readily as signal.
   - The event veto with a TRKPTZ / WAVeS / TZP t0 stays the best use of the
     timing, about +5%.
+  - **In the VBF H->inv SIGNAL REGION (2026-09-29, `--sr` +
+    `python/vbs_time_veto_sr.py`, `results/vbs_time_veto_sr.md`).** The
+    selection is ANA-EXOT-2020-11-INT1's SR, emulated offline; the internal
+    note is `~/Downloads/ATL-COM-PHYS-2020-310.pdf`. It includes JVT, fJVT on
+    j1/j2 with the E_T^miss-dependent working point, 2-4 jets, the j3/j4
+    centrality and m_rel cuts, E_T^jet,no-jvt, the dphi/deta/m_jj cuts and the
+    16-bin union.
+    - The SR flips the jet-removal conclusion on the signal side. The event
+      veto costs 7-9% of the signal: SR pairs are 99.4% HS+HS. Removing
+      failing jets first GAINS 2-5%: removed out-of-time pileup jets no longer
+      fail the extra-jet cuts.
+    - Pileup jets cost the SR 42% of its signal (truth ceiling x1.71). Only
+      x1.14 of that lies in HGTD acceptance.
+    - **The background cannot be measured: 4 Z+jets MC events survive the
+      SR.** Inclusive Powheg DY has too little VBF topology; the whole sample
+      gives 223 candidates.
+    - `--sr` exists because 14% of SR candidates fail the region-plot
+      preselection. It stores every jet > 20 GeV with the JVT R_pT, fJVT and
+      windows.
+    - EMTopo, not the note's PFlow: this production's PFlow is miscalibrated
+      forward (HS response 1.14 at 2.4-4.0, 1.31 beyond).
+    - `python/vbs_time_veto_common.py` is shared by both plot scripts, which
+      is validated byte- and pixel-identical.
+    - Job cost: VBF raw ~22 min per shard (it reads the truth record for
+      every event), Z+jets ~5 min.
 
 ### ML Data Export
 - **export_training_data.cxx** (`util/`): Exports the cluster-SELECTION
