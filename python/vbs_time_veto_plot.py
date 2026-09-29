@@ -45,8 +45,9 @@ in the m_jj of the pair the event ends up with.
 Writes <out>_{sig,bkg}_eff_mjj.(pdf|png), and with both files
 <out>_s_over_sqrtb.(pdf|png) (S/sqrt(B) change vs no veto in %, per column),
 <out>_s_over_sqrtb_yields.(pdf|png) (S/sqrt(B) from the yields at --lumi),
-<out>_tradeoff.(pdf|png) and, with --compare, <out>_veto_vs_repair_tradeoff,
-plus <out>_summary.md.
+<out>_tradeoff.(pdf|png) (signal efficiency against background rejection 1/eps_B,
+threshold scanned) and, with --compare, <out>_veto_vs_repair_tradeoff, plus
+<out>_summary.md (with the scan's points appended).
 """
 import argparse, os
 import numpy as np
@@ -784,11 +785,13 @@ if ks and kb:
                   B_COUNTS, "B MC events", ref=None, methods=SB_METHODS, xnote=XNOTE)
 
 
-# ── The trade-off: eps_B vs eps_S as the threshold moves (all columns) ───────
+# ── The trade-off: eps_S against background rejection as the threshold moves ─
+# (all m_jj columns). Background rejection = 1 / eps_B, the ROC convention.
 SCAN = np.array([1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 8.0, 12.0])
 
 
 def tradeoff_curves(methods):
+    """per method: (eps_S, eps_B) at each SCAN threshold"""
     curves = {m: [] for m in methods}
     for ns in SCAN:
         rs, rb = outcomes(sg, ns, methods)[0], outcomes(bk, ns, methods)[0]
@@ -797,26 +800,30 @@ def tradeoff_curves(methods):
     return {m: np.array(v) for m, v in curves.items()}
 
 
-def tradeoff_figure(stem, methods, dashed=()):
-    curves = tradeoff_curves(methods)
+def tradeoff_figure(stem, curves, methods, dashed=()):
+    """Signal efficiency against background rejection 1/eps_B, one point per
+    scanned threshold, the --nsigma working point as a large marker."""
     c = ROOT.TCanvas("c_" + os.path.basename(stem), "", 800, 700); KEEP.append(c)
     c.SetLeftMargin(0.15); c.SetRightMargin(0.05)
-    xs = np.concatenate([p[:, 0] for p in curves.values()]); ys = np.concatenate([p[:, 1] for p in curves.values()])
-    ylo = max(0.0, ys.min() - 0.05)
+    xs = np.concatenate([curves[m][:, 0] for m in methods]); ys = np.concatenate([1.0 / curves[m][:, 1] for m in methods])
+    ylo = ys.min() - 0.05   # rejection >= 1: no veto sits at (1, 1)
     fr = ROOT.TH1D("fr_" + os.path.basename(stem), "", 10, max(0.0, xs.min() - 0.03), 1.005); KEEP.append(fr)
-    fr.SetMinimum(ylo); fr.SetMaximum(1.0 + (1.0 - ylo) * (0.7 + 0.08 * max(0, len(methods) - 5)))
+    fr.SetMinimum(ylo); fr.SetMaximum(ys.max() + (ys.max() - ylo) * (0.9 + 0.08 * max(0, len(methods) - 5)))
     fr.GetXaxis().SetTitle("Signal efficiency #varepsilon_{S}")
-    fr.GetYaxis().SetTitle("Background efficiency #varepsilon_{B}")
+    fr.GetYaxis().SetTitle("Background rejection 1/#varepsilon_{B}")
     fr.Draw("AXIS")
-    leg = ROOT.TLegend(0.18, 0.77 - 0.04 * len(methods), 0.70, 0.77); ROOT.StyleLegend(leg, 0.026); KEEP.append(leg)
+    # the curves fall from the top left to (1, 1): the legend goes on the right
+    leg = ROOT.TLegend(0.50, 0.77 - 0.04 * len(methods), 0.93, 0.77); ROOT.StyleLegend(leg, 0.026); KEEP.append(leg)
+    leg.SetMargin(0.15)
     i3 = int(np.argmin(np.abs(SCAN - args.nsigma)))
     for m in methods:
         lab, col, mk = STYLE[m]
-        g = ROOT.TGraph(len(SCAN), curves[m][:, 0].copy(), curves[m][:, 1].copy()); KEEP.append(g)
+        x, y = curves[m][:, 0].copy(), 1.0 / curves[m][:, 1]
+        g = ROOT.TGraph(len(SCAN), x, y); KEEP.append(g)
         g.SetLineColor(colour(col)); g.SetLineWidth(2); g.SetMarkerColor(colour(col)); g.SetMarkerStyle(mk); g.SetMarkerSize(0.8)
         if m in dashed: g.SetLineStyle(2)
         g.Draw("LP SAME")
-        g3 = ROOT.TGraph(1, curves[m][i3:i3 + 1, 0].copy(), curves[m][i3:i3 + 1, 1].copy()); KEEP.append(g3)
+        g3 = ROOT.TGraph(1, x[i3:i3 + 1].copy(), y[i3:i3 + 1].copy()); KEEP.append(g3)
         g3.SetMarkerColor(colour(col)); g3.SetMarkerStyle(mk); g3.SetMarkerSize(2.0); g3.Draw("P SAME")
         leg.AddEntry(g, lab, "lp")
     leg.Draw()
@@ -830,12 +837,21 @@ def tradeoff_figure(stem, methods, dashed=()):
                  + (";  dashed: jets removed, pair re-formed" if dashed else ""))
     c.Print(stem + ".pdf"); c.Print(stem + ".png")
     print("wrote", stem + ".pdf / .png")
-    return curves
 
 
-tradeoff_figure(args.out + "_tradeoff", DRAWN, dashed=[m for m in DRAWN if m.startswith("rp_")])
-
+TRADEOFF = [(args.out + "_tradeoff", DRAWN, [m for m in DRAWN if m.startswith("rp_")])]
 # ── Event veto against jet removal + re-pairing, same t0 sources ────────────
 if COMPARE:
     cmp_methods = [f"t0_{s}" for s in COMPARE] + [f"rp_{s}" for s in COMPARE]
-    tradeoff_figure(args.out + "_veto_vs_repair_tradeoff", cmp_methods, dashed=[f"rp_{s}" for s in COMPARE])
+    TRADEOFF.append((args.out + "_veto_vs_repair_tradeoff", cmp_methods, [f"rp_{s}" for s in COMPARE]))
+SCANNED = list(dict.fromkeys(m for _, ms, _ in TRADEOFF for m in ms))
+CURVES = tradeoff_curves(SCANNED)
+for stem, ms, dashed in TRADEOFF:
+    tradeoff_figure(stem, CURVES, ms, dashed)
+# the points behind the trade-off figures, appended to the summary
+scan = ["**Threshold scan: signal efficiency (%) / background rejection 1/eps_B** (all m_jj columns)", "",
+        "| method | " + " | ".join(f"{t:g} sigma" for t in SCAN) + " |", "|" + "---|" * (len(SCAN) + 1)]
+scan += [f"| {m} | " + " | ".join(f"{100 * es:.1f} / {1 / eb:.3f}" for es, eb in CURVES[m]) + " |" for m in SCANNED]
+open(args.out + "_summary.md", "a").write("\n".join(scan) + "\n")
+print("\n".join(scan))
+print("appended the threshold scan to", args.out + "_summary.md")
