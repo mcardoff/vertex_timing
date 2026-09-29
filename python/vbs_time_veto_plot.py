@@ -55,7 +55,9 @@ import uproot
 import awkward as ak
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MJJ_EDGES = [200, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500, 3000, 4000]
+# 500 GeV columns above 1 TeV: 250 GeV ones there hold only 50-130 Z+jets MC events
+# after the recoil cut. The last column includes the overflow.
+MJJ_EDGES = [200, 500, 750, 1000, 1500, 2000, 2500, 3000, 4000]
 SPLIT = 2.4   # forward = |eta| >= this, as vbs_region_stack.py
 # the event preselection re-applied after jet removal: >= MIN_PASSPT_JETS jets,
 # >= 1 of them in MIN_ABS_ETA_JET < |eta| < MAX_ABS_ETA_JET (clustering_constants.h)
