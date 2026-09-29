@@ -43,7 +43,7 @@ in the m_jj of the pair the event ends up with.
         --tag "JVT + fJVT loose before pairing" --out figs/time_veto/jvtLoose
 
 Writes <out>_{sig,bkg}_eff_mjj.(pdf|png), and with both files
-<out>_s_over_sqrtb.(pdf|png) (S/sqrt(B) relative to no veto, per column),
+<out>_s_over_sqrtb.(pdf|png) (S/sqrt(B) change vs no veto in %, per column),
 <out>_s_over_sqrtb_yields.(pdf|png) (S/sqrt(B) from the yields at --lumi),
 <out>_tradeoff.(pdf|png) and, with --compare, <out>_veto_vs_repair_tradeoff,
 plus <out>_summary.md.
@@ -523,10 +523,11 @@ def atlas_block(label, lines):
 
 
 def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_title, ref=1.0, methods=None,
-                  xnote="last bin includes overflow"):
+                  xnote="last bin includes overflow", pct=False):
     """The region plots' layout: per-m_jj-column values on top (one dodged marker
     per method), the MC event count of each column underneath on a log scale.
-    `ref` draws a dashed reference line (None: none); `methods` defaults to DRAWN."""
+    `ref` draws a dashed reference line (None: none); `pct`: the values are a
+    signed change in %, so the axis may go below zero; `methods` defaults to DRAWN."""
     methods = methods or DRAWN
     c = ROOT.TCanvas("c_" + os.path.basename(stem), "", 800, 780)
     pTop = ROOT.TPad("pTop", "", 0.0, 0.30, 1.0, 1.0)
@@ -539,7 +540,9 @@ def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_
     lows = [v - lo for m in methods for v, lo, _, _ in series[m] if np.isfinite(v)]
     highs = [v + hi for m in methods for v, _, hi, _ in series[m] if np.isfinite(v)]
     ytop = max([max(highs) if highs else 1.0] + ([ref] if ref is not None else []))
-    if ref is not None:   # efficiency-like: round down to the next 0.1
+    if pct:               # signed change in %: round down to the next 10%, the ref line in range
+        ymin = np.floor((min(lows + [ref]) - 3.0) / 10) * 10 if lows else -10.0
+    elif ref is not None: # efficiency-like: round down to the next 0.1
         ymin = max(0.0, np.floor((min(lows) - 0.03) * 10) / 10) if lows else 0.0
     else:                 # absolute: a margin below the lowest point
         ymin = max(0.0, min(lows) - 0.06 * (ytop - min(lows))) if lows else 0.0
@@ -552,6 +555,7 @@ def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_
     ytxt = atlas_block(label, lines)
     nrow = (len(methods) + 1) // 2
     leg = ROOT.TLegend(0.17, ytxt - 0.055 * nrow, 0.93, ytxt - 0.005); ROOT.StyleLegend(leg); leg.SetNColumns(2); KEEP.append(leg)
+    leg.SetMargin(0.15)   # TLegend's 0.25 marker column runs the long right-hand entries into the frame
     for k, m in enumerate(methods):
         g = graph(series[m], k, len(methods), m)
         g.Draw("P SAME")
@@ -723,12 +727,12 @@ def label_lines(methods):
 XNOTE = "final pair; last bin includes overflow" if ANY_RP else "last bin includes overflow"
 B_COUNTS = [int(np.sum(mjj_index(bk["e"]["mjj"], EDGES) == b)) for b in range(len(EDGES) - 1)]
 
-# ── S / sqrt(B) per m_jj column relative to no veto ──────────────────────────
+# ── S / sqrt(B) per m_jj column relative to no veto, drawn as a change in % ──
 # (S/sqrt(B))_method / (S/sqrt(B))_no veto per column. For event vetoes the
 # column content does not move and this is exactly eps_S / sqrt(eps_B), with the
 # efficiencies' binomial errors; re-paired events move between columns, so for
 # those the ratio comes from the yields, with their MC-stat errors (conservative:
-# numerator and denominator share events).
+# numerator and denominator share events). The figure shows 100 x (ratio - 1).
 ratio = {}
 for m in DRAWN:
     ratio[m] = []
@@ -748,15 +752,16 @@ for m in DRAWN:
             r = (S / S0) / np.sqrt(B / B0)
             err = r * np.hypot(dS / S, 0.5 * dB / B)
             ratio[m].append((r, err, err, 0))
-extra = {m: f"  ({eff(ws, sg['kept'][m])[0] / np.sqrt(eff(wb, bk['kept'][m])[0]):.2f})" for m in DRAWN}
-column_figure(f"{args.out}_s_over_sqrtb", "(S/#sqrt{B}) / (S/#sqrt{B})_{no veto}", ratio, extra,
+change = {m: [(100 * (r - 1), 100 * lo, 100 * hi, n) for r, lo, hi, n in ratio[m]] for m in DRAWN}
+extra = {m: f"  ({100 * (eff(ws, sg['kept'][m])[0] / np.sqrt(eff(wb, bk['kept'][m])[0]) - 1):+.1f}%)" for m in DRAWN}
+column_figure(f"{args.out}_s_over_sqrtb", "S/#sqrt{B} change vs no veto [%]", change, extra,
               f"S: {args.sig_label.split(', ')[-1]},  B: {args.bkg_label.split(', ')[-1]}",
-              label_lines(DRAWN) + ["all m_{jj} columns in brackets; > 1 = the timing test raises S/#sqrt{B}"],
-              B_COUNTS, "B MC events", xnote=XNOTE)
+              label_lines(DRAWN) + ["all m_{jj} columns in brackets; > 0 = the timing test raises S/#sqrt{B}"],
+              B_COUNTS, "B MC events", ref=0.0, pct=True, xnote=XNOTE)
 
 # ── S / sqrt(B) from the YIELDS per m_jj column (absolute, at --lumi) ───────
-# The same information as the ratio above -- that ratio is exactly this divided
-# by its no-veto value -- but on the absolute scale, which carries the two
+# The same information as the change above -- which is exactly this divided by
+# its no-veto value, minus 1, in % -- but on the absolute scale, which carries the two
 # normalisation assumptions (B(H->inv), Z->ll standing in for Z->nunu) that
 # cancel in the ratio. Errors: MC statistics of both yields.
 if ks and kb:
