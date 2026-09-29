@@ -87,7 +87,11 @@
 //     and fJVT (src/jet_tagging.h) and their windows, for the jet counting
 //     (25 GeV), the no-JVT jet sum (20 GeV) and fJVT on the leading two;
 //   * the legs are the two leading jets > 25 GeV passing JVT loose, the note's
-//     tagging pair before fJVT (a_idx = -1 if there are fewer than two).
+//     tagging pair before fJVT (a_idx = -1 if there are fewer than two);
+//   * met_jets: |sum pT| of the JVT-passing jets > 20 GeV, the analysis'
+//     E_T^miss jets with leptons invisible and no soft term. --sr-met=jets
+//     floors on it instead: a multijet (dijet) event's truth E_T^miss is ~0,
+//     and it enters the SR only through this FAKE E_T^miss.
 // Outputs are tagged sr_; --jvt and --vbs-* are refused (the SR fixes both).
 //
 // ── Outputs (histFilePath: sample-, selection- and shard-tagged) ─────────────
@@ -238,6 +242,7 @@ struct Row {
   int      file_idx = -1;      // vbs_region_diag's file_idx (trailing number of the name)
   float    weight = 0.f;
   float    met_truth = -1.f, z_pt = -1.f, z_mass = -1.f;
+  float    met_jets = -1.f;     // --sr only: |sum pT| of the JVT-passing jets > 20 GeV
   int      n_jets = 0, n_jets_fwd_acc = 0, n_rm_jvt = 0, n_rm_fjvt = 0;
   double   mjj = -1.0, deta = -1.0;
   Leg      a, b;
@@ -312,13 +317,18 @@ int main(int argc, char** argv) {
   // vbs_region_diag / rpt_v5_hist (src/jet_tagging.h). Joins SELECTION_TAG.
   const JvtWP* wpSel = &JVT_WPS[0];
   std::string outOverride;
-  bool srMode = false;
+  bool srMode = false, srMetJets = false;
   float srRecoilMin = 100.f;
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
     if (a.rfind("--out=", 0) == 0) outOverride = a.substr(6);
     if (a == "--sr") srMode = true;
     if (a.rfind("--sr-recoil-min=", 0) == 0) srRecoilMin = std::stof(a.substr(16));
+    if (a.rfind("--sr-met=", 0) == 0) {
+      const std::string v = a.substr(9);
+      if (v != "jets" && v != "truth") { std::cerr << "[veto] " << a << ": jets | truth\n"; return 1; }
+      srMetJets = (v == "jets");
+    }
     if (a.rfind("--jvt=", 0) != 0) continue;
     const JvtWP* hit = jvtWPByName(a.substr(6));
     if (!hit) { std::cerr << "[veto] unknown " << a << " (none|loose|tight)\n"; return 1; }
@@ -334,6 +344,7 @@ int main(int argc, char** argv) {
   }
   // --sr: the legs pass JVT loose; fJVT and everything else is applied offline
   const JvtWP& WPL = *jvtWPByName("loose");
+  if (srMetJets && !srMode) { std::cerr << "[veto] --sr-met=jets needs --sr\n"; return 1; }
   if (srMode) {
     if (!SELECTION_TAG.empty()) {
       std::cerr << "[veto] --sr fixes the selection and the jet tagging: drop --jvt and --vbs-*\n";
@@ -351,8 +362,8 @@ int main(int argc, char** argv) {
   std::cout << "[veto] sample=" << (SAMPLE_NAME.empty() ? "local" : SAMPLE_NAME);
   if (srMode)
     std::cout << " --sr: VBF H->inv SR candidates (a pair > " << SR_J1_PT << "/" << SR_J2_PT << " GeV, opposite "
-              << "hemispheres, |Deta| > " << SR_DETA << ", m_jj > " << SR_MJJ << "), recoil >= " << srRecoilMin
-              << " GeV, every jet stored";
+              << "hemispheres, |Deta| > " << SR_DETA << ", m_jj > " << SR_MJJ << "), "
+              << (srMetJets ? "jet-based E_T^miss" : "recoil") << " >= " << srRecoilMin << " GeV, every jet stored";
   else
     std::cout << " jvt=" << WP.name << " m_jj >= " << VBS_JET_MJJ << " |Deta| >= " << VBS_JET_D_ETA;
   std::cout << "  jet time: core = timed ghost tracks, " << MIN_TRACK_PT << "-" << MAX_TRACK_PT
@@ -438,6 +449,7 @@ int main(int argc, char** argv) {
   tree.Branch("jet_sig", &R.jet_sig);
   tree.Branch("jet_n",   &R.jet_n);
   if (srMode) {
+    tree.Branch("met_jets", &R.met_jets, "met_jets/F");
     tree.Branch("jet_rpt",     &R.jet_rpt);
     tree.Branch("jet_fjvt",    &R.jet_fjvt);
     tree.Branch("jet_jvtwin",  &R.jet_jvtwin);
@@ -475,7 +487,7 @@ int main(int argc, char** argv) {
     // Recoil proxies. --sr cuts on them before anything else; the region mode
     // computes them only for selected events, so the truth record is read for
     // those alone.
-    float metTruth = -1.f, zPt = -1.f, zMass = -1.f;
+    float metTruth = -1.f, zPt = -1.f, zMass = -1.f, metJets = -1.f;
     auto recoil = [&]() {
       if (hasTruthMet) {
         double px = 0.0, py = 0.0;
@@ -546,10 +558,14 @@ int main(int argc, char** argv) {
       recoil();
     } else {
       // ── --sr: the recoil floor, then events that could enter the SR ───────
-      recoil();
-      const float r = OVERLAP_REMOVAL ? zPt : (hasTruthMet ? metTruth : srRecoilMin);
-      if (r < srRecoilMin) continue;
-      ++nJets;
+      // --sr-met=jets floors on the jet-based met_jets instead, which needs the
+      // tagger, so it comes after the (cheap) pair check.
+      if (!srMetJets) {
+        recoil();
+        const float r = OVERLAP_REMOVAL ? zPt : (hasTruthMet ? metTruth : srRecoilMin);
+        if (r < srRecoilMin) continue;
+        ++nJets;
+      }
       for (int j = 0; j < (int)branch.topoJetPt.GetSize(); ++j)
         if (!branch.isJetRemoved(j) && std::abs((double)branch.topoJetEta[j]) < SR_JET_ETA) passPtIdx.push_back(j);
       std::sort(passPtIdx.begin(), passPtIdx.end(),
@@ -571,9 +587,24 @@ int main(int argc, char** argv) {
         }
       }
       if (!could) continue;
+      D = computeJetDiscriminants(branch);
+      // Jet-based E_T^miss: the analysis' E_T^miss jets (> 20 GeV, passing JVT),
+      // leptons invisible (their overlapping jets are not in passPtIdx), no
+      // soft term. The only recoil a multijet event has: its truth E_T^miss is ~0.
+      double mpx = 0.0, mpy = 0.0;
+      for (int j : passPtIdx) {
+        if (jvtRemoves(D[j], WPL)) continue;
+        mpx -= branch.topoJetPt[j] * std::cos(branch.topoJetPhi[j]);
+        mpy -= branch.topoJetPt[j] * std::sin(branch.topoJetPhi[j]);
+      }
+      metJets = (float)std::hypot(mpx, mpy);
+      if (srMetJets) {
+        if (metJets < srRecoilMin) continue;
+        ++nJets;
+        recoil();   // stored only: read the truth record for the kept events alone
+      }
       ++nTagger;
       ++nPair;
-      D = computeJetDiscriminants(branch);
       for (int j : passPtIdx) {
         nRmJvt  += jvtRemoves(D[j], WPL);
         nRmFjvt += fjvtRemoves(D[j], WPL);
@@ -609,6 +640,7 @@ int main(int argc, char** argv) {
     R.met_truth = metTruth;
     R.z_pt = zPt;
     R.z_mass = zMass;
+    R.met_jets = metJets;
 
     // ── Every pairing candidate: kinematics, labels, core jet time ──────────
     std::unordered_map<int, JetTime> coreTime;
@@ -702,7 +734,7 @@ int main(int argc, char** argv) {
   int    jvtWp = srMode ? -1 : (int)(wpSel - JVT_WPS);
   double cutMjj = srMode ? SR_MJJ : VBS_JET_MJJ, cutDeta = srMode ? SR_DETA : VBS_JET_D_ETA;
   double jdr = JET_TIME_DR, jcut = JET_TIME_DIST_CUT;
-  bool   srFlag = srMode;
+  bool   srFlag = srMode, srJetsFlag = srMetJets;
   double srRecoil = srRecoilMin, legRptMin = WPL.rptMin;
   bool   truthMet = hasTruthMet;
   std::string sample = SAMPLE_NAME.empty() ? "local" : SAMPLE_NAME, ndir = cfg.ntupleDir;
@@ -728,6 +760,7 @@ int main(int argc, char** argv) {
     // n_pass_jets = past the recoil floor; n_pass_tagger = n_pass_pair = n_selected = SR candidates
     meta.Branch("sr_mode", &srFlag, "sr_mode/O");
     meta.Branch("sr_recoil_min", &srRecoil, "sr_recoil_min/D");
+    meta.Branch("sr_met_jets", &srJetsFlag, "sr_met_jets/O");   // the floor was on met_jets
     meta.Branch("leg_jvt_rpt_min", &legRptMin, "leg_jvt_rpt_min/D");
   }
   meta.Fill();
@@ -737,9 +770,9 @@ int main(int argc, char** argv) {
   out.Close();
 
   if (srMode)
-    std::printf("\n[veto] --sr: read %lld (sum w %.6g); Z->ll/OR %lld; vertex %lld; recoil >= %g GeV %lld; "
+    std::printf("\n[veto] --sr: read %lld (sum w %.6g); Z->ll/OR %lld; vertex %lld; %s >= %g GeV %lld; "
                 "SR candidates (stored) %lld\n",
-                nRead, sumw, nLep, nVtx, srRecoilMin, nJets, nSel);
+                nRead, sumw, nLep, nVtx, srMetJets ? "met_jets" : "recoil", srRecoilMin, nJets, nSel);
   else
     std::printf("\n[veto] read %lld (sum w %.6g); Z->ll/OR %lld; vertex %lld; jets %lld; after --jvt=%s %lld; "
                 "pair %lld; selected %lld (m_jj >= %g)\n",
