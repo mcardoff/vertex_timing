@@ -57,7 +57,8 @@ region is chosen, S and B are both measured in it.
     ... --region minimal --mjj-edges 800,1000,1500,3500 --out figs/time_veto/srmin
 
 Writes <out>_{sig,bkg}_ratio_mjj, <out>_s_over_sqrtb (% change per m_jj column),
-<out>_s_over_sqrtb_yields (at --lumi), <out>_tradeoff (threshold scan), each
+<out>_s_over_sqrtb_yields (at --lumi), the same two for S/B (<out>_s_over_b,
+<out>_s_over_b_yields), <out>_tradeoff (threshold scan), each
 .pdf and .png, and <out>_summary.md (cut flow, method table, SR bins, scan).
 The S and B ratio figures share one y axis.
 """
@@ -154,7 +155,7 @@ for name, flags in rows:
     md.append(f"| {name} | " + " | ".join(cells) + " |")
 md.append("")
 
-hdr = "| method | S / S(none) | S MC |" + (" B / B(none) | B MC | S/sqrt(B) change |" if both else "")
+hdr = "| method | S / S(none) | S MC |" + (" B / B(none) | B MC | S/sqrt(B) change | S/B change |" if both else "")
 md += [f"**Timing relative to no timing, {WHERE}** (errors: the events the two selections do not share)", "",
        hdr, "|" + "---|" * (hdr.count("|") - 1)]
 summ = {}
@@ -166,7 +167,10 @@ for m in ["none"] + METHODS:
         z = rs / np.sqrt(rb) if rb > 0 else np.nan
         ez = z * np.hypot(es / rs, 0.5 * eb / rb) if rb > 0 else np.nan
         summ[m] = (rs, es, rb, eb, z, ez)
-        line += f" {rb:.3f} +- {eb:.3f} | {int(B_['out'][m]['ok'].sum()):,} | {100 * (z - 1):+.1f} +- {100 * ez:.1f}% |"
+        zb = rs / rb if rb > 0 else np.nan
+        ezb = zb * np.hypot(es / rs, eb / rb) if rb > 0 else np.nan
+        line += (f" {rb:.3f} +- {eb:.3f} | {int(B_['out'][m]['ok'].sum()):,} | {100 * (z - 1):+.1f} +- {100 * ez:.1f}% "
+                 f"| {100 * (zb - 1):+.1f} +- {100 * ezb:.1f}% |")
     md.append(line)
 md.append("")
 if both and k_factor(S_) and k_factor(B_):
@@ -258,26 +262,29 @@ for r, ylab, label in [("sig", "Signal yield / no timing", args.sig_label),
                     yrange=RATIO_RANGE)
 
 if both:
-    change = {}
-    for m in DRAWN:
-        pts = []
-        for (rs, es, _, _), (rb, eb, _, _) in zip(per_column(S_, m), per_column(B_, m)):
-            if not (np.isfinite(rs) and np.isfinite(rb)) or rb <= 0 or rs <= 0:
-                pts.append((np.nan, np.nan, np.nan, 0)); continue
-            z = rs / np.sqrt(rb)
-            ez = z * np.hypot(es / rs, 0.5 * eb / rb)
-            pts.append((100 * (z - 1), 100 * ez, 100 * ez, 0))
-        change[m] = pts
-    extra = {m: f"  ({100 * (summ[m][4] - 1):+.1f}%)" for m in DRAWN}
+    # S/sqrt(B) and S/B, each per m_jj column: the change vs no timing (S and B ratios in the
+    # same column), and the absolute value from the yields at --lumi. p: the power on B.
     counts = [n for _, _, _, n in per_column(B_, DRAWN[0])]
-    C.column_figure(f"{args.out}_s_over_sqrtb", "S/#sqrt{B} change vs no timing [%]", change, extra,
-                    "S: VBF H#rightarrowinv.,  B: Z(#rightarrowll)+jets",
-                    [SEL1, SEL2, met_line("bkg").replace("p_{T}^{ll}", "E_{T}^{miss} (S: truth, B: p_{T}^{ll})"),
-                     TIMING, "all m_{jj} bins in brackets; > 0 = the timing test raises S/#sqrt{B}"],
-                    counts, "B MC events", EDGES, STYLE, DRAWN, ref=0.0, pct=True,
-                    xnote="final pair; last bin includes overflow")
     ks, kb = k_factor(S_), k_factor(B_)
-    if ks and kb:
+    for p, stem, name, fmt in [(0.5, "s_over_sqrtb", "S/#sqrt{B}", ".0f"), (1.0, "s_over_b", "S/B", ".2f")]:
+        change = {}
+        for m in DRAWN:
+            pts = []
+            for (rs, es, _, _), (rb, eb, _, _) in zip(per_column(S_, m), per_column(B_, m)):
+                if not (np.isfinite(rs) and np.isfinite(rb)) or rb <= 0 or rs <= 0:
+                    pts.append((np.nan, np.nan, np.nan, 0)); continue
+                z = rs / rb ** p
+                ez = z * np.hypot(es / rs, p * eb / rb)
+                pts.append((100 * (z - 1), 100 * ez, 100 * ez, 0))
+            change[m] = pts
+        extra = {m: f"  ({100 * (summ[m][0] / summ[m][2] ** p - 1):+.1f}%)" for m in DRAWN}
+        C.column_figure(f"{args.out}_{stem}", f"{name} change vs no timing [%]", change, extra,
+                        "S: VBF H#rightarrowinv.,  B: Z(#rightarrowll)+jets",
+                        [SEL1, SEL2, met_line("bkg").replace("p_{T}^{ll}", "E_{T}^{miss} (S: truth, B: p_{T}^{ll})"),
+                         TIMING, f"all m_{{jj}} bins in brackets; > 0 = the timing test raises {name}"],
+                        counts, "B MC events", EDGES, STYLE, DRAWN, ref=0.0, pct=True,
+                        xnote="final pair; last bin includes overflow")
+        if not (ks and kb): continue
         absol, extra = {}, {}
         for m in ["none"] + DRAWN:
             ci_s, ci_b = C.mjj_index(S_["out"][m]["mjj"], EDGES), C.mjj_index(B_["out"][m]["mjj"], EDGES)
@@ -287,12 +294,13 @@ if both:
                 if ws.sum() <= 0 or wb.sum() <= 0:
                     pts.append((np.nan, np.nan, np.nan, 0)); continue
                 Sy, By = ks * ws.sum(), kb * wb.sum()
-                z = Sy / np.sqrt(By)
-                ez = z * np.hypot(np.sqrt((ws ** 2).sum()) / ws.sum(), 0.5 * np.sqrt((wb ** 2).sum()) / wb.sum())
+                z = Sy / By ** p
+                ez = z * np.hypot(np.sqrt((ws ** 2).sum()) / ws.sum(), p * np.sqrt((wb ** 2).sum()) / wb.sum())
                 pts.append((z, ez, ez, 0))
             absol[m] = pts
-            extra[m] = f"  ({ks * S_['w'][S_['out'][m]['ok']].sum() / np.sqrt(kb * B_['w'][B_['out'][m]['ok']].sum()):.0f})"
-        C.column_figure(f"{args.out}_s_over_sqrtb_yields", "S / #sqrt{B}  per m_{jj} bin", absol, extra,
+            whole = ks * S_["w"][S_["out"][m]["ok"]].sum() / (kb * B_["w"][B_["out"][m]["ok"]].sum()) ** p
+            extra[m] = f"  ({whole:{fmt}})"
+        C.column_figure(f"{args.out}_{stem}_yields", f"{name.replace('/', ' / ')}  per m_{{jj}} bin", absol, extra,
                         f"S: VBF H#rightarrowinv.,  B: Z(#rightarrowll)+jets,  {args.lumi:g} fb^{{-1}}",
                         [SEL1, SEL2, TIMING,
                          f"S at B(H#rightarrowinv) = {100 * args.bf_hinv:g}%;  B = Z(#rightarrowll)+jets alone "
