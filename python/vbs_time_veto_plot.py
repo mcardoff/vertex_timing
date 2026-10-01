@@ -44,7 +44,8 @@ in the m_jj of the pair the event ends up with.
 
 Writes <out>_{sig,bkg}_eff_mjj.(pdf|png), and with both files
 <out>_s_over_sqrtb.(pdf|png) (S/sqrt(B) change vs no veto in %, per column),
-<out>_s_over_sqrtb_yields.(pdf|png) (S/sqrt(B) from the yields at --lumi),
+<out>_s_over_sqrtb_yields.(pdf|png) (S/sqrt(B) from the yields at --lumi), the same two for S/B
+(<out>_s_over_b, <out>_s_over_b_yields), <out>_jet_time_{pulls,calib} (the HS-leg jet-time pulls and f(n)),
 <out>_tradeoff.(pdf|png) (signal efficiency against background rejection 1/eps_B,
 threshold scanned) and, with --compare, <out>_veto_vs_repair_tradeoff, plus
 <out>_summary.md (with the scan's points appended).
@@ -515,31 +516,36 @@ def label_lines(methods):
 XNOTE = "final pair; last bin includes overflow" if ANY_RP else "last bin includes overflow"
 B_COUNTS = [int(np.sum(mjj_index(bk["e"]["mjj"], EDGES) == b)) for b in range(len(EDGES) - 1)]
 
-# ── S / sqrt(B) per m_jj column relative to no veto, drawn as a change in % ──
-# (S/sqrt(B))_method / (S/sqrt(B))_no veto per column. For event vetoes the
-# column content does not move and this is exactly eps_S / sqrt(eps_B), with the
-# efficiencies' binomial errors; re-paired events move between columns, so for
-# those the ratio comes from the yields, with their MC-stat errors (conservative:
-# numerator and denominator share events). The figure shows 100 x (ratio - 1).
-ratio = {}
-for m in DRAWN:
-    ratio[m] = []
-    if not m.startswith("rp_"):
-        for (es, sl, sh, _), (eb, bl, bh, _) in zip(binned(sg["e"], sg["kept"][m], EDGES),
-                                                   binned(bk["e"], bk["kept"][m], EDGES)):
-            if not (np.isfinite(es) and np.isfinite(eb)) or eb <= 0:
-                ratio[m].append((np.nan, np.nan, np.nan, 0)); continue
-            r = es / np.sqrt(eb)
-            err = r * np.hypot(0.5 * (sl + sh) / es, 0.25 * (bl + bh) / eb)
-            ratio[m].append((r, err, err, 0))
-    else:
-        for (S, dS), (B, dB), (S0, _), (B0, _) in zip(column_yields(sg, ws, 1.0, m), column_yields(bk, wb, 1.0, m),
-                                                    column_yields(sg, ws, 1.0, "none"), column_yields(bk, wb, 1.0, "none")):
-            if S <= 0 or B <= 0 or S0 <= 0 or B0 <= 0:
-                ratio[m].append((np.nan, np.nan, np.nan, 0)); continue
-            r = (S / S0) / np.sqrt(B / B0)
-            err = r * np.hypot(dS / S, 0.5 * dB / B)
-            ratio[m].append((r, err, err, 0))
+# ── S / sqrt(B) and S / B per m_jj column relative to no veto, as a change in % ──
+# (S/S0) / f(B/B0) per column, f = sqrt for S/sqrt(B) and the identity for S/B. For
+# event vetoes the column content does not move and this is exactly eps_S / f(eps_B),
+# with the efficiencies' binomial errors; re-paired events move between columns, so
+# for those the ratio comes from the yields, with their MC-stat errors (conservative:
+# numerator and denominator share events). The figures show 100 x (ratio - 1).
+def relative(bfun, bpow):
+    out = {}
+    for m in DRAWN:
+        out[m] = []
+        if not m.startswith("rp_"):
+            for (es, sl, sh, _), (eb, bl, bh, _) in zip(binned(sg["e"], sg["kept"][m], EDGES),
+                                                       binned(bk["e"], bk["kept"][m], EDGES)):
+                if not (np.isfinite(es) and np.isfinite(eb)) or eb <= 0:
+                    out[m].append((np.nan, np.nan, np.nan, 0)); continue
+                r = es / bfun(eb)
+                err = r * np.hypot(0.5 * (sl + sh) / es, bpow * 0.5 * (bl + bh) / eb)
+                out[m].append((r, err, err, 0))
+        else:
+            for (S, dS), (B, dB), (S0, _), (B0, _) in zip(column_yields(sg, ws, 1.0, m), column_yields(bk, wb, 1.0, m),
+                                                        column_yields(sg, ws, 1.0, "none"), column_yields(bk, wb, 1.0, "none")):
+                if S <= 0 or B <= 0 or S0 <= 0 or B0 <= 0:
+                    out[m].append((np.nan, np.nan, np.nan, 0)); continue
+                r = (S / S0) / bfun(B / B0)
+                err = r * np.hypot(dS / S, bpow * dB / B)
+                out[m].append((r, err, err, 0))
+    return out
+
+
+ratio = relative(np.sqrt, 0.5)
 change = {m: [(100 * (r - 1), 100 * lo, 100 * hi, n) for r, lo, hi, n in ratio[m]] for m in DRAWN}
 extra = {m: f"  ({100 * (eff(ws, sg['kept'][m])[0] / np.sqrt(eff(wb, bk['kept'][m])[0]) - 1):+.1f}%)" for m in DRAWN}
 column_figure(f"{args.out}_s_over_sqrtb", "S/#sqrt{B} change vs no veto [%]", change, extra,
@@ -571,6 +577,99 @@ if ks and kb:
                    f"Z(#rightarrow#nu#nu));  all columns in brackets"],
                   B_COUNTS, "B MC events", ref=None, methods=SB_METHODS, xnote=XNOTE)
 
+
+# ── S / B per m_jj column: the change vs no veto, and from the yields ───────
+ratio_b = relative(lambda x: x, 1.0)
+change_b = {m: [(100 * (r - 1), 100 * lo, 100 * hi, n) for r, lo, hi, n in ratio_b[m]] for m in DRAWN}
+extra = {m: f"  ({100 * (eff(ws, sg['kept'][m])[0] / eff(wb, bk['kept'][m])[0] - 1):+.1f}%)" for m in DRAWN}
+column_figure(f"{args.out}_s_over_b", "S/B change vs no veto [%]", change_b, extra,
+              f"S: {args.sig_label.split(', ')[-1]},  B: {args.bkg_label.split(', ')[-1]}",
+              label_lines(DRAWN) + ["all m_{jj} columns in brackets; > 0 = the timing test raises S/B"],
+              B_COUNTS, "B MC events", ref=0.0, pct=True, xnote=XNOTE)
+if ks and kb:
+    absol, extra = {}, {}
+    for m in SB_METHODS:
+        absol[m] = []
+        for (S, dS), (B, dB) in zip(column_yields(sg, ws, ks, m), column_yields(bk, wb, kb, m)):
+            if S <= 0 or B <= 0:
+                absol[m].append((np.nan, np.nan, np.nan, 0)); continue
+            z = S / B
+            absol[m].append((z, z * np.hypot(dS / S, dB / B), z * np.hypot(dS / S, dB / B), 0))
+        extra[m] = f"  ({ws[sg['kept'][m]].sum() * ks / (kb * wb[bk['kept'][m]].sum()):.3f})"
+    column_figure(f"{args.out}_s_over_b_yields", "S / B  per m_{jj} column", absol, extra,
+                  f"S: {args.sig_label.split(', ')[-1]},  B: {args.bkg_label.split(', ')[-1]}",
+                  label_lines(DRAWN) +
+                  [f"S at B(H#rightarrowinv) = {100 * args.bf_hinv:g}%;  B = Z(#rightarrowll)+jets alone (stand-in for "
+                   f"Z(#rightarrow#nu#nu));  all columns in brackets"],
+                  B_COUNTS, "B MC events", ref=None, methods=SB_METHODS, xnote=XNOTE)
+
+
+# ── How a jet gets a time: the HS-leg pulls against the true vertex time ─────
+def jet_time_figures(stem, e_all, cal):
+    """<stem>_jet_time_pulls: (t_jet - t_HS^truth) / sigma for the signal's paper-HS
+    legs, with the quoted sigma and with sigma x f(n); <stem>_jet_time_calib: f(n)"""
+    ROOT_ = C.ROOT
+    p, n = C.hs_pulls(e_all)
+    pc = p / cal(n)
+    c = ROOT_.TCanvas("c_jtp", "", 800, 650); C.KEEP.append(c)
+    c.SetLeftMargin(0.14); c.SetRightMargin(0.05); c.SetLogy(True)
+    hs = []
+    for name, v, col, fill in [("raw", p, "#9E9E9E", True), ("cal", pc, "kP10Blue", False)]:
+        h = ROOT_.TH1D(f"h_jtp_{name}", "", 64, -8, 8); C.KEEP.append(h)
+        for x in np.clip(v, -7.99, 7.99): h.Fill(x)
+        h.Scale(1.0 / h.Integral())
+        h.SetLineColor(C.colour(col)); h.SetLineWidth(2)
+        if fill: h.SetFillColor(C.colour(col)); h.SetFillStyle(3004)
+        hs.append(h)
+    hs[0].SetMinimum(2e-5); hs[0].SetMaximum(2.0)
+    hs[0].GetXaxis().SetTitle("(t_{jet} - t_{HS}^{truth}) / #sigma_{jet}   (overflow in the edge bins)")
+    hs[0].GetYaxis().SetTitle("Fraction of hard-scatter tagging jets")
+    hs[0].Draw("HIST"); hs[1].Draw("HIST SAME")
+    g = ROOT_.TF1("f_unit", "[0]*exp(-0.5*x*x)", -8, 8); C.KEEP.append(g)
+    g.SetParameter(0, 0.25 / np.sqrt(2 * np.pi)); g.SetLineColor(ROOT_.kBlack); g.SetLineStyle(2); g.Draw("SAME")
+    leg = ROOT_.TLegend(0.16, 0.60, 0.60, 0.75); ROOT_.StyleLegend(leg, 0.03); C.KEEP.append(leg)
+    leg.AddEntry(hs[0], f"quoted #sigma: {100 * np.mean(np.abs(p) >= args.nsigma):.0f}% beyond {args.nsigma:g}", "f")
+    leg.AddEntry(hs[1], f"#sigma #times f(n): {100 * np.mean(np.abs(pc) >= args.nsigma):.1f}% beyond {args.nsigma:g}", "l")
+    leg.AddEntry(g, "unit Gaussian", "l")
+    leg.Draw()
+    ROOT_.ATLASLabel(0.17, 0.88, "")
+    t = ROOT_.TLatex(); t.SetNDC(); t.SetTextFont(42); t.SetTextSize(0.04); C.KEEP.append(t)
+    t.DrawLatex(0.31, 0.88, "Simulation Internal")
+    t2 = ROOT_.TLatex(); t2.SetNDC(); t2.SetTextFont(42); t2.SetTextSize(0.028); t2.SetTextColor(ROOT_.kGray + 2); C.KEEP.append(t2)
+    t2.DrawLatex(0.17, 0.83, f"VBF H#rightarrowinv., hard-scatter tagging jets with a time ({len(p):,})")
+    t2.DrawLatex(0.17, 0.795, jet_line())
+    c.Print(stem + "_jet_time_pulls.pdf"); c.Print(stem + "_jet_time_pulls.png")
+    print("wrote", stem + "_jet_time_pulls.pdf / .png")
+    # f(n), with each bin's share of the jets and its tail after the correction
+    c2 = ROOT_.TCanvas("c_jtc", "", 800, 650); C.KEEP.append(c2)
+    c2.SetLeftMargin(0.14); c2.SetRightMargin(0.05); c2.SetBottomMargin(0.14)
+    labels = [f"{lo}" if hi == lo + 1 else (f"{lo}-{hi - 1}" if hi < 10**6 else f"#geq{lo}") for lo, hi in zip(C.NBINS[:-1], C.NBINS[1:])]
+    fr = ROOT_.TH1D("fr_jtc", "", len(labels), 0, len(labels)); C.KEEP.append(fr)
+    for i, lab in enumerate(labels): fr.GetXaxis().SetBinLabel(i + 1, lab)
+    fr.SetMinimum(0.0); fr.SetMaximum(3.4)
+    fr.GetXaxis().SetTitle("tracks in the jet time, n"); fr.GetXaxis().SetLabelSize(0.06); fr.GetXaxis().SetTitleOffset(1.1)
+    fr.GetYaxis().SetTitle("f(n) = width of the pull / quoted #sigma")
+    fr.Draw("AXIS")
+    gr = ROOT_.TGraph(); C.KEEP.append(gr)
+    tx = ROOT_.TLatex(); tx.SetTextFont(42); tx.SetTextSize(0.03); tx.SetTextAlign(21); C.KEEP.append(tx)
+    for i, (lo, hi) in enumerate(zip(C.NBINS[:-1], C.NBINS[1:])):
+        m = (n >= lo) & (n < hi)
+        f = cal.fac[i] if cal.fac is not None else cal.glob
+        gr.SetPoint(i, i + 0.5, f)
+        tx.DrawLatex(i + 0.5, f + 0.12, f"{f:.2f}")
+        tx.DrawLatex(i + 0.5, 0.25, f"{100 * m.mean():.0f}% of jets")
+        tx.DrawLatex(i + 0.5, 0.10, f"{100 * np.mean(np.abs(pc[m]) >= args.nsigma):.1f}% > {args.nsigma:g}#sigma")
+    gr.SetMarkerStyle(20); gr.SetMarkerSize(1.6); gr.SetMarkerColor(C.colour("kP10Blue")); gr.Draw("P SAME")
+    one = ROOT_.TLine(0, 1, len(labels), 1); one.SetLineStyle(2); one.SetLineColor(ROOT_.kGray + 1); one.Draw(); C.KEEP.append(one)
+    ROOT_.ATLASLabel(0.17, 0.88, "")
+    t.DrawLatex(0.31, 0.88, "Simulation Internal")
+    t2.DrawLatex(0.17, 0.83, "f(n) = 1.4826 #times median |pull|, hard-scatter tagging jets of VBF H#rightarrowinv.")
+    t2.DrawLatex(0.17, 0.795, "applied to signal and background alike")
+    c2.Print(stem + "_jet_time_calib.pdf"); c2.Print(stem + "_jet_time_calib.png")
+    print("wrote", stem + "_jet_time_calib.pdf / .png")
+
+
+jet_time_figures(args.out, loaded["sig"][5], calibs["sig"])
 
 # ── The trade-off: eps_S against background rejection as the threshold moves ─
 # (all m_jj columns). Background rejection = 1 / eps_B, the ROC convention.
