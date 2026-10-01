@@ -77,7 +77,8 @@
 // E_T^miss, and a timing tagger that removes jets re-forms the tagging pair
 // and re-runs the jet counting. So here only:
 //   * the same vertex / Z->ll preamble, then a recoil floor (--sr-recoil-min,
-//     default 100 GeV: met_truth, or z_pt for Z+jets; the SR needs > 160);
+//     default 100 GeV: met_truth, or z_pt for Z+jets; the SR needs > 160;
+//     any other floor tags the output sr_rec<value>, e.g. sr_rec0p0);
 //   * events that COULD enter the SR under any tagging or jet removal: some
 //     jet pair with pT > 80 / 50 GeV, opposite hemispheres, |Deta| > 3.8 and
 //     m_jj > 800 GeV, among ALL jets (no JVT). A removal never adds a jet, so
@@ -153,6 +154,7 @@ constexpr double SR_DETA      = 3.8;    // tagging-pair |Deta|
 constexpr double SR_MJJ       = 800.0;  // tagging-pair m_jj
 constexpr double SR_JET_PT    = 25.0;   // jet counting, and the tagging-pair candidates
 constexpr double SR_JET_ETA   = 4.5;    // jet acceptance
+constexpr float  SR_RECOIL_MIN_DEFAULT = 100.f;   // --sr-recoil-min; any other value is tagged (sr_rec<v>)
 
 struct JetTime {
   double t = 0.0, sig = -1.0;   // sig < 0: no time
@@ -318,7 +320,7 @@ int main(int argc, char** argv) {
   const JvtWP* wpSel = &JVT_WPS[0];
   std::string outOverride;
   bool srMode = false, srMetJets = false;
-  float srRecoilMin = 100.f;
+  float srRecoilMin = SR_RECOIL_MIN_DEFAULT;
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
     if (a.rfind("--out=", 0) == 0) outOverride = a.substr(6);
@@ -352,6 +354,14 @@ int main(int argc, char** argv) {
     }
     EXTENDED_BRANCHES = true;
     SELECTION_TAG = "sr";
+    // A different floor is a different candidate set: tagged, so it cannot overwrite the standard one.
+    if (srRecoilMin != SR_RECOIL_MIN_DEFAULT) {
+      std::ostringstream os;
+      os << "_rec" << std::fixed << std::setprecision(1) << srRecoilMin;
+      std::string tag = os.str();
+      std::replace(tag.begin(), tag.end(), '.', 'p');
+      SELECTION_TAG += tag;
+    }
   }
   const Inflation INFL = inflationFor(SAMPLE_NAME);
 
