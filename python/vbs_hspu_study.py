@@ -206,6 +206,41 @@ if BKG:
         s = samples[n]
         md.append(f"| {n} | " + " | ".join(f"{100 * frac(s, s['stage'][st], s['pu_tag']):.0f} ({int((s['stage'][st] & s['pu_tag']).sum())})"
                                            if s["stage"][st].any() else "-" for st, _ in STAGES) + " |")
+# ── The background in the SR, estimated ──────────────────────────────────────
+# Too few background MC events reach the SR (Z+jets: 4), so it is estimated from
+# Z+jets (V+jets is ~94% of the Run 2 SR background) at EST_STAGE, the last stage
+# before the jet veto (32 events), carried into the SR:
+#   event veto: unchanged. It acts on the tagging pair alone, which the jet veto
+#     (N_jet, the j3/j4 cuts) does not touch;
+#   jet removal: times R = (signal removal/none in the SR) / (the same at EST_STAGE),
+#     the jet veto's rescue: a removed out-of-time pileup jet stops failing it at a
+#     rate set by pileup, not by the hard process.
+EST_STAGE = "+dphi"
+ZLL = "Z(#rightarrowll)+jets"
+SR_EST = {}
+if ZLL in samples:
+    Z = samples[ZLL]
+    mz, ms = Z["stage"][EST_STAGE], S["stage"][EST_STAGE]
+    for src in C.T0_SRC:
+        bv, bv_err, _, _ = C.eff(Z["w"][mz], ~Z["vetoed"][src][mz])
+        w_z = Z["w"]
+        rz = w_z[Z["stage_rm"][src][EST_STAGE]].sum() / w_z[mz].sum()
+        rz_err = np.sqrt((w_z[Z["stage_rm"][src][EST_STAGE] ^ mz] ** 2).sum()) / w_z[mz].sum()
+        r_sig = lambda st: S["w"][S["stage_rm"][src][st]].sum() / S["w"][S["stage"][st]].sum()
+        R = r_sig("SR") / r_sig(EST_STAGE)
+        sv, srm = kept_veto(S, S["stage"]["SR"], src), r_sig("SR")
+        SR_EST[src] = dict(sv=sv, bv=bv, bv_err=bv_err, zv=sv / np.sqrt(bv), zv_err=0.5 * sv / np.sqrt(bv) * bv_err / bv,
+                           srm=srm, R=R, brm=rz * R, brm_err=rz_err * R,
+                           zrm=srm / np.sqrt(rz * R), zrm_err=0.5 * srm / np.sqrt(rz * R) * rz_err / rz)
+    md += ["", f"**The SR background, estimated** from Z+jets at {EST_STAGE} ({int(mz.sum())} MC events), the last "
+           "stage before the jet veto: the event veto's kept fraction carried over unchanged; jet removal's times "
+           "the signal's jet-veto rescue R. Signal measured in the SR.", "",
+           "| t0 | S veto | B veto (est.) | S/sqrt(B) veto | S removal | R | B removal (est.) | S/sqrt(B) removal |",
+           "|---|---|---|---|---|---|---|---|"]
+    for src, v in SR_EST.items():
+        md.append(f"| {src} | {v['sv']:.3f} | {v['bv']:.2f} +- {v['bv_err']:.2f} | {100 * (v['zv'] - 1):+.1f} +- {100 * v['zv_err']:.1f}% "
+                  f"| {v['srm']:.3f} | {v['R']:.3f} | {v['brm']:.2f} +- {v['brm_err']:.2f} | "
+                  f"{100 * (v['zrm'] - 1):+.1f} +- {100 * v['zrm_err']:.1f}% |")
 os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
 open(args.out + "_summary.md", "w").write("\n".join(md) + "\n")
 print("\n".join(md))

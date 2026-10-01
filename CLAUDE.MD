@@ -397,6 +397,13 @@ primary workflow.
         direct per-sample points sit on that model.
       - Our Z+jets at 34-44% overstates f (Powheg DY). Run 2 measured
         6-13%.
+    - **SR background, estimated** (vbs_hspu_study.py). Start from Z+jets at
+      +dphi, the stage before the jet veto (32 events). The event-veto kept
+      fraction carries over; jet removal's is x R, the signal's jet-veto
+      rescue (1.12).
+      - S/sqrt(B): event veto +3 to +5%; **jet removal +10 to +12%**
+        (TRKPTZ/WAVeS, +-5% stat). Jet removal wins in the SR.
+      - At f = 15% the veto gives -1% and removal +5%.
 
 ### ML Data Export
 - **export_training_data.cxx** (`util/`): Exports the cluster-SELECTION

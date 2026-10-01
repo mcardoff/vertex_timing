@@ -222,7 +222,7 @@ for r, ylab, label in [("sig", "Signal yield / no timing", args.sig_label),
     counts = [n for _, _, _, n in series[DRAWN[0]]]
     C.column_figure(f"{args.out}_{r}_ratio_mjj", ylab, series, extra, label,
                     [SEL1, SEL2, met_line(r), TIMING, CALIB + ";  all bins in brackets"],
-                    counts, "MC events (no timing)", EDGES, STYLE, DRAWN, xnote="final pair; last bin includes overflow")
+                    counts, "MC events", EDGES, STYLE, DRAWN, xnote="final pair; last bin includes overflow")
 
 if both:
     change = {}
