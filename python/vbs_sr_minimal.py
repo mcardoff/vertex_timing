@@ -89,6 +89,7 @@ ap.add_argument("--region", default="minimal", choices=["minimal", "relaxed"],
                 help="the pair's thresholds (vbf_hinv_sr.py's REGIONS): the SR's, or the relaxed set's")
 ap.add_argument("--met-floor", type=float, default=None,
                 help="E_T^miss floor of the pair (default: the region's; a sample's own ntuple floor applies if higher)")
+ap.add_argument("--calib-file", help="measure the jet-time correction f(n) on this signal file's HS legs instead of --sig's (to compare two productions under one calibration)")
 ap.add_argument("--out", required=True)
 args = ap.parse_args()
 REG = REGIONS[args.region]
@@ -119,7 +120,8 @@ def passes(g, keys):
 
 
 samples = load_samples(args.sig, args.zjets, args.dijet, args.slices)
-calib = C.measure(samples[SIG]["e"], True, "the VBF file's HS legs")
+calib = C.measure(samples[SIG]["e"] if not args.calib_file else C.legs(args.calib_file), True,
+                  "the VBF file's HS legs" if not args.calib_file else f"{args.calib_file}'s HS legs")
 for name, s in samples.items():
     s["floor"] = max(args.met_floor, s["info"]["sr_recoil_min"])
     prepare(s, calib, args.nsigma, args.min_trk, args.region)

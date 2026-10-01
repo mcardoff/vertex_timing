@@ -95,6 +95,13 @@ class Calib:
         return f"x f(n) from {self.source} ({self.nlegs:,} legs; {bins}; global {self.glob:.3f})"
 
 
+def legs(path):
+    """the leg columns hs_pulls reads, from a vbs_time_veto output"""
+    import uproot
+    cols = ["t0_truth"] + [f"{L}_{k}" for L in "ab" for k in ["hs", "core_n", "core_t", "core_sig"]]
+    return uproot.open(path)["events"].arrays(cols, library="np")
+
+
 def measure(e_all, binned, source):
     p, n = hs_pulls(e_all)
     g = mad(p)

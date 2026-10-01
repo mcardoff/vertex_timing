@@ -91,6 +91,7 @@ ap.add_argument("--region", default="sr", choices=list(REGIONS),
                 help="the selection S and B are both measured in: the full SR, or the minimal set")
 ap.add_argument("--mjj-edges", default=",".join(str(x) for x in MJJ_EDGES),
                 help="m_jj columns of the figures [GeV]; the last one includes the overflow")
+ap.add_argument("--calib-file", help="measure the jet-time correction f(n) on this signal file's HS legs instead of --sig's (to compare two productions under one calibration)")
 ap.add_argument("--out", required=True, help="output stem")
 args = ap.parse_args()
 REG = REGIONS[args.region]
@@ -112,7 +113,8 @@ def k_factor(s):
 
 samples = {"sig": load(args.sig, "sig", args.sig_norm, "met_truth", False)}
 if args.bkg: samples["bkg"] = load(args.bkg, "bkg", args.bkg_norm, "z_pt", True)
-calib = C.measure(samples["sig"]["e"], True, "the sig file's HS legs")   # one procedure for S and B
+calib = C.measure(samples["sig"]["e"] if not args.calib_file else C.legs(args.calib_file), True,
+                  "the sig file's HS legs" if not args.calib_file else f"{args.calib_file}'s HS legs")   # one procedure for S and B
 for s in samples.values():
     s["calib"] = calib
     s["sig"] = jet_sigma(s)
