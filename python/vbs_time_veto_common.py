@@ -182,12 +182,28 @@ def atlas_block(label, lines):
     return 0.81 - 0.036 * len(lines)
 
 
+def y_range(seriess, methods, ref=1.0, pct=False):
+    """(ymin, ytop) of column_figure's frame for one or more series dicts: pass the
+    series of every figure that shares a slide, and they get the same axis"""
+    lows = [v - lo for series in seriess for m in methods for v, lo, _, _ in series[m] if np.isfinite(v)]
+    highs = [v + hi for series in seriess for m in methods for v, _, hi, _ in series[m] if np.isfinite(v)]
+    ytop = max([max(highs) if highs else 1.0] + ([ref] if ref is not None else []))
+    if pct:               # signed change in %: round down to the next 10%, the ref line in range
+        ymin = np.floor((min(lows + [ref]) - 3.0) / 10) * 10 if lows else -10.0
+    elif ref is not None: # efficiency-like: round down to the next 0.1
+        ymin = max(0.0, np.floor((min(lows) - 0.03) * 10) / 10) if lows else 0.0
+    else:                 # absolute: a margin below the lowest point
+        ymin = max(0.0, min(lows) - 0.06 * (ytop - min(lows))) if lows else 0.0
+    return ymin, ytop
+
+
 def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_title, edges, style, methods,
-                  ref=1.0, xnote="last bin includes overflow", pct=False):
+                  ref=1.0, xnote="last bin includes overflow", pct=False, yrange=None):
     """The region plots' layout: per-m_jj-column values on top (one dodged marker
     per method), the MC event count of each column underneath on a log scale.
     `ref` draws a dashed reference line (None: none); `pct`: the values are a
-    signed change in %, so the axis may go below zero."""
+    signed change in %, so the axis may go below zero; `yrange`: (ymin, ytop)
+    from y_range() over several figures, to share their axis."""
     c = ROOT.TCanvas("c_" + os.path.basename(stem), "", 800, 780)
     pTop = ROOT.TPad("pTop", "", 0.0, 0.30, 1.0, 1.0)
     pBot = ROOT.TPad("pBot", "", 0.0, 0.00, 1.0, 0.30)
@@ -196,15 +212,7 @@ def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_
     pTop.Draw(); pBot.Draw(); KEEP.extend([c, pTop, pBot])
     pTop.cd()
     frame = ROOT.TH1D("frame_" + os.path.basename(stem), "", len(edges) - 1, edges); KEEP.append(frame)
-    lows = [v - lo for m in methods for v, lo, _, _ in series[m] if np.isfinite(v)]
-    highs = [v + hi for m in methods for v, _, hi, _ in series[m] if np.isfinite(v)]
-    ytop = max([max(highs) if highs else 1.0] + ([ref] if ref is not None else []))
-    if pct:               # signed change in %: round down to the next 10%, the ref line in range
-        ymin = np.floor((min(lows + [ref]) - 3.0) / 10) * 10 if lows else -10.0
-    elif ref is not None: # efficiency-like: round down to the next 0.1
-        ymin = max(0.0, np.floor((min(lows) - 0.03) * 10) / 10) if lows else 0.0
-    else:                 # absolute: a margin below the lowest point
-        ymin = max(0.0, min(lows) - 0.06 * (ytop - min(lows))) if lows else 0.0
+    ymin, ytop = yrange if yrange is not None else y_range([series], methods, ref, pct)
     frame.SetMinimum(ymin); frame.SetMaximum(ytop + (ytop - ymin) * (0.95 + 0.13 * max(0, len(lines) - 3)))
     frame.GetXaxis().SetLabelSize(0); frame.GetYaxis().SetTitle(ylab); frame.GetYaxis().SetTitleOffset(1.25)
     frame.Draw("AXIS")

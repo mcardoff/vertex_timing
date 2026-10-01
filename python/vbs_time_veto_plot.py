@@ -368,10 +368,10 @@ def calib_line(cal):
 
 
 def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_title, ref=1.0, methods=None,
-                  xnote="last bin includes overflow", pct=False):
+                  xnote="last bin includes overflow", pct=False, yrange=None):
     """vbs_time_veto_common.column_figure on this script's columns; `methods` defaults to DRAWN"""
     C.column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_title, EDGES, STYLE,
-                    methods or DRAWN, ref=ref, xnote=xnote, pct=pct)
+                    methods or DRAWN, ref=ref, xnote=xnote, pct=pct, yrange=yrange)
 
 
 def fmt_pct(v): return f"  ({100 * v:.1f}%)"
@@ -380,18 +380,20 @@ def fmt_pct(v): return f"  ({100 * v:.1f}%)"
 any_s = next(iter(samples.values()))
 JDR, JCUT = any_s["info"]["jet_time_dr"], any_s["info"]["jet_time_dist_cut"]
 ANY_RP = any(m.startswith("rp_") for m in DRAWN)
+EFF_SERIES = {role: {m: binned(samples[role]["e"], samples[role]["kept"][m], EDGES) for m in DRAWN} for role in samples}
+EFF_RANGE = C.y_range(list(EFF_SERIES.values()), DRAWN)   # signal and background shown side by side: one axis
 for role, ylab, label in [("sig", "Signal efficiency", args.sig_label), ("bkg", "Background efficiency", args.bkg_label)]:
     if role not in samples: continue
     s = samples[role]
     w = s["e"]["weight"].astype(float)
-    series = {m: binned(s["e"], s["kept"][m], EDGES) for m in DRAWN}
+    series = EFF_SERIES[role]
     extra = {m: fmt_pct(eff(w, s["kept"][m])[0]) for m in DRAWN}
     counts = [n for _, _, _, n in series[DRAWN[0]]]
     column_figure(f"{args.out}_{role}_eff_mjj", ylab, series, extra, label,
                   [sel_line(s), veto_line(), jet_line(), calib_line(s["calib"]),
                    "all m_{jj} columns in brackets; generator-weighted"
                    + ("; events binned in their no-veto m_{jj}" if ANY_RP else "")],
-                  counts, "MC events")
+                  counts, "MC events", yrange=EFF_RANGE)
 
 # ── Yields and the summary ───────────────────────────────────────────────────
 def k_factor(s):
