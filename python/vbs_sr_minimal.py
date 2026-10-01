@@ -136,7 +136,7 @@ for name, s in samples.items():
     if MINIMAL == ["fjvt", "dphi"] and args.met_floor == REG["met_floor"]:
         assert np.array_equal(passes(s["g"], MINIMAL), s["none"]["ok"]), name
     print(f"[{name}] {len(s['w']):,} candidates, E_T^miss floor {s['floor']:g} GeV, pair {int(s['g']['pair'].sum()):,}, "
-          f"SR {int(s['none']['ok'].sum()):,}")
+          f"{args.region} set {int(s['none']['ok'].sum()):,}")
 S = samples[SIG]
 BKG = [k for k in samples if k != SIG]
 
@@ -236,13 +236,13 @@ md += ["", f"**Factorisation on the pair** ({args.t0} t0): for the events passin
        "background measurement.", ""] + SPLIT_HEAD
 for name, s in samples.items():
     md += [f"| {name} | {k} | " + split(s, s["g"]["pair"], s["g"][k]) for k in KEYS]
-md += ["", f"**Factorisation on the minimal set** ({label(MINIMAL)}) for the groups it drops", ""] + SPLIT_HEAD
+md += ["", f"**Factorisation on the {args.region} set** ({label(MINIMAL)}) for the groups it drops", ""] + SPLIT_HEAD
 for name, s in samples.items():
     md += [f"| {name} | {k} | " + split(s, passes(s["g"], MINIMAL), s["g"][k]) for k in DROPPED]
 
 # the pair's own variables (cut at the ntuple, so only their range above the cut is
 # here) and E_T^miss, each split at a value inside that range, on the minimal set
-md += ["", f"**The preselected variables, split above their cut**, on the minimal set ({label(MINIMAL)}). No "
+md += ["", f"**The preselected variables, split above their cut**, on the {args.region} set ({label(MINIMAL)}). No "
        "Delta in a split is a hint, not a proof, that loosening that cut in the ntuple production would add "
        "statistics with the same response.", ""] + SPLIT_HEAD
 for name, s in samples.items():
@@ -265,7 +265,7 @@ for name, s in samples.items():
 # E_T^miss binned on the minimal set: whether the floor could go lower (a file with a
 # lower ntuple floor, sr_rec<v>, fills the bins below 100 GeV)
 MET_BINS = [0.0, 50.0, 100.0, 160.0, 200.0, np.inf]
-md += ["", f"**E_T^miss, binned**, on the minimal set ({label(MINIMAL)}, {args.t0} t0; Z+jets: pT(ll))", "",
+md += ["", f"**E_T^miss, binned**, on the {args.region} set ({label(MINIMAL)}, {args.t0} t0; Z+jets: pT(ll))", "",
        "| sample | E_T^miss [GeV] | MC | f | veto kept | removal ratio |", "|---|---|---|---|---|---|"]
 for name, s in samples.items():
     for lo, hi in zip(MET_BINS[:-1], MET_BINS[1:]):
@@ -278,7 +278,7 @@ for name, s in samples.items():
 
 # the jet veto's rescue in jet removal, measured on each sample: r(M + jetveto) / r(M)
 md += ["", f"**The jet veto's removal transfer** r(M + jetveto) / r(M), measured on every sample ({args.t0} t0): "
-       "the rescue jet removal gets from the jet veto in the full SR, which the minimal set does not include. "
+       f"the rescue jet removal gets from the jet veto in the full SR, which the {args.region} set does not include. "
        "For the record only: no S/sqrt(B) below uses it.", "",
        "| sample | M | r(M) | MC in M + jetveto | r(M + jetveto) | transfer |", "|---|---|---|---|---|---|"]
 TRANSFER = {}
@@ -298,7 +298,7 @@ for name, s in samples.items():
 # alone. Checked on the minimal set: each background's c against the signal's,
 # and its measured eps_B against the model at its own f.
 M = passes(S["g"], MINIMAL)
-md += ["", f"**Composition x per-type response**, on the minimal set ({label(MINIMAL)}): c = 1 - kept on PU-tagged "
+md += ["", f"**Composition x per-type response**, on the {args.region} set ({label(MINIMAL)}): c = 1 - kept on PU-tagged "
        "pairs, h = 1 - kept on the rest; the model eps_B = f (1 - c_S) + (1 - f)(1 - h_S) with the signal's c_S, h_S "
        "and the background's own f, against its measured eps_B.", "",
        "| sample | t0 | f | c | h | eps_B measured | eps_B model (signal c, h) | Delta / sigma |",
@@ -354,7 +354,7 @@ for keys in LADDER:
             zv, zv_err = zchange(rs, rb, "v")
             zr, zr_err = zchange(rs, rb, "r")
             ZTAB[label(keys), name, src] = dict(zv=zv, zv_err=zv_err, zr=zr, zr_err=zr_err, n=rb["n"])
-            md.append(f"| {label(keys)}{' (minimal)' if keys == MINIMAL else ''} | {name} | {count(samples[name], passes(samples[name]['g'], keys))} "
+            md.append(f"| {label(keys)}{f' ({args.region})' if keys == MINIMAL else ''} | {name} | {count(samples[name], passes(samples[name]['g'], keys))} "
                       f"| {src} | {fmt(rs['v'], rs['verr'], 3)} | {fmt(rb['v'], rb['verr'])} | {100 * (zv - 1):+.1f} +- "
                       f"{100 * zv_err:.1f}% | {fmt(rs['r'], rs['rerr'], 3)} | {fmt(rb['r'], rb['rerr'])} | "
                       f"{100 * (zr - 1):+.1f} +- {100 * zr_err:.1f}% |")
@@ -367,11 +367,11 @@ for src in C.T0_SRC:
     c = 1 - eff(S, M & S["pu_tag"], ~S["vetoed"][src])[0]
     h = 1 - eff(S, M & ~S["pu_tag"], ~S["vetoed"][src])[0]
     BE[src] = dict(eS=eS, c=c, h=h, fstar=(1 - h - eS ** 2) / (c - h) if c > h else np.nan)
-md += ["", f"**Break-even PU-tagged background share f\\*, in the minimal set** ({label(MINIMAL)}): eps_S, c and h "
+md += ["", f"**Break-even PU-tagged background share f\\*, in the {args.region} set** ({label(MINIMAL)}): eps_S, c and h "
        "from the signal there; the event veto raises S/sqrt(B) for a background with f > f*.", "",
        "| t0 | eps_S | c | h | f* |", "|---|---|---|---|---|"]
 md += [f"| {src} | {v['eS']:.3f} | {v['c']:.3f} | {v['h']:.3f} | {100 * v['fstar']:.0f}% |" for src, v in BE.items()]
-md += ["", "Each background's f in the minimal set: " + "; ".join(
+md += ["", f"Each background's f in the {args.region} set: " + "; ".join(
     f"{n} {fmt(*eff(samples[n], passes(samples[n]['g'], MINIMAL), samples[n]['pu_tag']))}"
     for n in BKG if passes(samples[n]["g"], MINIMAL).any())]
 
@@ -386,12 +386,12 @@ KEEP = C.KEEP
 c = ROOT.TCanvas("c_be", "", 800, 650); KEEP.append(c)
 c.SetLeftMargin(0.14); c.SetRightMargin(0.05)
 fr = ROOT.TH1D("fr_be", "", 10, 0.0, 100.0); KEEP.append(fr)
-fr.SetMinimum(-15); fr.SetMaximum(25)
+fr.SetMinimum(-25); fr.SetMaximum(25)
 fr.GetXaxis().SetTitle("Background with a pileup tagging jet  f [%]")
 fr.GetYaxis().SetTitle("S/#sqrt{B} change, event veto [%]")
 fr.Draw("AXIS")
 zero = ROOT.TLine(0, 0, 100, 0); zero.SetLineStyle(2); zero.SetLineColor(ROOT.kGray + 1); zero.Draw(); KEEP.append(zero)
-leg = ROOT.TLegend(0.17, 0.60, 0.55, 0.78); ROOT.StyleLegend(leg, 0.03); KEEP.append(leg)
+leg = ROOT.TLegend(0.17, 0.56, 0.55, 0.74); ROOT.StyleLegend(leg, 0.03); KEEP.append(leg)
 fgrid = np.linspace(0.0, 1.0, 101)
 for src in ["trkptz", "waves", "hgtd", "truth"]:
     v = BE[src]
@@ -403,7 +403,8 @@ for src in ["trkptz", "waves", "hgtd", "truth"]:
 leg.Draw()
 # each background measured directly in the minimal set, with the signal's eps_S there (t0 = --t0)
 t0name = {"waves": "WAVeS", "trkptz": "TRKPTZ", "hgtd": "HGTD", "tzp": "TZP", "truth": "truth"}[args.t0]
-leg2 = ROOT.TLegend(0.56, 0.20, 0.93, 0.21 + 0.045 * (len(BKG) + 1)); ROOT.StyleLegend(leg2, 0.027); KEEP.append(leg2)
+# lower left: below the curves (S/sqrt(B) at small f is the signal loss alone) and clear of every point
+leg2 = ROOT.TLegend(0.20, 0.19, 0.56, 0.20 + 0.04 * (len(BKG) + 1)); ROOT.StyleLegend(leg2, 0.027); KEEP.append(leg2)
 leg2.SetHeader(f"measured, {t0name} t_{{0}}:", "")
 for k, n in enumerate(BKG):
     s = samples[n]
@@ -425,9 +426,10 @@ ROOT.ATLASLabel(0.17, 0.88, "")
 a = ROOT.TLatex(); a.SetNDC(); a.SetTextFont(42); a.SetTextSize(0.04); KEEP.append(a)
 a.DrawLatex(0.31, 0.88, "Simulation Internal")
 g2 = ROOT.TLatex(); g2.SetNDC(); g2.SetTextFont(42); g2.SetTextSize(0.028); g2.SetTextColor(ROOT.kGray + 2); KEEP.append(g2)
-g2.DrawLatex(0.17, 0.84, f"S and B both in the {args.region} set: SR pair (j_{{1,2}} > {J1:g}, {J2:g} GeV), fJVT, "
-             f"|#Delta#phi_{{jj}}| < 2, E_{{T}}^{{miss}} > {args.met_floor:g} GeV")
-g2.DrawLatex(0.17, 0.81, "lines: #varepsilon_{S}, and the test on pileup / hard-scatter tagging pairs, from the signal")
+g2.DrawLatex(0.17, 0.84, f"S and B both in the {args.region} set: SR pair with j_{{1,2}} > {J1:g}, {J2:g} GeV,")
+g2.DrawLatex(0.17, 0.81, f"fJVT, |#Delta#phi_{{jj}}| < 2, E_{{T}}^{{miss}} > {args.met_floor:g} GeV.  Lines: #varepsilon_{{S}} and "
+             "the test's response,")
+g2.DrawLatex(0.17, 0.78, "pileup / hard-scatter tagging pairs, from the signal")
 stem = f"{args.out}_breakeven"
 c.Print(stem + ".pdf"); c.Print(stem + ".png")
 print("wrote", stem + ".pdf / .png")
