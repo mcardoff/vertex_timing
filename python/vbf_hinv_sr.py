@@ -25,6 +25,14 @@ SR_MJJ5 = [800.0, 1000.0, 1500.0, 2000.0, 3500.0]   # 2-jet, E_T^miss > 200 GeV 
 SR_MJJ3 = [1500.0, 2000.0, 3500.0]                  # 3-4 jets, and 2 jets at 160-200 GeV
 
 METHODS = ["jj"] + [f"t0_{s}" for s in C.T0_SRC] + [f"rm_{s}" for s in C.T0_SRC]
+# The selection a timing variant is measured in; S and B are always measured in the SAME one.
+#   sr       the full SR: every cut sr_select lists
+#   minimal  only the cuts the background's timing response depends on (python/vbs_sr_minimal.py):
+#            the tagging pair, fJVT on it, |dphi_jj| < 2, E_T^miss > 100 GeV, the Z window
+REGIONS = {"sr": dict(steps=None, met_floor=None),
+           "minimal": dict(steps=["j1 > 80, j2 > 50 GeV", "fJVT on j1, j2", "|dphi_jj| < 2",
+                                  "eta1 eta2 < 0, |deta_jj| > 3.8", "m_jj > 800 GeV", "|m_ll - 91.2| < 25 GeV"],
+                           met_floor=100.0)}
 SIG, ZLL = "VBF H#rightarrowinv.", "Z(#rightarrowll)+jets"
 JZ_RE = re.compile(r"\.(8011\d\d)\.Py8EG_A14NNPDF23LO_jj_(JZ\d)\.")
 
@@ -112,9 +120,10 @@ def sr_bin(n, met, mjj, dphi):
     return out
 
 
-def sr_select(s, keep):
-    """The SR on the jets with `keep`. Returns the cumulative cut flags (in the
-    cut-flow order), the final pass flag, SR bin, m_jj and the j1 / j2 indices."""
+def sr_select(s, keep, region="sr"):
+    """The SR on the jets with `keep`. Returns every cut's flag (in the cut-flow
+    order), the pass flag of `region` (REGIONS), the SR bin, m_jj and the j1 / j2
+    indices."""
     J, met = s["J"], s["met"]
     cnt = keep & s["jvt_ok"] & (J.jet_pt > SR_JET_PT)
     loc = ak.local_index(J.jet_pt)[cnt]                # stored jets are pT-ordered
@@ -151,8 +160,11 @@ def sr_select(s, keep):
              ("m_jj > 800 GeV", mjj > SR_MJJ),
              ("in an SR bin (E_T^miss / N_jet / m_jj)", bins > 0)]
     if s["zll"]: steps.append(("|m_ll - 91.2| < 25 GeV", s["zwin"]))
+    R = REGIONS[region]
     ok = np.ones(len(n), bool)
-    for _, f in steps: ok = ok & f
+    for name, f in steps:
+        if R["steps"] is None or name in R["steps"]: ok = ok & f
+    if R["met_floor"] is not None: ok = ok & (met >= R["met_floor"])
     return dict(steps=steps, ok=ok, bin=np.where(ok, bins, 0), mjj=np.where(ok, mjj, np.nan), i1=i1, i2=i2,
                 n=n, mjj_raw=mjj)
 
@@ -170,8 +182,8 @@ def fails_t0(s, src, nsigma, min_trk):
     return (J.jet_n >= min_trk) & e[f"ok_{src}"] & (pull >= nsigma)
 
 
-def outcomes(s, nsigma, min_trk):
-    """per method: dict(ok, bin, mjj); `none` included"""
+def outcomes(s, nsigma, min_trk, region="sr"):
+    """per method: dict(ok, bin, mjj) in `region`; `none` (s["none"], made in the same region) included"""
     base = s["none"]
     out = {"none": base}
     J, i1, i2 = s["J"], base["i1"], base["i2"]
@@ -184,19 +196,19 @@ def outcomes(s, nsigma, min_trk):
     for src in C.T0_SRC:
         bad = fails_t0(s, src, nsigma, min_trk)
         out[f"t0_{src}"] = veto(base, take(bad, i1) | take(bad, i2))
-        out[f"rm_{src}"] = sr_select(s, ~bad)
+        out[f"rm_{src}"] = sr_select(s, ~bad, region)
     return out
 
 
-def prepare(s, calib, nsigma, min_trk):
-    """The timing on one sample: the no-timing SR selection, every method's
+def prepare(s, calib, nsigma, min_trk, region="sr"):
+    """The timing on one sample: the no-timing selection, every method's
     outcome, each t0's per-jet failures and the event veto's decision on the
     no-timing pair (for every candidate, so any cut set can use it), and the
     pair's truth composition."""
     s["calib"] = calib
     s["sig"] = jet_sigma(s)
-    s["none"] = sr_select(s, ak.ones_like(s["J"].jet_pt, dtype=bool))
-    s["out"] = outcomes(s, nsigma, min_trk)
+    s["none"] = sr_select(s, ak.ones_like(s["J"].jet_pt, dtype=bool), region)
+    s["out"] = outcomes(s, nsigma, min_trk, region)
     J, i1, i2 = s["J"], s["none"]["i1"], s["none"]["i2"]
     s["fail"] = {src: fails_t0(s, src, nsigma, min_trk) for src in C.T0_SRC}
     s["vetoed"] = {src: take(f, i1) | take(f, i2) for src, f in s["fail"].items()}

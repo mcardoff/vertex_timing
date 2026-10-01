@@ -213,7 +213,12 @@ def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_
     pTop.cd()
     frame = ROOT.TH1D("frame_" + os.path.basename(stem), "", len(edges) - 1, edges); KEEP.append(frame)
     ymin, ytop = yrange if yrange is not None else y_range([series], methods, ref, pct)
-    frame.SetMinimum(ymin); frame.SetMaximum(ytop + (ytop - ymin) * (0.95 + 0.13 * max(0, len(lines) - 3)))
+    # headroom for the label block and legend; at least enough that the legend's
+    # bottom edge (pad NDC; frame from 0.025 to 0.94) stays above the highest point
+    legbot = 0.81 - 0.036 * len(lines) - 0.055 * ((len(methods) + 1) // 2)
+    top = max(ytop + (ytop - ymin) * (0.95 + 0.13 * max(0, len(lines) - 3)),
+              ymin + 0.915 * (ytop - ymin) / (legbot - 0.04))
+    frame.SetMinimum(ymin); frame.SetMaximum(top)
     frame.GetXaxis().SetLabelSize(0); frame.GetYaxis().SetTitle(ylab); frame.GetYaxis().SetTitleOffset(1.25)
     frame.Draw("AXIS")
     if ref is not None:

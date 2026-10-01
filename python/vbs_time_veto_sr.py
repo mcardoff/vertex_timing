@@ -42,21 +42,31 @@ jet no longer fails N_jet or the extra-jet cuts), so they are yield ratios, not
 efficiencies; their errors come from the events the two selections do not
 share. Events are binned in the m_jj of the pair they end up with.
 
+--region minimal measures S and B in the minimal set instead (vbf_hinv_sr.py's
+REGIONS, chosen by python/vbs_sr_minimal.py): the tagging pair with fJVT,
+|dphi_jj| < 2 and E_T^miss > 100 GeV, and none of the SR's E_T^miss bins, its
+E_T^jet cut or its jet veto, which the background's timing response does not
+depend on. The full SR leaves 4 Z+jets MC events, the minimal set 52. Whichever
+region is chosen, S and B are both measured in it.
+
     PYTHONNOUSERSITE=1 PYTHONPATH=/opt/homebrew/Cellar/root/6.40.04/lib/root \\
     ~/.venv-hgtd/bin/python python/vbs_time_veto_sr.py \\
         --sig condor/vbf/vbf_sr_vbs_time_veto.root \\
-        --bkg condor/zjets/zjets_sr_vbs_time_veto.root --out figs/time_veto_sr/sr
+        --bkg condor/zjets/zjets_sr_vbs_time_veto.root --out figs/time_veto/sr
+    # S and B in the minimal set
+    ... --region minimal --mjj-edges 800,1000,1500,3500 --out figs/time_veto/srmin
 
 Writes <out>_{sig,bkg}_ratio_mjj, <out>_s_over_sqrtb (% change per m_jj column),
 <out>_s_over_sqrtb_yields (at --lumi), <out>_tradeoff (threshold scan), each
 .pdf and .png, and <out>_summary.md (cut flow, method table, SR bins, scan).
+The S and B ratio figures share one y axis.
 """
 import argparse, os
 import numpy as np
 import uproot
 import awkward as ak
 import vbs_time_veto_common as C
-from vbf_hinv_sr import METHODS, load, take, sr_select, jet_sigma, outcomes, ratio
+from vbf_hinv_sr import METHODS, REGIONS, load, take, sr_select, jet_sigma, outcomes, ratio
 
 MJJ_EDGES = [800, 1000, 1500, 2000, 3500, 5000]     # the SR's m_jj bins; the last one includes the overflow
 SCAN = np.array([1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 8.0, 12.0])
@@ -77,12 +87,18 @@ ap.add_argument("--methods", default="t0_trkptz,t0_waves,t0_hgtd,t0_truth,rm_trk
                 help="drawn methods; the summary has all of " + ",".join(METHODS))
 ap.add_argument("--lumi", type=float, default=3000.0, help="fb^-1")
 ap.add_argument("--bf-hinv", type=float, default=1.0, help="B(H->inv) for the signal yields; cancels in every ratio")
+ap.add_argument("--region", default="sr", choices=list(REGIONS),
+                help="the selection S and B are both measured in: the full SR, or the minimal set")
+ap.add_argument("--mjj-edges", default=",".join(str(x) for x in MJJ_EDGES),
+                help="m_jj columns of the figures [GeV]; the last one includes the overflow")
 ap.add_argument("--out", required=True, help="output stem")
 args = ap.parse_args()
+REG = REGIONS[args.region]
+WHERE = {"sr": "in the SR", "minimal": "in the minimal set"}[args.region]
 DRAWN = args.methods.split(",")
 for m in DRAWN:
     if m not in METHODS: raise SystemExit(f"unknown method {m}; choose from {METHODS}")
-EDGES = np.array(MJJ_EDGES, float)
+EDGES = np.array([float(x) for x in args.mjj_edges.split(",")])
 
 
 def k_factor(s):
@@ -99,16 +115,18 @@ calib = C.measure(samples["sig"]["e"], True, "the sig file's HS legs")   # one p
 for s in samples.values():
     s["calib"] = calib
     s["sig"] = jet_sigma(s)
-    s["none"] = sr_select(s, ak.ones_like(s["J"].jet_pt, dtype=bool))
-    s["out"] = outcomes(s, args.nsigma, args.min_trk)
+    s["none"] = sr_select(s, ak.ones_like(s["J"].jet_pt, dtype=bool), args.region)
+    s["out"] = outcomes(s, args.nsigma, args.min_trk, args.region)
     print(f"[{s['role']}] {s['path']}: {s['info']['njobs']} job(s), {s['info']['n_read']:,} read, "
-          f"{len(s['w']):,} SR candidates stored, {int(s['none']['ok'].sum()):,} in the SR")
+          f"{len(s['w']):,} SR candidates stored, {int(s['none']['ok'].sum()):,} {WHERE}")
 
 # ── Summary ──────────────────────────────────────────────────────────────────
 both = "bkg" in samples
 S_, B_ = samples["sig"], samples.get("bkg")
-md = [f"# VBS timing tests in the VBF H->inv SR: {os.path.basename(args.out)}", "",
+md = [f"# VBS timing tests in the VBF H->inv SR ({args.region}): {os.path.basename(args.out)}", "",
       "ANA-EXOT-2020-11-INT1 Sec. 4.5.2 / 4.5.6 emulated (see the script's docstring for what is and is not). "
+      + ("" if args.region == "sr" else "S and B both in the minimal set: the SR's cuts below, without its E_T^miss "
+         "bins, E_T^jet and jet veto. ") +
       f"Timing test at {args.nsigma:g} sigma; a jet is timed with >= {args.min_trk} track(s); jet-time sigma "
       f"{calib.md()}; yields at {args.lumi:g} fb^-1.", ""]
 for s in samples.values():
@@ -116,22 +134,24 @@ for s in samples.values():
     md.append(f"- **{s['role']}**: `{s['path']}` -- {i['njobs']} job(s), {i['n_read']:,} events read (sum w "
               f"{i['sumw_read']:.6g}), {len(s['w']):,} SR candidates ({s['rcol']} >= {i['sr_recoil_min']:g}); "
               f"normalisation: {C.NORM[s['norm']]['note'] if s['norm'] != 'none' else 'none'}")
-md += ["", "**Cut flow of the SR without timing** (cumulative; MC events and the weighted fraction of the stored "
+md += ["", f"**Cut flow {WHERE} without timing** (cumulative; MC events and the weighted fraction of the stored "
        "candidates)", "", "| cut | " + " | ".join(f"{r} MC | {r} frac." for r in samples) + " |",
        "|---|" + "---|---|" * len(samples)]
 masks = {r: np.ones(len(s["w"]), bool) for r, s in samples.items()}
-names = [n for n, _ in (B_ or S_)["none"]["steps"]]
-for k, name in enumerate(names):
+rows = ([(f"E_T^miss > {REG['met_floor']:g} GeV", {r: s["met"] >= REG["met_floor"] for r, s in samples.items()})]
+        if REG["met_floor"] is not None else [])
+rows += [(n, {r: dict(s["none"]["steps"]).get(n) for r, s in samples.items()})
+         for n, _ in (B_ or S_)["none"]["steps"] if REG["steps"] is None or n in REG["steps"]]
+for name, flags in rows:
     cells = []
     for r, s in samples.items():
-        st = s["none"]["steps"]
-        if k < len(st): masks[r] &= st[k][1]
+        if flags[r] is not None: masks[r] &= flags[r]
         cells.append(f"{int(masks[r].sum()):,} | {100 * s['w'][masks[r]].sum() / s['w'].sum():.2f}%")
     md.append(f"| {name} | " + " | ".join(cells) + " |")
 md.append("")
 
 hdr = "| method | S / S(none) | S MC |" + (" B / B(none) | B MC | S/sqrt(B) change |" if both else "")
-md += ["**Timing relative to the SR without it** (errors: the events the two selections do not share)", "",
+md += [f"**Timing relative to no timing, {WHERE}** (errors: the events the two selections do not share)", "",
        hdr, "|" + "---|" * (hdr.count("|") - 1)]
 summ = {}
 for m in ["none"] + METHODS:
@@ -150,13 +170,14 @@ if both and k_factor(S_) and k_factor(B_):
     S0, B0 = ks * S_["w"][S_["none"]["ok"]].sum(), kb * B_["w"][B_["none"]["ok"]].sum()
     md += [f"Without timing: S = {S0:,.0f}, B = {B0:,.0f} (Z->ll+jets standing in for Z->nunu), "
            f"S/sqrt(B) = {S0 / np.sqrt(B0):.1f} at {args.lumi:g} fb^-1, B(H->inv) = {100 * args.bf_hinv:g}%.", ""]
+if both and k_factor(S_) and k_factor(B_) and args.region == "sr":
     md += ["**SR bins without timing** (S, B yields; MC events in brackets)", "",
            "| bin | S | B |", "|---|---|---|"]
     for b in range(1, 17):
         ms, mb = S_["none"]["bin"] == b, B_["none"]["bin"] == b
         md.append(f"| SR{b} | {ks * S_['w'][ms].sum():,.0f} ({int(ms.sum()):,}) | {kb * B_['w'][mb].sum():,.0f} ({int(mb.sum())}) |")
     md.append("")
-md += ["**Leading pair of the SR without timing** (weighted share; paper labels)", ""]
+md += [f"**Leading pair {WHERE} without timing** (weighted share; paper labels)", ""]
 for r, s in samples.items():
     J, ok, i1, i2 = s["J"], s["none"]["ok"], s["none"]["i1"], s["none"]["i2"]
     h1, h2 = take(J.jet_hs, i1) > 0, take(J.jet_hs, i2) > 0
@@ -171,7 +192,7 @@ md.append("")
 scan = {m: [] for m in METHODS}
 if both:
     for ns in SCAN:
-        res = {r: outcomes(s, ns, args.min_trk) for r, s in samples.items()}
+        res = {r: outcomes(s, ns, args.min_trk, args.region) for r, s in samples.items()}
         for m in METHODS:
             rs = ratio(S_["w"], res["sig"][m]["ok"], S_["none"]["ok"])[0]
             rb = ratio(B_["w"], res["bkg"][m]["ok"], B_["none"]["ok"])[0]
@@ -189,9 +210,11 @@ print("wrote", args.out + "_summary.md")
 # ── Figures ──────────────────────────────────────────────────────────────────
 ROOT = C.setup_root(args.out)
 JDR, JCUT = S_["info"]["jet_time_dr"], S_["info"]["jet_time_dist_cut"]
-SEL1 = ("SR: j_{1,2} > 80, 50 GeV, #eta_{1}#eta_{2} < 0, |#Delta#eta_{jj}| > 3.8, m_{jj} > 0.8 TeV, "
-        "|#Delta#phi_{jj}| < 2")
-SEL2 = "2-4 jets > 25 GeV (JVT), j_{3,4}: C < 0.6, m_{rel} < 0.05; fJVT on j_{1,2}; E_{T}^{jet} > 140 GeV"
+SEL1 = (("SR" if args.region == "sr" else "SR pair") + ": j_{1,2} > 80, 50 GeV, #eta_{1}#eta_{2} < 0, "
+        "|#Delta#eta_{jj}| > 3.8, m_{jj} > 0.8 TeV, |#Delta#phi_{jj}| < 2")
+SEL2 = ("2-4 jets > 25 GeV (JVT), j_{3,4}: C < 0.6, m_{rel} < 0.05; fJVT on j_{1,2}; E_{T}^{jet} > 140 GeV"
+        if args.region == "sr" else
+        "fJVT on j_{1,2};  minimal set: no jet veto, no E_{T}^{jet} cut, no E_{T}^{miss} bins")
 TIMING = (f"timing |#Deltat| / #sigma #geq {args.nsigma:g}: filled = event veto on j_{{1,2}}, "
           "open = failing jets removed first")
 CALIB = (f"#sigma_{{jet}} #times {calib.fac[0]:.2f} (1 track) #rightarrow {calib.fac[-1]:.2f} "
@@ -199,6 +222,8 @@ CALIB = (f"#sigma_{{jet}} #times {calib.fac[0]:.2f} (1 track) #rightarrow {calib
 
 
 def met_line(role):
+    if args.region == "minimal":
+        return "E_{T}^{miss,truth} > 100 GeV" if role == "sig" else "p_{T}^{ll} > 100 GeV; |m_{ll} - m_{Z}| < 25 GeV"
     if role == "sig": return "E_{T}^{miss,truth} > 200 GeV, or 160-200 GeV with 2 jets and m_{jj} > 1.5 TeV"
     return "p_{T}^{ll} > 200 GeV, or 160-200 GeV with 2 jets and m_{jj} > 1.5 TeV; |m_{ll} - m_{Z}| < 25 GeV"
 
@@ -213,16 +238,19 @@ def per_column(s, m):
     return res
 
 
+RATIO_SERIES = {r: {m: per_column(s, m) for m in DRAWN} for r, s in samples.items()}
+RATIO_RANGE = C.y_range(list(RATIO_SERIES.values()), DRAWN)   # S and B side by side: one axis
 for r, ylab, label in [("sig", "Signal yield / no timing", args.sig_label),
                        ("bkg", "Background yield / no timing", args.bkg_label)]:
     if r not in samples: continue
     s = samples[r]
-    series = {m: per_column(s, m) for m in DRAWN}
+    series = RATIO_SERIES[r]
     extra = {m: f"  ({ratio(s['w'], s['out'][m]['ok'], s['none']['ok'])[0]:.3f})" for m in DRAWN}
     counts = [n for _, _, _, n in series[DRAWN[0]]]
     C.column_figure(f"{args.out}_{r}_ratio_mjj", ylab, series, extra, label,
                     [SEL1, SEL2, met_line(r), TIMING, CALIB + ";  all bins in brackets"],
-                    counts, "MC events", EDGES, STYLE, DRAWN, xnote="final pair; last bin includes overflow")
+                    counts, "MC events", EDGES, STYLE, DRAWN, xnote="final pair; last bin includes overflow",
+                    yrange=RATIO_RANGE)
 
 if both:
     change = {}
@@ -270,7 +298,8 @@ if both:
     xy = {m: (np.array([p[0] for p in scan[m]]), np.array([1 / p[1] if p[1] > 0 else np.nan for p in scan[m]]))
           for m in DRAWN}
     C.roc_figure(f"{args.out}_tradeoff", xy, DRAWN, STYLE, i3,
-                 ["VBF H#rightarrowinv. SR (ANA-EXOT-2020-11 selection), S: VBF H#rightarrowinv., B: Z(#rightarrowll)+jets",
+                 [("VBF H#rightarrowinv. SR (ANA-EXOT-2020-11 selection)" if args.region == "sr" else
+                   "VBF H#rightarrowinv. SR pair, minimal set") + ", S: VBF H#rightarrowinv., B: Z(#rightarrowll)+jets",
                   f"threshold scanned {SCAN[0]:g}-{SCAN[-1]:g}#sigma; large markers at {args.nsigma:g}#sigma; "
                   "dashed: failing jets removed first"],
                  "Signal yield / no timing", "Background rejection vs no timing",

@@ -27,22 +27,20 @@ compatible with t0, or timed and failing; an event is classed by its most
 catchable pileup leg. Timing is vbs_time_veto_sr.py's: the event veto on j1, j2
 at --nsigma, with the signal's f(n) jet-time calibration for every sample.
 
-The break-even: with the event veto keeping eps_S of the signal, a background
-whose PU-tagged fraction is f is kept at eps_B = f (1 - c) + (1 - f)(1 - h), c
-the catch rate on its PU-tagged events and h the veto rate on the rest.
-S/sqrt(B) rises when eps_B < eps_S^2, i.e. f > f* = (1 - h - eps_S^2) / (c - h).
+The break-even PU-tagged share f*, and S/sqrt(B), are in python/vbs_sr_minimal.py:
+there S and B are always measured in the same selection (the minimal set).
 
     PYTHONNOUSERSITE=1 PYTHONPATH=/opt/homebrew/Cellar/root/6.40.04/lib/root \\
     ~/.venv-hgtd/bin/python python/vbs_hspu_study.py \\
         --sig condor/vbf/vbf_sr_vbs_time_veto.root --zjets condor/zjets/zjets_sr_vbs_time_veto.root \\
         --dijet condor/dijet/dijet_sr_vbs_time_veto.root --out figs/time_veto/hspu
 
-Writes <out>_summary.md and <out>_{composition_dphi,composition_sr,puleg,breakeven}.(pdf|png).
+Writes <out>_summary.md and <out>_{composition_pair100,composition_dphi,composition_sr,puleg}.(pdf|png).
 """
 import argparse, os
 import numpy as np
 import vbs_time_veto_common as C
-from vbf_hinv_sr import SIG, ZLL, take, load_samples, prepare
+from vbf_hinv_sr import SIG, take, load_samples, prepare
 
 STAGES = [("pair100", ["E_T^miss > 100 GeV", "j1 > 80, j2 > 50 GeV", "eta1 eta2 < 0, |deta_jj| > 3.8", "m_jj > 800 GeV",
                        "|m_ll - 91.2| < 25 GeV"]),
@@ -157,61 +155,14 @@ for n, s in samples.items():
             md.append(f"| {n} | {st} | " + " | ".join(f"{s['w'][s['stage_rm'][src][st]].sum() / s['w'][m].sum():.3f}"
                                                       for src in C.T0_SRC) + " |")
 
-# break-even: eps_S of the signal in the SR; c and h, the test's response to a PU-tagged
-# and to an HS+HS pair, from the signal's own pairs at pair100 (thousands of each; the
-# backgrounds have a few), assuming that response does not depend on the process
 S = samples[SIG]
-be_stage = "pair100"
-pool = {src: (1 - kept_veto(S, S["stage"][be_stage], src, S["pu_tag"]), 1 - kept_veto(S, S["stage"][be_stage], src, ~S["pu_tag"]))
-        for src in C.T0_SRC}
-eps_s = {src: kept_veto(S, S["stage"]["SR"], src) for src in C.T0_SRC}
 if BKG:
-    md += ["", f"**Break-even PU-tagged background fraction f\\*** (eps_S: the signal in the SR; c, h: the test on the "
-           f"signal's own PU-tagged and HS+HS pairs at {be_stage})", "", "| t0 | eps_S | c | h | f* |", "|---|---|---|---|---|"]
-    for src in C.T0_SRC:
-        c, h = pool[src]
-        fstar = (1 - h - eps_s[src] ** 2) / (c - h) if c > h else np.nan
-        md.append(f"| {src} | {eps_s[src]:.3f} | {c:.3f} | {h:.3f} | {100 * fstar:.0f}% |")
     md += ["", "Measured PU-tagged fraction f (weighted %; MC events in brackets):", "",
            "| sample | " + " | ".join(st for st, _ in STAGES) + " |", "|---|" + "---|" * len(STAGES)]
     for n in BKG:
         s = samples[n]
         md.append(f"| {n} | " + " | ".join(f"{100 * frac(s, s['stage'][st], s['pu_tag']):.0f} ({int((s['stage'][st] & s['pu_tag']).sum())})"
                                            if s["stage"][st].any() else "-" for st, _ in STAGES) + " |")
-# ── The background in the SR, estimated ──────────────────────────────────────
-# Too few background MC events reach the SR (Z+jets: 4), so it is estimated from
-# Z+jets (V+jets is ~94% of the Run 2 SR background) at EST_STAGE, the last stage
-# before the jet veto (32 events), carried into the SR:
-#   event veto: unchanged. It acts on the tagging pair alone, which the jet veto
-#     (N_jet, the j3/j4 cuts) does not touch;
-#   jet removal: times R = (signal removal/none in the SR) / (the same at EST_STAGE),
-#     the jet veto's rescue: a removed out-of-time pileup jet stops failing it at a
-#     rate set by pileup, not by the hard process.
-EST_STAGE = "+dphi"
-SR_EST = {}
-if ZLL in samples:
-    Z = samples[ZLL]
-    mz, ms = Z["stage"][EST_STAGE], S["stage"][EST_STAGE]
-    for src in C.T0_SRC:
-        bv, bv_err, _, _ = C.eff(Z["w"][mz], ~Z["vetoed"][src][mz])
-        w_z = Z["w"]
-        rz = w_z[Z["stage_rm"][src][EST_STAGE]].sum() / w_z[mz].sum()
-        rz_err = np.sqrt((w_z[Z["stage_rm"][src][EST_STAGE] ^ mz] ** 2).sum()) / w_z[mz].sum()
-        r_sig = lambda st: S["w"][S["stage_rm"][src][st]].sum() / S["w"][S["stage"][st]].sum()
-        R = r_sig("SR") / r_sig(EST_STAGE)
-        sv, srm = kept_veto(S, S["stage"]["SR"], src), r_sig("SR")
-        SR_EST[src] = dict(sv=sv, bv=bv, bv_err=bv_err, zv=sv / np.sqrt(bv), zv_err=0.5 * sv / np.sqrt(bv) * bv_err / bv,
-                           srm=srm, R=R, brm=rz * R, brm_err=rz_err * R,
-                           zrm=srm / np.sqrt(rz * R), zrm_err=0.5 * srm / np.sqrt(rz * R) * rz_err / rz)
-    md += ["", f"**The SR background, estimated** from Z+jets at {EST_STAGE} ({int(mz.sum())} MC events), the last "
-           "stage before the jet veto: the event veto's kept fraction carried over unchanged; jet removal's times "
-           "the signal's jet-veto rescue R. Signal measured in the SR.", "",
-           "| t0 | S veto | B veto (est.) | S/sqrt(B) veto | S removal | R | B removal (est.) | S/sqrt(B) removal |",
-           "|---|---|---|---|---|---|---|---|"]
-    for src, v in SR_EST.items():
-        md.append(f"| {src} | {v['sv']:.3f} | {v['bv']:.2f} +- {v['bv_err']:.2f} | {100 * (v['zv'] - 1):+.1f} +- {100 * v['zv_err']:.1f}% "
-                  f"| {v['srm']:.3f} | {v['R']:.3f} | {v['brm']:.2f} +- {v['brm_err']:.2f} | "
-                  f"{100 * (v['zrm'] - 1):+.1f} +- {100 * v['zrm_err']:.1f}% |")
 os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
 open(args.out + "_summary.md", "w").write("\n".join(md) + "\n")
 print("\n".join(md))
@@ -277,56 +228,3 @@ stacked(f"{args.out}_puleg", PUL, PULEG,
         ["events with a pileup tagging jet,", "SR tagging pair, E_{T}^{miss} > 100 GeV",
          f"t_{{0}}: {args.t0.upper() if args.t0 != 'waves' else 'WAVeS'}, test at {args.nsigma:g}#sigma",
          "most catchable pileup leg"])
-
-if BKG:
-    # break-even curves: S/sqrt(B) change vs f, per t0
-    c = ROOT.TCanvas("c_be", "", 800, 650); KEEP.append(c)
-    c.SetLeftMargin(0.14); c.SetRightMargin(0.05)
-    fr = ROOT.TH1D("fr_be", "", 10, 0.0, 100.0); KEEP.append(fr)
-    fr.SetMinimum(-15); fr.SetMaximum(40)
-    fr.GetXaxis().SetTitle("Background with a pileup tagging jet  f [%]")
-    fr.GetYaxis().SetTitle("S/#sqrt{B} change, event veto [%]")
-    fr.Draw("AXIS")
-    zero = ROOT.TLine(0, 0, 100, 0); zero.SetLineStyle(2); zero.SetLineColor(ROOT.kGray + 1); zero.Draw(); KEEP.append(zero)
-    leg = ROOT.TLegend(0.17, 0.60, 0.55, 0.80); ROOT.StyleLegend(leg, 0.03); KEEP.append(leg)
-    fgrid = np.linspace(0.0, 1.0, 101)
-    for src in ["trkptz", "waves", "hgtd", "truth"]:
-        cc, hh = pool[src]
-        z = 100 * (eps_s[src] / np.sqrt(fgrid * (1 - cc) + (1 - fgrid) * (1 - hh)) - 1)
-        g = ROOT.TGraph(len(fgrid), 100 * fgrid, z); KEEP.append(g)
-        lab, col, _ = C.STYLE[f"t0_{src}"]
-        g.SetLineColor(C.colour(col)); g.SetLineWidth(3); g.Draw("L SAME")
-        leg.AddEntry(g, lab.replace("Jet vs t_{0}: ", "t_{0}: ") + f"  (f* = {100 * (1 - hh - eps_s[src] ** 2) / (cc - hh):.0f}%)", "l")
-    leg.Draw()
-    # each background, measured directly: its own eps_B under the event veto (t0 = --t0);
-    # open marker at pair100, filled at +dphi (the last stage before the jet veto); the
-    # signal's eps_S taken at the same stage
-    leg2 = ROOT.TLegend(0.56, 0.20, 0.93, 0.21 + 0.045 * (len(BKG) + 1)); ROOT.StyleLegend(leg2, 0.027); KEEP.append(leg2)
-    t0name = {"waves": "WAVeS", "trkptz": "TRKPTZ", "hgtd": "HGTD", "tzp": "TZP", "truth": "truth"}[args.t0]
-    leg2.SetHeader(f"measured, {t0name} t_{{0}}:", "")
-    for k, n in enumerate(BKG):
-        s = samples[n]
-        filled, hollow = [20, 21, 22, 23, 33, 34][k % 6], [24, 25, 26, 32, 27, 28][k % 6]
-        for st, mk in [("pair100", hollow), ("+dphi", filled)]:
-            m = s["stage"][st]
-            if not m.any(): continue
-            f = frac(s, m, s["pu_tag"])
-            eb, eerr, _, _ = C.eff(s["w"][m], ~s["vetoed"][args.t0][m])
-            if not eb > 0: continue
-            g = ROOT.TGraphErrors(1); KEEP.append(g)
-            es = kept_veto(S, S["stage"][st], args.t0)
-            g.SetPoint(0, 100 * f, 100 * (es / np.sqrt(eb) - 1))
-            g.SetPointError(0, 100 * np.sqrt(max(f * (1 - f), 1e-12) / max(neff(s, m), 1)), 100 * es * 0.5 * eb ** -1.5 * eerr)
-            g.SetMarkerStyle(mk); g.SetMarkerSize(1.5); g.SetMarkerColor(ROOT.kBlack); g.SetLineColor(ROOT.kGray + 2)
-            g.Draw("P SAME")
-            if st == "+dphi": leg2.AddEntry(g, n, "p")
-    leg2.Draw()
-    ROOT.ATLASLabel(0.17, 0.88, "")
-    a = ROOT.TLatex(); a.SetNDC(); a.SetTextFont(42); a.SetTextSize(0.04); KEEP.append(a)
-    a.DrawLatex(0.31, 0.88, "Simulation Internal")
-    g2 = ROOT.TLatex(); g2.SetNDC(); g2.SetTextFont(42); g2.SetTextSize(0.028); g2.SetTextColor(ROOT.kGray + 2); KEEP.append(g2)
-    g2.DrawLatex(0.17, 0.84, "lines: #varepsilon_{S} in the SR; the test's response to PU / HS tagging jets from the signal")
-    g2.DrawLatex(0.17, 0.81, "points: each background directly (open: E_{T}^{miss} > 100 pair stage, filled: + fJVT, |#Delta#phi_{jj}| < 2)")
-    stem = f"{args.out}_breakeven"
-    c.Print(stem + ".pdf"); c.Print(stem + ".png")
-    print("wrote", stem + ".pdf / .png")

@@ -38,23 +38,30 @@ Tests, with the event veto (j1, j2 against t0 at --nsigma) and jet removal
 The signal (18k MC events in the SR) shows each cut's effect precisely; Z+jets
 and the multijet JZ slices within their statistics.
 
-S/sqrt(B) with the background measured in a set M (S always the signal in the SR):
-  event veto   eps_S(SR) / sqrt(eps_B(M))
-  jet removal  r_S(SR) / sqrt(r_B(M) T(M)), T(M) = r_S(SR) / r_S(M),
-the signal's removal transfer from M to the SR: the jet veto's rescue of events
-whose failing extra jet is removed, when M lacks the jet veto.
+S/sqrt(B) is only ever formed with S and B in the SAME set M:
+  event veto   eps_S(M) / sqrt(eps_B(M));   jet removal   r_S(M) / sqrt(r_B(M)).
+Nothing is transferred between sets. The jet veto's rescue of jet removal in the
+full SR (a removed out-of-time jet stops failing the extra-jet cuts) is therefore
+not in the minimal set's numbers; it is measured per sample, for the record.
+
+The break-even, also in the minimal set: the event veto keeps a background at
+eps_B = f (1 - c) + (1 - f)(1 - h), c the catch rate on pileup-tagged pairs and h
+the false-veto rate on the rest, both from the signal's own pairs there, so
+S/sqrt(B) rises when f > f* = (1 - h - eps_S^2) / (c - h).
 
     PYTHONNOUSERSITE=1 PYTHONPATH=/opt/homebrew/Cellar/root/6.40.04/lib/root \\
     ~/.venv-hgtd/bin/python python/vbs_sr_minimal.py \\
         --sig condor/vbf/vbf_sr_vbs_time_veto.root --zjets condor/zjets/zjets_sr_vbs_time_veto.root \\
-        --dijet condor/dijet/dijet_sr_vbs_time_veto.root --out figs/time_veto/srmin
+        --dijet condor/dijet/dijet_sr_vbs_time_veto.root --out figs/time_veto/srcuts
+(the minimal set's own figures, S and B both in it, are vbs_time_veto_sr.py --region minimal's)
 
-Writes <out>_summary.md.
+Writes <out>_summary.md and <out>_breakeven.(pdf|png).
 """
 import argparse, os
 import numpy as np
 import vbs_time_veto_common as C
-from vbf_hinv_sr import SIG, ZLL, MET_LO, MET_HI, MJJ_LOWBINS, load_samples, prepare, take, ratio
+import awkward as ak
+from vbf_hinv_sr import SIG, MET_LO, MET_HI, MJJ_LOWBINS, REGIONS, load_samples, prepare, take, ratio, sr_select
 
 GROUPS = [("fjvt", "fJVT on j1, j2"),
           ("dphi", "|dphi_jj| < 2"),
@@ -114,6 +121,10 @@ for name, s in samples.items():
     assert np.array_equal(passes(s["g"], KEYS), s["none"]["ok"]), name
     for src in C.T0_SRC:
         assert np.array_equal(passes(s["g_rm"][src], KEYS), s["out"][f"rm_{src}"]["ok"]), (name, src)
+    # and the default minimal set is vbf_hinv_sr's "minimal" region, which vbs_time_veto_sr.py --region uses
+    if MINIMAL == ["fjvt", "dphi"] and args.met_floor == REGIONS["minimal"]["met_floor"]:
+        assert np.array_equal(passes(s["g"], MINIMAL),
+                              sr_select(s, ak.ones_like(s["J"].jet_pt, dtype=bool), "minimal")["ok"]), name
     print(f"[{name}] {len(s['w']):,} candidates, E_T^miss floor {s['floor']:g} GeV, pair {int(s['g']['pair'].sum()):,}, "
           f"SR {int(s['none']['ok'].sum()):,}")
 S = samples[SIG]
@@ -138,7 +149,11 @@ def response(s, keys, src):
     m = passes(s["g"], keys)
     f, ferr = eff(s, m, s["pu_tag"])
     v, verr = eff(s, m, ~s["vetoed"][src])
-    r, rerr = ratio(s["w"], passes(s["g_rm"][src], keys), m) if m.any() else (np.nan, np.nan)
+    mr = passes(s["g_rm"][src], keys)
+    r, rerr = ratio(s["w"], mr, m) if m.any() else (np.nan, np.nan)
+    # the ratio's error (from the events removal changes) vanishes when it changes none of
+    # a few events: floor it at the Wilson error of the fraction it leaves unchanged
+    if m.any(): rerr = max(rerr, eff(s, m, mr)[1])
     return dict(n=int(m.sum()), neff=neff(s, m), f=f, ferr=ferr, v=v, verr=verr, r=r, rerr=rerr)
 
 
@@ -244,7 +259,8 @@ for name, s in samples.items():
 
 # the jet veto's rescue in jet removal, measured on each sample: r(M + jetveto) / r(M)
 md += ["", f"**The jet veto's removal transfer** r(M + jetveto) / r(M), measured on every sample ({args.t0} t0): "
-       "jet removal's S/sqrt(B) takes the signal's for the background.", "",
+       "the rescue jet removal gets from the jet veto in the full SR, which the minimal set does not include. "
+       "For the record only: no S/sqrt(B) below uses it.", "",
        "| sample | M | r(M) | MC in M + jetveto | r(M + jetveto) | transfer |", "|---|---|---|---|---|---|"]
 TRANSFER = {}
 for name, s in samples.items():
@@ -297,28 +313,101 @@ for name, s in samples.items():
                   f"| {fmt(r['v'], r['verr'], 3)} | {fmt(r['r'], r['rerr'], 3)} |")
     md.append("")
 
-# ── S/sqrt(B) with Z+jets measured in each set ───────────────────────────────
-Z = samples[ZLL]
-sr = KEYS
-md += ["**S/sqrt(B) relative to no timing, Z+jets measured in each set**: S is the signal in the full SR; "
-       "jet removal's B is r_B(M) x T(M), T(M) = r_S(SR) / r_S(M) from the signal. Errors: Z+jets MC statistics.", "",
-       "| B measured in | Z+jets MC | t0 | eps_B veto | S/sqrt(B) veto | r_B(M) | T(M) | S/sqrt(B) removal |",
-       "|---|---|---|---|---|---|---|---|"]
+# ── S/sqrt(B): S and B in the same set ───────────────────────────────────────
+def zchange(rs, rb, key):
+    """S/sqrt(B) relative to no timing for S and B measured in the same set, and its error"""
+    a, ea, b, eb = rs[key], rs[key + "err"], rb[key], rb[key + "err"]
+    if not (a > 0 and b > 0): return np.nan, np.nan
+    z = a / np.sqrt(b)
+    return z, z * np.hypot(ea / a, 0.5 * eb / b)
+
+
+md += ["", "**S/sqrt(B) relative to no timing, S and B in the same set** (errors: both samples' MC statistics; "
+       "the multijet slices each on their own, as their normalisations cancel within a slice)", "",
+       "| set | B | B MC | t0 | eps_S veto | eps_B veto | S/sqrt(B) veto | r_S removal | r_B removal | S/sqrt(B) removal |",
+       "|---|---|---|---|---|---|---|---|---|---|"]
 ZTAB = {}
 for keys in LADDER:
-    for src in C.T0_SRC:
-        rs, rb = response(S, sr, src), response(Z, keys, src)
-        T = rs["r"] / response(S, keys, src)["r"]
-        zv = rs["v"] / np.sqrt(rb["v"])
-        zv_err = 0.5 * zv * rb["verr"] / rb["v"]
-        zr = rs["r"] / np.sqrt(rb["r"] * T)
-        zr_err = 0.5 * zr * rb["rerr"] / rb["r"]
-        ZTAB[label(keys), src] = dict(zv=zv, zv_err=zv_err, zr=zr, zr_err=zr_err, n=rb["n"])
-        md.append(f"| {label(keys)}{' (minimal)' if keys == MINIMAL else ''} | {rb['n']} | {src} | {fmt(rb['v'], rb['verr'])} | {100 * (zv - 1):+.1f} +- "
-                  f"{100 * zv_err:.1f}% | {fmt(rb['r'], rb['rerr'])} | {T:.3f} | {100 * (zr - 1):+.1f} +- "
-                  f"{100 * zr_err:.1f}% |")
+    for name in BKG:
+        if not passes(samples[name]["g"], keys).any(): continue
+        for src in C.T0_SRC:
+            rs, rb = response(S, keys, src), response(samples[name], keys, src)
+            zv, zv_err = zchange(rs, rb, "v")
+            zr, zr_err = zchange(rs, rb, "r")
+            ZTAB[label(keys), name, src] = dict(zv=zv, zv_err=zv_err, zr=zr, zr_err=zr_err, n=rb["n"])
+            md.append(f"| {label(keys)}{' (minimal)' if keys == MINIMAL else ''} | {name} | {count(samples[name], passes(samples[name]['g'], keys))} "
+                      f"| {src} | {fmt(rs['v'], rs['verr'], 3)} | {fmt(rb['v'], rb['verr'])} | {100 * (zv - 1):+.1f} +- "
+                      f"{100 * zv_err:.1f}% | {fmt(rs['r'], rs['rerr'], 3)} | {fmt(rb['r'], rb['rerr'])} | "
+                      f"{100 * (zr - 1):+.1f} +- {100 * zr_err:.1f}% |")
+
+# ── Break-even in the minimal set ────────────────────────────────────────────
+M = passes(S["g"], MINIMAL)
+BE = {}
+for src in C.T0_SRC:
+    eS = eff(S, M, ~S["vetoed"][src])[0]
+    c = 1 - eff(S, M & S["pu_tag"], ~S["vetoed"][src])[0]
+    h = 1 - eff(S, M & ~S["pu_tag"], ~S["vetoed"][src])[0]
+    BE[src] = dict(eS=eS, c=c, h=h, fstar=(1 - h - eS ** 2) / (c - h) if c > h else np.nan)
+md += ["", f"**Break-even PU-tagged background share f\\*, in the minimal set** ({label(MINIMAL)}): eps_S, c and h "
+       "from the signal there; the event veto raises S/sqrt(B) for a background with f > f*.", "",
+       "| t0 | eps_S | c | h | f* |", "|---|---|---|---|---|"]
+md += [f"| {src} | {v['eS']:.3f} | {v['c']:.3f} | {v['h']:.3f} | {100 * v['fstar']:.0f}% |" for src, v in BE.items()]
+md += ["", "Each background's f in the minimal set: " + "; ".join(
+    f"{n} {fmt(*eff(samples[n], passes(samples[n]['g'], MINIMAL), samples[n]['pu_tag']))}"
+    for n in BKG if passes(samples[n]["g"], MINIMAL).any())]
 
 os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
 open(args.out + "_summary.md", "w").write("\n".join(md) + "\n")
 print("\n".join(md))
 print("wrote", args.out + "_summary.md")
+
+# ── Figure: the break-even curves and each background, all in the minimal set ─
+ROOT = C.setup_root(args.out)
+KEEP = C.KEEP
+c = ROOT.TCanvas("c_be", "", 800, 650); KEEP.append(c)
+c.SetLeftMargin(0.14); c.SetRightMargin(0.05)
+fr = ROOT.TH1D("fr_be", "", 10, 0.0, 100.0); KEEP.append(fr)
+fr.SetMinimum(-15); fr.SetMaximum(25)
+fr.GetXaxis().SetTitle("Background with a pileup tagging jet  f [%]")
+fr.GetYaxis().SetTitle("S/#sqrt{B} change, event veto [%]")
+fr.Draw("AXIS")
+zero = ROOT.TLine(0, 0, 100, 0); zero.SetLineStyle(2); zero.SetLineColor(ROOT.kGray + 1); zero.Draw(); KEEP.append(zero)
+leg = ROOT.TLegend(0.17, 0.60, 0.55, 0.78); ROOT.StyleLegend(leg, 0.03); KEEP.append(leg)
+fgrid = np.linspace(0.0, 1.0, 101)
+for src in ["trkptz", "waves", "hgtd", "truth"]:
+    v = BE[src]
+    z = 100 * (v["eS"] / np.sqrt(fgrid * (1 - v["c"]) + (1 - fgrid) * (1 - v["h"])) - 1)
+    g = ROOT.TGraph(len(fgrid), 100 * fgrid, z); KEEP.append(g)
+    lab, col, _ = C.STYLE[f"t0_{src}"]
+    g.SetLineColor(C.colour(col)); g.SetLineWidth(3); g.Draw("L SAME")
+    leg.AddEntry(g, lab.replace("Jet vs t_{0}: ", "t_{0}: ") + f"  (f* = {100 * v['fstar']:.0f}%)", "l")
+leg.Draw()
+# each background measured directly in the minimal set, with the signal's eps_S there (t0 = --t0)
+t0name = {"waves": "WAVeS", "trkptz": "TRKPTZ", "hgtd": "HGTD", "tzp": "TZP", "truth": "truth"}[args.t0]
+leg2 = ROOT.TLegend(0.56, 0.20, 0.93, 0.21 + 0.045 * (len(BKG) + 1)); ROOT.StyleLegend(leg2, 0.027); KEEP.append(leg2)
+leg2.SetHeader(f"measured, {t0name} t_{{0}}:", "")
+for k, n in enumerate(BKG):
+    s = samples[n]
+    m = passes(s["g"], MINIMAL)
+    if not m.any(): continue
+    f, _ = eff(s, m, s["pu_tag"])
+    eb, eerr = eff(s, m, ~s["vetoed"][args.t0])
+    if not eb > 0: continue
+    es = BE[args.t0]["eS"]
+    g = ROOT.TGraphErrors(1); KEEP.append(g)
+    g.SetPoint(0, 100 * f, 100 * (es / np.sqrt(eb) - 1))
+    g.SetPointError(0, 100 * np.sqrt(max(f * (1 - f), 1e-12) / max(neff(s, m), 1)), 100 * es * 0.5 * eb ** -1.5 * eerr)
+    g.SetMarkerStyle([20, 21, 22, 23, 33, 34][k % 6]); g.SetMarkerSize(1.5)
+    g.SetMarkerColor(ROOT.kBlack); g.SetLineColor(ROOT.kGray + 2)
+    g.Draw("P SAME")
+    leg2.AddEntry(g, f"{n}  ({count(s, m)} MC)", "p")
+leg2.Draw()
+ROOT.ATLASLabel(0.17, 0.88, "")
+a = ROOT.TLatex(); a.SetNDC(); a.SetTextFont(42); a.SetTextSize(0.04); KEEP.append(a)
+a.DrawLatex(0.31, 0.88, "Simulation Internal")
+g2 = ROOT.TLatex(); g2.SetNDC(); g2.SetTextFont(42); g2.SetTextSize(0.028); g2.SetTextColor(ROOT.kGray + 2); KEEP.append(g2)
+g2.DrawLatex(0.17, 0.84, "S and B both in the minimal set: SR pair, fJVT, |#Delta#phi_{jj}| < 2, E_{T}^{miss} > 100 GeV")
+g2.DrawLatex(0.17, 0.81, "lines: #varepsilon_{S}, and the test on pileup / hard-scatter tagging pairs, from the signal")
+stem = f"{args.out}_breakeven"
+c.Print(stem + ".pdf"); c.Print(stem + ".png")
+print("wrote", stem + ".pdf / .png")
