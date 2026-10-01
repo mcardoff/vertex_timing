@@ -66,7 +66,8 @@ vertex_timing/
 │   ├── vbs_time_veto.cxx         # Event-level timing veto on the VBS pair, jet vs jet against jet vs
 │   │                             #   t0: per selected event, both tests' INGREDIENTS (jet times, every
 │   │                             #   t0), the weight, truth MET / pT(ll). Write-up: results/vbs_time_veto.md.
-│   │                             #   --sr: VBF H->inv SR candidates instead, every jet + JVT/fJVT stored
+│   │                             #   --sr: VBF H->inv SR candidates instead, every jet + JVT/fJVT stored;
+│   │                             #   --sr-j1-pt/--sr-j2-pt lower the stored pair's pT (tagged sr_j1pt<v>_j2pt<v>)
 │   └── sweep_utilities.h         # Shared helpers for parameter-sweep executables (no sweep .cxx files currently present)
 ├── python/                        # Interactive/visualisation scripts (run from within this dir)
 │   ├── event_display.py          # Event visualisation — calls runHGTD_Clustering.cxx, produces 3-page PDF
@@ -84,7 +85,7 @@ vertex_timing/
 │   │                             #   S/sqrt(B), threshold trade-off, yield table (region-plot style)
 │   ├── vbs_time_veto_sr.py       # vbs_time_veto --sr outputs -> the same tests INSIDE the VBF H->inv SR
 │   │                             #   (ANA-EXOT-2020-11-INT1 emulated), event veto vs jet removal;
-│   │                             #   --region minimal: S and B both in the minimal set
+│   │                             #   --region minimal|relaxed: S and B both in that set
 │   ├── vbs_time_veto_common.py   # shared by the two: normalisation, jet-time calibration, figure layouts
 │   ├── vbf_hinv_sr.py            # the VBF H->inv SR selection + timing variants, shared by the SR scripts
 │   ├── vbs_hspu_study.py         # pileup-tagged (HS+PU) SR background: VBF, Z+jets, dijet (fake MET from jets)
@@ -426,6 +427,16 @@ primary workflow.
         - jet removal: 0.8 points more. Without the jet veto it is just the
           veto plus re-pairing.
       - At Run 2's f = 6-13% the event veto costs 3-4%.
+    - **Relaxed set** (2026-10-01, REGIONS["relaxed"]): the minimal set with
+      j1 > 40, j2 > 30 GeV and |m_ll - 91.2| < 40 GeV, on the `vbs_time_veto
+      --sr --sr-j1-pt=40 --sr-j2-pt=30` files (`sr_j1pt40p0_j2pt30p0`).
+      - Z+jets: 110 MC events.
+      - S/sqrt(B), S and B both in it: +2.0% WAVeS, +1.9% TZP, +2.2% truth,
+        +0.2% TRKPTZ, -2.8% HGTD (+-2.8%). Jet removal is the same.
+      - The added j2 < 50 GeV Z+jets pairs are 82% pileup-tagged, so f rises
+        31% -> 55%, and f* = 40%.
+      - Validated: under the 80/50 file's calibration (`--calib-file`), those
+        files reproduce the SR and minimal-set results exactly.
       - eps_B equals f x the signal's per-type response within 1 sigma. So
         the background MC is needed for f (and where its PU legs sit), not
         for the response.
