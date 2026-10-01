@@ -66,7 +66,7 @@ import numpy as np
 import uproot
 import awkward as ak
 import vbs_time_veto_common as C
-from vbf_hinv_sr import METHODS, REGIONS, load, take, sr_select, jet_sigma, outcomes, ratio
+from vbf_hinv_sr import METHODS, REGIONS, SR_J1_PT, SR_J2_PT, MZ_WIN, load, take, sr_select, jet_sigma, outcomes, ratio
 
 MJJ_EDGES = [800, 1000, 1500, 2000, 3500, 5000]     # the SR's m_jj bins; the last one includes the overflow
 SCAN = np.array([1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 8.0, 12.0])
@@ -94,7 +94,8 @@ ap.add_argument("--mjj-edges", default=",".join(str(x) for x in MJJ_EDGES),
 ap.add_argument("--out", required=True, help="output stem")
 args = ap.parse_args()
 REG = REGIONS[args.region]
-WHERE = {"sr": "in the SR", "minimal": "in the minimal set"}[args.region]
+WHERE = "in the SR" if args.region == "sr" else f"in the {args.region} set"
+J1, J2, ZW = REG.get("j1_pt", SR_J1_PT), REG.get("j2_pt", SR_J2_PT), REG.get("z_win", MZ_WIN)
 DRAWN = args.methods.split(",")
 for m in DRAWN:
     if m not in METHODS: raise SystemExit(f"unknown method {m}; choose from {METHODS}")
@@ -125,8 +126,8 @@ both = "bkg" in samples
 S_, B_ = samples["sig"], samples.get("bkg")
 md = [f"# VBS timing tests in the VBF H->inv SR ({args.region}): {os.path.basename(args.out)}", "",
       "ANA-EXOT-2020-11-INT1 Sec. 4.5.2 / 4.5.6 emulated (see the script's docstring for what is and is not). "
-      + ("" if args.region == "sr" else "S and B both in the minimal set: the SR's cuts below, without its E_T^miss "
-         "bins, E_T^jet and jet veto. ") +
+      + ("" if args.region == "sr" else f"S and B both in the {args.region} set: the SR's cuts below (thresholds "
+         "as listed), without its E_T^miss bins, E_T^jet and jet veto. ") +
       f"Timing test at {args.nsigma:g} sigma; a jet is timed with >= {args.min_trk} track(s); jet-time sigma "
       f"{calib.md()}; yields at {args.lumi:g} fb^-1.", ""]
 for s in samples.values():
@@ -140,8 +141,9 @@ md += ["", f"**Cut flow {WHERE} without timing** (cumulative; MC events and the 
 masks = {r: np.ones(len(s["w"]), bool) for r, s in samples.items()}
 rows = ([(f"E_T^miss > {REG['met_floor']:g} GeV", {r: s["met"] >= REG["met_floor"] for r, s in samples.items()})]
         if REG["met_floor"] is not None else [])
-rows += [(n, {r: dict(s["none"]["steps"]).get(n) for r, s in samples.items()})
-         for n, _ in (B_ or S_)["none"]["steps"] if REG["steps"] is None or n in REG["steps"]]
+rows += [(label, {r: s["none"]["flags"].get(k) for r, s in samples.items()})
+         for k, (label, _) in zip((B_ or S_)["none"]["keys"], (B_ or S_)["none"]["steps"])
+         if REG["cuts"] is None or k in REG["cuts"]]
 for name, flags in rows:
     cells = []
     for r, s in samples.items():
@@ -210,11 +212,11 @@ print("wrote", args.out + "_summary.md")
 # ── Figures ──────────────────────────────────────────────────────────────────
 ROOT = C.setup_root(args.out)
 JDR, JCUT = S_["info"]["jet_time_dr"], S_["info"]["jet_time_dist_cut"]
-SEL1 = (("SR" if args.region == "sr" else "SR pair") + ": j_{1,2} > 80, 50 GeV, #eta_{1}#eta_{2} < 0, "
+SEL1 = (("SR" if args.region == "sr" else "SR pair") + f": j_{{1,2}} > {J1:g}, {J2:g} GeV, #eta_{{1}}#eta_{{2}} < 0, "
         "|#Delta#eta_{jj}| > 3.8, m_{jj} > 0.8 TeV, |#Delta#phi_{jj}| < 2")
 SEL2 = ("2-4 jets > 25 GeV (JVT), j_{3,4}: C < 0.6, m_{rel} < 0.05; fJVT on j_{1,2}; E_{T}^{jet} > 140 GeV"
         if args.region == "sr" else
-        "fJVT on j_{1,2};  minimal set: no jet veto, no E_{T}^{jet} cut, no E_{T}^{miss} bins")
+        f"fJVT on j_{{1,2}};  {args.region} set: no jet veto, no E_{{T}}^{{jet}} cut, no E_{{T}}^{{miss}} bins")
 TIMING = (f"timing |#Deltat| / #sigma #geq {args.nsigma:g}: filled = event veto on j_{{1,2}}, "
           "open = failing jets removed first")
 CALIB = (f"#sigma_{{jet}} #times {calib.fac[0]:.2f} (1 track) #rightarrow {calib.fac[-1]:.2f} "
@@ -222,8 +224,9 @@ CALIB = (f"#sigma_{{jet}} #times {calib.fac[0]:.2f} (1 track) #rightarrow {calib
 
 
 def met_line(role):
-    if args.region == "minimal":
-        return "E_{T}^{miss,truth} > 100 GeV" if role == "sig" else "p_{T}^{ll} > 100 GeV; |m_{ll} - m_{Z}| < 25 GeV"
+    if args.region != "sr":
+        return ("E_{T}^{miss,truth} > 100 GeV" if role == "sig" else
+                f"p_{{T}}^{{ll}} > 100 GeV; |m_{{ll}} - m_{{Z}}| < {ZW:g} GeV")
     if role == "sig": return "E_{T}^{miss,truth} > 200 GeV, or 160-200 GeV with 2 jets and m_{jj} > 1.5 TeV"
     return "p_{T}^{ll} > 200 GeV, or 160-200 GeV with 2 jets and m_{jj} > 1.5 TeV; |m_{ll} - m_{Z}| < 25 GeV"
 
@@ -299,7 +302,7 @@ if both:
           for m in DRAWN}
     C.roc_figure(f"{args.out}_tradeoff", xy, DRAWN, STYLE, i3,
                  [("VBF H#rightarrowinv. SR (ANA-EXOT-2020-11 selection)" if args.region == "sr" else
-                   "VBF H#rightarrowinv. SR pair, minimal set") + ", S: VBF H#rightarrowinv., B: Z(#rightarrowll)+jets",
+                   f"VBF H#rightarrowinv. SR pair, {args.region} set") + ", S: VBF H#rightarrowinv., B: Z(#rightarrowll)+jets",
                   f"threshold scanned {SCAN[0]:g}-{SCAN[-1]:g}#sigma; large markers at {args.nsigma:g}#sigma; "
                   "dashed: failing jets removed first"],
                  "Signal yield / no timing", "Background rejection vs no timing",

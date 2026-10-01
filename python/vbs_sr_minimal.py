@@ -21,8 +21,8 @@ The SR's cuts, in groups (the tagging pair: the two leading JVT-passing jets
   etjet    E_T^jet,no-jvt > 140 GeV
   jetveto  2-4 jets; j3, j4: C < 0.6 and m_rel < 0.05; with 3-4 jets, E_T^miss >
            200 GeV and m_jj > 1.5 TeV (the 3-4 jet SR bins)
-All six together are exactly the SR: checked against sr_select's decision for
-every sample and every timing variant.
+All six together are exactly the SR (at the region's thresholds): checked against
+sr_select's cut flags for every sample and every timing variant.
 
 Tests, with the event veto (j1, j2 against t0 at --nsigma) and jet removal
 (failing jets removed, the selection re-run):
@@ -55,13 +55,18 @@ S/sqrt(B) rises when f > f* = (1 - h - eps_S^2) / (c - h).
         --dijet condor/dijet/dijet_sr_vbs_time_veto.root --out figs/time_veto/srcuts
 (the minimal set's own figures, S and B both in it, are vbs_time_veto_sr.py --region minimal's)
 
+--region relaxed runs every test on the relaxed set instead (vbf_hinv_sr.py's REGIONS):
+j1 > 40, j2 > 30 GeV and |m_ll - 91.2| < 40 GeV, on the vbs_time_veto --sr-j1-pt=40
+--sr-j2-pt=30 outputs. Its splits then include the SR's own thresholds (j1 > 80, j2 > 50
+GeV, the 25 GeV Z window): whether the events the relaxation adds respond like the rest.
+
 Writes <out>_summary.md and <out>_breakeven.(pdf|png).
 """
 import argparse, os
 import numpy as np
 import vbs_time_veto_common as C
-import awkward as ak
-from vbf_hinv_sr import SIG, MET_LO, MET_HI, MJJ_LOWBINS, REGIONS, load_samples, prepare, take, ratio, sr_select
+from vbf_hinv_sr import (SIG, MET_LO, MET_HI, MJJ_LOWBINS, MZ, MZ_WIN, SR_J1_PT, SR_J2_PT, REGIONS,
+                         load_samples, prepare, take, ratio)
 
 GROUPS = [("fjvt", "fJVT on j1, j2"),
           ("dphi", "|dphi_jj| < 2"),
@@ -80,28 +85,31 @@ ap.add_argument("--nsigma", type=float, default=3.0)
 ap.add_argument("--min-trk", type=int, default=1)
 ap.add_argument("--t0", default="waves", choices=C.T0_SRC, help="the t0 of the per-cut tables")
 ap.add_argument("--minimal", default="fjvt,dphi", help="the groups the minimal set keeps besides the pair")
-ap.add_argument("--met-floor", type=float, default=100.0,
-                help="E_T^miss floor of the pair (a sample's own ntuple floor applies if higher)")
+ap.add_argument("--region", default="minimal", choices=["minimal", "relaxed"],
+                help="the pair's thresholds (vbf_hinv_sr.py's REGIONS): the SR's, or the relaxed set's")
+ap.add_argument("--met-floor", type=float, default=None,
+                help="E_T^miss floor of the pair (default: the region's; a sample's own ntuple floor applies if higher)")
 ap.add_argument("--out", required=True)
 args = ap.parse_args()
+REG = REGIONS[args.region]
+if args.met_floor is None: args.met_floor = REG["met_floor"]
+J1, J2, ZW = REG.get("j1_pt", SR_J1_PT), REG.get("j2_pt", SR_J2_PT), REG.get("z_win", MZ_WIN)
 MINIMAL = [k for k in KEYS if k in args.minimal.split(",")]
 DROPPED = [k for k in KEYS if k not in MINIMAL]
 
 
 def groups(sel, s):
     """per-event pass flags of each cut group, for one selection (none or a removal)"""
-    st = dict(sel["steps"])
+    fl = sel["flags"]   # at the region's thresholds
     n, met = sel["n"], s["met"]
     with np.errstate(invalid="ignore"):
         wide = sel["mjj_raw"] >= MJJ_LOWBINS
-    return {"pair": st["j1 > 80, j2 > 50 GeV"] & st["eta1 eta2 < 0, |deta_jj| > 3.8"] & st["m_jj > 800 GeV"] & s["zwin"]
-                    & (met >= args.met_floor),
-            "fjvt": st["fJVT on j1, j2"],
-            "dphi": st["|dphi_jj| < 2"],
+    return {"pair": fl["pt"] & fl["deta"] & fl["mjj"] & fl.get("zwin", True) & (met >= args.met_floor),
+            "fjvt": fl["fjvt"],
+            "dphi": fl["dphi"],
             "met": (met > MET_HI) | ((met > MET_LO) & wide),
-            "etjet": st["E_T^jet,no-jvt > 140 GeV"],
-            "jetveto": st["2-4 jets > 25 GeV (JVT)"] & st["j3, j4: C < 0.6, m_rel < 0.05"]
-                       & ((n == 2) | ((met > MET_HI) & wide))}
+            "etjet": fl["etjet"],
+            "jetveto": fl["njet"] & fl["extra"] & ((n == 2) | ((met > MET_HI) & wide))}
 
 
 def passes(g, keys):
@@ -114,17 +122,17 @@ samples = load_samples(args.sig, args.zjets, args.dijet, args.slices)
 calib = C.measure(samples[SIG]["e"], True, "the VBF file's HS legs")
 for name, s in samples.items():
     s["floor"] = max(args.met_floor, s["info"]["sr_recoil_min"])
-    prepare(s, calib, args.nsigma, args.min_trk)
+    prepare(s, calib, args.nsigma, args.min_trk, args.region)
     s["g"] = groups(s["none"], s)
     s["g_rm"] = {src: groups(s["out"][f"rm_{src}"], s) for src in C.T0_SRC}
-    # the decomposition must be the SR exactly, with and without timing
-    assert np.array_equal(passes(s["g"], KEYS), s["none"]["ok"]), name
+    # the decomposition must be every SR cut (at the region's thresholds) exactly, with and without timing
+    every = lambda sel: np.logical_and.reduce(list(sel["flags"].values())) & (s["met"] >= args.met_floor)
+    assert np.array_equal(passes(s["g"], KEYS), every(s["none"])), name
     for src in C.T0_SRC:
-        assert np.array_equal(passes(s["g_rm"][src], KEYS), s["out"][f"rm_{src}"]["ok"]), (name, src)
-    # and the default minimal set is vbf_hinv_sr's "minimal" region, which vbs_time_veto_sr.py --region uses
-    if MINIMAL == ["fjvt", "dphi"] and args.met_floor == REGIONS["minimal"]["met_floor"]:
-        assert np.array_equal(passes(s["g"], MINIMAL),
-                              sr_select(s, ak.ones_like(s["J"].jet_pt, dtype=bool), "minimal")["ok"]), name
+        assert np.array_equal(passes(s["g_rm"][src], KEYS), every(s["out"][f"rm_{src}"])), (name, src)
+    # and the default minimal set is the region's selection, which vbs_time_veto_sr.py --region uses
+    if MINIMAL == ["fjvt", "dphi"] and args.met_floor == REG["met_floor"]:
+        assert np.array_equal(passes(s["g"], MINIMAL), s["none"]["ok"]), name
     print(f"[{name}] {len(s['w']):,} candidates, E_T^miss floor {s['floor']:g} GeV, pair {int(s['g']['pair'].sum()):,}, "
           f"SR {int(s['none']['ok'].sum()):,}")
 S = samples[SIG]
@@ -183,8 +191,9 @@ for name, s in samples.items():
 md += ["", "**The SR's cuts.** `pair` is always applied (the ntuple keeps only events with such a pair among all "
        "jets, above its E_T^miss floor); the other groups together with it are exactly the SR.", "",
        "| group | cuts |", "|---|---|",
-       "| pair | j1 > 80, j2 > 50 GeV (the two leading JVT-passing jets > 25 GeV); eta1 eta2 < 0, |deta_jj| > 3.8; "
-       "m_jj > 800 GeV; Z+jets: |m_ll - 91.2| < 25 GeV; E_T^miss above the floor (per sample, above) |"]
+       f"| pair | j1 > {J1:g}, j2 > {J2:g} GeV (the two leading JVT-passing jets > 25 GeV); eta1 eta2 < 0, "
+       f"|deta_jj| > 3.8; m_jj > 800 GeV; Z+jets: |m_ll - 91.2| < {ZW:g} GeV; E_T^miss above the floor "
+       "(per sample, above) |"]
 md += [f"| {k} | {t} |" for k, t in GROUPS]
 
 # ── MC events per set ────────────────────────────────────────────────────────
@@ -239,8 +248,16 @@ for name, s in samples.items():
     with np.errstate(invalid="ignore"):
         pv = [("m_jj > 1.5 TeV", s["none"]["mjj_raw"] > 1500.0),
               ("|deta_jj| > 5", np.abs(take(J.jet_eta, i1) - take(J.jet_eta, i2)) > 5.0),
-              ("j2 > 80 GeV", take(J.jet_pt, i2) > 80.0),
               ("E_T^miss > 200 GeV", s["met"] > MET_HI)]
+        if J2 < SR_J2_PT:   # relaxed: do the events below the SR's own thresholds respond like the rest?
+            pv += [(f"j1 > {SR_J1_PT:g} GeV", take(J.jet_pt, i1) > SR_J1_PT),
+                   (f"j2 > {SR_J2_PT:g} GeV", take(J.jet_pt, i2) > SR_J2_PT),
+                   (f"j1 > {SR_J1_PT:g} and j2 > {SR_J2_PT:g} GeV",
+                    (take(J.jet_pt, i1) > SR_J1_PT) & (take(J.jet_pt, i2) > SR_J2_PT))]
+        else:
+            pv += [("j2 > 80 GeV", take(J.jet_pt, i2) > 80.0)]
+        if s["zll"] and ZW > MZ_WIN:
+            pv += [(f"|m_ll - 91.2| < {MZ_WIN:g} GeV", np.abs(s["e"]["z_mass"] - MZ) < MZ_WIN)]
     md += [f"| {name} | {lab} | " + split(s, passes(s["g"], MINIMAL), flag) for lab, flag in pv]
 
 # E_T^miss binned on the minimal set: whether the floor could go lower (a file with a
@@ -406,7 +423,8 @@ ROOT.ATLASLabel(0.17, 0.88, "")
 a = ROOT.TLatex(); a.SetNDC(); a.SetTextFont(42); a.SetTextSize(0.04); KEEP.append(a)
 a.DrawLatex(0.31, 0.88, "Simulation Internal")
 g2 = ROOT.TLatex(); g2.SetNDC(); g2.SetTextFont(42); g2.SetTextSize(0.028); g2.SetTextColor(ROOT.kGray + 2); KEEP.append(g2)
-g2.DrawLatex(0.17, 0.84, "S and B both in the minimal set: SR pair, fJVT, |#Delta#phi_{jj}| < 2, E_{T}^{miss} > 100 GeV")
+g2.DrawLatex(0.17, 0.84, f"S and B both in the {args.region} set: SR pair (j_{{1,2}} > {J1:g}, {J2:g} GeV), fJVT, "
+             f"|#Delta#phi_{{jj}}| < 2, E_{{T}}^{{miss}} > {args.met_floor:g} GeV")
 g2.DrawLatex(0.17, 0.81, "lines: #varepsilon_{S}, and the test on pileup / hard-scatter tagging pairs, from the signal")
 stem = f"{args.out}_breakeven"
 c.Print(stem + ".pdf"); c.Print(stem + ".png")

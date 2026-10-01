@@ -26,13 +26,18 @@ SR_MJJ3 = [1500.0, 2000.0, 3500.0]                  # 3-4 jets, and 2 jets at 16
 
 METHODS = ["jj"] + [f"t0_{s}" for s in C.T0_SRC] + [f"rm_{s}" for s in C.T0_SRC]
 # The selection a timing variant is measured in; S and B are always measured in the SAME one.
-#   sr       the full SR: every cut sr_select lists
+# Each lists the cuts it applies (sr_select's keys; None: all of them) and any threshold it
+# moves from the SR's:
+#   sr       the full SR
 #   minimal  only the cuts the background's timing response depends on (python/vbs_sr_minimal.py):
 #            the tagging pair, fJVT on it, |dphi_jj| < 2, E_T^miss > 100 GeV, the Z window
-REGIONS = {"sr": dict(steps=None, met_floor=None),
-           "minimal": dict(steps=["j1 > 80, j2 > 50 GeV", "fJVT on j1, j2", "|dphi_jj| < 2",
-                                  "eta1 eta2 < 0, |deta_jj| > 3.8", "m_jj > 800 GeV", "|m_ll - 91.2| < 25 GeV"],
-                           met_floor=100.0)}
+#   relaxed  the minimal set with a softer pair, j1 > 40 and j2 > 30 GeV, and a wider Z window,
+#            |m_ll - 91.2| < 40 GeV. Needs the vbs_time_veto --sr --sr-j1-pt=40 --sr-j2-pt=30
+#            outputs: the standard ones only hold events with an 80 / 50 GeV pair
+MINIMAL_CUTS = ["pt", "fjvt", "dphi", "deta", "mjj", "zwin"]
+REGIONS = {"sr": dict(cuts=None, met_floor=None),
+           "minimal": dict(cuts=MINIMAL_CUTS, met_floor=100.0),
+           "relaxed": dict(cuts=MINIMAL_CUTS, met_floor=100.0, j1_pt=40.0, j2_pt=30.0, z_win=40.0)}
 SIG, ZLL = "VBF H#rightarrowinv.", "Z(#rightarrowll)+jets"
 JZ_RE = re.compile(r"\.(8011\d\d)\.Py8EG_A14NNPDF23LO_jj_(JZ\d)\.")
 
@@ -46,6 +51,10 @@ def load(path, role, norm, rcol, zll):
     info = {k: meta[k].sum() for k in ["n_read", "n_selected", "sumw_read"]}
     for k in ["leg_jvt_rpt_min", "sr_recoil_min", "jet_time_dr", "jet_time_dist_cut"]:
         u = np.unique(meta[k])
+        if len(u) != 1: raise SystemExit(f"{path}: meta {k} differs between merged jobs: {u}")
+        info[k] = u[0]
+    for k, default in [("sr_j1_pt", SR_J1_PT), ("sr_j2_pt", SR_J2_PT)]:   # the could-be pair's thresholds
+        u = np.unique(meta[k]) if k in meta else np.array([default])
         if len(u) != 1: raise SystemExit(f"{path}: meta {k} differs between merged jobs: {u}")
         info[k] = u[0]
     info["sample"], info["njobs"] = str(meta["sample"][0]), len(meta["n_read"])
@@ -121,9 +130,17 @@ def sr_bin(n, met, mjj, dphi):
 
 
 def sr_select(s, keep, region="sr"):
-    """The SR on the jets with `keep`. Returns every cut's flag (in the cut-flow
-    order), the pass flag of `region` (REGIONS), the SR bin, m_jj and the j1 / j2
-    indices."""
+    """The SR on the jets with `keep`, at `region`'s thresholds (REGIONS). Returns
+    every cut as (label, flag) in the cut-flow order, the same flags by key, the
+    pass flag of `region`, the SR bin, m_jj and the j1 / j2 indices."""
+    R = REGIONS[region]
+    j1pt, j2pt, zw = R.get("j1_pt", SR_J1_PT), R.get("j2_pt", SR_J2_PT), R.get("z_win", MZ_WIN)
+    i = s["info"]
+    if j1pt < i["sr_j1_pt"] or j2pt < i["sr_j2_pt"] or (R["met_floor"] or np.inf) < i["sr_recoil_min"]:
+        raise SystemExit(f"{s['path']}: region {region} needs j1 > {j1pt:g}, j2 > {j2pt:g} GeV, E_T^miss > "
+                         f"{R['met_floor']} GeV, but the file only holds events with a {i['sr_j1_pt']:g} / "
+                         f"{i['sr_j2_pt']:g} GeV pair above {i['sr_recoil_min']:g} GeV (vbs_time_veto "
+                         "--sr-j1-pt / --sr-j2-pt / --sr-recoil-min)")
     J, met = s["J"], s["met"]
     cnt = keep & s["jvt_ok"] & (J.jet_pt > SR_JET_PT)
     loc = ak.local_index(J.jet_pt)[cnt]                # stored jets are pT-ordered
@@ -149,24 +166,24 @@ def sr_select(s, keep, region="sr"):
                           np.sqrt(np.maximum(m2(A(pt2), A(e2), A(f2), xpt, xeta, xphi), 0.0))) / A(mjj)
         extra_ok = ak.to_numpy(ak.all((cen < SR_CEN) & (mrel < SR_MREL), axis=1))
     bins = sr_bin(n, met, mjj, dphi)
-    steps = [("E_T^miss > 160 GeV", met > MET_LO),
-             ("2-4 jets > 25 GeV (JVT)", (n >= 2) & (n <= 4)),
-             ("j1 > 80, j2 > 50 GeV", has2 & (pt1 > SR_J1_PT) & (pt2 > SR_J2_PT)),
-             ("fJVT on j1, j2", fj_ok),
-             ("j3, j4: C < 0.6, m_rel < 0.05", extra_ok),
-             ("E_T^jet,no-jvt > 140 GeV", s["etjet"] > SR_ETJET),
-             ("|dphi_jj| < 2", dphi < SR_DPHI),
-             ("eta1 eta2 < 0, |deta_jj| > 3.8", (e1 * e2 < 0) & (np.abs(e1 - e2) > SR_DETA)),
-             ("m_jj > 800 GeV", mjj > SR_MJJ),
-             ("in an SR bin (E_T^miss / N_jet / m_jj)", bins > 0)]
-    if s["zll"]: steps.append(("|m_ll - 91.2| < 25 GeV", s["zwin"]))
-    R = REGIONS[region]
+    named = [("met160", f"E_T^miss > {MET_LO:g} GeV", met > MET_LO),
+             ("njet", "2-4 jets > 25 GeV (JVT)", (n >= 2) & (n <= 4)),
+             ("pt", f"j1 > {j1pt:g}, j2 > {j2pt:g} GeV", has2 & (pt1 > j1pt) & (pt2 > j2pt)),
+             ("fjvt", "fJVT on j1, j2", fj_ok),
+             ("extra", "j3, j4: C < 0.6, m_rel < 0.05", extra_ok),
+             ("etjet", "E_T^jet,no-jvt > 140 GeV", s["etjet"] > SR_ETJET),
+             ("dphi", "|dphi_jj| < 2", dphi < SR_DPHI),
+             ("deta", "eta1 eta2 < 0, |deta_jj| > 3.8", (e1 * e2 < 0) & (np.abs(e1 - e2) > SR_DETA)),
+             ("mjj", "m_jj > 800 GeV", mjj > SR_MJJ),
+             ("bins", "in an SR bin (E_T^miss / N_jet / m_jj)", bins > 0)]
+    if s["zll"]: named.append(("zwin", f"|m_ll - 91.2| < {zw:g} GeV", np.abs(s["e"]["z_mass"] - MZ) < zw))
     ok = np.ones(len(n), bool)
-    for name, f in steps:
-        if R["steps"] is None or name in R["steps"]: ok = ok & f
+    for k, _, f in named:
+        if R["cuts"] is None or k in R["cuts"]: ok = ok & f
     if R["met_floor"] is not None: ok = ok & (met >= R["met_floor"])
-    return dict(steps=steps, ok=ok, bin=np.where(ok, bins, 0), mjj=np.where(ok, mjj, np.nan), i1=i1, i2=i2,
-                n=n, mjj_raw=mjj)
+    return dict(steps=[(label, f) for _, label, f in named], keys=[k for k, _, _ in named],
+                flags={k: f for k, _, f in named}, ok=ok, bin=np.where(ok, bins, 0),
+                mjj=np.where(ok, mjj, np.nan), i1=i1, i2=i2, n=n, mjj_raw=mjj)
 
 
 # ── Timing ───────────────────────────────────────────────────────────────────
