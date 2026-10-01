@@ -82,7 +82,8 @@
 //   * events that COULD enter the SR under any tagging or jet removal: some
 //     jet pair with pT > 80 / 50 GeV, opposite hemispheres, |Deta| > 3.8 and
 //     m_jj > 800 GeV, among ALL jets (no JVT). A removal never adds a jet, so
-//     the SR pair of any variant is such a pair;
+//     the SR pair of any variant is such a pair. --sr-j1-pt / --sr-j2-pt lower
+//     the two thresholds for a looser offline set (tagged sr_j1pt<v>_j2pt<v>);
 //   * the jet_* arrays hold EVERY jet not removed by the lepton overlap
 //     removal (the ntuple's >= 20 GeV, |eta| < 4.5), with the in-code JVT R_pT
 //     and fJVT (src/jet_tagging.h) and their windows, for the jet counting
@@ -148,8 +149,8 @@ constexpr double T0_ASSOC_NSIGMA = 2.5;
 
 // --sr: the SR's tagging-pair requirements (ANA-EXOT-2020-11-INT1 Sec. 4.5.2),
 // used here only to keep the events that could pass them.
-constexpr double SR_J1_PT     = 80.0;   // leading jet pT
-constexpr double SR_J2_PT     = 50.0;   // sub-leading jet pT
+constexpr double SR_J1_PT     = 80.0;   // leading jet pT     (--sr-j1-pt to loosen; tagged sr_j1pt<v>)
+constexpr double SR_J2_PT     = 50.0;   // sub-leading jet pT (--sr-j2-pt to loosen; tagged sr_j2pt<v>)
 constexpr double SR_DETA      = 3.8;    // tagging-pair |Deta|
 constexpr double SR_MJJ       = 800.0;  // tagging-pair m_jj
 constexpr double SR_JET_PT    = 25.0;   // jet counting, and the tagging-pair candidates
@@ -321,11 +322,14 @@ int main(int argc, char** argv) {
   std::string outOverride;
   bool srMode = false, srMetJets = false;
   float srRecoilMin = SR_RECOIL_MIN_DEFAULT;
+  double srJ1Pt = SR_J1_PT, srJ2Pt = SR_J2_PT;   // the could-be-SR pair's pT thresholds
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
     if (a.rfind("--out=", 0) == 0) outOverride = a.substr(6);
     if (a == "--sr") srMode = true;
     if (a.rfind("--sr-recoil-min=", 0) == 0) srRecoilMin = std::stof(a.substr(16));
+    if (a.rfind("--sr-j1-pt=", 0) == 0) srJ1Pt = std::stod(a.substr(11));
+    if (a.rfind("--sr-j2-pt=", 0) == 0) srJ2Pt = std::stod(a.substr(11));
     if (a.rfind("--sr-met=", 0) == 0) {
       const std::string v = a.substr(9);
       if (v != "jets" && v != "truth") { std::cerr << "[veto] " << a << ": jets | truth\n"; return 1; }
@@ -354,13 +358,21 @@ int main(int argc, char** argv) {
     }
     EXTENDED_BRANCHES = true;
     SELECTION_TAG = "sr";
-    // A different floor is a different candidate set: tagged, so it cannot overwrite the standard one.
-    if (srRecoilMin != SR_RECOIL_MIN_DEFAULT) {
+    // A different floor or pair threshold is a different candidate set: tagged, so it
+    // cannot overwrite the standard one.
+    auto addTag = [](const char* label, double v) {
       std::ostringstream os;
-      os << "_rec" << std::fixed << std::setprecision(1) << srRecoilMin;
+      os << "_" << label << std::fixed << std::setprecision(1) << v;
       std::string tag = os.str();
       std::replace(tag.begin(), tag.end(), '.', 'p');
       SELECTION_TAG += tag;
+    };
+    if (srRecoilMin != SR_RECOIL_MIN_DEFAULT) addTag("rec", srRecoilMin);
+    if (srJ1Pt != SR_J1_PT) addTag("j1pt", srJ1Pt);
+    if (srJ2Pt != SR_J2_PT) addTag("j2pt", srJ2Pt);
+    if (srJ2Pt <= SR_JET_PT || srJ1Pt < srJ2Pt) {
+      std::cerr << "[veto] --sr-j1-pt >= --sr-j2-pt > " << SR_JET_PT << " GeV (the jet counting threshold)\n";
+      return 1;
     }
   }
   const Inflation INFL = inflationFor(SAMPLE_NAME);
@@ -371,7 +383,7 @@ int main(int argc, char** argv) {
                                             : boost::filesystem::path(outPath).parent_path());
   std::cout << "[veto] sample=" << (SAMPLE_NAME.empty() ? "local" : SAMPLE_NAME);
   if (srMode)
-    std::cout << " --sr: VBF H->inv SR candidates (a pair > " << SR_J1_PT << "/" << SR_J2_PT << " GeV, opposite "
+    std::cout << " --sr: VBF H->inv SR candidates (a pair > " << srJ1Pt << "/" << srJ2Pt << " GeV, opposite "
               << "hemispheres, |Deta| > " << SR_DETA << ", m_jj > " << SR_MJJ << "), "
               << (srMetJets ? "jet-based E_T^miss" : "recoil") << " >= " << srRecoilMin << " GeV, every jet stored";
   else
@@ -589,10 +601,10 @@ int main(int argc, char** argv) {
       bool could = false;
       for (size_t x = 0; x < passPtIdx.size() && !could; ++x) {
         const int i = passPtIdx[x];
-        if (branch.topoJetPt[i] <= SR_J1_PT) break;   // sorted: no harder jet follows
+        if (branch.topoJetPt[i] <= srJ1Pt) break;   // sorted: no harder jet follows
         for (int k : passPtIdx) {
           const double ei = branch.topoJetEta[i], ek = branch.topoJetEta[k];
-          if (k == i || branch.topoJetPt[k] <= SR_J2_PT || ei * ek >= 0.0 || std::abs(ei - ek) <= SR_DETA) continue;
+          if (k == i || branch.topoJetPt[k] <= srJ2Pt || ei * ek >= 0.0 || std::abs(ei - ek) <= SR_DETA) continue;
           if (mass(i, k) > SR_MJJ) { could = true; break; }
         }
       }
@@ -770,6 +782,8 @@ int main(int argc, char** argv) {
     // n_pass_jets = past the recoil floor; n_pass_tagger = n_pass_pair = n_selected = SR candidates
     meta.Branch("sr_mode", &srFlag, "sr_mode/O");
     meta.Branch("sr_recoil_min", &srRecoil, "sr_recoil_min/D");
+    meta.Branch("sr_j1_pt", &srJ1Pt, "sr_j1_pt/D");   // the could-be pair's thresholds
+    meta.Branch("sr_j2_pt", &srJ2Pt, "sr_j2_pt/D");
     meta.Branch("sr_met_jets", &srJetsFlag, "sr_met_jets/O");   // the floor was on met_jets
     meta.Branch("leg_jvt_rpt_min", &legRptMin, "leg_jvt_rpt_min/D");
   }
