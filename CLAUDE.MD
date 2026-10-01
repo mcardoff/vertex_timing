@@ -83,7 +83,8 @@ vertex_timing/
 │   ├── vbs_time_veto_plot.py     # vbs_time_veto outputs -> weighted S/B efficiency vs m_jj per veto,
 │   │                             #   S/sqrt(B), threshold trade-off, yield table (region-plot style)
 │   ├── vbs_time_veto_sr.py       # vbs_time_veto --sr outputs -> the same tests INSIDE the VBF H->inv SR
-│   │                             #   (ANA-EXOT-2020-11-INT1 emulated), event veto vs jet removal
+│   │                             #   (ANA-EXOT-2020-11-INT1 emulated), event veto vs jet removal;
+│   │                             #   --region minimal: S and B both in the minimal set
 │   ├── vbs_time_veto_common.py   # shared by the two: normalisation, jet-time calibration, figure layouts
 │   ├── vbf_hinv_sr.py            # the VBF H->inv SR selection + timing variants, shared by the SR scripts
 │   ├── vbs_hspu_study.py         # pileup-tagged (HS+PU) SR background: VBF, Z+jets, dijet (fake MET from jets)
@@ -394,17 +395,17 @@ primary workflow.
       - Of the PU tagging jets, 1/3-1/2 lie beyond |eta| 4. The t0 test
         catches ~2/3 of those in HGTD.
       - **The event veto pays when the pileup-tagged background share f
-        exceeds f* ~ 20%** (WAVeS/truth; TRKPTZ 23%, HGTD 33%). The
-        direct per-sample points sit on that model.
+        exceeds f* ~ 30%.** That is with eps_S, c and h all in the minimal
+        set: WAVeS 31%, truth 30%, TRKPTZ 35%, HGTD 47%. An earlier 20%
+        mixed selections (eps_S from the full SR, c and h at the pair
+        stage).
       - Our Z+jets at 34-44% overstates f (Powheg DY). Run 2 measured
         6-13%.
-    - **SR background, estimated** (vbs_hspu_study.py). Start from Z+jets at
-      +dphi, the stage before the jet veto (32 events). The event-veto kept
-      fraction carries over; jet removal's is x R, the signal's jet-veto
-      rescue (1.12).
-      - S/sqrt(B): event veto +3 to +5%; **jet removal +10 to +12%**
-        (TRKPTZ/WAVeS, +-5% stat). Jet removal wins in the SR.
-      - At f = 15% the veto gives -1% and removal +5%.
+    - **WITHDRAWN 2026-10-01: the "SR background, estimated" numbers.** They
+      took S from the full SR, and B from Z+jets at +dphi times a transfer
+      factor, so S and B sat in different selections. Its "jet removal
+      +10 to +12%" came from that factor. **S/sqrt(B) only ever compares S
+      and B measured in the same selection.**
     - **Minimal cut set** (`python/vbs_sr_minimal.py`, 2026-10-01). Only
       B(timing)/B(none) enters S/sqrt(B), so a cut uncorrelated with the
       timing decision can be dropped. Each cut is tested pass vs fail on f
@@ -418,7 +419,13 @@ primary workflow.
       - The pair cuts and the floor cannot be loosened. f depends on m_jj,
         deta and j2 pT within the SR range. Below pT(ll) = 100, f is 81-85%
         (`--sr-recoil-min=0`, tagged `sr_rec0p0`).
-      - S/sqrt(B) (WAVeS): veto +4.4 +- 3.7%, removal +10.7 +- 4.5%.
+      - S/sqrt(B), with S and B both in the minimal set
+        (`vbs_time_veto_sr.py --region minimal`, figs/time_veto/srmin_*):
+        - event veto: +3.6% WAVeS, +2.9% TZP, +2.0% truth, +0.6% TRKPTZ,
+          -3.8% HGTD (+-4%);
+        - jet removal: 0.8 points more. Without the jet veto it is just the
+          veto plus re-pairing.
+      - At Run 2's f = 6-13% the event veto costs 3-4%.
       - eps_B equals f x the signal's per-type response within 1 sigma. So
         the background MC is needed for f (and where its PU legs sit), not
         for the response.
