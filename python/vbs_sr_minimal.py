@@ -11,9 +11,10 @@ dropped ones' share of the yield never enters.
 The SR's cuts, in groups (the tagging pair: the two leading JVT-passing jets
 > 25 GeV):
   pair     j1 > 80, j2 > 50 GeV; eta1 eta2 < 0, |deta_jj| > 3.8; m_jj > 800 GeV;
-           for Z+jets |m_ll - 91.2| < 25 GeV. Always applied: vbs_time_veto --sr
-           keeps only events with such a pair among all jets, and E_T^miss above
-           a 100 GeV floor, so neither can be loosened here
+           for Z+jets |m_ll - 91.2| < 25 GeV; E_T^miss above --met-floor (100 GeV).
+           Always applied: vbs_time_veto --sr keeps only events with such a pair
+           among all jets, and E_T^miss above its --sr-recoil-min (100 GeV unless
+           the file is tagged sr_rec<v>), so neither can be loosened below that
   fjvt     fJVT on j1, j2 (< 0.5 above E_T^miss = 200 GeV, < 0.2 below)
   dphi     |dphi_jj| < 2
   met      E_T^miss > 200 GeV, or > 160 GeV with m_jj > 1.5 TeV (the 2-jet SR bins)
@@ -72,6 +73,8 @@ ap.add_argument("--nsigma", type=float, default=3.0)
 ap.add_argument("--min-trk", type=int, default=1)
 ap.add_argument("--t0", default="waves", choices=C.T0_SRC, help="the t0 of the per-cut tables")
 ap.add_argument("--minimal", default="fjvt,dphi", help="the groups the minimal set keeps besides the pair")
+ap.add_argument("--met-floor", type=float, default=100.0,
+                help="E_T^miss floor of the pair (a sample's own ntuple floor applies if higher)")
 ap.add_argument("--out", required=True)
 args = ap.parse_args()
 MINIMAL = [k for k in KEYS if k in args.minimal.split(",")]
@@ -84,7 +87,8 @@ def groups(sel, s):
     n, met = sel["n"], s["met"]
     with np.errstate(invalid="ignore"):
         wide = sel["mjj_raw"] >= MJJ_LOWBINS
-    return {"pair": st["j1 > 80, j2 > 50 GeV"] & st["eta1 eta2 < 0, |deta_jj| > 3.8"] & st["m_jj > 800 GeV"] & s["zwin"],
+    return {"pair": st["j1 > 80, j2 > 50 GeV"] & st["eta1 eta2 < 0, |deta_jj| > 3.8"] & st["m_jj > 800 GeV"] & s["zwin"]
+                    & (met >= args.met_floor),
             "fjvt": st["fJVT on j1, j2"],
             "dphi": st["|dphi_jj| < 2"],
             "met": (met > MET_HI) | ((met > MET_LO) & wide),
@@ -102,6 +106,7 @@ def passes(g, keys):
 samples = load_samples(args.sig, args.zjets, args.dijet, args.slices)
 calib = C.measure(samples[SIG]["e"], True, "the VBF file's HS legs")
 for name, s in samples.items():
+    s["floor"] = max(args.met_floor, s["info"]["sr_recoil_min"])
     prepare(s, calib, args.nsigma, args.min_trk)
     s["g"] = groups(s["none"], s)
     s["g_rm"] = {src: groups(s["out"][f"rm_{src}"], s) for src in C.T0_SRC}
@@ -109,7 +114,8 @@ for name, s in samples.items():
     assert np.array_equal(passes(s["g"], KEYS), s["none"]["ok"]), name
     for src in C.T0_SRC:
         assert np.array_equal(passes(s["g_rm"][src], KEYS), s["out"][f"rm_{src}"]["ok"]), (name, src)
-    print(f"[{name}] {len(s['w']):,} candidates, pair {int(s['g']['pair'].sum()):,}, SR {int(s['none']['ok'].sum()):,}")
+    print(f"[{name}] {len(s['w']):,} candidates, E_T^miss floor {s['floor']:g} GeV, pair {int(s['g']['pair'].sum()):,}, "
+          f"SR {int(s['none']['ok'].sum()):,}")
 S = samples[SIG]
 BKG = [k for k in samples if k != SIG]
 
@@ -157,13 +163,13 @@ md = [f"# A minimal SR cut set for the background's timing response: {os.path.ba
       "effective count (sum w)^2 / sum w^2 in brackets; the JZ slices are not normalised to each other.", ""]
 for name, s in samples.items():
     i = s["info"]
-    md.append(f"- **{name}**: `{s['path']}` ({i['njobs']} job(s), {i['n_read']:,} read), E_T^miss = {s['rcol']}, "
-              f"{len(s['w']):,} SR candidates")
+    md.append(f"- **{name}**: `{s['path']}` ({i['njobs']} job(s), {i['n_read']:,} read), E_T^miss = {s['rcol']} "
+              f"> {s['floor']:g} GeV, {len(s['w']):,} SR candidates")
 md += ["", "**The SR's cuts.** `pair` is always applied (the ntuple keeps only events with such a pair among all "
-       "jets, above an E_T^miss floor of 100 GeV); the other groups together with it are exactly the SR.", "",
+       "jets, above its E_T^miss floor); the other groups together with it are exactly the SR.", "",
        "| group | cuts |", "|---|---|",
        "| pair | j1 > 80, j2 > 50 GeV (the two leading JVT-passing jets > 25 GeV); eta1 eta2 < 0, |deta_jj| > 3.8; "
-       "m_jj > 800 GeV; Z+jets: |m_ll - 91.2| < 25 GeV; E_T^miss > 100 GeV |"]
+       "m_jj > 800 GeV; Z+jets: |m_ll - 91.2| < 25 GeV; E_T^miss above the floor (per sample, above) |"]
 md += [f"| {k} | {t} |" for k, t in GROUPS]
 
 # ── MC events per set ────────────────────────────────────────────────────────
@@ -180,16 +186,28 @@ def split(s, base, flag):
     p, q = base & flag, base & ~flag
     fp, fq = eff(s, p, s["pu_tag"]), eff(s, q, s["pu_tag"])
     vp, vq = eff(s, p, ~s["vetoed"][args.t0]), eff(s, q, ~s["vetoed"][args.t0])
-    sig = lambda a, b: (a[0] - b[0]) / np.hypot(a[1], b[1]) if np.hypot(a[1], b[1]) > 0 else np.nan
-    return (f"{count(s, p)} / {count(s, q)} | {fmt(*fp)} | {fmt(*fq)} | {sig(fp, fq):+.1f} | {fmt(*vp)} | "
-            f"{fmt(*vq)} | {sig(vp, vq):+.1f} |")
+    return (f"{count(s, p)} / {count(s, q)} | {fmt(*fp)} | {fmt(*fq)} | {delta(s, p, q, s['pu_tag']):+.1f} | "
+            f"{fmt(*vp)} | {fmt(*vq)} | {delta(s, p, q, ~s['vetoed'][args.t0]):+.1f} |")
+
+
+def delta(s, p, q, flag):
+    """(fraction of flag in p) - (in q), in standard deviations of the pooled two-proportion
+    test at the effective counts: unlike the per-side errors, it does not collapse when one
+    side is a few events all on one side"""
+    if not (p.any() and q.any()): return np.nan
+    w = s["w"]
+    fp, fq = w[p & flag].sum() / w[p].sum(), w[q & flag].sum() / w[q].sum()
+    pool = w[(p | q) & flag].sum() / w[p | q].sum()
+    var = pool * (1 - pool) * (1 / neff(s, p) + 1 / neff(s, q))
+    return (fp - fq) / np.sqrt(var) if var > 0 else 0.0
 
 
 SPLIT_HEAD = ["| sample | split | MC pass / fail | f pass | f fail | Delta f | veto kept pass | veto kept fail "
               "| Delta kept |", "|---|---|---|---|---|---|---|---|---|"]
 md += ["", f"**Factorisation on the pair** ({args.t0} t0): for the events passing / failing each group, the "
-       "PU-tagged share f and the event veto's kept fraction. Delta = pass - fail, in standard deviations. A "
-       "group with no significant Delta in either can be dropped from the background measurement.", ""] + SPLIT_HEAD
+       "PU-tagged share f and the event veto's kept fraction. Delta = pass - fail, in standard deviations of the "
+       "pooled two-proportion test. A group with no significant Delta in either can be dropped from the "
+       "background measurement.", ""] + SPLIT_HEAD
 for name, s in samples.items():
     md += [f"| {name} | {k} | " + split(s, s["g"]["pair"], s["g"][k]) for k in KEYS]
 md += ["", f"**Factorisation on the minimal set** ({label(MINIMAL)}) for the groups it drops", ""] + SPLIT_HEAD
@@ -210,6 +228,20 @@ for name, s in samples.items():
               ("E_T^miss > 200 GeV", s["met"] > MET_HI)]
     md += [f"| {name} | {lab} | " + split(s, passes(s["g"], MINIMAL), flag) for lab, flag in pv]
 
+# E_T^miss binned on the minimal set: whether the floor could go lower (a file with a
+# lower ntuple floor, sr_rec<v>, fills the bins below 100 GeV)
+MET_BINS = [0.0, 50.0, 100.0, 160.0, 200.0, np.inf]
+md += ["", f"**E_T^miss, binned**, on the minimal set ({label(MINIMAL)}, {args.t0} t0; Z+jets: pT(ll))", "",
+       "| sample | E_T^miss [GeV] | MC | f | veto kept | removal ratio |", "|---|---|---|---|---|---|"]
+for name, s in samples.items():
+    for lo, hi in zip(MET_BINS[:-1], MET_BINS[1:]):
+        if hi <= s["floor"]: continue
+        inbin = (s["met"] >= lo) & (s["met"] < hi)
+        m = passes(s["g"], MINIMAL) & inbin
+        f, v = eff(s, m, s["pu_tag"]), eff(s, m, ~s["vetoed"][args.t0])
+        r = ratio(s["w"], passes(s["g_rm"][args.t0], MINIMAL) & inbin, m) if m.any() else (np.nan, np.nan)
+        md.append(f"| {name} | {lo:g}-{hi:g} | {count(s, m)} | {fmt(*f)} | {fmt(*v, 3)} | {fmt(*r, 3)} |")
+
 # the jet veto's rescue in jet removal, measured on each sample: r(M + jetveto) / r(M)
 md += ["", f"**The jet veto's removal transfer** r(M + jetveto) / r(M), measured on every sample ({args.t0} t0): "
        "jet removal's S/sqrt(B) takes the signal's for the background.", "",
@@ -223,6 +255,36 @@ for name, s in samples.items():
         TRANSFER[name, label(keys)] = (t, t_err)
         md.append(f"| {name} | {label(keys)} | {fmt(a['r'], a['rerr'], 3)} | {count(s, passes(s['g'], keys + ['jetveto']))} "
                   f"| {fmt(b['r'], b['rerr'], 3)} | {fmt(t, t_err, 3)} |")
+
+# ── The response as composition x per-type response ──────────────────────────
+# The veto keeps a background at eps_B = f (1 - c) + (1 - f)(1 - h): c its catch
+# rate on PU-tagged pairs, h its false-veto rate on the rest. If c and h are the
+# signal's (thousands of pairs of each type), the background MC is needed for f
+# alone. Checked on the minimal set: each background's c against the signal's,
+# and its measured eps_B against the model at its own f.
+M = passes(S["g"], MINIMAL)
+md += ["", f"**Composition x per-type response**, on the minimal set ({label(MINIMAL)}): c = 1 - kept on PU-tagged "
+       "pairs, h = 1 - kept on the rest; the model eps_B = f (1 - c_S) + (1 - f)(1 - h_S) with the signal's c_S, h_S "
+       "and the background's own f, against its measured eps_B.", "",
+       "| sample | t0 | f | c | h | eps_B measured | eps_B model (signal c, h) | Delta / sigma |",
+       "|---|---|---|---|---|---|---|---|"]
+for src in C.T0_SRC:
+    kc = eff(S, M & S["pu_tag"], ~S["vetoed"][src]); kh = eff(S, M & ~S["pu_tag"], ~S["vetoed"][src])
+    cS, hS = 1 - kc[0], 1 - kh[0]
+    md.append(f"| {SIG} | {src} | {fmt(*eff(S, M, S['pu_tag']), 3)} | {fmt(cS, kc[1], 3)} | {fmt(hS, kh[1], 3)} "
+              f"| {fmt(*eff(S, M, ~S['vetoed'][src]), 3)} | - | - |")
+    for name in BKG:
+        s = samples[name]
+        m = passes(s["g"], MINIMAL)
+        if not m.any(): continue
+        f, ferr = eff(s, m, s["pu_tag"])
+        kc_b, kh_b = eff(s, m & s["pu_tag"], ~s["vetoed"][src]), eff(s, m & ~s["pu_tag"], ~s["vetoed"][src])
+        v, verr = eff(s, m, ~s["vetoed"][src])
+        model = f * (1 - cS) + (1 - f) * (1 - hS)
+        model_err = ferr * abs(hS - cS)
+        d = (v - model) / np.hypot(verr, model_err)
+        md.append(f"| {name} | {src} | {fmt(f, ferr, 3)} | {fmt(1 - kc_b[0], kc_b[1], 3)} | {fmt(1 - kh_b[0], kh_b[1], 3)} "
+                  f"| {fmt(v, verr, 3)} | {fmt(model, model_err, 3)} | {d:+.1f} |")
 
 # ── The response along the ladder, each group alone, and N-1 ──────────────────
 md += ["", f"**The timing response per cut set** ({args.t0} t0): f, the event veto's kept fraction and jet "

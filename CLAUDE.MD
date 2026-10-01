@@ -86,7 +86,8 @@ vertex_timing/
 │   │                             #   (ANA-EXOT-2020-11-INT1 emulated), event veto vs jet removal
 │   ├── vbs_time_veto_common.py   # shared by the two: normalisation, jet-time calibration, figure layouts
 │   ├── vbf_hinv_sr.py            # the VBF H->inv SR selection + timing variants, shared by the SR scripts
-│   └── vbs_hspu_study.py         # pileup-tagged (HS+PU) SR background: VBF, Z+jets, dijet (fake MET from jets)
+│   ├── vbs_hspu_study.py         # pileup-tagged (HS+PU) SR background: VBF, Z+jets, dijet (fake MET from jets)
+│   └── vbs_sr_minimal.py         # which SR cuts the background's timing response needs (the minimal set)
 ├── share/
 │   ├── models/                   # ML artifacts from a prior (currently inactive) DNN/BDT effort — see
 │   │                             #   Machine Learning section below
@@ -404,6 +405,23 @@ primary workflow.
       - S/sqrt(B): event veto +3 to +5%; **jet removal +10 to +12%**
         (TRKPTZ/WAVeS, +-5% stat). Jet removal wins in the SR.
       - At f = 15% the veto gives -1% and removal +5%.
+    - **Minimal cut set** (`python/vbs_sr_minimal.py`, 2026-10-01). Only
+      B(timing)/B(none) enters S/sqrt(B), so a cut uncorrelated with the
+      timing decision can be dropped. Each cut is tested pass vs fail on f
+      and on the veto's kept fraction.
+      - Keep: the pair (j1/j2 pT, deta, m_jj), fJVT, and E_T^miss > 100.
+        Also keep |dphi_jj| < 2: a back-to-back multijet pair passes it only
+        with a PU leg (+5 sigma).
+      - Drop: E_T^miss > 160/200 with the bins, E_T^jet,no-jvt, and the jet
+        veto (<= 1.6 sigma everywhere). That leaves Z+jets 52 MC events
+        (SR: 4).
+      - The pair cuts and the floor cannot be loosened. f depends on m_jj,
+        deta and j2 pT within the SR range. Below pT(ll) = 100, f is 81-85%
+        (`--sr-recoil-min=0`, tagged `sr_rec0p0`).
+      - S/sqrt(B) (WAVeS): veto +4.4 +- 3.7%, removal +10.7 +- 4.5%.
+      - eps_B equals f x the signal's per-type response within 1 sigma. So
+        the background MC is needed for f (and where its PU legs sit), not
+        for the response.
 
 ### ML Data Export
 - **export_training_data.cxx** (`util/`): Exports the cluster-SELECTION
