@@ -609,7 +609,9 @@ if ks and kb:
 # ── How a jet gets a time: the HS-leg pulls against the true vertex time ─────
 def jet_time_figures(stem, e_all, cal):
     """<stem>_jet_time_pulls: (t_jet - t_HS^truth) / sigma for the signal's paper-HS
-    legs, with the quoted sigma and with sigma x f(n); <stem>_jet_time_calib: f(n)"""
+    legs (reco tagging jets truth-matched to a hard-scatter jet: dR < 0.3 to a truth
+    HS jet above 10 GeV), with the quoted sigma and with sigma x f(n);
+    <stem>_jet_time_calib: f(n)"""
     ROOT_ = C.ROOT
     p, n = C.hs_pulls(e_all)
     pc = p / cal(n)
@@ -623,13 +625,13 @@ def jet_time_figures(stem, e_all, cal):
         h.SetLineColor(C.colour(col)); h.SetLineWidth(2)
         if fill: h.SetFillColor(C.colour(col)); h.SetFillStyle(3004)
         hs.append(h)
-    hs[0].SetMinimum(2e-5); hs[0].SetMaximum(2.0)
+    hs[0].SetMinimum(2e-5); hs[0].SetMaximum(200.0)   # two decades of headroom: the label and legend sit above the peak
     hs[0].GetXaxis().SetTitle("(t_{jet} - t_{HS}^{truth}) / #sigma_{jet}   (overflow in the edge bins)")
-    hs[0].GetYaxis().SetTitle("Fraction of hard-scatter tagging jets")
+    hs[0].GetYaxis().SetTitle("Fraction of truth-matched HS tagging jets")
     hs[0].Draw("HIST"); hs[1].Draw("HIST SAME")
     g = ROOT_.TF1("f_unit", "[0]*exp(-0.5*x*x)", -8, 8); C.KEEP.append(g)
     g.SetParameter(0, 0.25 / np.sqrt(2 * np.pi)); g.SetLineColor(ROOT_.kBlack); g.SetLineStyle(2); g.Draw("SAME")
-    leg = ROOT_.TLegend(0.16, 0.60, 0.60, 0.75); ROOT_.StyleLegend(leg, 0.03); C.KEEP.append(leg)
+    leg = ROOT_.TLegend(0.16, 0.60, 0.60, 0.735); ROOT_.StyleLegend(leg, 0.03); C.KEEP.append(leg)
     leg.AddEntry(hs[0], f"quoted #sigma: {100 * np.mean(np.abs(p) >= args.nsigma):.0f}% beyond {args.nsigma:g}", "f")
     leg.AddEntry(hs[1], f"#sigma #times f(n): {100 * np.mean(np.abs(pc) >= args.nsigma):.1f}% beyond {args.nsigma:g}", "l")
     leg.AddEntry(g, "unit Gaussian", "l")
@@ -638,8 +640,9 @@ def jet_time_figures(stem, e_all, cal):
     t = ROOT_.TLatex(); t.SetNDC(); t.SetTextFont(42); t.SetTextSize(0.04); C.KEEP.append(t)
     t.DrawLatex(0.31, 0.88, "Simulation Internal")
     t2 = ROOT_.TLatex(); t2.SetNDC(); t2.SetTextFont(42); t2.SetTextSize(0.028); t2.SetTextColor(ROOT_.kGray + 2); C.KEEP.append(t2)
-    t2.DrawLatex(0.17, 0.83, f"VBF H#rightarrowinv., hard-scatter tagging jets with a time ({len(p):,})")
-    t2.DrawLatex(0.17, 0.795, jet_line())
+    t2.DrawLatex(0.17, 0.835, "VBF H#rightarrowinv. reco tagging jets truth-matched to a hard-scatter jet")
+    t2.DrawLatex(0.17, 0.80, f"(#DeltaR < 0.3 to a truth HS jet with p_{{T}} > 10 GeV), with a time: {len(p):,} jets")
+    t2.DrawLatex(0.17, 0.765, jet_line())
     c.Print(stem + "_jet_time_pulls.pdf"); c.Print(stem + "_jet_time_pulls.png")
     print("wrote", stem + "_jet_time_pulls.pdf / .png")
     # f(n), with each bin's share of the jets and its tail after the correction
