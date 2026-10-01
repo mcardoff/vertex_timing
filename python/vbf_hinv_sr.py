@@ -7,6 +7,7 @@ and python/vbs_hspu_study.py.
 A sample is a dict made by load(): its events `e`, jets `J` (awkward), weights
 `w`, the E_T^miss proxy `met` (truth |sum pT(nu)| for VBF, pT(ll) for Z+jets,
 the jet-based met_jets for multijet) and whether the Z->ll window applies."""
+import re
 import numpy as np
 import uproot
 import awkward as ak
@@ -24,6 +25,8 @@ SR_MJJ5 = [800.0, 1000.0, 1500.0, 2000.0, 3500.0]   # 2-jet, E_T^miss > 200 GeV 
 SR_MJJ3 = [1500.0, 2000.0, 3500.0]                  # 3-4 jets, and 2 jets at 160-200 GeV
 
 METHODS = ["jj"] + [f"t0_{s}" for s in C.T0_SRC] + [f"rm_{s}" for s in C.T0_SRC]
+SIG, ZLL = "VBF H#rightarrowinv.", "Z(#rightarrowll)+jets"
+JZ_RE = re.compile(r"\.(8011\d\d)\.Py8EG_A14NNPDF23LO_jj_(JZ\d)\.")
 
 
 # ── Loading ─────────────────────────────────────────────────────────────────
@@ -60,6 +63,27 @@ def load(path, role, norm, rcol, zll):
                           ak.to_numpy(ak.sum(J.jet_pt * np.sin(J.jet_phi), axis=1)))
     s["zwin"] = (np.abs(e["z_mass"] - MZ) < MZ_WIN) if zll else np.ones(len(w), bool)
     return s
+
+
+def subset(s, mask):
+    """the sample restricted to the events in mask"""
+    return dict(s, e={k: v[mask] for k, v in s["e"].items()}, J=s["J"][mask], w=s["w"][mask], met=s["met"][mask],
+                jvt_ok=s["jvt_ok"][mask], etjet=s["etjet"][mask], zwin=s["zwin"][mask])
+
+
+def load_samples(sig, zjets=None, dijet=None, slices="JZ2,JZ3,JZ4"):
+    """{name: sample}, the signal first. The dijet JZ slices are separate samples:
+    they are not normalised to each other (the ntuple weight is the generator weight)."""
+    samples = {SIG: load(sig, "sig", "vbf", "met_truth", False)}
+    if zjets: samples[ZLL] = load(zjets, "zjets", "zjets", "z_pt", True)
+    if dijet:
+        dj = load(dijet, "dijet", "none", "met_jets", False)
+        tags = np.array([(lambda m: m.group(2) if m else "?")(JZ_RE.search(str(p))) for p in dj["e"]["file_path"]])
+        for jz in slices.split(","):
+            if (tags == jz).any(): samples[f"multijet {jz}"] = subset(dj, tags == jz)
+        if not any(k.startswith("multijet") for k in samples):   # not the JZ production: one multijet sample
+            samples["multijet"] = dj
+    return samples
 
 
 def take(arr, idx):
@@ -129,7 +153,8 @@ def sr_select(s, keep):
     if s["zll"]: steps.append(("|m_ll - 91.2| < 25 GeV", s["zwin"]))
     ok = np.ones(len(n), bool)
     for _, f in steps: ok = ok & f
-    return dict(steps=steps, ok=ok, bin=np.where(ok, bins, 0), mjj=np.where(ok, mjj, np.nan), i1=i1, i2=i2)
+    return dict(steps=steps, ok=ok, bin=np.where(ok, bins, 0), mjj=np.where(ok, mjj, np.nan), i1=i1, i2=i2,
+                n=n, mjj_raw=mjj)
 
 
 # ── Timing ───────────────────────────────────────────────────────────────────
@@ -161,6 +186,27 @@ def outcomes(s, nsigma, min_trk):
         out[f"t0_{src}"] = veto(base, take(bad, i1) | take(bad, i2))
         out[f"rm_{src}"] = sr_select(s, ~bad)
     return out
+
+
+def prepare(s, calib, nsigma, min_trk):
+    """The timing on one sample: the no-timing SR selection, every method's
+    outcome, each t0's per-jet failures and the event veto's decision on the
+    no-timing pair (for every candidate, so any cut set can use it), and the
+    pair's truth composition."""
+    s["calib"] = calib
+    s["sig"] = jet_sigma(s)
+    s["none"] = sr_select(s, ak.ones_like(s["J"].jet_pt, dtype=bool))
+    s["out"] = outcomes(s, nsigma, min_trk)
+    J, i1, i2 = s["J"], s["none"]["i1"], s["none"]["i2"]
+    s["fail"] = {src: fails_t0(s, src, nsigma, min_trk) for src in C.T0_SRC}
+    s["vetoed"] = {src: take(f, i1) | take(f, i2) for src, f in s["fail"].items()}
+    h1, h2 = take(J.jet_hs, i1) > 0, take(J.jet_hs, i2) > 0
+    p1, p2 = take(J.jet_pu, i1) > 0, take(J.jet_pu, i2) > 0
+    s["pu_leg"] = (p1, p2)
+    s["comp"] = {"HS+HS": h1 & h2, "HS+PU": (h1 & p2) | (p1 & h2), "PU+PU": p1 & p2}
+    s["comp"]["other"] = ~(s["comp"]["HS+HS"] | s["comp"]["HS+PU"] | s["comp"]["PU+PU"])
+    s["pu_tag"] = s["comp"]["HS+PU"] | s["comp"]["PU+PU"]
+    return s
 
 
 def veto(base, rejected):

@@ -39,11 +39,10 @@ S/sqrt(B) rises when eps_B < eps_S^2, i.e. f > f* = (1 - h - eps_S^2) / (c - h).
 
 Writes <out>_summary.md and <out>_{composition_dphi,composition_sr,puleg,breakeven}.(pdf|png).
 """
-import argparse, os, re
+import argparse, os
 import numpy as np
-import awkward as ak
 import vbs_time_veto_common as C
-from vbf_hinv_sr import load, take, sr_select, jet_sigma, fails_t0, outcomes
+from vbf_hinv_sr import SIG, ZLL, take, load_samples, prepare
 
 STAGES = [("pair100", ["E_T^miss > 100 GeV", "j1 > 80, j2 > 50 GeV", "eta1 eta2 < 0, |deta_jj| > 3.8", "m_jj > 800 GeV",
                        "|m_ll - 91.2| < 25 GeV"]),
@@ -56,8 +55,6 @@ COMPOSITION = [("HS+HS", "#3F7FBF"), ("HS+PU", "#E8A33D"), ("PU+PU", "#C0392B"),
 PULEG = [("central, |#eta| < 2.4", "#7F7F7F"), ("|#eta| > 4.0", "#B8B8B8"), ("HGTD, untimed", "#9DC3E6"),
          ("HGTD, passes t_{0} test", "#E8A33D"), ("HGTD, fails t_{0} test", "#2E8B57")]
 PULEG_MD = ["central", "beyond 4.0", "HGTD untimed", "HGTD timed, passes", "HGTD timed, fails"]
-JZ_RE = re.compile(r"\.(8011\d\d)\.Py8EG_A14NNPDF23LO_jj_(JZ\d)\.")
-SIG = "VBF H#rightarrowinv."
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument("--sig", required=True, help="VBF H->inv vbs_time_veto --sr output (RAW ntuples)")
@@ -71,29 +68,12 @@ ap.add_argument("--out", required=True)
 args = ap.parse_args()
 
 
-def subset(s, mask):
-    """the sample restricted to the events in mask"""
-    return dict(s, e={k: v[mask] for k, v in s["e"].items()}, J=s["J"][mask], w=s["w"][mask], met=s["met"][mask],
-                jvt_ok=s["jvt_ok"][mask], etjet=s["etjet"][mask], zwin=s["zwin"][mask])
-
-
-samples = {SIG: load(args.sig, "sig", "vbf", "met_truth", False)}
-if args.zjets: samples["Z(#rightarrowll)+jets"] = load(args.zjets, "zjets", "zjets", "z_pt", True)
-if args.dijet:
-    dj = load(args.dijet, "dijet", "none", "met_jets", False)
-    tags = np.array([(lambda m: m.group(2) if m else "?")(JZ_RE.search(str(p))) for p in dj["e"]["file_path"]])
-    for jz in args.slices.split(","):
-        if (tags == jz).any(): samples[f"multijet {jz}"] = subset(dj, tags == jz)
-    if not any(k.startswith("multijet") for k in samples):   # not the JZ production: one multijet sample
-        samples["multijet"] = dj
+samples = load_samples(args.sig, args.zjets, args.dijet, args.slices)
 BKG = [k for k in samples if k != SIG]
 calib = C.measure(samples[SIG]["e"], True, "the VBF file's HS legs")
 
 for name, s in samples.items():
-    s["calib"] = calib
-    s["sig"] = jet_sigma(s)
-    s["none"] = sr_select(s, ak.ones_like(s["J"].jet_pt, dtype=bool))
-    s["out"] = outcomes(s, args.nsigma, args.min_trk)
+    prepare(s, calib, args.nsigma, args.min_trk)
 
     def stages(steps):
         steps, m, out = dict(steps, **{"E_T^miss > 100 GeV": s["met"] > 100.0}), np.ones(len(s["w"]), bool), {}
@@ -105,17 +85,9 @@ for name, s in samples.items():
     s["stage"] = stages(s["none"]["steps"])
     s["stage_rm"] = {src: stages(s["out"][f"rm_{src}"]["steps"]) for src in C.T0_SRC}
     J, i1, i2 = s["J"], s["none"]["i1"], s["none"]["i2"]
-    # the event veto's decision on the no-timing pair, for every candidate (so any stage can use it)
-    fail = {src: fails_t0(s, src, args.nsigma, args.min_trk) for src in C.T0_SRC}
-    s["vetoed"] = {src: take(f, i1) | take(f, i2) for src, f in fail.items()}
-    h1, h2 = take(J.jet_hs, i1) > 0, take(J.jet_hs, i2) > 0
-    p1, p2 = take(J.jet_pu, i1) > 0, take(J.jet_pu, i2) > 0
-    s["comp"] = {"HS+HS": h1 & h2, "HS+PU": (h1 & p2) | (p1 & h2), "PU+PU": p1 & p2}
-    s["comp"]["other"] = ~(s["comp"]["HS+HS"] | s["comp"]["HS+PU"] | s["comp"]["PU+PU"])
-    s["pu_tag"] = s["comp"]["HS+PU"] | s["comp"]["PU+PU"]
     cls = np.full(len(s["w"]), -1)
-    for i, p in [(i1, p1), (i2, p2)]:
-        aeta, timed, f = np.abs(take(J.jet_eta, i)), take(J.jet_n, i) >= args.min_trk, take(fail[args.t0], i)
+    for i, p in zip([i1, i2], s["pu_leg"]):
+        aeta, timed, f = np.abs(take(J.jet_eta, i)), take(J.jet_n, i) >= args.min_trk, take(s["fail"][args.t0], i)
         c = np.where(aeta < 2.4, 0, np.where(aeta >= 4.0, 1, np.where(~timed, 2, np.where(f, 4, 3))))
         cls = np.where(p, np.maximum(cls, c), cls)
     s["puleg"] = cls
@@ -216,7 +188,6 @@ if BKG:
 #     the jet veto's rescue: a removed out-of-time pileup jet stops failing it at a
 #     rate set by pileup, not by the hard process.
 EST_STAGE = "+dphi"
-ZLL = "Z(#rightarrowll)+jets"
 SR_EST = {}
 if ZLL in samples:
     Z = samples[ZLL]
