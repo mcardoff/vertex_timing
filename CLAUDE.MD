@@ -423,7 +423,7 @@ TZP_D0_PRECISION      = 0.45  // exponent on (1/σ_d0^cluster); d0 beat its qP/z
 KDE_SEL_WIDTH / KDE_TIME_WIDTH = 60 ps  // Gaussian kernels: density at the mode / mean-shift
 KDE_PT_POWER          = 0.5   // sqrt(pT) in both the selection and the time weight
 KDE_MS_ITER           = 3     // mean-shift passes (6 is identical)
-KDE_HGTD_BONUS / TAU  = 0.5 / 30 ps  // agreement with Athena's RecoVtx_time, when valid
+DIST_CUT_TZ           = 3.0   // σ — TZP_KDE_TZ's joint (t, z0) iterative clustering (ITERATIVE_ZSEED)
 MIN_INJET_TRACKS_FOR_TIME = 3 // Score::minSubsetTracks — in-jet time only when ≥3 in-jet tracks (sample-independence guard)
 TRACK_DZ_WEIGHT       = 0.7   // /mm — the TZ-family ladder rows (historical, kept for continuity)
 QP_PRECISION_WEIGHT   = 0.8   // unused; superseded by d0 (kept for the record)
@@ -1140,7 +1140,8 @@ All scores are defined as `static const Score` members of the `Score` struct in 
 | 31 | WAVES_GIJ | WAVeS Score [guarded in-jet t] | WAVeS selection with the ≥3 guard |
 | 32 | TRKPTZ_TZJ | ... [+ jet frac] | Bounded jet term — REJECTED (population coin-flip on zjets); `JET_FRAC_WEIGHT = 0` |
 | 33 | TRKPTZ_TZP | ... [+ d0 precision] | **The final classical selector (TZP)** — C++ symbol is still `Score::TRKPTZ_TZQ`, renamed short/long name after the d0-supersedes-qP swap. See Physics Findings |
-| 34 | TZP_KDE | Kernel-density TZP [mean-shift t] | TZP's envelope × a 60 ps kernel density over ALL clustered tracks; time = mean-shift mode (`TimeSource::MEAN_SHIFT`). Filled by `applyKernelDensityScore`, a collection-level pass after `updateScores`. Removes 8.5% (zjets) to 18% (vbf) of TZP's fails |
+| 34 | TZP_KDE | Kernel-density TZP [mean-shift t] | TZP's envelope × a 60 ps kernel density over ALL clustered tracks; time = mean-shift mode (`TimeSource::MEAN_SHIFT`). Filled by `applyKernelDensityScore`, a collection-level pass after `updateScores`. No Athena input |
+| 35 | TZP_KDE_TZ | Kernel-density TZP [(t,z) clusters] | **Best classical row.** Same score on its own collection: iterative clustering jointly in (t, z0) at 3σ, seeded by pT·e^{−\|Δz\|} (`ClusteringMethod::ITERATIVE_ZSEED`). Removes 9.2% (zjets) to 16% (ttbar) of TZP's fails |
 
 Two fields added to `Score` (2026-09-01): **`timeSource`**
 (`TimeSource::{FULL, IN_JET, OUT_JET}`) — which subset of the SELECTED
@@ -1166,7 +1167,7 @@ Comparison PDF groups produced by `clustering_plot` from histograms written by `
 - `trkptz_tz_*.pdf` — TRKPTZ vs TRKPTZ_TZ vs WAVES (the per-track Δz term isolated)
 - `timesource_*.pdf` — TRKPTZ_TZ raw vs in-jet vs out-of-jet time (selection bit-identical)
 - `guarded_*.pdf` — the deployable set: TRKPTZ / TZ / TZ_GIJ / **TZP** / WAVES
-- `kde_*.pdf` — TRKPTZ / WAVES / TZP / **TZP_KDE**
+- `kde_*.pdf` — TRKPTZ / WAVES / TZP / TZP_KDE / **TZP_KDE_TZ**
 
 Plus inclusive resolution/pull plots (`inclusive/inclusivereso_*`,
 `inclusive/inclusivepull_*`, log/lin) and shape-comparison plots
@@ -1228,30 +1229,40 @@ Key structures and entry points:
 > checked and produce a warning instead — those are exactly the ones whose
 > untagged name no longer implies their selection.
 
-### TZP_KDE: kernel-density selection + mean-shift time (2026-10-03)
+### TZP_KDE: kernel-density selection, mean-shift time, (t,z) clustering (2026-10-03)
 
-`Score::TZP_KDE` (id 34), full record in `results/kde_mean_shift.md`. The
-clustering still supplies the candidates; each is re-timed by a 60 ps Gaussian
+`Score::TZP_KDE` (id 34) and `Score::TZP_KDE_TZ` (id 35); full record in
+`results/kde_mean_shift.md`. Each cluster is re-timed by a 60 ps Gaussian
 mean-shift over ALL clustered tracks (weight √pT·e^{−|Δz|}/σ_t²) and scored by
-the kernel density at that mode × TZP's cluster envelope × an agreement bonus
-with Athena's `RecoVtx_time`.
+the kernel density at that mode × TZP's cluster envelope. `TZP_KDE_TZ` also
+clusters jointly in (t, z0), seeded by pT·e^{−|Δz|}.
 
-| | zjets | dijet | vbf | ttbar |
+| novbs exports | zjets | dijet | vbf | ttbar |
 |---|---|---|---|---|
-| TZP → TZP_KDE (novbs exports) | 64.69 → 67.69 | 88.98 → 90.50 | 91.69 → 93.19 | 88.95 → 90.62 |
-| TZP fails removed | 8.5% | 13.8% | 18.1% | 15.1% |
+| TZP | 64.71 | 88.97 | 91.67 | 88.93 |
+| TZP_KDE_TZ | 67.96 | 90.54 | 92.93 | 90.70 |
+| TZP fails removed | 9.2% | 14.3% | 15.1% | 16.0% |
 
-- C++ on local VBF: 91.98 → 93.46, 18.5% of fails removed; other rows unchanged.
-- Disjoint files and mjj500 reproduce it (vbf 19.6%, ttbar 16.2%, zjets 9.0%).
-- **The time estimator is the larger half**: with TZP's selection untouched,
-  re-timing alone removes 5.6–13%. The inverse-variance cluster mean was
-  averaging absorbed pileup tracks in at full weight.
-- Z+jets stays under 10%: 21.5% of its fails have no timed HS track.
-- Single-cluster events keep TZP's time. Without that guard mu = 0 loses
-  0.02–0.07 points; with it mu = 0 is +0.03.
-- Gains hold in every n-HS-track bin and at 20–150 ps windows.
-- Closed negatives: expected-pileup subtraction, per-track z0-precision
-  weights in the selection, a kernel-weighted cluster envelope.
+- C++ on local VBF: 91.98 → 93.25, 15.8% of fails removed; older rows unchanged.
+- Disjoint files and mjj500 reproduce it (vbf 17.2%, ttbar 16.0%, zjets 9.8%).
+  mu = 0 is unharmed.
+- **Athena's `RecoVtx_time` is not an input, by decision.** An agreement bonus
+  was worth 0.5–4 more points and was removed: the score is meant to replace
+  that time.
+- **The time estimator is the largest piece**: with TZP's selection untouched,
+  re-timing alone removes 5.6–13%.
+- **The clustering is within 2 points of its ceiling.** A truth-perfect
+  partition scored the same way reaches 10.7 / 16.1 / 17.7 / 18.3; adding an
+  oracle choice of the HS cluster reaches 63–82. What is left is selection.
+- The kernel score is nearly indifferent to the partition (zjets 6.7–9.2 over
+  ~30 clustering variants). Joint (t,z) is the one change that helps both it
+  and the hard-cluster TZP score (+4 to +6).
+- Z+jets stays under 10%: 21.5% of its fails have no timed HS track, and its
+  lost HS clusters are 2 tracks against 8-track pileup coincidences.
+- Single-cluster events keep TZP's time (the mu = 0 guard).
+- `python/kde_study/reclus.py` re-clusters the exported tracks offline and
+  reproduces the production partition label for label; use it before touching
+  the C++ clustering.
 - `rpt_v5_hist`, the exporter and the display still use TZP. No grid C++ run yet.
 
 ### TZP: the classical selector (2026-09-01) — supersedes WAVeS as the best non-ML score

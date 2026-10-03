@@ -543,7 +543,10 @@ namespace MyUtl {
     for (const auto& [id, col] : auxCollections) {
       auto qual = filterClusters(col);
       if (qual.empty()) continue;
-      chosen[id] = chooseCluster(qual, Score::TRKPTZ);
+      // TZP_KDE_TZ ranks its (t,z) collection by the kernel-density score
+      // that applyKernelDensityScore stored under TZP_KDE's id.
+      chosen[id] = chooseCluster(qual, id == Score::TZP_KDE_TZ.id ? Score::TZP_KDE
+                                                                 : Score::TRKPTZ);
     }
 
     // CONE_BDT: main clusters, TMVA BDT selector (aliases HGTD_SORT score)

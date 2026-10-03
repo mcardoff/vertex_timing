@@ -367,6 +367,7 @@ namespace MyUtl {
     CONE,         // doConeClustering — seed-and-cone simultaneous absorption
     ITERATIVE,    // doIterativeClustering — nearest-neighbour, centroid-updating
     ITERATIVE_SPLIT, // ITERATIVE + post-process: split clusters with high t-pull RMS
+    ITERATIVE_ZSEED, // ITERATIVE, seeds ordered by pT e^{-|z0 - z_PV|} instead of pT (TZP_KDE_TZ)
   };
 
   // ---------------------------------------------------------------------------
@@ -645,6 +646,7 @@ namespace MyUtl {
     static const Score TRKPTZ_TZJ;
     static const Score TRKPTZ_TZQ;
     static const Score TZP_KDE;
+    static const Score TZP_KDE_TZ;
   };
 
   inline const std::string STR_TRKPTZ = "#Sigma p_{T}e^{-|#Delta z|}";
@@ -885,23 +887,37 @@ namespace MyUtl {
   //          w_t = sqrt(pT) e^{-|z0 - z_PV|} / sigma_t^2 and K a 60 ps Gaussian.
   //   S(C) = [SUM_all sqrt(pT) e^{-|z0 - z_PV|} K(t_i - t_C)]
   //          x TZP's cluster envelope  e^{-0.6|z_C - z_PV|} (SUM 1/var_d0)^0.225
-  //          x [1 + 0.5 exp(-((t_C - t_HGTD)/30 ps)^2 / 2)]   if RecoVtx_time valid
   //
+  // Athena's RecoVtx_time is deliberately NOT an input (an agreement bonus was
+  // worth 0.5-4 more points of the fails, and was removed: the aim is to
+  // replace that time, not lean on it).
   // Every constant sits on a plateau measured on all four novbs samples
-  // (width 50-75 ps, power 0.35-0.65 or a 5 GeV cap, bonus 0.3-0.8).
-  // Fails removed relative to TZP: zjets 8.5%, dijet 13.8%, vbf 18.1%,
-  // ttbar 15.1%; out-of-sample file ranges and mjj500 agree.
+  // (width 50-75 ps, power 0.35-0.65 or a 5 GeV cap).
+  // Fails removed relative to TZP: zjets 8.0%, dijet 12.6%, vbf 14.1%,
+  // ttbar 13.6%; out-of-sample file ranges and mjj500 agree.
   inline constexpr double KDE_SEL_WIDTH   = 60.0;  // ps, density kernel at the mode
   inline constexpr double KDE_TIME_WIDTH  = 60.0;  // ps, mean-shift kernel
   inline constexpr double KDE_PT_POWER    = 0.5;   // pT saturation in both weights
   inline constexpr int    KDE_MS_ITER     = 3;     // mean-shift passes
-  inline constexpr double KDE_HGTD_BONUS  = 0.5;   // agreement with Athena's RecoVtx_time
-  inline constexpr double KDE_HGTD_TAU    = 30.0;  // ps
   inline const Score Score::TZP_KDE = { 34, "Kernel-density TZP [mean-shift t]",
                                         "TZP_KDE", false, false, -1.f, -1.0,
                                         ClusteringMethod::ITERATIVE, false,
                                         TrackFilterType::ALL, VbsRegion::NONE,
                                         TimeSource::MEAN_SHIFT, MIN_INJET_TRACKS_FOR_TIME };
+  // TZP_KDE on its OWN collection: the same iterative clustering run jointly
+  // in (t, z0) -- distance sqrt(dt^2/s_t^2 + dz^2/s_z^2) < 3 -- and seeded in
+  // order of pT e^{-|z0 - z_PV|} rather than pT. Clusters are then z-coherent,
+  // which sharpens the cluster envelope (7.6 clusters per event against 5.6).
+  // Fails removed relative to TZP: zjets 9.2%, dijet 14.3%, vbf 15.1%,
+  // ttbar 16.0%. A truth-perfect partition scored the same way reaches only
+  // 10.7 / 16.1 / 17.7 / 18.3, so the clustering is within 1.5-2.6 points of
+  // its ceiling: what remains is selection (results/kde_mean_shift.md).
+  inline constexpr double DIST_CUT_TZ = 3.0;
+  inline const Score Score::TZP_KDE_TZ = { 35, "Kernel-density TZP [(t,z) clusters]",
+                                           "TZP_KDE_TZ", true, false, -1.f, DIST_CUT_TZ,
+                                           ClusteringMethod::ITERATIVE_ZSEED, true,
+                                           TrackFilterType::ALL, VbsRegion::NONE,
+                                           TimeSource::MEAN_SHIFT, MIN_INJET_TRACKS_FOR_TIME };
   // WAVeS SELECTION with the guarded in-jet time. Deployed WAVeS (id 18) applies
   // its in-jet re-timing unconditionally, and that re-timing is +0.82 on VBF but
   // -1.43 on Z+jets for ANY selector -- so WAVeS inherits that Z+jets deficit.
@@ -933,7 +949,7 @@ namespace MyUtl {
     Score::VBF_R1,   Score::VBF_R2,
     Score::TRKPTZ_PV, Score::TRKPTZ_PU, Score::TRKPTZ_PUW, Score::TRKPTZ_TZ,
     Score::TRKPTZ_TZ_IJ, Score::TRKPTZ_TZ_OJ, Score::TRKPTZ_TZ_GIJ, Score::WAVES_GIJ, Score::TRKPTZ_TZJ, Score::TRKPTZ_TZQ,
-    Score::TZP_KDE,
+    Score::TZP_KDE, Score::TZP_KDE_TZ,
   };
 
   // ---------------------------------------------------------------------------

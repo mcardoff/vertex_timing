@@ -338,7 +338,8 @@ namespace MyUtl {
   //   to the iterative step in the anti-kT jet algorithm.
   // ---------------------------------------------------------------------------
   void doIterativeClustering(
-    std::vector<Cluster>* collection, double distCut
+    std::vector<Cluster>* collection, double distCut,
+    const std::vector<double>* seedWeights = nullptr  // per input cluster; default = TRKPT
   ) {
     const int N = (int)collection->size();
     std::vector<bool> consumed(N, false);
@@ -351,7 +352,8 @@ namespace MyUtl {
       double maxPt = -1.0;
       for (int i = 0; i < N; ++i) {
         if (consumed[i]) continue;
-        double pt = (*collection)[i].scores.at(Score::TRKPT.id);
+        double pt = seedWeights ? (*seedWeights)[i]
+                                : (*collection)[i].scores.at(Score::TRKPT.id);
         if (pt > maxPt) { maxPt = pt; seedIdx = i; }
       }
       if (seedIdx == -1) break; // all clusters consumed
@@ -498,7 +500,6 @@ namespace MyUtl {
       span.push_back({b, all.size()});
     }
 
-    const bool hgtdOk = (branch->recoVtxValid[0] == 1);
     for (size_t ic = 0; ic < collection.size(); ++ic) {
       Cluster& c = collection[ic];
       double sw = 0.0, swt = 0.0;
@@ -520,12 +521,9 @@ namespace MyUtl {
         const double u = (k.t - m) / KDE_SEL_WIDTH;
         dens += k.wSel * std::exp(-0.5 * u * u);
       }
-      double s = dens * c.tzpEnvelope;
-      if (hgtdOk) {
-        const double u = (m - branch->recoVtxTime[0]) / KDE_HGTD_TAU;
-        s *= 1.0 + KDE_HGTD_BONUS * std::exp(-0.5 * u * u);
-      }
-      c.scores[Score::TZP_KDE.id] = s;
+      // No agreement term with Athena's RecoVtx_time: this score exists to
+      // replace that time, so it must not depend on it.
+      c.scores[Score::TZP_KDE.id] = dens * c.tzpEnvelope;
       c.kernelTime    = m;
       // One cluster = every track mutually compatible: nothing to re-weight,
       // and at mu = 0 the plain time is the better estimator.
@@ -586,6 +584,19 @@ namespace MyUtl {
         doConeClustering        (&collection, distanceCut); break;
       case ClusteringMethod::ITERATIVE:
         doIterativeClustering   (&collection, distanceCut); break;
+      case ClusteringMethod::ITERATIVE_ZSEED: {
+        // Seed on pT e^{-|z0 - z_PV|}: the track most likely to be hard
+        // scatter starts each cluster, not merely the hardest one.
+        std::vector<double> seedW;
+        seedW.reserve(collection.size());
+        for (const Cluster& c : collection) {
+          const int idx = c.trackIndices.at(0);
+          seedW.push_back(branch->trackPt[idx]
+                          * std::exp(-TZP_TRACK_DZ_WEIGHT
+                                     * std::abs(branch->trackZ0[idx] - branch->recoVtxZ[0])));
+        }
+        doIterativeClustering   (&collection, distanceCut, &seedW); break;
+      }
       case ClusteringMethod::ITERATIVE_SPLIT:
         // Run standard iterative clustering, then split any cluster whose
         // internal t-pull RMS exceeds T_PULL_SPLIT_THRESHOLD by re-clustering
