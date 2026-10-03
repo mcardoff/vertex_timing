@@ -594,10 +594,12 @@ namespace MyUtl {
     // 9% of Z+jets ones purely because Z+jets clusters rarely hold 3 in-jet
     // tracks, giving +0.50 on VBF and +0.02 on Z+jets with ONE threshold.
     int              minSubsetTracks   = 0;
-    // Quality gate (TZP_KDE_TZ_Q): the event enters this score's denominator
-    // only when the selected cluster's Cluster::kdeQuality is at least this.
-    // Negative = no gate. The row then reads "of the events where a time is
-    // PROVIDED, how many are right", which is the purity of the time.
+    // Quality gate (TZP_KDE_TZ_Q): no time is PROVIDED when the selected
+    // cluster's Cluster::kdeQuality is below this. Negative = no gate.
+    // An event without a provided time stays in the denominator and counts as
+    // a failure -- exactly how an event without a valid Athena time is treated
+    // in the HGTD row -- so the two rows are directly comparable. It does NOT
+    // gate the denominator (unlike requiresPurity / regionGate).
     float            minQuality        = -1.f;
 
     Score() = default;
@@ -620,7 +622,7 @@ namespace MyUtl {
     bool hasThreshold()         const { return threshold >= 0.f; }
     // True when this score restricts its denominator at fill time (step H)
     // rather than counting every selected event.
-    bool gatesDenominator()     const { return requiresPurity || regionGate != VbsRegion::NONE || minQuality >= 0.f; }
+    bool gatesDenominator()     const { return requiresPurity || regionGate != VbsRegion::NONE; }
     // True when this score's collection is built via SCORE_REGISTRY in section E
     bool buildsCollection()     const { return usesOwnCollection && distCut >= 0.0; }
 
@@ -937,8 +939,10 @@ namespace MyUtl {
   // of Z+jets (83.8% right); Athena provides 91.5% / 55.6% at 92.2% / 74.6%.
   // See results/time_quality.md.
   inline constexpr double KDE_QUALITY_MIN = 2.0;
-  // TZP_KDE_TZ's pick, counted only when its quality passes. Shares that row's
-  // collection and selection (aliased in selectClusters; builds nothing).
+  // TZP_KDE_TZ's pick, with the time withheld when its quality fails. Every
+  // selected event is in the denominator; a withheld time is a failure, as for
+  // the HGTD row. Shares TZP_KDE_TZ's collection and selection (aliased in
+  // selectClusters; builds nothing).
   inline const Score Score::TZP_KDE_TZ_Q = { 36, "Kernel-density TZP [(t,z), Q #geq 2]",
                                              "TZP_KDE_TZ_Q", true, false, -1.f, -1.0,
                                              ClusteringMethod::ITERATIVE_ZSEED, true,

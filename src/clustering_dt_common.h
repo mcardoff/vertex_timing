@@ -199,11 +199,10 @@ inline void makeComparisonPlots(
 	    },
 	    {C01, C02, C04, C03});
 
-  // The time-quality gate. TZP_KDE_TZ over every event, and the same pick
-  // counted only where a time is PROVIDED (Q >= KDE_QUALITY_MIN) -- so the
-  // gated curve is the purity of the provided time, and its grey denominator
-  // band is the acceptance. HGTD is Athena's time over every event (its
-  // invalid-time events count as failures there).
+  // The time-quality flag. All three curves share one denominator (every
+  // selected event). TZP_KDE_TZ provides a time always; TZP_KDE_TZ_Q withholds
+  // it below Q = KDE_QUALITY_MIN and HGTD when Athena's time is invalid, and a
+  // withheld time counts as a failure in both.
   moneyPlot(MyUtl::plotFilePath("comparisons", TString::Format("quality_%s.pdf", key).Data()).c_str(), key, canvas,
 	    {
 	      &mapHGTD.at(Score::HGTD),

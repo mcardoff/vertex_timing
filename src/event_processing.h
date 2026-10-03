@@ -785,6 +785,12 @@ namespace MyUtl {
       if (!chosen.count(score.id))                                continue;
 
       Cluster& scored    = chosen.at(score.id);
+      // Time-quality flag: below the threshold no time is provided. The event
+      // is already in this score's denominator (step F), so skipping here
+      // counts it as a failure, the same way an invalid Athena time is counted
+      // for the HGTD row above. Resolution / purity histograms then hold the
+      // PROVIDED times only.
+      if (score.minQuality >= 0.f && scored.kdeQuality < score.minQuality) continue;
       double iResH       = useSmearedTimes ? IDEAL_TRACK_RES : -1.0;
       double t           = scored.calculateTime(score, branch, iResH);
       scored.values[0]   = t;   // keep passEfficiency consistent with diff
@@ -863,9 +869,6 @@ namespace MyUtl {
           // pure event-topology restriction, so the row reads as "the same
           // WAVeS algorithm, measured only in these events".
           passesGate = (eventRegion == score.regionGate);
-        } else if (score.minQuality >= 0.f) {
-          // Time-quality gate: no time is provided below the threshold.
-          passesGate = (scored.kdeQuality >= score.minQuality);
         } else if (score == Score::TEST_MISAS || score == Score::WAVES_MISAS) {
           // Gate on event-level HS timing purity: 100% of HS pT must have |pull|<3σ
           passesGate = (hsTimingPurity >= 0.95f);
@@ -883,7 +886,7 @@ namespace MyUtl {
       }
 
       // Inclusive resolution split by cluster purity; only fill if in denominator
-      if (inDenominator || score.minQuality < 0.f) analysis.inclusivePurity->Fill(purity);
+      analysis.inclusivePurity->Fill(purity);
       if (inDenominator) {
         fillResoStack(analysis.inclusiveResoSig.get(),
                       analysis.inclusiveResoMix.get(),

@@ -6,7 +6,7 @@ import sys, numpy as np, uproot
 
 lab, fc, fr = sys.argv[1:4]
 c = uproot.open(fc); r = uproot.open(fr)
-ROWS = [("HGTD (Athena), all events", "HGTD Algorithm", "hgtd"), ("TZP", "d0 precision]", "trkptztzp"),
+ROWS = [("HGTD (Athena)", "HGTD Algorithm", "hgtd"), ("TZP", "d0 precision]", "trkptztzp"),
         ("TZP_KDE_TZ (no cut)", "[(t,z) clusters]", "tzpkdetz"), ("TZP_KDE_TZ, Q >= 2", "[(t,z), Q #geq 2]", "tzpkdetzq")]
 names = [k.split(';')[0] for k in c.keys()]
 key = "n_Forward_Jets"
@@ -19,11 +19,13 @@ for name, pat, pk in ROWS:
     if ntot is None: ntot = tot
     h = c["purity_hgtdtimes_" + pk]; v = h.values(flow=True)[1:-1]; x = h.axis().centers()
     pur = (v * x).sum() / v.sum() if v.sum() else float('nan')
-    if name.startswith("HGTD"):
-        nv = r["meta_n_hgtd_valid"].member("fVal") / r["meta_n_pass_basic"].member("fVal")
-        print(f"{name:28s} {'(see RpT) ':>14s} {'':>17s} {100*good/ntot:13.2f}% {100*pur:19.1f}%   [RpT selection: valid in {100*nv:.1f}%]")
+    if False:
+        pass
     else:
-        print(f"{name:28s} {100*tot/ntot:13.1f}% {100*good/tot:16.2f}% {100*good/ntot:13.2f}% {100*pur:19.1f}%")
+        # every row shares the denominator (all selected events); the purity histogram is filled
+        # only where a time is provided, so its entries give the acceptance
+        nprov = h.values(flow=True).sum()
+        print(f"{name:28s} {100*nprov/ntot:13.1f}% {100*good/nprov:16.2f}% {100*good/tot:13.2f}% {100*pur:19.1f}%")
 
 
 def curve(hs, pu):
