@@ -187,6 +187,17 @@ inline void makeComparisonPlots(
 	    },
 	    {C02, C03, C04, C01, C08});
 
+  // The headline four: Athena's HGTD time, the TRKPTZ baseline, TZP, and the
+  // new method (kernel-density score + mean-shift time on (t,z) clusters).
+  moneyPlot(MyUtl::plotFilePath("comparisons", TString::Format("newmethod_%s.pdf", key).Data()).c_str(), key, canvas,
+	    {
+	      &mapHGTD.at(Score::HGTD),
+	      &mapHGTD.at(Score::TRKPTZ),
+	      &mapHGTD.at(Score::TRKPTZ_TZQ),
+	      &mapHGTD.at(Score::TZP_KDE_TZ),
+	    },
+	    {C01, C02, C04, C03});
+
 }
 
 #endif  // CLUSTERING_DT_COMMON_H
