@@ -969,6 +969,10 @@ namespace MyUtl {
     double purity = 0.0;
     bool wasMerged = false;
     int nConstituents=1;
+    // Filled by updateScores / applyKernelDensityScore for Score::TZP_KDE.
+    double tzpEnvelope   = 1.0;    // TZP's cluster-level factor (z term x d0 precision)
+    double kernelTime    = 0.0;    // mean-shift mode time
+    bool   hasKernelTime = false;  // false: calculateTime falls back to the guarded in-jet time
 
     // -----------------------------------------------------------------------
     // operator== / operator!=
@@ -1110,8 +1114,11 @@ namespace MyUtl {
         const double dzTermTzp = (this->values.size() > 1)
           ? std::exp(-TZP_CLUSTER_DZ_WEIGHT * std::abs(this->values.at(1) - branch->recoVtxZ[0]))
           : std::exp(-TZP_CLUSTER_DZ_WEIGHT * std::abs(rawDeltaZ));
-        this->scores[Score::TRKPTZ_TZQ.id] =
-          sumTzp * dzTermTzp * std::pow(d0Info, 0.5 * TZP_D0_PRECISION);
+        this->tzpEnvelope = dzTermTzp * std::pow(d0Info, 0.5 * TZP_D0_PRECISION);
+        this->scores[Score::TRKPTZ_TZQ.id] = sumTzp * this->tzpEnvelope;
+        // Default only: applyKernelDensityScore overwrites it with the
+        // collection-level kernel score once every cluster exists.
+        this->scores[Score::TZP_KDE.id] = this->scores[Score::TRKPTZ_TZQ.id];
       }
 
       // WAVES: WAVeS-style score — Σ_i pT_i × pT_jet(i) / max(ΔR_i, DR_FLOOR)

@@ -191,8 +191,13 @@ namespace MyUtl {
     // qualifying forward jets are usually PILEUP, so the subset to keep and the
     // subset to discard swap over relative to VBF, and only running both
     // settles which.
+    if (score.timeSource == TimeSource::MEAN_SHIFT && this->hasKernelTime)
+      return this->kernelTime;
+
     if (score.timeSource != TimeSource::FULL) {
-      const bool wantInJet = (score.timeSource == TimeSource::IN_JET);
+      // MEAN_SHIFT without a kernel time (single-cluster collection) falls
+      // back to the guarded in-jet time, i.e. to TZP's.
+      const bool wantInJet = (score.timeSource != TimeSource::OUT_JET);
       // Collect (eta, phi) of qualifying forward reco jets — no truth matching
       std::vector<std::pair<double,double>> hsJets;
       const int nJets = (int)branch->topoJetPt.GetSize();

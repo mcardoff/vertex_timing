@@ -419,6 +419,11 @@ WAVES_DR_FLOOR        = 0.05  // minimum ΔR for the WAVeS 1/ΔR weight (prevent
 TZP_TRACK_DZ_WEIGHT   = 1.0   // /mm — per-track exp(−α|z0_t − z_PV|) inside the pT sum
 TZP_CLUSTER_DZ_WEIGHT = 0.6   // /mm — cluster-level exp(−β|Δz|); TRKPTZ's 1.5 was never tuned and is too steep
 TZP_D0_PRECISION      = 0.45  // exponent on (1/σ_d0^cluster); d0 beat its qP/z0 siblings head-to-head
+// TZP_KDE (2026-10-03, results/kde_mean_shift.md) — all on measured plateaus
+KDE_SEL_WIDTH / KDE_TIME_WIDTH = 60 ps  // Gaussian kernels: density at the mode / mean-shift
+KDE_PT_POWER          = 0.5   // sqrt(pT) in both the selection and the time weight
+KDE_MS_ITER           = 3     // mean-shift passes (6 is identical)
+KDE_HGTD_BONUS / TAU  = 0.5 / 30 ps  // agreement with Athena's RecoVtx_time, when valid
 MIN_INJET_TRACKS_FOR_TIME = 3 // Score::minSubsetTracks — in-jet time only when ≥3 in-jet tracks (sample-independence guard)
 TRACK_DZ_WEIGHT       = 0.7   // /mm — the TZ-family ladder rows (historical, kept for continuity)
 QP_PRECISION_WEIGHT   = 0.8   // unused; superseded by d0 (kept for the record)
@@ -1135,6 +1140,7 @@ All scores are defined as `static const Score` members of the `Score` struct in 
 | 31 | WAVES_GIJ | WAVeS Score [guarded in-jet t] | WAVeS selection with the ≥3 guard |
 | 32 | TRKPTZ_TZJ | ... [+ jet frac] | Bounded jet term — REJECTED (population coin-flip on zjets); `JET_FRAC_WEIGHT = 0` |
 | 33 | TRKPTZ_TZP | ... [+ d0 precision] | **The final classical selector (TZP)** — C++ symbol is still `Score::TRKPTZ_TZQ`, renamed short/long name after the d0-supersedes-qP swap. See Physics Findings |
+| 34 | TZP_KDE | Kernel-density TZP [mean-shift t] | TZP's envelope × a 60 ps kernel density over ALL clustered tracks; time = mean-shift mode (`TimeSource::MEAN_SHIFT`). Filled by `applyKernelDensityScore`, a collection-level pass after `updateScores`. Removes 8.5% (zjets) to 18% (vbf) of TZP's fails |
 
 Two fields added to `Score` (2026-09-01): **`timeSource`**
 (`TimeSource::{FULL, IN_JET, OUT_JET}`) — which subset of the SELECTED
@@ -1160,6 +1166,7 @@ Comparison PDF groups produced by `clustering_plot` from histograms written by `
 - `trkptz_tz_*.pdf` — TRKPTZ vs TRKPTZ_TZ vs WAVES (the per-track Δz term isolated)
 - `timesource_*.pdf` — TRKPTZ_TZ raw vs in-jet vs out-of-jet time (selection bit-identical)
 - `guarded_*.pdf` — the deployable set: TRKPTZ / TZ / TZ_GIJ / **TZP** / WAVES
+- `kde_*.pdf` — TRKPTZ / WAVES / TZP / **TZP_KDE**
 
 Plus inclusive resolution/pull plots (`inclusive/inclusivereso_*`,
 `inclusive/inclusivepull_*`, log/lin) and shape-comparison plots
@@ -1220,6 +1227,32 @@ Key structures and entry points:
 > mismatch (`HistReader::CheckSelection`); files older than that cannot be
 > checked and produce a warning instead — those are exactly the ones whose
 > untagged name no longer implies their selection.
+
+### TZP_KDE: kernel-density selection + mean-shift time (2026-10-03)
+
+`Score::TZP_KDE` (id 34), full record in `results/kde_mean_shift.md`. The
+clustering still supplies the candidates; each is re-timed by a 60 ps Gaussian
+mean-shift over ALL clustered tracks (weight √pT·e^{−|Δz|}/σ_t²) and scored by
+the kernel density at that mode × TZP's cluster envelope × an agreement bonus
+with Athena's `RecoVtx_time`.
+
+| | zjets | dijet | vbf | ttbar |
+|---|---|---|---|---|
+| TZP → TZP_KDE (novbs exports) | 64.69 → 67.69 | 88.98 → 90.50 | 91.69 → 93.19 | 88.95 → 90.62 |
+| TZP fails removed | 8.5% | 13.8% | 18.1% | 15.1% |
+
+- C++ on local VBF: 91.98 → 93.46, 18.5% of fails removed; other rows unchanged.
+- Disjoint files and mjj500 reproduce it (vbf 19.6%, ttbar 16.2%, zjets 9.0%).
+- **The time estimator is the larger half**: with TZP's selection untouched,
+  re-timing alone removes 5.6–13%. The inverse-variance cluster mean was
+  averaging absorbed pileup tracks in at full weight.
+- Z+jets stays under 10%: 21.5% of its fails have no timed HS track.
+- Single-cluster events keep TZP's time. Without that guard mu = 0 loses
+  0.02–0.07 points; with it mu = 0 is +0.03.
+- Gains hold in every n-HS-track bin and at 20–150 ps windows.
+- Closed negatives: expected-pileup subtraction, per-track z0-precision
+  weights in the selection, a kernel-weighted cluster envelope.
+- `rpt_v5_hist`, the exporter and the display still use TZP. No grid C++ run yet.
 
 ### TZP: the classical selector (2026-09-01) — supersedes WAVeS as the best non-ML score
 

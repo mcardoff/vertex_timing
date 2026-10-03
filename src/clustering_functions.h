@@ -464,6 +464,75 @@ namespace MyUtl {
   //     e) Optionally compute cluster purity (calcPurityFlag) and call
   //        updateScores on every cluster to fill the derived score map.
   // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // 6b. applyKernelDensityScore  (Score::TZP_KDE)
+  //   Collection-level pass, run after every cluster's updateScores. The hard
+  //   partition supplies the CANDIDATES (one seed per cluster) and TZP's
+  //   cluster envelope; the pT sum and the time are both taken from a Gaussian
+  //   kernel over ALL tracks of the collection, so hard-scatter tracks the
+  //   partition split across neighbouring clusters still count, and absorbed
+  //   pileup tracks at a cluster's far edge are down-weighted instead of
+  //   averaged in at full weight.
+  //   fixedRes > 0 replaces the per-track resolution (idealised scenarios).
+  // ---------------------------------------------------------------------------
+  inline void applyKernelDensityScore(
+    std::vector<Cluster>& collection,
+    BranchPointerWrapper *branch,
+    double fixedRes = -1.0
+  ) {
+    struct KTrack { double t, wSel, wTime; };
+    std::vector<KTrack> all;
+    std::vector<std::pair<size_t,size_t>> span;  // [begin, end) of each cluster in `all`
+    const double zPV = branch->recoVtxZ[0];
+    for (const Cluster& c : collection) {
+      const size_t b = all.size();
+      const size_t n = std::min(c.trackIndices.size(), c.allTimes.size());
+      for (size_t i = 0; i < n; ++i) {
+        const int idx = c.trackIndices[i];
+        const double res = (fixedRes > 0.0) ? fixedRes
+                                            : static_cast<double>(branch->trackTimeRes[idx]);
+        const double w = std::pow(static_cast<double>(branch->trackPt[idx]), KDE_PT_POWER)
+                       * std::exp(-TZP_TRACK_DZ_WEIGHT * std::abs(branch->trackZ0[idx] - zPV));
+        all.push_back({c.allTimes[i], w, (res > 0.0) ? w / (res * res) : 0.0});
+      }
+      span.push_back({b, all.size()});
+    }
+
+    const bool hgtdOk = (branch->recoVtxValid[0] == 1);
+    for (size_t ic = 0; ic < collection.size(); ++ic) {
+      Cluster& c = collection[ic];
+      double sw = 0.0, swt = 0.0;
+      for (size_t i = span[ic].first; i < span[ic].second; ++i) {
+        sw += all[i].wTime;  swt += all[i].wTime * all[i].t;
+      }
+      double m = (sw > 0.0) ? swt / sw : c.values.at(0);
+      for (int it = 0; it < KDE_MS_ITER; ++it) {
+        double num = 0.0, den = 0.0;
+        for (const KTrack& k : all) {
+          const double u = (k.t - m) / KDE_TIME_WIDTH;
+          const double g = k.wTime * std::exp(-0.5 * u * u);
+          num += g * k.t;  den += g;
+        }
+        if (den > 0.0) m = num / den;
+      }
+      double dens = 0.0;
+      for (const KTrack& k : all) {
+        const double u = (k.t - m) / KDE_SEL_WIDTH;
+        dens += k.wSel * std::exp(-0.5 * u * u);
+      }
+      double s = dens * c.tzpEnvelope;
+      if (hgtdOk) {
+        const double u = (m - branch->recoVtxTime[0]) / KDE_HGTD_TAU;
+        s *= 1.0 + KDE_HGTD_BONUS * std::exp(-0.5 * u * u);
+      }
+      c.scores[Score::TZP_KDE.id] = s;
+      c.kernelTime    = m;
+      // One cluster = every track mutually compatible: nothing to re-weight,
+      // and at mu = 0 the plain time is the better estimator.
+      c.hasKernelTime = (collection.size() > 1);
+    }
+  }
+
   auto clusterTracksInTime(
      const std::vector<int>& trackIndices,
      BranchPointerWrapper *branch,
@@ -532,6 +601,7 @@ namespace MyUtl {
         cluster.calcPurity(branch);  // only needed when a purity-gated score is active
       cluster.updateScores(branch);
     }
+    applyKernelDensityScore(collection, branch, useSmearedTimes ? smearRes : -1.0);
     
     if (DEBUG) std::cout << "Finished Clustering\n";
     return collection;

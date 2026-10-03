@@ -67,6 +67,7 @@ inline auto buildAnalysisMap(
   m.emplace(Score::WAVES_GIJ,   AnalysisObj(label, Score::WAVES_GIJ));
   m.emplace(Score::TRKPTZ_TZJ,  AnalysisObj(label, Score::TRKPTZ_TZJ));
   m.emplace(Score::TRKPTZ_TZQ,  AnalysisObj(label, Score::TRKPTZ_TZQ));
+  m.emplace(Score::TZP_KDE,     AnalysisObj(label, Score::TZP_KDE));
 
   // Scores active only in the real-HGTD scenario
   if (scenario == Scenario::HGTD) {
@@ -170,6 +171,19 @@ inline void makeComparisonPlots(
 	      &mapHGTD.at(Score::TRKPTZ_TZQ),
 	    },
 	    {C02, C08, C01, C03, C04});
+
+  // TZP against its kernel-density successor, with TRKPTZ and WAVeS as the
+  // references. TZP and TZP_KDE share the clustering and the cluster envelope;
+  // they differ in the pT sum (kernel over all tracks vs the hard cluster) and
+  // in the time (mean-shift mode vs guarded in-jet mean).
+  moneyPlot(MyUtl::plotFilePath("comparisons", TString::Format("kde_%s.pdf", key).Data()).c_str(), key, canvas,
+	    {
+	      &mapHGTD.at(Score::TRKPTZ),
+	      &mapHGTD.at(Score::WAVES),
+	      &mapHGTD.at(Score::TRKPTZ_TZQ),
+	      &mapHGTD.at(Score::TZP_KDE),
+	    },
+	    {C02, C03, C04, C01});
 
 }
 
