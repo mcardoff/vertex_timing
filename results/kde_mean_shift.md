@@ -229,8 +229,26 @@ An earlier version multiplied the score by
 worth 0.5 (zjets) to 4 (vbf) more points of the fails. It is gone: the score is
 meant to replace Athena's time, not depend on it.
 
+## Grid run of the C++ (clusters 3248506-09, default selection m_jj >= 200)
+
+46 shards, none held; merged with `hist_merge`. Inclusive core fraction:
+
+| | vbf | zjets | dijet | ttbar |
+|---|---:|---:|---:|---:|
+| events | 630,720 | 64,950 | 105,137 | 863,552 |
+| HGTD (Athena) | 84.53 | 41.60 | 77.88 | 77.24 |
+| TRKPTZ | 90.02 | 61.94 | 86.66 | 86.71 |
+| WAVeS | 91.49 | 58.50 | 85.98 | 85.98 |
+| TZP | 91.69 | 64.48 | 88.30 | 88.50 |
+| TZP_KDE | 92.94 | 67.35 | 89.74 | 90.14 |
+| **TZP_KDE_TZ** | **93.03** | **67.78** | **89.94** | **90.29** |
+| TZP fails removed by TZP_KDE_TZ | 16.2% | 9.3% | 14.0% | 15.6% |
+
+Differential plots: `clustering_plot --sample=<s> --hist-file=<merged>` writes
+`<s>/comparisons/<s>_newmethod_<key>.pdf` (HGTD / TRKPTZ / TZP / TZP_KDE_TZ)
+and `<s>_kde_<key>.pdf` (TRKPTZ / WAVeS / TZP / TZP_KDE / TZP_KDE_TZ) for the
+five keys. `python/kde_study/grid_core.py` prints the table above.
+
 ## Not done
 
-- No grid run of the C++ (`clustering_hist --sample=`). The offline numbers
-  come from the grid exports, and the C++ agrees with them on local VBF.
 - `rpt_v5_hist`, `export_training_data` and the event display still use TZP.
