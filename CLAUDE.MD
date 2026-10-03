@@ -1143,7 +1143,7 @@ All scores are defined as `static const Score` members of the `Score` struct in 
 | 33 | TRKPTZ_TZP | ... [+ d0 precision] | **The final classical selector (TZP)** — C++ symbol is still `Score::TRKPTZ_TZQ`, renamed short/long name after the d0-supersedes-qP swap. See Physics Findings |
 | 34 | TZP_KDE | Kernel-density TZP [mean-shift t] | TZP's envelope × a 60 ps kernel density over ALL clustered tracks; time = mean-shift mode (`TimeSource::MEAN_SHIFT`). Filled by `applyKernelDensityScore`, a collection-level pass after `updateScores`. No Athena input |
 | 35 | TZP_KDE_TZ | Kernel-density TZP [(t,z) clusters] | **Best classical row.** Same score on its own collection: iterative clustering jointly in (t, z0) at 3σ, seeded by pT·e^{−\|Δz\|} (`ClusteringMethod::ITERATIVE_ZSEED`). Removes 9.2% (zjets) to 16% (ttbar) of TZP's fails |
-| 36 | TZP_KDE_TZ_Q | Kernel-density TZP [(t,z), Q ≥ 2] | TZP_KDE_TZ's pick with the denominator gated on the time-quality flag (`Score::minQuality`, `Cluster::kdeQuality`). Reads as the purity of the PROVIDED time; aliased in `selectClusters`, builds no collection |
+| 36 | TZP_KDE_TZ_Q | Kernel-density TZP [(t,z), Q ≥ 2] | TZP_KDE_TZ's pick with the time WITHHELD below the quality threshold (`Score::minQuality`, `Cluster::kdeQuality`). A withheld time stays in the denominator as a failure, like an invalid Athena time in the HGTD row; aliased in `selectClusters`, builds no collection |
 
 Two fields added to `Score` (2026-09-01): **`timeSource`**
 (`TimeSource::{FULL, IN_JET, OUT_JET}`) — which subset of the SELECTED
@@ -1171,7 +1171,7 @@ Comparison PDF groups produced by `clustering_plot` from histograms written by `
 - `guarded_*.pdf` — the deployable set: TRKPTZ / TZ / TZ_GIJ / **TZP** / WAVES
 - `kde_*.pdf` — TRKPTZ / WAVES / TZP / TZP_KDE / **TZP_KDE_TZ**
 - `newmethod_*.pdf` — HGTD / TRKPTZ / TZP / TZP_KDE_TZ
-- `quality_*.pdf` — HGTD / TZP_KDE_TZ / TZP_KDE_TZ_Q (the gated curve's grey band is its acceptance)
+- `quality_*.pdf` — HGTD / TZP_KDE_TZ / TZP_KDE_TZ_Q, all over one denominator (a withheld time is a failure)
 
 Plus inclusive resolution/pull plots (`inclusive/inclusivereso_*`,
 `inclusive/inclusivepull_*`, log/lin) and shape-comparison plots
@@ -1289,6 +1289,10 @@ counterpart of Athena's BDT ≥ 0.3.
 - P(right | Q) agrees within ~3 points across vbf / dijet / ttbar in every Q
   bin; Z+jets sits 8–10 lower (events with no timed HS track).
 - At Athena's own acceptance the provided time is wrong about half as often.
+- **Core-fraction plots keep withheld-time events in the denominator as
+  failures**, for this row as for Athena's. Over all events the gated time is
+  86.1 / 45.4 / 81.0 / 80.2 (vbf / zjets / dijet / ttbar) against Athena's
+  84.5 / 41.6 / 77.9 / 77.2. Purity of the provided time is quoted separately.
 - **The cut does not help R_pT.** `rpt_v5` scenarios 7–9 (`kde`, `kde_q`,
   `kde_q1`, fallback = ITk-only): rejection at 0.80 falls 7–14% with the cut;
   the efficiency ceiling rises 0.3–1.0 points. A low-Q time is still right

@@ -89,7 +89,11 @@ acceptance on every sample without being tuned to. Figure:
 ## Before and after the cut, C++ on the grid
 
 Clusters 3248510-17, 92 shards, none held; default selection m_jj >= 200.
-`TZP_KDE_TZ_Q` (Score id 36) is `TZP_KDE_TZ`'s pick counted only where Q >= 2.
+`TZP_KDE_TZ_Q` (Score id 36) is `TZP_KDE_TZ`'s pick with the time withheld where
+Q < 2. **A withheld time stays in the denominator and counts as a failure**,
+exactly as an invalid Athena time does in the HGTD row, so the differential
+core-fraction curves of the three rows share one denominator. (The first
+version gated the denominator instead; clusters 3250027-30 are the rerun.)
 
 | | | vbf | zjets | dijet | ttbar |
 |---|---|---:|---:|---:|---:|
@@ -110,8 +114,17 @@ on vbf / dijet / ttbar and gives up 7-10 right ones (Z+jets: 23 wrong, 22
 right). Counted that way the gated time still beats Athena's on every sample.
 
 Differential plots: `<s>/comparisons/<s>_quality_<key>.pdf` (HGTD / TZP_KDE_TZ /
-TZP_KDE_TZ_Q); the gated curve's grey band is its acceptance. Bundled per
-sample in `figs/quality/<s>_quality.pdf`.
+TZP_KDE_TZ_Q), bundled per sample in `figs/quality/<s>_quality.pdf`. All three
+curves are core fraction over every selected event. Read that way the gated
+curve sits below the ungated one everywhere (it gives up right times too) and
+above Athena's: on VBF it tracks Athena's below ~8 forward HS tracks and
+reaches 99% above 13 where Athena's plateaus near 95%; on Z+jets it is 2-4
+points above Athena's in every populated bin. The purity of the provided time
+is the table row above, not these curves.
+
+Athena's row from the same files, for scale (provided / right among provided /
+right over all): vbf 91.6 / 92.2 / 84.5, zjets 56.0 / 74.3 / 41.6, dijet 86.9 /
+89.6 / 77.9, ttbar 85.7 / 90.1 / 77.2.
 
 ## RpT: the cut does not help the jet tagger
 
