@@ -524,10 +524,35 @@ namespace MyUtl {
       // No agreement term with Athena's RecoVtx_time: this score exists to
       // replace that time, so it must not depend on it.
       c.scores[Score::TZP_KDE.id] = dens * c.tzpEnvelope;
+      // Uncertainty of the weighted mean at the mode: weights g_i, per-track
+      // variance s_i^2  ->  SUM g_i^2 s_i^2 / (SUM g_i)^2, with g_i = w/s^2 K.
+      {
+        double sg = 0.0, sg2 = 0.0;
+        for (const KTrack& k : all) {
+          if (k.wTime <= 0.0 || k.wSel <= 0.0) continue;
+          const double u = (k.t - m) / KDE_TIME_WIDTH;
+          const double g = k.wTime * std::exp(-0.5 * u * u);
+          sg += g;  sg2 += g * g * (k.wSel / k.wTime);  // wSel / wTime = s_i^2
+        }
+        c.kernelSigma = (sg > 0.0) ? std::sqrt(sg2) / sg : 0.0;
+      }
       c.kernelTime    = m;
       // One cluster = every track mutually compatible: nothing to re-weight,
       // and at mu = 0 the plain time is the better estimator.
       c.hasKernelTime = (collection.size() > 1);
+    }
+
+    // Quality of each candidate: how far its score stands above the best
+    // candidate at a DIFFERENT time (more than one kernel width away).
+    for (Cluster& c : collection) {
+      const double s1 = c.scores[Score::TZP_KDE.id];
+      double s2 = 0.0;
+      for (const Cluster& o : collection) {
+        if (&o == &c) continue;
+        if (std::abs(o.kernelTime - c.kernelTime) <= KDE_SEL_WIDTH) continue;
+        s2 = std::max(s2, o.scores.at(Score::TZP_KDE.id));
+      }
+      c.kdeQuality = (s1 + s2 > 0.0) ? (s1 - s2) / std::sqrt(s1 + s2) : 0.0;
     }
   }
 

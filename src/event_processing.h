@@ -549,6 +549,11 @@ namespace MyUtl {
                                                                  : Score::TRKPTZ);
     }
 
+    // TZP_KDE_TZ_Q: the same pick as TZP_KDE_TZ; only its denominator differs
+    // (quality-gated in step H).
+    if (chosen.count(Score::TZP_KDE_TZ.id) && analyses.count(Score::TZP_KDE_TZ_Q))
+      chosen[Score::TZP_KDE_TZ_Q.id] = chosen.at(Score::TZP_KDE_TZ.id);
+
     // CONE_BDT: main clusters, TMVA BDT selector (aliases HGTD_SORT score)
     if (!qualMain.empty() && analyses.count(Score::CONE_BDT)) {
       auto c = chooseHGTDSortCluster(qualMain, branch);
@@ -858,6 +863,9 @@ namespace MyUtl {
           // pure event-topology restriction, so the row reads as "the same
           // WAVeS algorithm, measured only in these events".
           passesGate = (eventRegion == score.regionGate);
+        } else if (score.minQuality >= 0.f) {
+          // Time-quality gate: no time is provided below the threshold.
+          passesGate = (scored.kdeQuality >= score.minQuality);
         } else if (score == Score::TEST_MISAS || score == Score::WAVES_MISAS) {
           // Gate on event-level HS timing purity: 100% of HS pT must have |pull|<3σ
           passesGate = (hsTimingPurity >= 0.95f);
@@ -875,7 +883,7 @@ namespace MyUtl {
       }
 
       // Inclusive resolution split by cluster purity; only fill if in denominator
-      analysis.inclusivePurity->Fill(purity);
+      if (inDenominator || score.minQuality < 0.f) analysis.inclusivePurity->Fill(purity);
       if (inDenominator) {
         fillResoStack(analysis.inclusiveResoSig.get(),
                       analysis.inclusiveResoMix.get(),

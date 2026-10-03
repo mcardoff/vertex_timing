@@ -973,6 +973,8 @@ namespace MyUtl {
     double tzpEnvelope   = 1.0;    // TZP's cluster-level factor (z term x d0 precision)
     double kernelTime    = 0.0;    // mean-shift mode time
     bool   hasKernelTime = false;  // false: calculateTime falls back to the guarded in-jet time
+    double kernelSigma   = 0.0;    // propagated uncertainty of kernelTime (0 if !hasKernelTime)
+    double kdeQuality    = 0.0;    // (S1 - S2)/sqrt(S1 + S2) against the best competing mode
 
     // -----------------------------------------------------------------------
     // operator== / operator!=

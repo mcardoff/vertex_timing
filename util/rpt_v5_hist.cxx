@@ -137,7 +137,7 @@ static constexpr double GATE_SIGMA = 3.0;
 // on the same Athena time, part of the difference is population rather than
 // calibration: rpt_v6 measured over every timed HS track, while these are
 // measured after the z-association, which already removes the worst outliers.
-struct Inflation { double hgtd, trkptz, waves, tzp; };
+struct Inflation { double hgtd, trkptz, waves, tzp, kde; };
 
 // Keyed on MyUtl::SAMPLE_NAME. The local default run (no --sample, so an empty
 // SAMPLE_NAME) reads the VBF ntuples, so it correctly falls through to the VBF
@@ -146,18 +146,21 @@ static Inflation inflationFor(const std::string& sample) {
   // tzp inflation seeded from the waves value per sample; the PRINT_PULL_DIAG
   // table prints the freshly measured ratio next to it -- update after the
   // first run per sample if they disagree.
-  if (sample == "zjets") return {1.61, 1.63, 1.65, 1.65};
-  if (sample == "dijet") return {1.53, 1.45, 1.46, 1.46};
+  if (sample == "zjets") return {1.61, 1.63, 1.65, 1.65, 1.65};
+  if (sample == "dijet") return {1.53, 1.45, 1.46, 1.46, 1.46};
   // SEEDED, NOT MEASURED: no rpt_v5 run has measured ttbar's ratios yet. Seeded
   // from the dijet row (ttbar has tracked dijet in every core-fraction study
   // this branch). Check this run's calibration table and replace.
-  if (sample == "ttbar") return {1.53, 1.45, 1.46, 1.46};
-  return {1.48, 1.39, 1.38, 1.38};  // vbf, and the local default run
+  if (sample == "ttbar") return {1.53, 1.45, 1.46, 1.46, 1.46};
+  return {1.48, 1.39, 1.38, 1.38, 1.33};  // vbf, and the local default run (kde MEASURED 1.33)
+  // kde (last entry) is SEEDED from tzp: its quoted sigma is the selected (t,z)
+  // cluster's, the same quantity the tzp row quotes. The pull table prints the
+  // measured ratio beside it.
 }
 
 // Resolved once in main() before the event loop starts, then only read by the
 // worker threads -- write-once-before-fork, so no synchronisation is needed.
-static Inflation INFL = {1.48, 1.39, 1.38, 1.38};
+static Inflation INFL = {1.48, 1.39, 1.38, 1.38, 1.38};
 
 // Set true to print the measured per-scenario pull widths after the event loop.
 static constexpr bool PRINT_PULL_DIAG = true;
@@ -382,6 +385,9 @@ struct ThreadState {
   double pull_dt2_trkptz = 0, pull_var_trkptz = 0;
   double pull_dt2_waves = 0, pull_var_waves = 0;
   double pull_dt2_tzp = 0, pull_var_tzp = 0;
+  double pull_dt2_kde = 0, pull_var_kde = 0, pull_dt_kde = 0;
+  long   pull_n_kde = 0, pull_ntail_kde = 0;
+  long   n_kde_time = 0, n_kde_quality = 0;   // events with a KDE time / with one passing the quality flag
   long   pull_n_hgtd = 0, pull_n_trkptz = 0, pull_n_waves = 0, pull_n_tzp = 0;
   // First moment and out-of-core counts, so the diagnostic can separate a
   // systematic OFFSET (which an inflation cannot fix) from genuine spread, and
@@ -675,6 +681,29 @@ int main(int argc, char** argv) {
         tzp_ok      = true;
       }
 
+      // TZP_KDE_TZ: its own (t,z) collection over the SAME track list, ranked
+      // by the kernel-density score; time = mean-shift mode. kde_q_ok says
+      // whether the quality flag lets that time be used at all.
+      double t_kde = 0.0, var_kde = 0.0;
+      bool   kde_ok = false, kde_q_ok = false, kde_q1_ok = false;
+      {
+        auto clustersTZ = clusterTracksInTime(
+            trk_z, &branch, DIST_CUT_TZ,
+            /*useSmearedTimes=*/false, /*checkTimeValid=*/true, IDEAL_TRACK_RES,
+            ClusteringMethod::ITERATIVE_ZSEED, /*useZ0=*/true,
+            /*sortTracks=*/false, /*calcPurityFlag=*/false);
+        if (!clustersTZ.empty()) {
+          auto bestK = chooseCluster(clustersTZ, Score::TZP_KDE);
+          t_kde    = bestK.calculateTime(Score::TZP_KDE_TZ, &branch);
+          var_kde  = bestK.sigmas[0] * bestK.sigmas[0];
+          kde_ok   = true;
+          kde_q_ok = (bestK.kdeQuality >= KDE_QUALITY_MIN);
+          kde_q1_ok = (bestK.kdeQuality >= 1.0);
+          ++state.n_kde_time;
+          if (kde_q_ok) ++state.n_kde_quality;
+        }
+      }
+
       // ── HGTD ntuple vertex time. ─────────────────────────────────────────────
       double t_hgtd         = branch.recoVtxTime[0];
       double var_hgtd       = branch.recoVtxTimeRes[0] * branch.recoVtxTimeRes[0];
@@ -702,6 +731,9 @@ int main(int argc, char** argv) {
       std::vector<int> trk_waves  = applyTimeGate(trk_all, t_waves,  var_waves,  waves_ok,       GATE_SIGMA, INFL.waves);
       std::vector<int> trk_trkptz = applyTimeGate(trk_all, t_trkptz, var_trkptz, trkptz_ok,      GATE_SIGMA, INFL.trkptz);
       std::vector<int> trk_tzp    = applyTimeGate(trk_all, t_tzp,    var_tzp,    tzp_ok,         GATE_SIGMA, INFL.tzp);
+      std::vector<int> trk_kde    = applyTimeGate(trk_all, t_kde,    var_kde,    kde_ok,         GATE_SIGMA, INFL.kde);
+      std::vector<int> trk_kde_q  = applyTimeGate(trk_all, t_kde,    var_kde,    kde_q_ok,       GATE_SIGMA, INFL.kde);
+      std::vector<int> trk_kde_q1 = applyTimeGate(trk_all, t_kde,    var_kde,    kde_q1_ok,      GATE_SIGMA, INFL.kde);
       // Central list gets the identical gate. It is a no-op there in practice
       // (no HGTD coverage below |eta| 2.4, so no track carries a valid time),
       // but applying it keeps all four central scenarios defined exactly as
@@ -711,6 +743,9 @@ int main(int argc, char** argv) {
       std::vector<int> trk_waves_cen  = applyTimeGate(trk_all_cen, t_waves,  var_waves,  waves_ok,       GATE_SIGMA, INFL.waves);
       std::vector<int> trk_trkptz_cen = applyTimeGate(trk_all_cen, t_trkptz, var_trkptz, trkptz_ok,      GATE_SIGMA, INFL.trkptz);
       std::vector<int> trk_tzp_cen    = applyTimeGate(trk_all_cen, t_tzp,    var_tzp,    tzp_ok,         GATE_SIGMA, INFL.tzp);
+      std::vector<int> trk_kde_cen    = applyTimeGate(trk_all_cen, t_kde,    var_kde,    kde_ok,         GATE_SIGMA, INFL.kde);
+      std::vector<int> trk_kde_q_cen  = applyTimeGate(trk_all_cen, t_kde,    var_kde,    kde_q_ok,       GATE_SIGMA, INFL.kde);
+      std::vector<int> trk_kde_q1_cen = applyTimeGate(trk_all_cen, t_kde,    var_kde,    kde_q1_ok,      GATE_SIGMA, INFL.kde);
 
       // ── Pull-width measurement, one accumulator set per scenario ───────────
       // Truth-HS tracks only (trackToTruthvtx == 0) with a valid time, in
@@ -738,6 +773,7 @@ int main(int argc, char** argv) {
         accum(t_trkptz, var_trkptz, trkptz_ok,      state.pull_dt2_trkptz, state.pull_var_trkptz, state.pull_n_trkptz, state.pull_dt_trkptz, state.pull_ntail_trkptz);
         accum(t_waves,  var_waves,  waves_ok,       state.pull_dt2_waves,  state.pull_var_waves,  state.pull_n_waves, state.pull_dt_waves, state.pull_ntail_waves);
         accum(t_tzp,    var_tzp,    tzp_ok,         state.pull_dt2_tzp,    state.pull_var_tzp,    state.pull_n_tzp,   state.pull_dt_tzp,   state.pull_ntail_tzp);
+        accum(t_kde,    var_kde,    kde_ok,         state.pull_dt2_kde,    state.pull_var_kde,    state.pull_n_kde,   state.pull_dt_kde,   state.pull_ntail_kde);
       }
 
       // ── Idealised-timing reference scenarios ──────────────────────────────
@@ -833,21 +869,27 @@ int main(int argc, char** argv) {
       std::vector<int> trk_wsm_cen = smearedGate(trk_all_cen, t_wsm, var_wsm, wsm_ok, INFL.waves);
 
       // Build per-scenario sets once per event for O(1) ghost-index lookup.
-      struct TrackSets { std::unordered_set<int> all, hgtd, trkptz, waves, waves_ideal, truth, tzp; };
+      struct TrackSets { std::unordered_set<int> all, hgtd, trkptz, waves, waves_ideal, truth, tzp, kde, kde_q, kde_q1; };
       TrackSets fwd{ {trk_all.begin(),    trk_all.end()},
                      {trk_hgtd.begin(),   trk_hgtd.end()},
                      {trk_trkptz.begin(), trk_trkptz.end()},
                      {trk_waves.begin(),  trk_waves.end()},
                      {trk_wsm.begin(),    trk_wsm.end()},
                      {trk_truth.begin(),  trk_truth.end()},
-                     {trk_tzp.begin(),    trk_tzp.end()} };
+                     {trk_tzp.begin(),    trk_tzp.end()},
+                     {trk_kde.begin(),    trk_kde.end()},
+                     {trk_kde_q.begin(),  trk_kde_q.end()},
+                     {trk_kde_q1.begin(), trk_kde_q1.end()} };
       TrackSets cen{ {trk_all_cen.begin(),    trk_all_cen.end()},
                      {trk_hgtd_cen.begin(),   trk_hgtd_cen.end()},
                      {trk_trkptz_cen.begin(), trk_trkptz_cen.end()},
                      {trk_waves_cen.begin(),  trk_waves_cen.end()},
                      {trk_wsm_cen.begin(),    trk_wsm_cen.end()},
                      {trk_truth_cen.begin(),  trk_truth_cen.end()},
-                     {trk_tzp_cen.begin(),    trk_tzp_cen.end()} };
+                     {trk_tzp_cen.begin(),    trk_tzp_cen.end()},
+                     {trk_kde_cen.begin(),    trk_kde_cen.end()},
+                     {trk_kde_q_cen.begin(),  trk_kde_q_cen.end()},
+                     {trk_kde_q1_cen.begin(), trk_kde_q1_cen.end()} };
 
       // ── Fill jets into pT slices. ─────────────────────────────────────────────
       // eta_min/eta_max select the acceptance; do_floor is false for the central
@@ -880,6 +922,9 @@ int main(int argc, char** argv) {
           fill(sv[4], S.waves_ideal);                 // ORACLE: 30 ps tracks + perfect selection
           fill(sv[5], S.truth);                       // truth t0, 10 (+) 30 ps
           fill(sv[6], S.tzp);                         // TZP t0 (classical selector)
+          fill(sv[7], S.kde);                         // TZP_KDE_TZ t0, every event
+          fill(sv[8], S.kde_q);                       // TZP_KDE_TZ t0 only where Q passes
+          fill(sv[9], S.kde_q1);                      // same, Q >= 1
 
           // How the WAVeS gate moved this jet's R_pT relative to ITk-only.
           // Forward only (do_floor marks the forward calls): central is outside
@@ -1058,6 +1103,9 @@ int main(int argc, char** argv) {
             put(sv[4], fwd.waves_ideal);
             put(sv[5], fwd.truth);
             put(sv[6], fwd.tzp);
+            put(sv[7], fwd.kde);
+            put(sv[8], fwd.kde_q);
+            put(sv[9], fwd.kde_q1);
           };
 
           // Per-jet RpT under the no-timing baseline and under WAVeS, used both
@@ -1178,6 +1226,8 @@ int main(int argc, char** argv) {
     merged.pull_dt2_trkptz += other.pull_dt2_trkptz; merged.pull_var_trkptz += other.pull_var_trkptz; merged.pull_n_trkptz += other.pull_n_trkptz;  merged.pull_dt_trkptz += other.pull_dt_trkptz;  merged.pull_ntail_trkptz += other.pull_ntail_trkptz;
     merged.pull_dt2_waves  += other.pull_dt2_waves;  merged.pull_var_waves  += other.pull_var_waves;  merged.pull_n_waves  += other.pull_n_waves;  merged.pull_dt_waves += other.pull_dt_waves;  merged.pull_ntail_waves += other.pull_ntail_waves;
     merged.pull_dt2_tzp    += other.pull_dt2_tzp;    merged.pull_var_tzp    += other.pull_var_tzp;    merged.pull_n_tzp    += other.pull_n_tzp;    merged.pull_dt_tzp   += other.pull_dt_tzp;   merged.pull_ntail_tzp   += other.pull_ntail_tzp;
+    merged.pull_dt2_kde    += other.pull_dt2_kde;    merged.pull_var_kde    += other.pull_var_kde;    merged.pull_n_kde    += other.pull_n_kde;    merged.pull_dt_kde   += other.pull_dt_kde;   merged.pull_ntail_kde   += other.pull_ntail_kde;
+    merged.n_kde_time += other.n_kde_time;  merged.n_kde_quality += other.n_kde_quality;
     mergeRegionCases(merged.cases_r1, other.cases_r1);
     mergeRegionCases(merged.cases_r2, other.cases_r2);
     mergeRegionCases(merged.cases_r2_fail, other.cases_r2_fail);
@@ -1200,6 +1250,8 @@ int main(int argc, char** argv) {
   writer.WriteScalar("meta_n_total",      static_cast<Long64_t>(merged.n_total));
   writer.WriteScalar("meta_n_pass_basic", static_cast<Long64_t>(merged.n_pass_basic));
   writer.WriteScalar("meta_n_hgtd_valid", static_cast<Long64_t>(merged.n_hgtd_valid));
+  writer.WriteScalar("meta_n_kde_time",    static_cast<Long64_t>(merged.n_kde_time));
+  writer.WriteScalar("meta_n_kde_quality", static_cast<Long64_t>(merged.n_kde_quality));
   writer.WriteScalar("meta_n_pass_lepton_sel", static_cast<Long64_t>(merged.n_pass_lepton_sel));
   writer.WriteScalar("meta_n_rej_no_lepton",    static_cast<Long64_t>(merged.n_rej_no_lepton));
   writer.WriteScalar("meta_n_rej_one_lepton",   static_cast<Long64_t>(merged.n_rej_one_lepton));
@@ -1263,6 +1315,11 @@ int main(int argc, char** argv) {
         merged.pull_n_waves,  merged.pull_ntail_waves,  INFL.waves);
     row("tzp",    merged.pull_dt2_tzp,    merged.pull_dt_tzp,    merged.pull_var_tzp,
         merged.pull_n_tzp,    merged.pull_ntail_tzp,    INFL.tzp);
+    row("kde",    merged.pull_dt2_kde,    merged.pull_dt_kde,    merged.pull_var_kde,
+        merged.pull_n_kde,    merged.pull_ntail_kde,    INFL.kde);
+    std::printf("  KDE time provided: %ld events; passing the quality flag (Q >= %.1f): %ld (%.1f%%)\n",
+                merged.n_kde_time, KDE_QUALITY_MIN, merged.n_kde_quality,
+                merged.n_kde_time ? 100.0 * merged.n_kde_quality / merged.n_kde_time : 0.0);
     std::printf("  mean dt : systematic offset -- an inflation CANNOT correct this.\n");
     std::printf("  tail    : fraction outside the core window, i.e. how much\n");
     std::printf("            structure the core-width calibration does not see.\n");

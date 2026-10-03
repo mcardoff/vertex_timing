@@ -81,6 +81,14 @@ inline std::vector<Scenario> makeScenarios(const std::string& suffix) {
     // Physics Findings. Appended LAST so the load-bearing indices 0-5 are
     // untouched; fillJets fills sv[6] positionally.
     {"tzp",         "TZP t_{0}",                   C08, nullptr, nullptr},
+    // TZP_KDE_TZ (kernel-density score, mean-shift time, (t,z) clusters), with
+    // its time applied in EVERY event, and the same time applied only where
+    // the quality flag passes (Q >= KDE_QUALITY_MIN). Below the threshold no
+    // time is provided and the jet keeps its ITk-only R_pT. Indices 7 and 8.
+    // Index 9 is the same with a looser threshold (Q >= 1), for the trend.
+    {"kde",         "KDE t_{0}",                   C07, nullptr, nullptr},
+    {"kde_q",       "KDE t_{0}, Q #geq 2",         C09, nullptr, nullptr},
+    {"kde_q1",      "KDE t_{0}, Q #geq 1",         kGray + 2, nullptr, nullptr},
   };
   for (auto& sc : s) {
     sc.h_hs = makeHist(("HS_" + sc.name + suffix).c_str(),

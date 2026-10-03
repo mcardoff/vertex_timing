@@ -594,6 +594,11 @@ namespace MyUtl {
     // 9% of Z+jets ones purely because Z+jets clusters rarely hold 3 in-jet
     // tracks, giving +0.50 on VBF and +0.02 on Z+jets with ONE threshold.
     int              minSubsetTracks   = 0;
+    // Quality gate (TZP_KDE_TZ_Q): the event enters this score's denominator
+    // only when the selected cluster's Cluster::kdeQuality is at least this.
+    // Negative = no gate. The row then reads "of the events where a time is
+    // PROVIDED, how many are right", which is the purity of the time.
+    float            minQuality        = -1.f;
 
     Score() = default;
     Score(int id_, std::string ln, const char* sn,
@@ -601,11 +606,11 @@ namespace MyUtl {
           double dc=-1.0, ClusteringMethod m=ClusteringMethod::ITERATIVE,
           bool z0=false, TrackFilterType f=TrackFilterType::ALL,
           VbsRegion rg=VbsRegion::NONE,
-          TimeSource ts=TimeSource::FULL, int mst=0)
+          TimeSource ts=TimeSource::FULL, int mst=0, float mq=-1.f)
       : id(id_), longName(std::move(ln)), shortName(sn),
         usesOwnCollection(own), requiresPurity(pur), threshold(thr),
         distCut(dc), method(m), useZ0(z0), filter(f), regionGate(rg),
-        timeSource(ts), minSubsetTracks(mst) {}
+        timeSource(ts), minSubsetTracks(mst), minQuality(mq) {}
 
     bool operator<(const Score& o)  const { return id < o.id; }
     bool operator==(const Score& o) const { return id == o.id; }
@@ -615,7 +620,7 @@ namespace MyUtl {
     bool hasThreshold()         const { return threshold >= 0.f; }
     // True when this score restricts its denominator at fill time (step H)
     // rather than counting every selected event.
-    bool gatesDenominator()     const { return requiresPurity || regionGate != VbsRegion::NONE; }
+    bool gatesDenominator()     const { return requiresPurity || regionGate != VbsRegion::NONE || minQuality >= 0.f; }
     // True when this score's collection is built via SCORE_REGISTRY in section E
     bool buildsCollection()     const { return usesOwnCollection && distCut >= 0.0; }
 
@@ -647,6 +652,7 @@ namespace MyUtl {
     static const Score TRKPTZ_TZQ;
     static const Score TZP_KDE;
     static const Score TZP_KDE_TZ;
+    static const Score TZP_KDE_TZ_Q;
   };
 
   inline const std::string STR_TRKPTZ = "#Sigma p_{T}e^{-|#Delta z|}";
@@ -918,6 +924,27 @@ namespace MyUtl {
                                            ClusteringMethod::ITERATIVE_ZSEED, true,
                                            TrackFilterType::ALL, VbsRegion::NONE,
                                            TimeSource::MEAN_SHIFT, MIN_INJET_TRACKS_FOR_TIME };
+  // ---------------------------------------------------------------------------
+  // The time-quality flag: when NOT to hand out a t0.
+  //   Q = (S1 - S2) / sqrt(S1 + S2)
+  // S1 is the selected candidate's kernel-density score and S2 the best score
+  // among candidates whose mode sits more than KDE_SEL_WIDTH away, i.e. the
+  // best COMPETING time (0 if there is none). It is the significance by which
+  // the chosen time beats the runner-up. Reco-only, no training.
+  // P(|dt| < 60 ps) rises monotonically with Q from ~40% below 0.25 to >99%
+  // above 6, and the curve is the same within ~3 points on vbf / dijet / ttbar.
+  // At Q >= 2 a time is provided for 88% of VBF events (97.6% right) and 54%
+  // of Z+jets (83.8% right); Athena provides 91.5% / 55.6% at 92.2% / 74.6%.
+  // See results/time_quality.md.
+  inline constexpr double KDE_QUALITY_MIN = 2.0;
+  // TZP_KDE_TZ's pick, counted only when its quality passes. Shares that row's
+  // collection and selection (aliased in selectClusters; builds nothing).
+  inline const Score Score::TZP_KDE_TZ_Q = { 36, "Kernel-density TZP [(t,z), Q #geq 2]",
+                                             "TZP_KDE_TZ_Q", true, false, -1.f, -1.0,
+                                             ClusteringMethod::ITERATIVE_ZSEED, true,
+                                             TrackFilterType::ALL, VbsRegion::NONE,
+                                             TimeSource::MEAN_SHIFT, MIN_INJET_TRACKS_FOR_TIME,
+                                             (float)KDE_QUALITY_MIN };
   // WAVeS SELECTION with the guarded in-jet time. Deployed WAVeS (id 18) applies
   // its in-jet re-timing unconditionally, and that re-timing is +0.82 on VBF but
   // -1.43 on Z+jets for ANY selector -- so WAVeS inherits that Z+jets deficit.
@@ -949,7 +976,7 @@ namespace MyUtl {
     Score::VBF_R1,   Score::VBF_R2,
     Score::TRKPTZ_PV, Score::TRKPTZ_PU, Score::TRKPTZ_PUW, Score::TRKPTZ_TZ,
     Score::TRKPTZ_TZ_IJ, Score::TRKPTZ_TZ_OJ, Score::TRKPTZ_TZ_GIJ, Score::WAVES_GIJ, Score::TRKPTZ_TZJ, Score::TRKPTZ_TZQ,
-    Score::TZP_KDE, Score::TZP_KDE_TZ,
+    Score::TZP_KDE, Score::TZP_KDE_TZ, Score::TZP_KDE_TZ_Q,
   };
 
   // ---------------------------------------------------------------------------

@@ -69,6 +69,7 @@ inline auto buildAnalysisMap(
   m.emplace(Score::TRKPTZ_TZQ,  AnalysisObj(label, Score::TRKPTZ_TZQ));
   m.emplace(Score::TZP_KDE,     AnalysisObj(label, Score::TZP_KDE));
   m.emplace(Score::TZP_KDE_TZ,  AnalysisObj(label, Score::TZP_KDE_TZ));
+  m.emplace(Score::TZP_KDE_TZ_Q, AnalysisObj(label, Score::TZP_KDE_TZ_Q));
 
   // Scores active only in the real-HGTD scenario
   if (scenario == Scenario::HGTD) {
@@ -197,6 +198,19 @@ inline void makeComparisonPlots(
 	      &mapHGTD.at(Score::TZP_KDE_TZ),
 	    },
 	    {C01, C02, C04, C03});
+
+  // The time-quality gate. TZP_KDE_TZ over every event, and the same pick
+  // counted only where a time is PROVIDED (Q >= KDE_QUALITY_MIN) -- so the
+  // gated curve is the purity of the provided time, and its grey denominator
+  // band is the acceptance. HGTD is Athena's time over every event (its
+  // invalid-time events count as failures there).
+  moneyPlot(MyUtl::plotFilePath("comparisons", TString::Format("quality_%s.pdf", key).Data()).c_str(), key, canvas,
+	    {
+	      &mapHGTD.at(Score::HGTD),
+	      &mapHGTD.at(Score::TZP_KDE_TZ),
+	      &mapHGTD.at(Score::TZP_KDE_TZ_Q),
+	    },
+	    {C01, C03, C08});
 
 }
 
