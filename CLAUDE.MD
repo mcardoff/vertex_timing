@@ -424,6 +424,7 @@ KDE_SEL_WIDTH / KDE_TIME_WIDTH = 60 ps  // Gaussian kernels: density at the mode
 KDE_PT_POWER          = 0.5   // sqrt(pT) in both the selection and the time weight
 KDE_MS_ITER           = 3     // mean-shift passes (6 is identical)
 DIST_CUT_TZ           = 3.0   // σ — TZP_KDE_TZ's joint (t, z0) iterative clustering (ITERATIVE_ZSEED)
+KDE_QUALITY_MIN       = 2.0   // time-quality flag: no time provided below Q = (S1−S2)/√(S1+S2)
 MIN_INJET_TRACKS_FOR_TIME = 3 // Score::minSubsetTracks — in-jet time only when ≥3 in-jet tracks (sample-independence guard)
 TRACK_DZ_WEIGHT       = 0.7   // /mm — the TZ-family ladder rows (historical, kept for continuity)
 QP_PRECISION_WEIGHT   = 0.8   // unused; superseded by d0 (kept for the record)
@@ -1142,6 +1143,7 @@ All scores are defined as `static const Score` members of the `Score` struct in 
 | 33 | TRKPTZ_TZP | ... [+ d0 precision] | **The final classical selector (TZP)** — C++ symbol is still `Score::TRKPTZ_TZQ`, renamed short/long name after the d0-supersedes-qP swap. See Physics Findings |
 | 34 | TZP_KDE | Kernel-density TZP [mean-shift t] | TZP's envelope × a 60 ps kernel density over ALL clustered tracks; time = mean-shift mode (`TimeSource::MEAN_SHIFT`). Filled by `applyKernelDensityScore`, a collection-level pass after `updateScores`. No Athena input |
 | 35 | TZP_KDE_TZ | Kernel-density TZP [(t,z) clusters] | **Best classical row.** Same score on its own collection: iterative clustering jointly in (t, z0) at 3σ, seeded by pT·e^{−\|Δz\|} (`ClusteringMethod::ITERATIVE_ZSEED`). Removes 9.2% (zjets) to 16% (ttbar) of TZP's fails |
+| 36 | TZP_KDE_TZ_Q | Kernel-density TZP [(t,z), Q ≥ 2] | TZP_KDE_TZ's pick with the denominator gated on the time-quality flag (`Score::minQuality`, `Cluster::kdeQuality`). Reads as the purity of the PROVIDED time; aliased in `selectClusters`, builds no collection |
 
 Two fields added to `Score` (2026-09-01): **`timeSource`**
 (`TimeSource::{FULL, IN_JET, OUT_JET}`) — which subset of the SELECTED
@@ -1168,6 +1170,8 @@ Comparison PDF groups produced by `clustering_plot` from histograms written by `
 - `timesource_*.pdf` — TRKPTZ_TZ raw vs in-jet vs out-of-jet time (selection bit-identical)
 - `guarded_*.pdf` — the deployable set: TRKPTZ / TZ / TZ_GIJ / **TZP** / WAVES
 - `kde_*.pdf` — TRKPTZ / WAVES / TZP / TZP_KDE / **TZP_KDE_TZ**
+- `newmethod_*.pdf` — HGTD / TRKPTZ / TZP / TZP_KDE_TZ
+- `quality_*.pdf` — HGTD / TZP_KDE_TZ / TZP_KDE_TZ_Q (the gated curve's grey band is its acceptance)
 
 Plus inclusive resolution/pull plots (`inclusive/inclusivereso_*`,
 `inclusive/inclusivepull_*`, log/lin) and shape-comparison plots
@@ -1264,6 +1268,35 @@ clusters jointly in (t, z0), seeded by pT·e^{−|Δz|}.
   reproduces the production partition label for label; use it before touching
   the C++ clustering.
 - `rpt_v5_hist`, the exporter and the display still use TZP. No grid C++ run yet.
+
+### The time-quality flag Q: when not to provide a time (2026-10-03)
+
+`Cluster::kdeQuality`, `KDE_QUALITY_MIN = 2`; record in `results/time_quality.md`.
+`Q = (S1 − S2)/√(S1 + S2)`: the selected candidate's kernel-density score
+against the best candidate more than 60 ps away. Reco-only, no training; the
+counterpart of Athena's BDT ≥ 0.3.
+
+| grid C++, m_jj ≥ 200 | vbf | zjets | dijet | ttbar |
+|---|---|---|---|---|
+| time provided at Q ≥ 2 | 88.3% | 54.2% | 84.3% | 83.1% |
+| core fraction of provided times, before → after | 93.0 → 97.5 | 67.8 → 83.9 | 89.9 → 96.0 | 90.3 → 96.6 |
+| mean cluster purity, before → after | 72.5 → 77.0 | 40.0 → 52.4 | 68.4 → 74.6 | 68.1 → 74.5 |
+| Athena: provided / right (novbs exports) | 91.5 / 92.2 | 55.6 / 74.6 | 87.8 / 89.9 | 86.1 / 90.4 |
+
+- The information is the GAP to the competing time. Of 22 variables nothing
+  about the winner alone comes close, and nothing combined with the gap adds
+  more than 0.01 of AUC.
+- P(right | Q) agrees within ~3 points across vbf / dijet / ttbar in every Q
+  bin; Z+jets sits 8–10 lower (events with no timed HS track).
+- At Athena's own acceptance the provided time is wrong about half as often.
+- **The cut does not help R_pT.** `rpt_v5` scenarios 7–9 (`kde`, `kde_q`,
+  `kde_q1`, fallback = ITk-only): rejection at 0.80 falls 7–14% with the cut;
+  the efficiency ceiling rises 0.3–1.0 points. A low-Q time is still right
+  40–75% of the time and the gate forgives wrong t0s. Use Q where the time
+  itself must be right, and apply the time in every event for R_pT.
+- Without the cut `kde` is level with `tzp` in R_pT (1–2%).
+- Compare rejections with `python/kde_study/quality_report.py`, which
+  interpolates at matched efficiency.
 
 ### TZP: the classical selector (2026-09-01) — supersedes WAVeS as the best non-ML score
 
