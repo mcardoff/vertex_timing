@@ -87,7 +87,7 @@ inline std::vector<Scenario> makeScenarios(const std::string& suffix) {
     // time is provided and the jet keeps its ITk-only R_pT. Indices 7 and 8.
     // Index 9 is the same with a looser threshold (Q >= 1), for the trend.
     {"kde",         "KDE t_{0}",                   C07, nullptr, nullptr},
-    {"kde_q",       "KDE t_{0}, Q #geq 2",         C09, nullptr, nullptr},
+    {"kde_q",       "KDE t_{0}, Q #geq 1.5",       C09, nullptr, nullptr},
     {"kde_q1",      "KDE t_{0}, Q #geq 1",         kGray + 2, nullptr, nullptr},
   };
   for (auto& sc : s) {

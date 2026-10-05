@@ -907,6 +907,20 @@ namespace MyUtl {
   inline constexpr double KDE_TIME_WIDTH  = 60.0;  // ps, mean-shift kernel
   inline constexpr double KDE_PT_POWER    = 0.5;   // pT saturation in both weights
   inline constexpr int    KDE_MS_ITER     = 3;     // mean-shift passes
+  // Time RELIABILITY of a track (2026-10-05, results/selection_reliability.md).
+  // Whether a hard-scatter track's HGTD time is right (within 3 sigma of truth)
+  // depends on how the track was matched to hits, not on its resolution:
+  //   1 HGTD hit: 62-70% right;  >= 2 hits: 88-93% (flat in 2/3/4)
+  //   sigma_z0 < 0.3 mm: 84-87% (1 hit) / 98%;  1.2-2.4 mm: 53-57% / 85%
+  // A wrong time is a random time, so unreliable tracks are what fake
+  // coincidences are made of. Both factors multiply the per-track weight:
+  //   selection density:  x h x r_z     time weight:  x r_z   (1/sigma_t^2
+  //   already halves a single-hit track there)
+  //   h = KDE_SINGLE_HIT_WEIGHT for 1 hit, else 1;  r_z = 1/(1 + sigma_z0/KDE_Z0_REL_SCALE)
+  // Plateaus: h 0.35-0.5, scale 1-4 mm. Worth +1.9 / +2.4 / +3.4 / +3.6 points
+  // of TZP's fails (zjets / dijet / vbf / ttbar) on top of TZP_KDE_TZ.
+  inline constexpr double KDE_SINGLE_HIT_WEIGHT = 0.5;
+  inline constexpr double KDE_Z0_REL_SCALE      = 2.0;   // mm
   inline const Score Score::TZP_KDE = { 34, "Kernel-density TZP [mean-shift t]",
                                         "TZP_KDE", false, false, -1.f, -1.0,
                                         ClusteringMethod::ITERATIVE, false,
@@ -916,10 +930,10 @@ namespace MyUtl {
   // in (t, z0) -- distance sqrt(dt^2/s_t^2 + dz^2/s_z^2) < 3 -- and seeded in
   // order of pT e^{-|z0 - z_PV|} rather than pT. Clusters are then z-coherent,
   // which sharpens the cluster envelope (7.6 clusters per event against 5.6).
-  // Fails removed relative to TZP: zjets 9.2%, dijet 14.3%, vbf 15.1%,
-  // ttbar 16.0%. A truth-perfect partition scored the same way reaches only
-  // 10.7 / 16.1 / 17.7 / 18.3, so the clustering is within 1.5-2.6 points of
-  // its ceiling: what remains is selection (results/kde_mean_shift.md).
+  // Fails removed relative to TZP: zjets 11.1%, dijet 16.7%, vbf 18.5%,
+  // ttbar 19.6% with the reliability weights above (9.2 / 14.3 / 15.1 / 16.0
+  // without). A truth-perfect partition was worth only 1.5-2.6 points more
+  // than this clustering: what remains is selection (results/kde_mean_shift.md).
   inline constexpr double DIST_CUT_TZ = 3.0;
   inline const Score Score::TZP_KDE_TZ = { 35, "Kernel-density TZP [(t,z) clusters]",
                                            "TZP_KDE_TZ", true, false, -1.f, DIST_CUT_TZ,
@@ -935,15 +949,16 @@ namespace MyUtl {
   // the chosen time beats the runner-up. Reco-only, no training.
   // P(|dt| < 60 ps) rises monotonically with Q from ~40% below 0.25 to >99%
   // above 6, and the curve is the same within ~3 points on vbf / dijet / ttbar.
-  // At Q >= 2 a time is provided for 88% of VBF events (97.6% right) and 54%
-  // of Z+jets (83.8% right); Athena provides 91.5% / 55.6% at 92.2% / 74.6%.
-  // See results/time_quality.md.
-  inline constexpr double KDE_QUALITY_MIN = 2.0;
+  // At Q >= 1.5 a time is provided for 89% of VBF events (97.5% right) and 57%
+  // of Z+jets (83.5% right); Athena provides 91.5% / 55.6% at 92.2% / 74.6%.
+  // The threshold was 2.0 before the reliability weights, which scale S (and
+  // so Q) down; 1.5 is the same acceptance. See results/time_quality.md.
+  inline constexpr double KDE_QUALITY_MIN = 1.5;
   // TZP_KDE_TZ's pick, with the time withheld when its quality fails. Every
   // selected event is in the denominator; a withheld time is a failure, as for
   // the HGTD row. Shares TZP_KDE_TZ's collection and selection (aliased in
   // selectClusters; builds nothing).
-  inline const Score Score::TZP_KDE_TZ_Q = { 36, "Kernel-density TZP [(t,z), Q #geq 2]",
+  inline const Score Score::TZP_KDE_TZ_Q = { 36, "Kernel-density TZP [(t,z), Q #geq 1.5]",
                                              "TZP_KDE_TZ_Q", true, false, -1.f, -1.0,
                                              ClusteringMethod::ITERATIVE_ZSEED, true,
                                              TrackFilterType::ALL, VbsRegion::NONE,

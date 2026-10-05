@@ -7,7 +7,7 @@ import sys, numpy as np, uproot
 lab, fc, fr = sys.argv[1:4]
 c = uproot.open(fc); r = uproot.open(fr)
 ROWS = [("HGTD (Athena)", "HGTD Algorithm", "hgtd"), ("TZP", "d0 precision]", "trkptztzp"),
-        ("TZP_KDE_TZ (no cut)", "[(t,z) clusters]", "tzpkdetz"), ("TZP_KDE_TZ, Q >= 2", "[(t,z), Q #geq 2]", "tzpkdetzq")]
+        ("TZP_KDE_TZ (no cut)", "[(t,z) clusters]", "tzpkdetz"), ("TZP_KDE_TZ, Q >= 1.5", "[(t,z), Q #geq 1.5]", "tzpkdetzq")]
 names = [k.split(';')[0] for k in c.keys()]
 key = "n_Forward_Jets"
 print(f"== {lab}: clustering ==")

@@ -482,7 +482,7 @@ namespace MyUtl {
     BranchPointerWrapper *branch,
     double fixedRes = -1.0
   ) {
-    struct KTrack { double t, wSel, wTime; };
+    struct KTrack { double t, wSel, wTime, res2; };
     std::vector<KTrack> all;
     std::vector<std::pair<size_t,size_t>> span;  // [begin, end) of each cluster in `all`
     const double zPV = branch->recoVtxZ[0];
@@ -493,9 +493,14 @@ namespace MyUtl {
         const int idx = c.trackIndices[i];
         const double res = (fixedRes > 0.0) ? fixedRes
                                             : static_cast<double>(branch->trackTimeRes[idx]);
+        // Time reliability: extrapolation quality (sigma_z0) in both weights,
+        // the single-hit factor in the selection only -- see KDE_SINGLE_HIT_WEIGHT.
+        const double vz = branch->trackVarZ0[idx];
+        const double rz = 1.0 / (1.0 + ((vz > 0.0) ? std::sqrt(vz) : 0.0) / KDE_Z0_REL_SCALE);
+        const double h  = (branch->trackHgtdHits[idx] >= 2) ? 1.0 : KDE_SINGLE_HIT_WEIGHT;
         const double w = std::pow(static_cast<double>(branch->trackPt[idx]), KDE_PT_POWER)
-                       * std::exp(-TZP_TRACK_DZ_WEIGHT * std::abs(branch->trackZ0[idx] - zPV));
-        all.push_back({c.allTimes[i], w, (res > 0.0) ? w / (res * res) : 0.0});
+                       * std::exp(-TZP_TRACK_DZ_WEIGHT * std::abs(branch->trackZ0[idx] - zPV)) * rz;
+        all.push_back({c.allTimes[i], w * h, (res > 0.0) ? w / (res * res) : 0.0, res * res});
       }
       span.push_back({b, all.size()});
     }
@@ -529,10 +534,10 @@ namespace MyUtl {
       {
         double sg = 0.0, sg2 = 0.0;
         for (const KTrack& k : all) {
-          if (k.wTime <= 0.0 || k.wSel <= 0.0) continue;
+          if (k.wTime <= 0.0) continue;
           const double u = (k.t - m) / KDE_TIME_WIDTH;
           const double g = k.wTime * std::exp(-0.5 * u * u);
-          sg += g;  sg2 += g * g * (k.wSel / k.wTime);  // wSel / wTime = s_i^2
+          sg += g;  sg2 += g * g * k.res2;
         }
         c.kernelSigma = (sg > 0.0) ? std::sqrt(sg2) / sg : 0.0;
       }
