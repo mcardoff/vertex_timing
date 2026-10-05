@@ -7,9 +7,12 @@
 // Also split by Track_nHGTDPrimaryHits == 0 against >= 1: a track none of whose
 // hits come from its own particle carries somebody else's time.
 //
-// Output: <OUTPUT_DIR>/track_dt_nhits.pdf (3 pages: residual, pull, the
-// no-primary-hit split) and a console table.
-//   ./track_dt_nhits [--sample=<name>] [--max-events=N]
+// --by=pt bins the same quantities in track pT instead (< 1, 1-2, 2-5, 5-10,
+// 10-30, > 30 GeV) and writes track_dt_pt.pdf.
+//
+// Output: <OUTPUT_DIR>/track_dt_nhits.pdf or track_dt_pt.pdf (4 pages: residual
+// log and linear, pull, the no-primary-hit split) and a console table.
+//   ./track_dt_nhits [--by=nhits|pt] [--sample=<name>] [--max-events=N]
 
 #include <TCanvas.h>
 #include <TChain.h>
@@ -35,23 +38,23 @@ using namespace MyUtl;
 namespace {
 struct Acc {
   TH1D *dt = nullptr, *pull = nullptr, *dtNoPrim = nullptr, *dtPrim = nullptr;
-  long n = 0, n30 = 0, n60 = 0, n90 = 0, n3s = 0, nNoPrim = 0, nNoPrimBad = 0, nPrimBad = 0;
+  long n = 0, n30 = 0, n60 = 0, n90 = 0, n3s = 0, nNoPrim = 0, nNoPrimBad = 0, nPrimBad = 0, nOneHit = 0;
   double sumRes = 0, sumDt = 0;
 };
 
-// shared-mean double Gaussian, as track_dt.cxx; returns (core sigma, tail sigma, core fraction of the fit area)
+// Core width: Gaussian + flat floor over +-120 ps. The tails are flat out to +-400 ps (mis-matched hits),
+// not Gaussian, so a double-Gaussian tail width is ill-defined here and its fit unstable from bin to bin;
+// the tail is reported as counted fractions instead.
 std::array<double,3> fitDG(TH1D* h, const char* name) {
-  TF1* f = new TF1(name, "[1]*TMath::Exp(-0.5*((x-[0])/[3])^2)+[2]*TMath::Exp(-0.5*((x-[0])/[4])^2)",
-                   h->GetXaxis()->GetXmin(), h->GetXaxis()->GetXmax());
-  f->SetParameters(h->GetMean(), 0.8 * h->GetMaximum(), 1e-2 * h->GetMaximum(), 25.0, h->GetStdDev());
-  f->SetParLimits(0, -50.0, 50.0); f->SetParLimits(1, 0, 1e12); f->SetParLimits(2, 0, 1e12);
-  f->SetParLimits(3, 5.0, 1e6);    f->SetParLimits(4, 5.0, 1e6);
-  f->SetNpx(1000);
-  h->Fit(f, "RQ0");
-  double s1 = f->GetParameter(3), s2 = f->GetParameter(4), n1 = f->GetParameter(1), n2 = f->GetParameter(2);
-  if (s1 > s2) { std::swap(s1, s2); std::swap(n1, n2); }
-  const double a1 = n1 * s1, a2 = n2 * s2;
-  return {s1, s2, (a1 + a2 > 0) ? a1 / (a1 + a2) : 0.0};
+  TF1* f = new TF1(name, "[1]*TMath::Exp(-0.5*((x-[0])/[2])^2)+[3]", -120.0, 120.0);
+  f->SetParameters(h->GetBinCenter(h->GetMaximumBin()), 0.9 * h->GetMaximum(), 28.0, 0.02 * h->GetMaximum());
+  // Limits scaled to the histogram: Minuit's bounded-parameter transform loses all precision when a
+  // value of ~1e3 sits in [0, 1e12], which is what broke the fit in the smallest bin.
+  const double mx = h->GetMaximum();
+  f->SetParLimits(0, -50.0, 50.0); f->SetParLimits(1, 0, 10 * mx);
+  f->SetParLimits(2, 5.0, 100.0);  f->SetParLimits(3, 0, mx);
+  h->Fit(f, "RQ0L");   // likelihood: the > 30 GeV bin has ~28k tracks and a chi2 fit lands in a false minimum
+  return {f->GetParameter(2), f->GetParameter(0), f->GetParError(2)};
 }
 }  // namespace
 
@@ -70,10 +73,21 @@ int main(int argc, char** argv) {
   TTreeReader reader(&chain);
   BranchPointerWrapper branch(reader);
 
-  const int NB = 4;
-  const char* lab[NB] = {"1 hit", "2 hits", "3 hits", "#geq 4 hits"};
-  const Color_t col[NB] = {C02, C01, C08, C04};
-  Acc a[NB];
+  bool byPt = false;
+  for (int i = 1; i < argc; ++i) if (std::string(argv[i]) == "--by=pt") byPt = true;
+  const int NB = byPt ? 6 : 4;
+  const std::vector<const char*> lab = byPt
+    ? std::vector<const char*>{"p_{T} < 1 GeV", "1 #minus 2 GeV", "2 #minus 5 GeV", "5 #minus 10 GeV", "10 #minus 30 GeV", "> 30 GeV"}
+    : std::vector<const char*>{"1 hit", "2 hits", "3 hits", "#geq 4 hits"};
+  const std::vector<const char*> row = byPt
+    ? std::vector<const char*>{"<1", "1-2", "2-5", "5-10", "10-30", ">30"}
+    : std::vector<const char*>{"1", "2", "3", ">=4"};
+  const std::vector<Color_t> col = byPt ? std::vector<Color_t>{C02, C07, C03, C08, C01, C04}
+                                        : std::vector<Color_t>{C02, C01, C08, C04};
+  const double ptEdge[5] = {1.0, 2.0, 5.0, 10.0, 30.0};
+  // the two bins drawn on the own-particle page
+  const int splitA = 0, splitB = byPt ? 3 : 1;
+  std::vector<Acc> a(NB);
   for (int i = 0; i < NB; ++i) {
     a[i].dt       = new TH1D(Form("dt_%d", i), ";t_{track}^{HGTD} #minus t_{truth particle} [ps];Fraction of tracks / 4 ps", 200, -400, 400);
     a[i].pull     = new TH1D(Form("pull_%d", i), ";(t_{track}^{HGTD} #minus t_{truth particle}) / #sigma_{t};Fraction of tracks", 200, -10, 10);
@@ -91,7 +105,10 @@ int main(int argc, char** argv) {
       if (p < 0 || p >= (int)branch.particleT.GetSize()) continue;
       const int nh = branch.trackHgtdHits[idx];
       if (nh < 1) continue;
-      Acc& x = a[std::min(nh, NB) - 1];
+      int bin = std::min(nh, 4) - 1;
+      if (byPt) { const double pt = branch.trackPt[idx]; bin = 0; while (bin < 5 && pt >= ptEdge[bin]) ++bin; }
+      Acc& x = a[bin];
+      if (nh == 1) ++x.nOneHit;
       const double dt = branch.trackTime[idx] - branch.particleT[p];
       const double res = branch.trackTimeRes[idx];
       const bool noPrim = (branch.trackPrimHits[idx] == 0);
@@ -111,24 +128,25 @@ int main(int argc, char** argv) {
 
   long nAll = 0;
   for (auto& x : a) nAll += x.n;
-  std::printf("\n=== HGTD track time - truth particle time, by number of HGTD hits (%lld events, %ld tracks) ===\n", (long long)nEv, nAll);
-  std::printf("%-9s %10s %7s %8s %9s %9s %9s %7s %7s %7s %8s | %12s %14s %14s\n", "n hits", "tracks", "share", "<sig_t>", "core sig", "tail sig", "core frac",
-              "<30ps", "<60ps", "<90ps", "<3 sig_t", "no prim. hit", "bad | no prim", "bad | >=1 prim");
+  std::printf("\n=== HGTD track time - truth particle time, by %s (%lld events, %ld tracks) ===\n",
+              byPt ? "track pT [GeV]" : "number of HGTD hits", (long long)nEv, nAll);
+  std::printf("%-9s %10s %7s %8s %9s %9s %9s %7s %7s %7s %8s | %12s %14s %14s %9s\n", byPt ? "pT" : "n hits", "tracks", "share", "<sig_t>", "core sig", "peak", "sig/quoted",
+              "<30ps", "<60ps", "<90ps", "<3 sig_t", "no prim. hit", "bad | no prim", "bad | >=1 prim", "1-hit");
   for (int i = 0; i < NB; ++i) {
     Acc& x = a[i];
     if (x.n == 0) continue;
     auto f = fitDG(x.dt, Form("fit_%d", i));
-    std::printf("%-9s %10ld %6.1f%% %7.1f %8.1f %9.1f %8.1f%% %6.1f%% %6.1f%% %6.1f%% %7.1f%% | %11.1f%% %13.1f%% %13.1f%%\n",
-                i == 3 ? ">=4" : Form("%d", i + 1), x.n, 100.0 * x.n / nAll, x.sumRes / x.n, f[0], f[1], 100 * f[2],
+    std::printf("%-9s %10ld %6.2f%% %7.1f %8.1f %9.1f %9.2f %6.1f%% %6.1f%% %6.1f%% %7.1f%% | %11.1f%% %13.1f%% %13.1f%% %8.1f%%\n",
+                row[i], x.n, 100.0 * x.n / nAll, x.sumRes / x.n, f[0], f[1], f[0] / (x.sumRes / x.n),
                 100.0 * x.n30 / x.n, 100.0 * x.n60 / x.n, 100.0 * x.n90 / x.n, 100.0 * x.n3s / x.n,
                 100.0 * x.nNoPrim / x.n, x.nNoPrim ? 100.0 * x.nNoPrimBad / x.nNoPrim : 0.0,
-                (x.n - x.nNoPrim) ? 100.0 * x.nPrimBad / (x.n - x.nNoPrim) : 0.0);
+                (x.n - x.nNoPrim) ? 100.0 * x.nPrimBad / (x.n - x.nNoPrim) : 0.0, 100.0 * x.nOneHit / x.n);
   }
-  std::printf("  core/tail sig: shared-mean double Gaussian over +-400 ps.  'bad' = |dt| >= 3 sigma_t.\n"
+  std::printf("  core sig / peak: Gaussian + flat floor fitted over +-120 ps.  'bad' = |dt| >= 3 sigma_t.\n"
               "  no prim. hit: Track_nHGTDPrimaryHits == 0, i.e. none of the track's hits come from its own particle.\n");
 
   boost::filesystem::create_directories(MyUtl::OUTPUT_DIR);
-  const std::string out = MyUtl::plotFilePath("", "track_dt_nhits.pdf");
+  const std::string out = MyUtl::plotFilePath("", byPt ? "track_dt_pt.pdf" : "track_dt_nhits.pdf");
   TCanvas* c = new TCanvas("c", "", 800, 600);
   c->Print((out + "[").c_str());
   auto drawSet = [&](bool pull, bool logy) {
@@ -143,10 +161,10 @@ int main(int argc, char** argv) {
     }
     hs[0]->SetMaximum(logy ? 30 * mx : 1.35 * mx);
     if (logy) hs[0]->SetMinimum(2e-5);
-    TLegend* leg = new TLegend(0.66, 0.70, 0.92, 0.90); StyleLegend(leg);
+    TLegend* leg = new TLegend(0.64, byPt ? 0.62 : 0.70, 0.92, 0.90); StyleLegend(leg);
     for (int i = 0; i < NB; ++i) {
       hs[i]->Draw(i == 0 ? "HIST" : "HIST SAME");
-      leg->AddEntry(hs[i], Form("%s (%.0f%%)", lab[i], 100.0 * a[i].n / nAll), "l");
+      leg->AddEntry(hs[i], Form(100.0 * a[i].n / nAll < 1 ? "%s (%.2f%%)" : "%s (%.0f%%)", lab[i], 100.0 * a[i].n / nAll), "l");
     }
     leg->Draw();
     ATLASLabel(0.18, 0.88, "Simulation Internal");
@@ -159,20 +177,26 @@ int main(int argc, char** argv) {
   drawSet(false, true);
   drawSet(false, false);
   drawSet(true, true);
-  // page 4: 1-hit and 2-hit tracks, split by whether any hit is from the track's own particle
+  // page 4: two of the bins, split by whether any hit is from the track's own particle. Unit area per
+  // BIN (both of its curves share one normalisation), so bins of very different size can be compared.
   c->SetLogy(true);
   {
-    TH1D* h[4] = {a[0].dtPrim, a[0].dtNoPrim, a[1].dtPrim, a[1].dtNoPrim};
-    const Color_t cc[4] = {C02, C02, C01, C01};
-    const char* ll[4] = {"1 hit, from own particle", "1 hit, not from own particle", "2 hits, #geq 1 from own particle", "2 hits, none from own particle"};
-    double mx = 0; for (auto* x : h) mx = std::max(mx, x->GetMaximum());
-    TLegend* leg = new TLegend(0.56, 0.70, 0.92, 0.90); StyleLegend(leg);
-    for (int i = 0; i < 4; ++i) {
-      h[i]->SetLineColor(cc[i]); h[i]->SetLineWidth(2); h[i]->SetLineStyle(i % 2 ? 2 : 1);
-      if (i == 0) { h[i]->SetMaximum(30 * mx); h[i]->SetMinimum(0.5); }
-      h[i]->Draw(i == 0 ? "HIST" : "HIST SAME");
-      leg->AddEntry(h[i], ll[i], "l");
+    const int bb[2] = {splitA, splitB};
+    std::vector<TH1D*> h; double mx = 0;
+    TLegend* leg = new TLegend(0.50, 0.70, 0.92, 0.90); StyleLegend(leg);
+    for (int k = 0; k < 2; ++k) {
+      const Acc& x = a[bb[k]];
+      for (int np = 0; np < 2; ++np) {
+        TH1D* g = (TH1D*)(np ? x.dtNoPrim : x.dtPrim)->Clone(Form("sp_%d_%d", k, np));
+        if (x.n > 0) g->Scale(1.0 / x.n);
+        g->SetLineColor(col[bb[k]]); g->SetLineWidth(2); g->SetLineStyle(np ? 2 : 1);
+        g->GetYaxis()->SetTitle("Fraction of the bin's tracks / 4 ps");
+        mx = std::max(mx, g->GetMaximum()); h.push_back(g);
+        leg->AddEntry(g, Form("%s, %s", lab[bb[k]], np ? "no hit from own particle" : "#geq 1 hit from own particle"), "l");
+      }
     }
+    h[0]->SetMaximum(30 * mx); h[0]->SetMinimum(2e-6);
+    for (size_t i = 0; i < h.size(); ++i) h[i]->Draw(i == 0 ? "HIST" : "HIST SAME");
     leg->Draw();
     ATLASLabel(0.18, 0.88, "Simulation Internal");
     ATLASEnergyLabel(0.18, 0.82, MyUtl::ENERGY_LABEL.c_str());
