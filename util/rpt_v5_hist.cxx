@@ -687,8 +687,9 @@ int main(int argc, char** argv) {
       double t_kde = 0.0, var_kde = 0.0;
       bool   kde_ok = false, kde_q_ok = false, kde_q1_ok = false;
       {
+        // The wide list (getWideTracks), not trk_z: TZP_KDE_TZ's own selection.
         auto clustersTZ = clusterTracksInTime(
-            trk_z, &branch, DIST_CUT_TZ,
+            getWideTracks(&branch), &branch, DIST_CUT_TZ,
             /*useSmearedTimes=*/false, /*checkTimeValid=*/true, IDEAL_TRACK_RES,
             ClusteringMethod::ITERATIVE_ZSEED, /*useZ0=*/true,
             /*sortTracks=*/false, /*calcPurityFlag=*/false);

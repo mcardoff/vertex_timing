@@ -355,6 +355,35 @@ namespace MyUtl {
     return true;
   }
 
+  // ---------------------------------------------------------------------------
+  // 4-wide. getWideTracks -- the TZP_KDE_TZ track list (see KDE_WIDE_* in
+  //   clustering_constants.h). Built from the FULL track array, not narrowed
+  //   from the nominal list: it is wider in pT on both sides and in z.
+  //   Always the z0-significance rule; --dzpara does not apply here.
+  // ---------------------------------------------------------------------------
+  inline std::vector<int> getWideTracks(BranchPointerWrapper *branch) {
+    std::vector<int> out;
+    const double vz = branch->recoVtxZ[0];
+    for (size_t trk = 0; trk < branch->trackZ0.GetSize(); ++trk) {
+      const double eta = std::abs(branch->trackEta[trk]);
+      if (eta < MIN_HGTD_ETA || eta > MAX_HGTD_ETA) continue;
+      if (!branch->trackQuality[trk]) continue;
+      const double pt = branch->trackPt[trk];
+      if (pt <= KDE_WIDE_PT_MIN) continue;
+      const double var = branch->trackVarZ0[trk];
+      if (!(var > 0.0)) continue;
+      const double nsig = std::abs(branch->trackZ0[trk] - vz) / std::sqrt(Z0_VAR_INFLATION * var);
+      if (pt > MIN_TRACK_PT) {
+        if (nsig >= KDE_WIDE_NSIG) continue;
+      } else {
+        if (nsig >= KDE_WIDE_NSIG_LOWPT) continue;
+        if (branch->trackHgtdHits[trk] < KDE_WIDE_LOWPT_MINHITS) continue;
+      }
+      out.push_back((int)trk);
+    }
+    return out;
+  }
+
   std::vector<int> getAssociatedTracks(
       BranchPointerWrapper *branch,
       double minTrkPt, double maxTrkPt,
@@ -726,6 +755,7 @@ namespace MyUtl {
       switch (ft) {
         case TrackFilterType::JET:     return filterTracksInJets(tracks, branch, 0.4);
         case TrackFilterType::HS_ONLY: return filterHSTracks(tracks, branch);
+        case TrackFilterType::WIDE:    return getWideTracks(branch);
         default:                       return tracks;
       }
     };

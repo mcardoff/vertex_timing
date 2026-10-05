@@ -44,16 +44,25 @@ def nominal(tr, nsig=NSIG0, ptlo=PTLO0, pthi=PTHI0, quality=True):
     return m & (tr['quality'] > 0.5) if quality else m
 
 
-def evaluate(ev, tr, mask, zscale=2.0, hit=0.5, extra=None):
-    d = make_d(ev, tr, mask); t = d['tracks']
-    zf = 1 / (1 + t['sigma_z0_d'] / zscale)
-    rel = np.where(t['nhgtd_hits'] >= 2, 1.0, hit) * zf
-    if extra is not None:
-        e = extra(t); rel = rel * e; zf = zf * e
-    c = cands(d, sfac=rel, tfac=zf)
-    p = evmax_pick(c['ev'], c['S'], d['nev'])
-    ok = np.zeros(d['nev'], bool); has = p >= 0
-    ok[has] = c['ok'][p[has]]
+def evaluate(ev, tr, mask, zscale=2.0, hit=0.5, extra=None, chunk=12000):
+    """core flag per event for the track list `mask`. Processed in event chunks: the (candidate, track) pair
+    arrays grow as tracks^2 and took 12-16 GB in one go on 55k events."""
+    nev = len(ev['vz']); ok = np.zeros(nev, bool)
+    idx = np.where(mask)[0]; tev = tr['ev'][idx]
+    for a in range(0, nev, chunk):
+        b = min(a + chunk, nev)
+        lo, hi = np.searchsorted(tev, [a, b])
+        sub = idx[lo:hi]
+        t = {k: v[sub] for k, v in tr.items()}; t['ev'] = t['ev'] - a
+        e = {k: v[a:b] for k, v in ev.items()}
+        d = make_d(e, t, np.ones(len(sub), bool)); tt = d['tracks']
+        zf = 1 / (1 + tt['sigma_z0_d'] / zscale)
+        rel = np.where(tt['nhgtd_hits'] >= 2, 1.0, hit) * zf
+        if extra is not None:
+            x = extra(tt); rel = rel * x; zf = zf * x
+        c = cands(d, sfac=rel, tfac=zf)
+        p = evmax_pick(c['ev'], c['S'], d['nev']); has = p >= 0
+        o = np.zeros(b - a, bool); o[has] = c['ok'][p[has]]
+        ok[a:b] = o
+        d.pop('_pairs', None)
     return ok
-
-

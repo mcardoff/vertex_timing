@@ -379,7 +379,9 @@ namespace MyUtl {
   //     JET      — tracks falling inside a forward jet cone (FILTJET)
   //     HS_ONLY  — truth-HS-linked tracks only (TEST_HS)
   // ---------------------------------------------------------------------------
-  enum class TrackFilterType { ALL, JET, HS_ONLY };
+  // WIDE: not a filter of the nominal list but a different, wider one built
+  // from the full track array (getWideTracks) -- see KDE_WIDE_* below.
+  enum class TrackFilterType { ALL, JET, HS_ONLY, WIDE };
 
   // ---------------------------------------------------------------------------
   // 3c-bis. TimeSource
@@ -935,10 +937,28 @@ namespace MyUtl {
   // without). A truth-perfect partition was worth only 1.5-2.6 points more
   // than this clustering: what remains is selection (results/kde_mean_shift.md).
   inline constexpr double DIST_CUT_TZ = 3.0;
+  // ---------------------------------------------------------------------------
+  // The WIDE track list (2026-10-05, results/wide_track_list.md), TZP_KDE_TZ only.
+  // The nominal list (quality, 1 < pT < 30 GeV, z0 significance < 3) threw away
+  // hard-scatter tracks in three places:
+  //   pT > 30 GeV       0.04-0.24 tracks/event, 79-93% HS, time right 96-98%
+  //   z0 signif 3-4     ~6.5 tracks/event, 2-4% HS
+  //   0.5 < pT < 1 GeV  ~59 tracks/event, 8% HS, time right 70%; in 60% of the
+  //                     events with NO right-timed HS track in the nominal list
+  //                     there is one here
+  // The kernel score's weights (sqrt(pT), e^-|dz|, time reliability) can afford
+  // them where a hard-cluster pT sum could not. Sub-GeV tracks must have >= 2
+  // HGTD hits (single-hit ones are right ~50% of the time) and keep the 3 sigma
+  // window. Removes a further 7.7 / 7.1 / 12.2 / 12.0% of the remaining fails
+  // (zjets / dijet / vbf / ttbar) and halves the no-HS-track events.
+  inline constexpr double KDE_WIDE_NSIG          = 4.0;  // z0 significance, pT >= 1 GeV
+  inline constexpr double KDE_WIDE_NSIG_LOWPT    = 3.0;  // ... below 1 GeV
+  inline constexpr double KDE_WIDE_PT_MIN        = 0.5;  // GeV; NO ceiling
+  inline constexpr int    KDE_WIDE_LOWPT_MINHITS = 2;    // HGTD hits required below 1 GeV
   inline const Score Score::TZP_KDE_TZ = { 35, "Kernel-density TZP [(t,z) clusters]",
                                            "TZP_KDE_TZ", true, false, -1.f, DIST_CUT_TZ,
                                            ClusteringMethod::ITERATIVE_ZSEED, true,
-                                           TrackFilterType::ALL, VbsRegion::NONE,
+                                           TrackFilterType::WIDE, VbsRegion::NONE,
                                            TimeSource::MEAN_SHIFT, MIN_INJET_TRACKS_FOR_TIME };
   // ---------------------------------------------------------------------------
   // The time-quality flag: when NOT to hand out a t0.
