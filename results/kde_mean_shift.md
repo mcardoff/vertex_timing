@@ -3,7 +3,8 @@
 > **Update 2026-10-05.** Two time-reliability factors were added to the track
 > weights (`selection_reliability.md`): fails removed are now 19.8 / 11.1 /
 > 16.5 / 18.8% (vbf / zjets / dijet / ttbar, grid C++). The numbers below are
-> the 2026-10-03 state without them.
+> the 2026-10-03 state without them. With the wide track list
+> (`wide_track_list.md`) the current figures are 29.0 / 17.8 / 22.6 / 27.6%.
 
 `Score::TZP_KDE` (id 34, main collection) and `Score::TZP_KDE_TZ` (id 35, its
 own (t,z) collection). `applyKernelDensityScore` and `ITERATIVE_ZSEED` in

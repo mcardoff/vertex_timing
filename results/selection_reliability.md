@@ -1,5 +1,8 @@
 # Selection: weighting tracks by how reliable their TIME is (2026-10-05)
 
+> Numbers here are on the nominal track list. `wide_track_list.md` (same day)
+> widens the list and takes the fails removed to 29.0 / 17.8 / 22.6 / 27.6%.
+
 Follows `kde_mean_shift.md` (clustering at its ceiling, selection is what is
 left) and `time_quality.md` (the flag Q). Scripts: `python/kde_study/sel.py`
 (candidates, top-2 structure, aggregate), `sel2.py` / `sel9.py` (tie-break

@@ -53,6 +53,7 @@ vertex_timing/
 │   ├── track_dt.cxx              # Inclusive per-track HGTD-time-vs-truth-particle-time residual
 │   ├── skim_ntuples.cxx          # Writes the skimmed+slimmed sample copies under
 │   │                             #   /data/mcardiff/skimmed_ntuples/ (see Data Format)
+│   ├── dump_tracks.cxx           # Loose timed-track dump for offline track-list studies (python/kde_study/wide*.py)
 │   ├── vbs_region_diag.cxx       # Per-event VBS pair composition: does an R1/R2-shaped pair
 │   │                             #   EXIST, and did the m_jj picker choose it (3 zone conventions);
 │   │                             #   truth-side jet columns + --no-or; write-up in
@@ -427,6 +428,9 @@ DIST_CUT_TZ           = 3.0   // σ — TZP_KDE_TZ's joint (t, z0) iterative clu
 KDE_QUALITY_MIN       = 1.5   // time-quality flag: no time provided below Q = (S1−S2)/√(S1+S2) (was 2.0 before the reliability weights)
 KDE_SINGLE_HIT_WEIGHT = 0.5   // selection-density weight of a track with ONE HGTD hit (its time is right 62–70%, vs 88–93% for ≥2)
 KDE_Z0_REL_SCALE      = 2.0   // mm — r_z = 1/(1+σ_z0/scale), extrapolation quality, in selection AND time weights
+// TZP_KDE_TZ's WIDE track list (getWideTracks, results/wide_track_list.md) — every other score keeps the nominal list
+KDE_WIDE_NSIG / _LOWPT = 4.0 / 3.0  // z0 significance, pT ≥ 1 GeV / below
+KDE_WIDE_PT_MIN       = 0.5   // GeV, NO ceiling; below 1 GeV a track needs KDE_WIDE_LOWPT_MINHITS = 2 HGTD hits
 MIN_INJET_TRACKS_FOR_TIME = 3 // Score::minSubsetTracks — in-jet time only when ≥3 in-jet tracks (sample-independence guard)
 TRACK_DZ_WEIGHT       = 0.7   // /mm — the TZ-family ladder rows (historical, kept for continuity)
 QP_PRECISION_WEIGHT   = 0.8   // unused; superseded by d0 (kept for the record)
@@ -1144,7 +1148,7 @@ All scores are defined as `static const Score` members of the `Score` struct in 
 | 32 | TRKPTZ_TZJ | ... [+ jet frac] | Bounded jet term — REJECTED (population coin-flip on zjets); `JET_FRAC_WEIGHT = 0` |
 | 33 | TRKPTZ_TZP | ... [+ d0 precision] | **The final classical selector (TZP)** — C++ symbol is still `Score::TRKPTZ_TZQ`, renamed short/long name after the d0-supersedes-qP swap. See Physics Findings |
 | 34 | TZP_KDE | Kernel-density TZP [mean-shift t] | TZP's envelope × a 60 ps kernel density over ALL clustered tracks; time = mean-shift mode (`TimeSource::MEAN_SHIFT`). Filled by `applyKernelDensityScore`, a collection-level pass after `updateScores`. No Athena input |
-| 35 | TZP_KDE_TZ | Kernel-density TZP [(t,z) clusters] | **Best classical row.** Same score on its own collection: iterative clustering jointly in (t, z0) at 3σ, seeded by pT·e^{−\|Δz\|} (`ClusteringMethod::ITERATIVE_ZSEED`). Removes 11.1% (zjets) to 19.8% (vbf) of TZP's fails with the reliability weights |
+| 35 | TZP_KDE_TZ | Kernel-density TZP [(t,z) clusters] | **Best classical row.** Same score on its own collection: iterative clustering jointly in (t, z0) at 3σ, seeded by pT·e^{−\|Δz\|} (`ClusteringMethod::ITERATIVE_ZSEED`). On the WIDE track list (`TrackFilterType::WIDE`). Removes 17.8% (zjets) to 29.0% (vbf) of TZP's fails |
 | 36 | TZP_KDE_TZ_Q | Kernel-density TZP [(t,z), Q ≥ 1.5] | TZP_KDE_TZ's pick with the time WITHHELD below the quality threshold (`Score::minQuality`, `Cluster::kdeQuality`). A withheld time stays in the denominator as a failure, like an invalid Athena time in the HGTD row; aliased in `selectClusters`, builds no collection |
 
 Two fields added to `Score` (2026-09-01): **`timeSource`**
@@ -1271,7 +1275,41 @@ clusters jointly in (t, z0), seeded by pT·e^{−|Δz|}.
   the C++ clustering.
 - `rpt_v5_hist`, the exporter and the display still use TZP. No grid C++ run yet.
 
+### The wide track list (2026-10-05) — current state of TZP_KDE_TZ
+
+`results/wide_track_list.md`. `TZP_KDE_TZ` clusters `getWideTracks`: no pT
+ceiling, z0 significance < 4 above 1 GeV, and 0.5–1 GeV tracks with ≥ 2 HGTD
+hits at < 3σ. 73–77 tracks per event against 26–30.
+
+| grid C++, m_jj ≥ 200 | vbf | zjets | dijet | ttbar |
+|---|---|---|---|---|
+| Athena HGTD | 84.53 | 41.60 | 77.88 | 77.24 |
+| TZP | 91.69 | 64.48 | 88.30 | 88.50 |
+| **TZP_KDE_TZ** | **94.10** | **70.81** | **90.95** | **91.67** |
+| TZP fails removed | 29.0% | 17.8% | 22.6% | 27.6% |
+| Q ≥ 1.5: provided / right / over all | 91.7 / 97.4 / 89.3 | 62.3 / 83.4 / 52.0 | 87.6 / 95.8 / 83.9 | 87.2 / 96.5 / 84.2 |
+
+- **The 30 GeV ceiling cut the best tracks in the sample** (93% HS, time right
+  96% on VBF). Lifting it alone removes 9% of VBF's remaining fails. It dates
+  from linear-pT sums and is unnecessary with √pT weights.
+- **The "no hard-scatter track" events were mostly a pT-floor artefact.** In
+  60% of them a right-timed HS track sits at 0.5–1 GeV. With the wide list
+  they fall from 12.2% to 5.7% of Z+jets events.
+- Sub-GeV tracks are 8% pure and double the list; only a weighted kernel score
+  can afford them. Single-hit sub-GeV tracks are sample-dependent and excluded.
+- mu = 0 gains (vbf_mu0 138,029 → 138,098 of 138,245). dijet and ttbar were
+  not used to choose the rule.
+- R_pT: level to +8% against tzp at matched efficiency.
+- `util/dump_tracks` + `python/kde_study/wide.py` re-run the whole chain on
+  any track list offline. Chunk by event: unchunked it took 12–16 GB.
+- The nominal list is unchanged for every other score. Whether TZP wants the
+  ceiling lifted is untested.
+
 ### Time reliability in the selection (2026-10-05)
+
+> Numbers in this section are on the NOMINAL track list, before the wide list
+> above.
+
 
 `results/selection_reliability.md`. Two factors on the `TZP_KDE` track weights:
 a track with ONE HGTD hit counts half in the selection density, and
