@@ -424,7 +424,9 @@ KDE_SEL_WIDTH / KDE_TIME_WIDTH = 60 ps  // Gaussian kernels: density at the mode
 KDE_PT_POWER          = 0.5   // sqrt(pT) in both the selection and the time weight
 KDE_MS_ITER           = 3     // mean-shift passes (6 is identical)
 DIST_CUT_TZ           = 3.0   // σ — TZP_KDE_TZ's joint (t, z0) iterative clustering (ITERATIVE_ZSEED)
-KDE_QUALITY_MIN       = 2.0   // time-quality flag: no time provided below Q = (S1−S2)/√(S1+S2)
+KDE_QUALITY_MIN       = 1.5   // time-quality flag: no time provided below Q = (S1−S2)/√(S1+S2) (was 2.0 before the reliability weights)
+KDE_SINGLE_HIT_WEIGHT = 0.5   // selection-density weight of a track with ONE HGTD hit (its time is right 62–70%, vs 88–93% for ≥2)
+KDE_Z0_REL_SCALE      = 2.0   // mm — r_z = 1/(1+σ_z0/scale), extrapolation quality, in selection AND time weights
 MIN_INJET_TRACKS_FOR_TIME = 3 // Score::minSubsetTracks — in-jet time only when ≥3 in-jet tracks (sample-independence guard)
 TRACK_DZ_WEIGHT       = 0.7   // /mm — the TZ-family ladder rows (historical, kept for continuity)
 QP_PRECISION_WEIGHT   = 0.8   // unused; superseded by d0 (kept for the record)
@@ -1142,8 +1144,8 @@ All scores are defined as `static const Score` members of the `Score` struct in 
 | 32 | TRKPTZ_TZJ | ... [+ jet frac] | Bounded jet term — REJECTED (population coin-flip on zjets); `JET_FRAC_WEIGHT = 0` |
 | 33 | TRKPTZ_TZP | ... [+ d0 precision] | **The final classical selector (TZP)** — C++ symbol is still `Score::TRKPTZ_TZQ`, renamed short/long name after the d0-supersedes-qP swap. See Physics Findings |
 | 34 | TZP_KDE | Kernel-density TZP [mean-shift t] | TZP's envelope × a 60 ps kernel density over ALL clustered tracks; time = mean-shift mode (`TimeSource::MEAN_SHIFT`). Filled by `applyKernelDensityScore`, a collection-level pass after `updateScores`. No Athena input |
-| 35 | TZP_KDE_TZ | Kernel-density TZP [(t,z) clusters] | **Best classical row.** Same score on its own collection: iterative clustering jointly in (t, z0) at 3σ, seeded by pT·e^{−\|Δz\|} (`ClusteringMethod::ITERATIVE_ZSEED`). Removes 9.2% (zjets) to 16% (ttbar) of TZP's fails |
-| 36 | TZP_KDE_TZ_Q | Kernel-density TZP [(t,z), Q ≥ 2] | TZP_KDE_TZ's pick with the time WITHHELD below the quality threshold (`Score::minQuality`, `Cluster::kdeQuality`). A withheld time stays in the denominator as a failure, like an invalid Athena time in the HGTD row; aliased in `selectClusters`, builds no collection |
+| 35 | TZP_KDE_TZ | Kernel-density TZP [(t,z) clusters] | **Best classical row.** Same score on its own collection: iterative clustering jointly in (t, z0) at 3σ, seeded by pT·e^{−\|Δz\|} (`ClusteringMethod::ITERATIVE_ZSEED`). Removes 11.1% (zjets) to 19.8% (vbf) of TZP's fails with the reliability weights |
+| 36 | TZP_KDE_TZ_Q | Kernel-density TZP [(t,z), Q ≥ 1.5] | TZP_KDE_TZ's pick with the time WITHHELD below the quality threshold (`Score::minQuality`, `Cluster::kdeQuality`). A withheld time stays in the denominator as a failure, like an invalid Athena time in the HGTD row; aliased in `selectClusters`, builds no collection |
 
 Two fields added to `Score` (2026-09-01): **`timeSource`**
 (`TimeSource::{FULL, IN_JET, OUT_JET}`) — which subset of the SELECTED
@@ -1269,7 +1271,45 @@ clusters jointly in (t, z0), seeded by pT·e^{−|Δz|}.
   the C++ clustering.
 - `rpt_v5_hist`, the exporter and the display still use TZP. No grid C++ run yet.
 
+### Time reliability in the selection (2026-10-05)
+
+`results/selection_reliability.md`. Two factors on the `TZP_KDE` track weights:
+a track with ONE HGTD hit counts half in the selection density, and
+`1/(1 + σ_z0/2 mm)` multiplies both the selection and the time weight.
+
+| grid C++, m_jj ≥ 200 | vbf | zjets | dijet | ttbar |
+|---|---|---|---|---|
+| TZP | 91.69 | 64.48 | 88.30 | 88.50 |
+| TZP_KDE_TZ, 2026-10-03 | 93.03 | 67.78 | 89.94 | 90.29 |
+| TZP_KDE_TZ, with reliability | 93.33 | 68.43 | 90.23 | 90.66 |
+| TZP fails removed | 19.8% | 11.1% | 16.5% | 18.8% |
+
+- **A wrong HGTD time is a random time, and it is predictable from the
+  matching, not from the resolution.** A truth-HS track's time is within 3σ of
+  truth 62–70% of the time with one hit and 88–93% with two or more (flat in
+  2/3/4). It also falls with σ_z0 (87% → 57% for one hit) and rises with pT.
+  Mis-timed HS tracks look perfect in z and are what fake candidates are made
+  of.
+- Hit count carries NO information about HS provenance (purity flat), which is
+  why the earlier per-track weight scans missed it. Ask "is this track's time
+  right", not "is this track HS".
+- Found by a top-2 tie-break scan: the right time is the pick OR the runner-up
+  in 80.4% of Z+jets events (pick alone 68.0%). No tie-break variable beats
+  the score on low-Q pairs (60–63%); the three weak independent ones were all
+  time reliability, worth more as a track weight.
+- Out of sample: vbf 20.6%, ttbar 19.0%, zjets mjj500 11.7%. mu = 0 neutral.
+- Quality threshold recalibrated 2.0 → 1.5 (scores scale down). Over all
+  events the gated time is now 87.4 / 47.5 / 82.2 / 81.8 against Athena's
+  84.5 / 41.6 / 77.9 / 77.2.
+- R_pT: `kde` now level with or above `tzp` on every sample (zjets +3%).
+- Closed: low-Q fallback to the aggregate t0 or to the runner-up, a beam-time
+  prior, |eta| weights, peakedness / sideband contrast.
+
 ### The time-quality flag Q: when not to provide a time (2026-10-03)
+
+> Numbers in this section are the 2026-10-03 state at Q ≥ 2. The threshold is
+> now 1.5; see the section above.
+
 
 `Cluster::kdeQuality`, `KDE_QUALITY_MIN = 2`; record in `results/time_quality.md`.
 `Q = (S1 − S2)/√(S1 + S2)`: the selected candidate's kernel-density score

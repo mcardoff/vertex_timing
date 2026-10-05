@@ -1,5 +1,10 @@
 # When NOT to use the time: the quality flag Q (2026-10-03)
 
+> **Update 2026-10-05.** The reliability weights (`selection_reliability.md`)
+> scale the scores down, so the threshold is now **Q >= 1.5** at the same
+> acceptance. Current grid numbers are in that file's "quality flag" section.
+> Everything below is the 2026-10-03 state at Q >= 2; the conclusions hold.
+
 Athena withholds its HGTD vertex time when a BDT score is below 0.3. This is the
 equivalent for `TZP_KDE_TZ` (results/kde_mean_shift.md), with no training and
 no truth: `Cluster::kdeQuality`, filled by `applyKernelDensityScore`.

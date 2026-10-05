@@ -18,8 +18,3 @@ def f(d, c):
     info = np.bincount(c['crow'], H(d) / t['sigma_d0_d'] ** 2, nc)
     return dens_with(d, c, H(d)) * np.exp(-0.6 * np.abs(c['dz'])) * info ** 0.225
 run("+ hit factor inside the d0 information sum", f)
-# single-hit tracks whose time has no multi-hit neighbour within 2 sigma: orphan single hits count less
-def g(d, c, lone=0.25):
-    t = d['tracks']; pc, pt_, dt, K, base, wt = d['_pairs']
-    multi = (t['nhgtd_hits'] >= 2).astype(float)
-    return None

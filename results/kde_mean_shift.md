@@ -1,5 +1,10 @@
 # TZP_KDE: kernel-density selection, mean-shift time, (t,z) clustering (2026-10-03)
 
+> **Update 2026-10-05.** Two time-reliability factors were added to the track
+> weights (`selection_reliability.md`): fails removed are now 19.8 / 11.1 /
+> 16.5 / 18.8% (vbf / zjets / dijet / ttbar, grid C++). The numbers below are
+> the 2026-10-03 state without them.
+
 `Score::TZP_KDE` (id 34, main collection) and `Score::TZP_KDE_TZ` (id 35, its
 own (t,z) collection). `applyKernelDensityScore` and `ITERATIVE_ZSEED` in
 `src/clustering_functions.h`. Classical, closed-form, one configuration for
