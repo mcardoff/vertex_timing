@@ -1,0 +1,28 @@
+# dump_tracks: loose track dump for offline track-list studies (python/kde_study/wide*.py).
+# One sample per submit; $(nrun) of $(nshards) shards are run (nrun < nshards = a subsample).
+#   condor_submit -a sample=zjets -a nshards=14 -a nrun=14 dump_tracks.sub
+# Merge with hadd (TTrees only).
+universe                 = vanilla
+executable               = run_analysis.sh
+sample                   = vbf
+nshards                  = 4
+nrun                     = $(nshards)
+selargs                  = --vbs-deta=-1
+seltag                   = novbs_
+arguments                = dump_tracks $(sample) --file-shard=$(ProcId)/$(nshards) $(selargs)
+should_transfer_files    = YES
+when_to_transfer_output  = ON_EXIT
+transfer_input_files     = ../build/dump_tracks
+transfer_output_files    = $(sample)/$(sample)_$(seltag)trackdump.shard$(ProcId)of$(nshards).root
+transfer_output_remaps   = "$(sample)_$(seltag)trackdump.shard$(ProcId)of$(nshards).root=$(sample)/$(sample)_$(seltag)trackdump.shard$(ProcId)of$(nshards).root"
+getenv                   = True
+stream_output            = True
+stream_error             = True
++JobFlavour              = "tomorrow"
+request_cpus             = 1
+request_memory           = 4GB
+request_disk             = 8GB
+output = logs/dump_tracks_$(sample).$(ClusterId).$(ProcId).out
+error  = logs/dump_tracks_$(sample).$(ClusterId).$(ProcId).err
+log    = logs/dump_tracks_$(sample).$(ClusterId).$(ProcId).log
+queue $(nrun)

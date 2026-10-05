@@ -67,6 +67,7 @@ add_executable(assoc_study_plot util/assoc_study_plot.cxx)
 add_executable(vbs_region_diag util/vbs_region_diag.cxx)
 add_executable(skim_ntuples util/skim_ntuples.cxx)
 add_executable(hist_merge util/hist_merge.cxx)
+add_executable(dump_tracks util/dump_tracks.cxx)
 
 # Specify the include directories for your header files
 foreach(_tgt
@@ -93,6 +94,7 @@ foreach(_tgt
     assoc_study_hist
     assoc_study_plot
     hist_merge
+    dump_tracks
 )
     target_include_directories(${_tgt}
         PRIVATE
