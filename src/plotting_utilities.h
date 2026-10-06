@@ -1111,6 +1111,7 @@ namespace MyUtl {
     PlotObj* ptrHSTrack = nullptr;
     PlotObj* ptrPUTrack = nullptr;
     PlotObj* ptrClusPuFrac  = nullptr;  // cluster PU fraction by track count
+    PlotObj* ptrClusQ       = nullptr;  // time-quality flag Q of the selected cluster
 
     Score score;
     std::string timetypeIDer;
@@ -1221,6 +1222,15 @@ namespace MyUtl {
         PURITY_MIN,        PURITY_MAX,        PURITY_WIDTH,
         FOLD_CLUS_PU_FRAC, CLUS_PU_FRAC_MAX);
 
+      dataObjects["clus_q"] = std::make_unique<PlotObj>(
+        "Selected cluster Q", timetypeIDer,
+        MyUtl::plotFilePath("fullplots", TString::Format("%s_clusq.pdf", filenameIDer.Data()).Data()).c_str(),
+        score,
+        CLUS_Q_MIN,  CLUS_Q_MAX,  CLUS_Q_WIDTH,
+        DIFF_MIN,    DIFF_MAX,    DIFF_WIDTH,
+        PURITY_MIN,  PURITY_MAX,  PURITY_WIDTH,
+        FOLD_CLUS_Q, CLUS_Q_MAX);
+
       // Helper to construct one inclusive-reso histogram
       auto makeResoHist = [&](const char* prefix, const char* catLabel) {
         return std::make_unique<TH1D>(
@@ -1328,6 +1338,7 @@ namespace MyUtl {
       ptrPUTrack  = dataObjects["pu_track"].get();
       ptrPuFrac   = dataObjects["pu_frac" ].get();
       ptrClusPuFrac  = dataObjects["clus_pu_frac"].get();
+      ptrClusQ       = dataObjects["clus_q"].get();
     }
 
     // -----------------------------------------------------------------------
@@ -1690,9 +1701,12 @@ namespace MyUtl {
     canvas->Print(fname);
 
     // Plot Efficiency — linear scale
+    // The selected-cluster-Q key spans the whole 0-100% range by construction
+    // (the flag's point is that low Q means a coin flip), so it gets a wider axis.
+    const bool fullRange = (std::string(key) == "clus_q");
     plotWithLegend(
         [](auto& plt) { return plt->efficiency.get(); },
-	"Core Fraction", EFF_YMIN, EFF_YMAX,
+	"Core Fraction", fullRange ? 0.0 : EFF_YMIN, EFF_YMAX,
 	0.99, "99% Core Fraction", false,                     // logY
 	0.60, 0.30, 0.80, 0.60);
     canvas->Print(fname);

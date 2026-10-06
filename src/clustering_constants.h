@@ -518,6 +518,11 @@ namespace MyUtl {
   // Cluster-level PU fraction by track count; mirrors event PU_FRAC_* for direct comparison
   const double CLUS_PU_FRAC_WIDTH = 0.1;
   const double CLUS_PU_FRAC_MIN = 0.0, CLUS_PU_FRAC_MAX = 1.0 + CLUS_PU_FRAC_WIDTH, FOLD_CLUS_PU_FRAC = 1.0;
+  // Time-quality flag Q of the SELECTED cluster (Cluster::kdeQuality). Negative
+  // values occur for rows whose selector is not the kernel score: the kernel
+  // score then prefers another candidate. Folded into the last bin above 8.
+  const double CLUS_Q_WIDTH = 0.5;
+  const double CLUS_Q_MIN = -2.0, CLUS_Q_MAX = 8.0 + CLUS_Q_WIDTH, FOLD_CLUS_Q = 8.0;
 
   // σ_t factor used as the third multiplicative term in cluster quality.
   // Linear roll-off: factor=1 below FLOOR, factor=0 above CEIL, linear between.

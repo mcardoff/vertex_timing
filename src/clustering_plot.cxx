@@ -65,7 +65,7 @@ auto main(int argc, char** argv) -> int {
 
   std::cout << "\nFINISHED PROCESSING\n";
 
-  const auto KEYS = {"pu_frac", "fjet", "ftrack", "hs_track", "truthjets"};
+  const auto KEYS = {"pu_frac", "fjet", "ftrack", "hs_track", "truthjets", "clus_q"};
 
   // --- Comparison plots (per variable KEY) ---
   for (const auto* key : KEYS)

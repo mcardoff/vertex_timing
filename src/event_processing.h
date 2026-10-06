@@ -821,6 +821,8 @@ namespace MyUtl {
       // for the HGTD row above. Resolution / purity histograms then hold the
       // PROVIDED times only.
       if (score.minQuality >= 0.f && scored.kdeQuality < score.minQuality) continue;
+      // Q of the selected cluster, pre-folded into the last bin like the EventCounts values.
+      const double qFill = std::min(scored.kdeQuality, FOLD_CLUS_Q + CLUS_Q_WIDTH / 2.0);
       double iResH       = useSmearedTimes ? IDEAL_TRACK_RES : -1.0;
       double t           = scored.calculateTime(score, branch, iResH);
       scored.values[0]   = t;   // keep passEfficiency consistent with diff
@@ -929,6 +931,7 @@ namespace MyUtl {
         // PlotObj denominators for cluster-level variables (filled here rather than at
         // the pre-loop fillTotals call since these values require the selected cluster)
         analysis.ptrClusPuFrac->fillTotal(clusPuFrac);
+        analysis.ptrClusQ->fillTotal(qFill);
         if (avgNHGTD < 1.5)
           fillResoStack(analysis.inclusiveResoNhit1Sig.get(),
                         analysis.inclusiveResoNhit1Mix.get(),
@@ -964,6 +967,7 @@ namespace MyUtl {
       if (passes) {
         analysis.fillPasses(ev);
         analysis.ptrClusPuFrac->fillPass(clusPuFrac);
+        analysis.ptrClusQ->fillPass(qFill);
         if (score == Score::TRKPTZ)     passesMine    = true;
         if (score == Score::TEST_MISAS) passesMisas   = true;
       }
@@ -976,6 +980,8 @@ namespace MyUtl {
         analysis.fillPurities(ev, purity);
         analysis.ptrClusPuFrac->fillDiff  (clusPuFrac, diff);
         analysis.ptrClusPuFrac->fillPurity(clusPuFrac, purity);
+        analysis.ptrClusQ->fillDiff  (qFill, diff);
+        analysis.ptrClusQ->fillPurity(qFill, purity);
         // 2D heatmaps: mean |Δt| and σ(Δt) as a function of (clusPuFrac, avgNHGTD)
         analysis.prof2dPuFracVsNhit     ->Fill(clusPuFrac, avgNHGTD, std::abs(diff));
         analysis.prof2dPuFracVsNhitSigma->Fill(clusPuFrac, avgNHGTD, diff);
