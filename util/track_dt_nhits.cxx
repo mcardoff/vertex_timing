@@ -14,7 +14,15 @@
 // out to +-400 ps (mis-matched hits), not Gaussian, so a double-Gaussian tail
 // is ill-defined here; the tail is reported as counted fractions.
 //
-// Output: <OUTPUT_DIR>/track_dt_binned.pdf (12 pages) and three console tables.
+// Mass correction: the reconstruction's time-of-flight correction takes the
+// particle at the speed of light. A particle of mass m and momentum p arrives
+// later by (L/c)(1/beta - 1), L = z_HGTD / |cos theta|. The "corrected"
+// residual subtracts that, using the TRUTH mass (TruthPart_m) and the track's
+// momentum pT cosh(eta): a test of the hypothesis, not a reco-level correction.
+// Each binning gets a corrected page, the tables get before/after columns, and
+// a species split (pion / kaon / proton / e / mu / other) is added at the end.
+//
+// Output: <OUTPUT_DIR>/track_dt_binned.pdf (20 pages: per binning residual log, linear, pull, mass-corrected, hit provenance) and the console tables.
 //   ./track_dt_nhits [--sample=<name>] [--max-events=N]
 
 #include <TCanvas.h>
@@ -40,10 +48,21 @@ using namespace MyUtl;
 
 namespace {
 struct Acc {
-  TH1D *dt = nullptr, *pull = nullptr, *dtNoPrim = nullptr, *dtPrim = nullptr;
+  TH1D *dt = nullptr, *pull = nullptr, *dtNoPrim = nullptr, *dtPrim = nullptr, *dtc = nullptr;
   long n = 0, n30 = 0, n60 = 0, n90 = 0, n3s = 0, nNoPrim = 0, nNoPrimBad = 0, nPrimBad = 0, nOneHit = 0;
+  long n60c = 0, n3sc = 0;
   double sumRes = 0, sumDt = 0;
 };
+constexpr double Z_HGTD = 3500.0;   // mm, nominal front face
+constexpr double C_MM_PS = 0.299792458;  // mm / ps
+
+// pure Gaussian over +-90 ps -> (sigma, mean, chi2/ndf); the fit-quality comparison before/after
+std::array<double,3> fitGaus(TH1D* h, const char* name) {
+  TF1* f = new TF1(name, "gaus", -90.0, 90.0);
+  f->SetParameters(h->GetMaximum(), h->GetBinCenter(h->GetMaximumBin()), 28.0);
+  h->Fit(f, "RQ0");
+  return {f->GetParameter(2), f->GetParameter(1), f->GetNDF() > 0 ? f->GetChisquare() / f->GetNDF() : 0.0};
+}
 
 struct Binning {
   const char* tag;                 // histogram-name stem
@@ -83,6 +102,11 @@ int main(int argc, char** argv) {
   setupChain(chain, cfg.ntupleDir.c_str());
   TTreeReader reader(&chain);
   BranchPointerWrapper branch(reader);
+  // Bound here rather than in BranchPointerWrapper: the grid skims do not carry
+  // these, and a wrapper branch missing from a file makes TTreeReader iterate
+  // zero entries for every executable.
+  TTreeReaderArray<float> particleM(reader, "TruthPart_m");
+  TTreeReaderArray<float> particlePdgId(reader, "TruthPart_pdgId");   // stored as float
 
   std::vector<Binning> B = {
     {"nhits", "number of HGTD hits",
@@ -94,6 +118,10 @@ int main(int argc, char** argv) {
      {"|#eta| 2.4 #minus 2.6", "2.6 #minus 2.8", "2.8 #minus 3.0", "3.0 #minus 3.2", "3.2 #minus 3.5", "3.5 #minus 4.0"},
      {"2.4-2.6", "2.6-2.8", "2.8-3.0", "3.0-3.2", "3.2-3.5", "3.5-4.0"}, {C02, C07, C03, C08, C01, C04}, 0, 5, {}},
   };
+  Binning SP = {"species", "truth particle species",
+     {"#pi^{#pm}", "K^{#pm}", "p / #bar{p}", "e^{#pm}", "#mu^{#pm}", "other"},
+     {"pion", "kaon", "proton", "e", "mu", "other"}, {C02, C07, C03, C08, C01, C04}, 0, 2, {}};
+  B.push_back(SP);
   const double ptEdge[5]  = {1.0, 2.0, 5.0, 10.0, 30.0};
   const double etaEdge[5] = {2.6, 2.8, 3.0, 3.2, 3.5};
   for (auto& b : B) {
@@ -103,6 +131,7 @@ int main(int argc, char** argv) {
       b.a[i].pull     = new TH1D(Form("pull_%s_%zu", b.tag, i), ";(t_{track}^{HGTD} #minus t_{truth particle}) / #sigma_{t};Fraction of tracks", 200, -10, 10);
       b.a[i].dtNoPrim = new TH1D(Form("dtnp_%s_%zu", b.tag, i), ";t_{track}^{HGTD} #minus t_{truth particle} [ps];Fraction of the bin's tracks / 4 ps", 200, -400, 400);
       b.a[i].dtPrim   = new TH1D(Form("dtp_%s_%zu", b.tag, i), ";t_{track}^{HGTD} #minus t_{truth particle} [ps];Fraction of the bin's tracks / 4 ps", 200, -400, 400);
+      b.a[i].dtc      = new TH1D(Form("dtc_%s_%zu", b.tag, i), ";t_{track}^{HGTD} #minus t_{truth particle} #minus #Deltat_{TOF}(m, p) [ps];Fraction of tracks / 4 ps", 200, -400, 400);
     }
   }
 
@@ -120,16 +149,27 @@ int main(int argc, char** argv) {
       int bPt = 0;  while (bPt < 5 && pt >= ptEdge[bPt]) ++bPt;
       int bEta = 0; while (bEta < 5 && aeta >= etaEdge[bEta]) ++bEta;
       if (aeta < MIN_HGTD_ETA || aeta > MAX_HGTD_ETA) bEta = -1;   // a few timed tracks sit just outside
-      const int bins[3] = {std::min(nh, 4) - 1, bPt, bEta};
+      const int pdg = std::abs((int)std::lround(particlePdgId[p]));
+      const int bSp = pdg == 211 ? 0 : pdg == 321 ? 1 : pdg == 2212 ? 2 : pdg == 11 ? 3 : pdg == 13 ? 4 : 5;
+      const int bins[4] = {std::min(nh, 4) - 1, bPt, bEta, bSp};
       const double dt = branch.trackTime[idx] - branch.particleT[p];
+      // expected extra flight time of a massive particle against the beta = 1 hypothesis
+      const double pmom = pt * std::cosh(aeta), m = particleM[p];
+      const double L = Z_HGTD * std::cosh(aeta) / std::sinh(aeta);           // z / |cos theta|
+      const double beta = pmom / std::sqrt(pmom * pmom + m * m);
+      const double dtTof = (L / C_MM_PS) * (1.0 / beta - 1.0);
+      const double dtc = dt - dtTof;
       const double res = branch.trackTimeRes[idx];
       const bool noPrim = (branch.trackPrimHits[idx] == 0);
       const bool bad = (res > 0) && (std::abs(dt) >= 3.0 * res);
       ++nAll;
-      for (int k = 0; k < 3; ++k) {
+      for (int k = 0; k < 4; ++k) {
         if (bins[k] < 0) continue;
         Acc& x = B[k].a[bins[k]];
         x.dt->Fill(dt);
+        x.dtc->Fill(dtc);
+        if (std::abs(dtc) < 60) ++x.n60c;
+        if (!((res > 0) && (std::abs(dtc) >= 3.0 * res))) ++x.n3sc;
         if (res > 0) x.pull->Fill(dt / res);
         (noPrim ? x.dtNoPrim : x.dtPrim)->Fill(dt);
         ++x.n; x.sumRes += res; x.sumDt += dt;
@@ -163,6 +203,21 @@ int main(int argc, char** argv) {
   }
   std::printf("  core sig / peak: Gaussian + flat floor fitted over +-120 ps.  'bad' = |dt| >= 3 sigma_t.\n"
               "  no prim. hit: Track_nHGTDPrimaryHits == 0, i.e. none of the track's hits comes from its own particle.\n");
+  std::printf("\n=== before vs after subtracting the expected mass delay, (L/c)(1/beta - 1) with the truth mass ===\n");
+  std::printf("  pure Gaussian over +-90 ps: sigma, mean, chi2/ndf;  then the counted fractions\n");
+  for (auto& b : B) {
+    std::printf("  -- by %s --\n", b.title);
+    std::printf("  %-9s %10s | %7s %7s %9s | %7s %7s %9s | %7s %7s | %8s %8s\n", "bin", "tracks", "sig", "mean", "chi2/ndf", "sig'", "mean'", "chi2/ndf'", "<60ps", "<60ps'", "<3sig", "<3sig'");
+    for (size_t i = 0; i < b.a.size(); ++i) {
+      Acc& x = b.a[i];
+      if (x.n == 0) continue;
+      auto f0 = fitGaus(x.dt, Form("g0_%s_%zu", b.tag, i));
+      auto f1 = fitGaus(x.dtc, Form("g1_%s_%zu", b.tag, i));
+      std::printf("  %-9s %10ld | %7.1f %7.1f %9.0f | %7.1f %7.1f %9.0f | %6.1f%% %6.1f%% | %7.1f%% %7.1f%%\n",
+                  b.row[i], x.n, f0[0], f0[1], f0[2], f1[0], f1[1], f1[2],
+                  100.0 * x.n60 / x.n, 100.0 * x.n60c / x.n, 100.0 * x.n3s / x.n, 100.0 * x.n3sc / x.n);
+    }
+  }
 
   // ── Pages ───────────────────────────────────────────────────────────────────
   boost::filesystem::create_directories(MyUtl::OUTPUT_DIR);
@@ -202,6 +257,27 @@ int main(int argc, char** argv) {
     drawSet(false, true);
     drawSet(false, false);
     drawSet(true, true);
+    // corrected residual, log
+    {
+      c->SetLogy(true);
+      double mx = 0; std::vector<TH1D*> hs;
+      for (int i = 0; i < NB; ++i) {
+        TH1D* h = (TH1D*)b.a[i].dtc->Clone(Form("nc_%s_%d", b.tag, i));
+        if (h->Integral(0, -1) > 0) h->Scale(1.0 / h->Integral(0, -1));
+        h->SetLineColor(b.col[i]); h->SetLineWidth(2); h->SetMarkerSize(0);
+        mx = std::max(mx, h->GetMaximum()); hs.push_back(h);
+      }
+      hs[0]->SetMaximum(30 * mx); hs[0]->SetMinimum(2e-5);
+      TLegend* leg = new TLegend(0.62, NB > 4 ? 0.62 : 0.70, 0.92, 0.90); StyleLegend(leg);
+      for (int i = 0; i < NB; ++i) {
+        hs[i]->Draw(i == 0 ? "HIST" : "HIST SAME");
+        const double sh = 100.0 * b.a[i].n / nAll;
+        leg->AddEntry(hs[i], Form(sh < 1 ? "%s (%.2f%%)" : "%s (%.0f%%)", b.lab[i], sh), "l");
+      }
+      leg->Draw();
+      labels(b, "Mass-corrected residual, unit area");
+      c->Print(out.c_str());
+    }
     // own-particle split for two bins, unit area per BIN (both curves of a bin share one normalisation)
     c->SetLogy(true);
     {
