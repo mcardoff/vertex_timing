@@ -1167,7 +1167,7 @@ Oracle scores (`requiresPurity=true`) gate their denominator: events outside the
 
 `clustering_hist`/`clustering_plot`'s currently active scores (built by `buildAnalysisMap`, `src/clustering_dt_common.h`) are `TRKPTZ`, `WAVES`, `JET_T_REFINED`, `TEST_MISAS`, `WAVES_MISCL`, `WAVES_MISAS`, `VBF_R1/R2`, the full id 24–33 ladder above, plus `HGTD`.
 
-Comparison PDF groups produced by `clustering_plot` from histograms written by `clustering_hist` (`makeComparisonPlots`, one set per `KEYS = {pu_frac, fjet, ftrack, hs_track, truthjets}`):
+Comparison PDF groups produced by `clustering_plot` from histograms written by `clustering_hist` (`makeComparisonPlots`, one set per `KEYS = {pu_frac, fjet, ftrack, hs_track, truthjets, clus_q}`; `clus_q` is the selected cluster's time-quality Q, drawn on a full 0–1 core-fraction axis):
 - `theplot_*.pdf` — HGTD vs TRKPTZ vs TEST_MISAS
 - `waves_oracle_*.pdf` — HGTD vs TRKPTZ vs WAVES vs WAVES_MISAS
 - `hgtd_trkptz_waves_*.pdf` — HGTD vs TRKPTZ vs WAVES (no oracles)
