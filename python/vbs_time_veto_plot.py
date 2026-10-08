@@ -100,6 +100,7 @@ ap.add_argument("--bf-hinv", type=float, default=1.0,
                      "normalised to sigma_VBF alone); scales S linearly, cancels in every relative number")
 ap.add_argument("--tag", default="", help="selection note for the third label line (e.g. the JVT working point)")
 ap.add_argument("--out", required=True, help="output stem")
+C.add_acceptance_args(ap)
 args = ap.parse_args()
 if not args.sig and not args.bkg:
     raise SystemExit("give --sig and/or --bkg")
@@ -141,6 +142,13 @@ def load(path, recoil_col, recoil_min, what):
         keep = e[recoil_col] > recoil_min
     else:
         keep = np.ones(len(e["weight"]), bool)
+    if C.ACCEPTANCE[args.acceptance] is not None:
+        if "a_hgtd_n" not in e:
+            raise SystemExit(f"{path}: no hgtd_n columns -- rerun util/vbs_time_veto for --acceptance")
+        acc = C.acceptance_mask(e["a_hgtd_n"], e["b_hgtd_n"], args.acceptance, args.acc_min_trk)
+        info["acc_frac"] = (e["weight"][keep & acc].sum() / e["weight"][keep].sum(), int((keep & acc).sum()),
+                            int(keep.sum()))
+        keep = keep & acc
     ev = {k: v[keep] for k, v in e.items()}
     ev["jets"] = jets[keep] if jets is not None else None
     # the calibration uses EVERY selected event's HS legs, not only the recoil-passing ones
@@ -370,6 +378,8 @@ def calib_line(cal):
 def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_title, ref=1.0, methods=None,
                   xnote="last bin includes overflow", pct=False, yrange=None):
     """vbs_time_veto_common.column_figure on this script's columns; `methods` defaults to DRAWN"""
+    acc = C.acceptance_line(args.acceptance, args.acc_min_trk)
+    if acc: lines = [lines[0], acc] + lines[1:]
     C.column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_title, EDGES, STYLE,
                     methods or DRAWN, ref=ref, xnote=xnote, pct=pct, yrange=yrange)
 
@@ -422,6 +432,10 @@ for role, s in samples.items():
               f"normalisation: {NORM[s['norm']]['note'] if s['norm'] != 'none' else 'none'}"
               + (f"; scaled to B(H->inv) = {100 * args.bf_hinv:g}%" if s["norm"] == "vbf" and args.bf_hinv != 1.0 else "")
               + (" (LOCAL sample: its own sum w, same cross-section assumed)" if i["sample"] == "local" and s["norm"] != "none" else ""))
+    if "acc_frac" in i:
+        f, n, n0 = i["acc_frac"]
+        md.append(f"  - **acceptance `{args.acceptance}`** (>= {args.acc_min_trk} HGTD track(s) per leg): "
+                  f"{n:,} of {n0:,} MC events after the recoil cut, {100 * f:.1f}% of their weight")
 md.append("")
 both = len(samples) == 2
 hdr = "| method | " + " | ".join(("eff. " + r) for r in samples) + (" | S | B | S/sqrt(B) | vs no veto |" if both else " |")
@@ -698,7 +712,8 @@ def tradeoff_figure(stem, curves, methods, dashed=()):
     C.roc_figure(stem, xy, methods, STYLE, int(np.argmin(np.abs(SCAN - args.nsigma))),
                  [f"S: {sel_line(sg)}", f"B: {sel_line(bk)}",
                   f"threshold scanned {SCAN[0]:g}-{SCAN[-1]:g}#sigma; large markers at {args.nsigma:g}#sigma"
-                  + (";  dashed: jets removed, pair re-formed" if dashed else "")],
+                  + (";  dashed: jets removed, pair re-formed" if dashed else "")]
+                 + ([C.acceptance_line(args.acceptance, args.acc_min_trk)] if C.ACCEPTANCE[args.acceptance] is not None else []),
                  "Signal efficiency #varepsilon_{S}", "Background rejection 1/#varepsilon_{B}", dashed=dashed)
 
 
