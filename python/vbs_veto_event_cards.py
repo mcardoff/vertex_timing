@@ -144,35 +144,9 @@ cases.append(("E_edge_pu_caught", "bkg",
               np.where(edgeA, np.abs(B["a_eta"]), np.abs(B["b_eta"]))))
 
 
-def card(key, role, title, rule, mask, score):
-    e, d, J = (S, SD, SJ) if role == "sig" else (B, BD, BJ)
-    print(f"[{key}] {rule}")
-    i = pick(e, d, mask, score, rule)
-    fig = plt.figure(figsize=(13.5, 5.2))
-    gs = fig.add_gridspec(1, 2, width_ratios=[1.0, 1.35], wspace=0.75, left=0.05, right=0.83, top=0.82, bottom=0.13)
-    # ── eta-phi ──
-    ax = fig.add_subplot(gs[0])
-    for sgn in (-1, 1):
-        ax.add_patch(Rectangle((min(sgn * 2.38, sgn * 4.0), -np.pi), 4.0 - 2.38, 2 * np.pi, color="#DCE6F2", zorder=0))
-        ax.text(sgn * 3.19, -np.pi * 0.95, "HGTD", ha="center", va="bottom", fontsize=12, color="#4A6FA5")
-    legs = {int(e["a_idx"][i]): "a", int(e["b_idx"][i]): "b"}
-    for k in range(len(J["jet_pt"][i])):
-        eta, phi, pt = J["jet_eta"][i][k], J["jet_phi"][i][k], J["jet_pt"][i][k]
-        hs, pu = J["jet_hs"][i][k] > 0, J["jet_pu"][i][k] > 0
-        col = "#2E9E4F" if hs else ("#8C8C8C" if pu else "#C9B458")
-        leg = legs.get(int(J["jet_idx"][i][k]))
-        for dphi in (0.0, 2 * np.pi, -2 * np.pi):   # wrap round phi = +-pi
-            ax.add_patch(Circle((eta, phi + dphi), 0.4, facecolor=col, alpha=0.55 if leg else 0.25,
-                                edgecolor="black" if leg else col, lw=2.2 if leg else 0.8, zorder=3))
-        lab = (("jet 1" if leg == "a" else "jet 2") + f"\n{pt:.0f} GeV") if leg else f"{pt:.0f}"
-        ty = min(max(phi, -np.pi + 0.45), np.pi - 0.45)
-        ax.text(eta, ty, lab, ha="center", va="center", fontsize=11 if leg else 9, zorder=4,
-                fontweight="bold" if leg else "normal")
-    ax.set_xlim(-4.6, 4.6); ax.set_ylim(-np.pi, np.pi); ax.set_aspect("equal")
-    ax.set_xlabel("jet $\\eta$"); ax.set_ylabel("jet $\\phi$")
-    ax.set_title("green: hard scatter, grey: pileup\noutlined: tagging pair", fontsize=12)
-    # ── time axis: one row per t0, then one per tagging jet ──
-    at = fig.add_subplot(gs[1])
+def draw_times(at, e, d, i, names):
+    """the time axis: one row per t0 (truth, TRKPTZ, WAVeS, HGTD), then one per
+    tagging jet, each with the +-1 sigma the test uses, and each t0's verdict"""
     tt = e["t0_truth"][i]
     rows = [("truth $t_{\\rm HS}$", tt, 0.0, "#5B3A29", "truth")]
     for s, lab, col in SRC:
@@ -180,7 +154,7 @@ def card(key, role, title, rule, mask, score):
         rows.append((lab + ("" if ok else "\n(no time)"), e[f"t0_{s}"][i] if ok else np.nan,
                      e[f"infl_{s}"][i] * e[f"sig0_{s}"][i] if ok else np.nan, col, s))
     jets = []
-    for L, name in [("a", "jet 1"), ("b", "jet 2")]:
+    for L, name in zip("ab", names):
         role_ = leg_role(e, L, i)
         txt = f"{name}: {role_}, $\\eta$ = {e[L + '_eta'][i]:+.2f}\n{e[L + '_hgtd_ntimed'][i]} timed HGTD tracks"
         if d[L + "_timed"][i]:
@@ -215,8 +189,39 @@ def card(key, role, title, rule, mask, score):
     at.axvline(tt, color="#5B3A29", lw=0.8, ls=":")
     at.set_xlim(lo - pad, hi + pad); at.set_ylim(-0.6, len(allrows) - 0.4)
     at.set_xlabel("time [ps]   (bars: $\\pm 1\\sigma$ as used by the test)")
-    at.text(1.015, len(allrows) - 0.25, f"jet vs $t_0$ at {args.nsigma:g}$\\sigma$\n(jet 1, jet 2 pulls)",
+    at.text(1.015, len(allrows) - 0.25, f"jet vs $t_0$ at {args.nsigma:g}$\\sigma$\n({names[0]}, {names[1]} pulls)",
             transform=at.get_yaxis_transform(), ha="left", va="bottom", fontsize=11, color="#555555")
+
+
+def card(key, role, title, rule, mask, score):
+    e, d, J = (S, SD, SJ) if role == "sig" else (B, BD, BJ)
+    print(f"[{key}] {rule}")
+    i = pick(e, d, mask, score, rule)
+    fig = plt.figure(figsize=(13.5, 5.2))
+    gs = fig.add_gridspec(1, 2, width_ratios=[1.0, 1.35], wspace=0.75, left=0.05, right=0.83, top=0.82, bottom=0.13)
+    # ── eta-phi ──
+    ax = fig.add_subplot(gs[0])
+    for sgn in (-1, 1):
+        ax.add_patch(Rectangle((min(sgn * 2.38, sgn * 4.0), -np.pi), 4.0 - 2.38, 2 * np.pi, color="#DCE6F2", zorder=0))
+        ax.text(sgn * 3.19, -np.pi * 0.95, "HGTD", ha="center", va="bottom", fontsize=12, color="#4A6FA5")
+    legs = {int(e["a_idx"][i]): "a", int(e["b_idx"][i]): "b"}
+    for k in range(len(J["jet_pt"][i])):
+        eta, phi, pt = J["jet_eta"][i][k], J["jet_phi"][i][k], J["jet_pt"][i][k]
+        hs, pu = J["jet_hs"][i][k] > 0, J["jet_pu"][i][k] > 0
+        col = "#2E9E4F" if hs else ("#8C8C8C" if pu else "#C9B458")
+        leg = legs.get(int(J["jet_idx"][i][k]))
+        for dphi in (0.0, 2 * np.pi, -2 * np.pi):   # wrap round phi = +-pi
+            ax.add_patch(Circle((eta, phi + dphi), 0.4, facecolor=col, alpha=0.55 if leg else 0.25,
+                                edgecolor="black" if leg else col, lw=2.2 if leg else 0.8, zorder=3))
+        lab = (("jet 1" if leg == "a" else "jet 2") + f"\n{pt:.0f} GeV") if leg else f"{pt:.0f}"
+        ty = min(max(phi, -np.pi + 0.45), np.pi - 0.45)
+        ax.text(eta, ty, lab, ha="center", va="center", fontsize=11 if leg else 9, zorder=4,
+                fontweight="bold" if leg else "normal")
+    ax.set_xlim(-4.6, 4.6); ax.set_ylim(-np.pi, np.pi); ax.set_aspect("equal")
+    ax.set_xlabel("jet $\\eta$"); ax.set_ylabel("jet $\\phi$")
+    ax.set_title("green: hard scatter, grey: pileup\noutlined: tagging pair", fontsize=12)
+    # ── time axis: one row per t0, then one per tagging jet ──
+    draw_times(fig.add_subplot(gs[1]), e, d, i, ("jet 1", "jet 2"))
     rec = (f"truth $E_T^{{\\rm miss}}$ = {e['met_truth'][i]:.0f} GeV" if role == "sig" else f"$p_T^{{\\ell\\ell}}$ = {e['z_pt'][i]:.0f} GeV")
     # the slide carries the title; the card keeps only the event's identity
     fig.text(0.02, 0.955, f"{'VBF H→inv.' if role == 'sig' else 'Z(→ℓℓ)+jets'}  ·  {short_file(e['file_path'][i])}  "
@@ -227,6 +232,15 @@ def card(key, role, title, rule, mask, score):
         fig.savefig(f"{args.out}_{key}.{ext}", dpi=150)
     plt.close(fig)
     print(f"  wrote {args.out}_{key}.pdf / .png")
+    # the time panel alone, beside an event display: its jets are named as event_display.py
+    # numbers them (ntuple jet index + 1)
+    f2 = plt.figure(figsize=(8.6, 4.4))
+    at = f2.add_axes([0.35, 0.15, 0.40, 0.72])
+    draw_times(at, e, d, i, (f"Jet {int(e['a_idx'][i]) + 1}", f"Jet {int(e['b_idx'][i]) + 1}"))
+    for ext in ("pdf", "png"):
+        f2.savefig(f"{args.out}_{key}_times.{ext}", dpi=170, bbox_inches="tight", pad_inches=0.08)
+    plt.close(f2)
+    print(f"  wrote {args.out}_{key}_times.pdf / .png")
     return dict(key=key, rule=rule, file=os.path.basename(str(e["file_path"][i])), entry=int(e["entry"][i]))
 
 
