@@ -222,6 +222,25 @@ JetTime jetTimeCore(BranchPointerWrapper& b, int j) {
   return out;
 }
 
+// HGTD acceptance of a jet, from its TRACKS rather than its axis: a jet whose
+// axis is past |eta| = 4.0 (or just inside 2.38) can still have ghost tracks
+// in HGTD. n = ghost tracks passing the standard track selection
+// (passTrackKinematics: 1 < pT < 30 GeV, quality, 2.38 < |eta| < 4.0) with or
+// without a time -- the geometric acceptance; nTimed = those of them with a
+// valid HGTD time. Reco-only, so the same definition works in data.
+struct HgtdCount { int n = 0, nTimed = 0; };
+HgtdCount hgtdTracks(BranchPointerWrapper& b, int j) {
+  HgtdCount out;
+  const int nT = (int)b.trackPt.GetSize();
+  for (int idx : b.topoJetGhostTrackIdx[j]) {
+    if (idx < 0 || idx >= nT) continue;
+    if (!passTrackKinematics((size_t)idx, &b, MIN_TRACK_PT, MAX_TRACK_PT)) continue;
+    ++out.n;
+    if (b.trackTimeValid[idx] == 1 && b.trackTimeRes[idx] > 0.0) ++out.nTimed;
+  }
+  return out;
+}
+
 // Per-leg columns.
 struct Leg {
   int    idx = -1;
@@ -232,6 +251,7 @@ struct Leg {
   int    core_n = 0, core_ncand = 0;
   double all_t = 0.0, all_sig = -1.0, all_hsfrac = -1.0;
   int    all_n = 0;
+  int    hgtd_n = 0, hgtd_ntimed = 0;     // hgtdTracks(): ghost tracks in HGTD acceptance
 };
 
 // The t0 sources, in column order. truth has sigma 0 and inflation 1.
@@ -257,6 +277,7 @@ struct Row {
   // jet counts, so these events are a superset of any re-paired selection. The
   // legs are the entries whose jet_idx equals a_idx / b_idx.
   std::vector<int>    jet_idx, jet_hs, jet_pu, jet_n;
+  std::vector<int>    jet_nhgtd;        // hgtdTracks().n
   std::vector<float>  jet_pt, jet_eta, jet_phi;
   std::vector<double> jet_t, jet_sig;   // core_ jet time; jet_n = 0: no time
   // --sr only: the tagger's discriminants and windows for every stored jet
@@ -458,6 +479,7 @@ int main(int argc, char** argv) {
     br("core_sumpt", &L.core_sumpt, "D");  br("core_hsfrac", &L.core_hsfrac, "D");
     br("all_t", &L.all_t, "D");  br("all_sig", &L.all_sig, "D");
     br("all_n", &L.all_n, "I");  br("all_hsfrac", &L.all_hsfrac, "D");
+    br("hgtd_n", &L.hgtd_n, "I");  br("hgtd_ntimed", &L.hgtd_ntimed, "I");
   };
   legBranches("a_", R.a);
   legBranches("b_", R.b);
@@ -470,6 +492,7 @@ int main(int argc, char** argv) {
   tree.Branch("jet_t",   &R.jet_t);
   tree.Branch("jet_sig", &R.jet_sig);
   tree.Branch("jet_n",   &R.jet_n);
+  tree.Branch("jet_nhgtd", &R.jet_nhgtd);
   if (srMode) {
     tree.Branch("met_jets", &R.met_jets, "met_jets/F");
     tree.Branch("jet_rpt",     &R.jet_rpt);
@@ -679,6 +702,7 @@ int main(int argc, char** argv) {
       R.jet_t.push_back(c.t);
       R.jet_sig.push_back(c.sig);
       R.jet_n.push_back(c.n);
+      R.jet_nhgtd.push_back(hgtdTracks(branch, j).n);
       if (srMode) {
         R.jet_rpt.push_back(D[j].rpt);
         R.jet_fjvt.push_back(D[j].fjvt);
@@ -702,6 +726,8 @@ int main(int argc, char** argv) {
       L.core_sumpt = c.sumPt;  L.core_hsfrac = c.hsFrac;
       const JetTime g = jetTimeAllGhost(branch, j);
       L.all_t = g.t;  L.all_sig = g.sig;  L.all_n = g.n;  L.all_hsfrac = g.hsFrac;
+      const HgtdCount h = hgtdTracks(branch, j);
+      L.hgtd_n = h.n;  L.hgtd_ntimed = h.nTimed;
       if (L.hs) { calCore.add(c, tHS); calAll.add(g, tHS); }
     };
     if (legI >= 0) fillLeg(legI, R.a);
