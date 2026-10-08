@@ -46,6 +46,8 @@ for spec in args.inputs:
                "--t0_label", "WAVeS t0",
                "--source_label", f"{TITLE[r['sample']]}   {os.path.basename(r['file_path'])} #{r['entry']}   |   JVT + fJVT loose",
                "--output_dir", os.path.abspath(args.out_dir), "--output_name", r["card"]]
+        if r.get("tagged_out"):   # jets the analysis removed (JVT/fJVT, lepton overlap): not drawn
+            cmd += ["--tagged_out", r["tagged_out"], "--drop_tagged"]
         os.makedirs(args.out_dir, exist_ok=True)
         p = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True)
         with open(os.path.join(args.out_dir, r["card"] + ".log"), "w") as f:

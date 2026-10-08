@@ -81,6 +81,9 @@ parser.add_argument('--tagged_out', type=str, default=None,
                     help='"IDX:JVT,IDX:fJVT,...": jets the pileup tagger removed '
                          'before pairing. Drawn faded with a dotted edge and '
                          'labelled, since they could not be a VBS leg.')
+parser.add_argument('--drop_tagged', action='store_true',
+                    help='leave the --tagged_out jets out of the drawing altogether (listed in one '
+                         'line instead); the other jets keep their ntuple numbering (Jet N = index + 1)')
 parser.add_argument('--expect_rpt', type=str, default=None,
                     help='"z_hs,t_hs,z_pu,t_pu" from the analysis for the --legs pair '
                          '(nan to skip one); prints RPT_CHECK OK|MISMATCH')
@@ -637,7 +640,10 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
                 color=trk_color.get(track['idx'], 'lightgrey'),
                 linestyle='solid' if track['stat'] == 1 else 'dashed')
 
+    _row = 0
     for (jet_i, jet_tup) in enumerate(jet_info_list):
+        if args.drop_tagged and jet_tup['idx'] in tagged_out:
+            continue
         highlighted = (args.jet_idx is not None and jet_tup.get('idx') == args.jet_idx)
         jet_color = 'orange' if highlighted else ('green' if _is_hs(jet_tup) else 'grey')
         x_off1, y_off1 = jet_tup['x']-0.15*jet_tup['y'], jet_tup['y']+0.15*jet_tup['x']
@@ -661,7 +667,9 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
                     hatch=VBS_HATCH, linewidth=VBS_HATCH_LW, zorder=VBS_HATCH_Z)
 
         txt_color = 'orange' if highlighted else ('green' if _is_hs(jet_tup) else 'black')
-        label = f"Jet {jet_i+1}: $p_T$={jet_tup['pt']:.0f} GeV, $\eta$={jet_tup['eta']:.1f}"
+        # numbered by ntuple index: the same as the list position (jets are pT-ordered and
+        # only those >= 30 GeV are kept), and stable when --drop_tagged hides some
+        label = f"Jet {jet_tup['idx']+1}: $p_T$={jet_tup['pt']:.0f} GeV, $\eta$={jet_tup['eta']:.1f}"
         if jet_tup.get('isVBS'):
             _rz = jet_tup.get('rpt', float('nan'))
             _rt = jet_tup.get('rpt_t')
@@ -675,8 +683,16 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
         if _out:
             label += f"  [fails {_out}]"
             txt_color = 'grey'
-        ax.text(reco_hs_z - 6.8, 0.9 - (1.2 + jet_i*0.1),
+        ax.text(reco_hs_z - 6.8, 0.9 - (1.2 + _row*0.1),
                 label, weight='bold', fontsize=12, color=txt_color)
+        _row += 1
+    if args.drop_tagged and tagged_out:
+        _by = {}
+        for _i, _why in sorted(tagged_out.items()):
+            _by.setdefault(_why, []).append(f"{_i+1}")
+        ax.text(reco_hs_z - 6.8, 0.9 - (1.2 + _row*0.1),
+                "not drawn: " + "; ".join(f"Jet {', '.join(v)} ({k})" for k, v in _by.items()),
+                fontsize=11, color='grey', style='italic')
 
     draw_eta_reference_lines(ax, reco_hs_z, 2.4)
     ax.set_ylim(-1.0, 1.0)
@@ -741,7 +757,7 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
     if args.jet_idx is not None:
         legend_handles.append(mpatches.Rectangle((0, 0), 1, 1, color='orange', alpha=0.7))
         legend_labels.append('Target jet')
-    if tagged_out:
+    if tagged_out and not args.drop_tagged:
         legend_handles.append(mpatches.Rectangle((0, 0), 1, 1, facecolor='lightgrey',
                                                  alpha=0.4, edgecolor='black',
                                                  linestyle=':'))
@@ -1026,6 +1042,8 @@ with PdfPages(filename) as pdf:
     for jet in jet_info:
         jet_eta = jet['eta']
         if abs(jet_eta) + 0.4 < ETA_MIN or abs(jet_eta) - 0.4 > ETA_MAX:
+            continue
+        if args.drop_tagged and jet['idx'] in tagged_out:
             continue
         highlighted = (args.jet_idx is not None and jet.get('idx') == args.jet_idx)
         jet_color = 'orange' if highlighted else ('green' if _is_hs(jet) else 'grey')
