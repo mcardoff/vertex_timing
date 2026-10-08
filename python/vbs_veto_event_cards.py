@@ -156,14 +156,19 @@ def draw_times(at, e, d, i, names):
     jets = []
     for L, name in zip("ab", names):
         role_ = leg_role(e, L, i)
-        txt = f"{name}: {role_}, $\\eta$ = {e[L + '_eta'][i]:+.2f}\n{e[L + '_hgtd_ntimed'][i]} timed HGTD tracks"
+        # in HGTD: every timed ghost track (the acceptance count); time: the size of the
+        # highest-sum-pT time cluster of the timed tracks within dR < 0.2 (the jet-time estimate)
+        txt = f"{name}: {role_}, $\\eta$ = {e[L + '_eta'][i]:+.2f}\n{e[L + '_hgtd_ntimed'][i]} timed tracks in HGTD"
         if d[L + "_timed"][i]:
-            jets.append((txt + f", time from {e[L + '_core_n'][i]}", e[L + "_core_t"][i], d[L + "_s"][i],
+            n = e[L + '_core_n'][i]
+            jets.append((txt + f"\njet time: {n}-track cluster" if n > 1 else txt + "\njet time: 1 track", e[L + "_core_t"][i], d[L + "_s"][i],
                          "#2E9E4F" if role_ == "HS" else "#555555", L))
         else:
             jets.append((txt + "\nno jet time", np.nan, np.nan, "#999999", L))
     allrows = rows + jets
-    ys = np.arange(len(allrows))[::-1]
+    # t0 rows one unit apart; the three-line jet rows 1.6 apart
+    ys = np.array([1.6 * len(jets) - 0.3 + (len(rows) - 1 - k) for k in range(len(rows))]
+                  + [1.6 * (len(jets) - 1 - k) for k in range(len(jets))])
     vals = [v for _, v, _, _, _ in allrows if np.isfinite(v)]
     sigs = [x for _, v, x, _, _ in allrows if np.isfinite(v) and np.isfinite(x)]
     lo = min([v - 3 * x for _, v, x, _, _ in allrows if np.isfinite(v) and np.isfinite(x)] + [min(vals) - 40])
@@ -191,11 +196,11 @@ def draw_times(at, e, d, i, names):
     at.set_yticks(ys)
     at.set_yticklabels([r[0] for r in allrows], fontsize=12)
     for tl, r in zip(at.get_yticklabels(), allrows): tl.set_color(r[3])
-    at.axhline(len(jets) - 0.5, color="#BBBBBB", lw=0.8)
+    at.axhline(1.6 * (len(jets) - 1) + 0.85, color="#BBBBBB", lw=0.8)
     at.axvline(tt, color="#5B3A29", lw=0.8, ls=":")
-    at.set_xlim(lo - pad, hi + pad); at.set_ylim(-0.6, len(allrows) - 0.4)
+    at.set_xlim(lo - pad, hi + pad); at.set_ylim(-0.9, ys.max() + 0.6)
     at.set_xlabel("time [ps]   (thick: $\\pm 2\\sigma$, thin: $\\pm 3\\sigma$; $\\sigma$ as used by the test)")
-    at.text(1.015, len(allrows) - 0.25, f"jet vs $t_0$ at {args.nsigma:g}$\\sigma$\n({names[0]}, {names[1]} pulls)",
+    at.text(1.015, ys.max() + 0.75, f"jet vs $t_0$ at {args.nsigma:g}$\\sigma$\n({names[0]}, {names[1]} pulls)",
             transform=at.get_yaxis_transform(), ha="left", va="bottom", fontsize=11, color="#555555")
 
 
@@ -240,7 +245,7 @@ def card(key, role, title, rule, mask, score):
     print(f"  wrote {args.out}_{key}.pdf / .png")
     # the time panel alone, beside an event display: its jets are named as event_display.py
     # numbers them (ntuple jet index + 1)
-    f2 = plt.figure(figsize=(8.6, 4.4))
+    f2 = plt.figure(figsize=(8.6, 5.0))
     at = f2.add_axes([0.35, 0.15, 0.40, 0.72])
     draw_times(at, e, d, i, (f"Jet {int(e['a_idx'][i]) + 1}", f"Jet {int(e['b_idx'][i]) + 1}"))
     for ext in ("pdf", "png"):
