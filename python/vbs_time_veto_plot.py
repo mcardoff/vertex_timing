@@ -101,6 +101,8 @@ ap.add_argument("--bf-hinv", type=float, default=1.0,
                      "normalised to sigma_VBF alone); scales S linearly, cancels in every relative number")
 ap.add_argument("--tag", default="", help="selection note for the third label line (e.g. the JVT working point)")
 ap.add_argument("--out", required=True, help="output stem")
+ap.add_argument("--jet-pulls", default="both", choices=["both", "quoted"],
+                help="<out>_jet_time_pulls: the quoted sigma and sigma x f(n) (both), or the quoted sigma alone")
 C.add_acceptance_args(ap)
 args = ap.parse_args()
 if not args.sig and not args.bkg:
@@ -634,7 +636,8 @@ def jet_time_figures(stem, e_all, cal):
     c = ROOT_.TCanvas("c_jtp", "", 800, 650); C.KEEP.append(c)
     c.SetLeftMargin(0.14); c.SetRightMargin(0.05); c.SetLogy(True)
     hs = []
-    for name, v, col, fill in [("raw", p, "#9E9E9E", True), ("cal", pc, "kP10Blue", False)]:
+    drawn = [("raw", p, "#9E9E9E", True)] + ([("cal", pc, "kP10Blue", False)] if args.jet_pulls == "both" else [])
+    for name, v, col, fill in drawn:
         h = ROOT_.TH1D(f"h_jtp_{name}", "", 64, -8, 8); C.KEEP.append(h)
         for x in np.clip(v, -7.99, 7.99): h.Fill(x)
         h.Scale(1.0 / h.Integral())
@@ -644,12 +647,14 @@ def jet_time_figures(stem, e_all, cal):
     hs[0].SetMinimum(2e-5); hs[0].SetMaximum(200.0)   # two decades of headroom: the label and legend sit above the peak
     hs[0].GetXaxis().SetTitle("(t_{jet} - t_{HS}^{truth}) / #sigma_{jet}   (overflow in the edge bins)")
     hs[0].GetYaxis().SetTitle("Fraction of truth-matched HS tagging jets")
-    hs[0].Draw("HIST"); hs[1].Draw("HIST SAME")
+    hs[0].Draw("HIST")
+    for h in hs[1:]: h.Draw("HIST SAME")
     g = ROOT_.TF1("f_unit", "[0]*exp(-0.5*x*x)", -8, 8); C.KEEP.append(g)
     g.SetParameter(0, 0.25 / np.sqrt(2 * np.pi)); g.SetLineColor(ROOT_.kBlack); g.SetLineStyle(2); g.Draw("SAME")
-    leg = ROOT_.TLegend(0.16, 0.60, 0.60, 0.735); ROOT_.StyleLegend(leg, 0.03); C.KEEP.append(leg)
+    leg = ROOT_.TLegend(0.16, 0.735 - 0.045 * (len(hs) + 1), 0.60, 0.735); ROOT_.StyleLegend(leg, 0.03); C.KEEP.append(leg)
     leg.AddEntry(hs[0], f"quoted #sigma: {100 * np.mean(np.abs(p) >= args.nsigma):.0f}% beyond {args.nsigma:g}", "f")
-    leg.AddEntry(hs[1], f"#sigma #times f(n): {100 * np.mean(np.abs(pc) >= args.nsigma):.1f}% beyond {args.nsigma:g}", "l")
+    if len(hs) > 1:
+        leg.AddEntry(hs[1], f"#sigma #times f(n): {100 * np.mean(np.abs(pc) >= args.nsigma):.1f}% beyond {args.nsigma:g}", "l")
     leg.AddEntry(g, "unit Gaussian", "l")
     leg.Draw()
     ROOT_.ATLASLabel(0.17, 0.88, "")
