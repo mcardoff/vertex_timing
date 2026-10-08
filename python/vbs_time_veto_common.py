@@ -53,11 +53,13 @@ STYLE = {
 NBINS = [1, 2, 3, 4, 6, 9, 10**6]
 
 
-# HGTD acceptance of the tagging pair, from the legs' TRACKS (vbs_time_veto's
-# hgtd_n / jet_nhgtd: ghost tracks passing the track selection in 2.38 < |eta| <
-# 4.0, timed or not), not from the jet axes: an axis past |eta| = 4.0 can still
-# put tracks in HGTD. Reco-only. The category counts the legs with >= min_trk
-# such tracks: "both" (2), "one" (1), "neither" (0); "all" is no restriction.
+# HGTD acceptance of the tagging pair, from the legs' TRACKS, not the jet axes: an
+# axis past |eta| = 4.0 can still put tracks in HGTD. vbs_time_veto counts each
+# leg's ghost tracks passing the track selection in 2.38 < |eta| < 4.0 -- with a
+# valid HGTD time (hgtd_ntimed, --acc-count timed, the default: the jet can be
+# tested) or without (hgtd_n, --acc-count any). Reco-only. The category counts
+# the legs with >= min_trk such tracks: "both" (2), "one" (1), "neither" (0);
+# "all" is no restriction.
 ACCEPTANCE = {"all": None, "both": 2, "one": 1, "neither": 0}
 ACC_TEXT = {"both": "both tagging jets", "one": "exactly one tagging jet", "neither": "neither tagging jet"}
 
@@ -67,6 +69,8 @@ def add_acceptance_args(ap):
                     help="restrict to events whose (no-timing) tagging pair has this many legs in HGTD "
                          "acceptance, by tracks: >= --acc-min-trk ghost tracks in 2.38 < |eta| < 4.0, timed or not")
     ap.add_argument("--acc-min-trk", type=int, default=1, help="HGTD-acceptance tracks a leg needs (--acceptance)")
+    ap.add_argument("--acc-count", default="timed", choices=["timed", "any"],
+                    help="--acceptance counts the leg's HGTD tracks with a valid time (default) or all of them")
 
 
 def acceptance_mask(nA, nB, mode, min_trk):
@@ -76,11 +80,17 @@ def acceptance_mask(nA, nB, mode, min_trk):
     return ((np.asarray(nA) >= min_trk).astype(int) + (np.asarray(nB) >= min_trk).astype(int)) == want
 
 
-def acceptance_line(mode, min_trk):
+def acc_column(count):
+    """the per-leg column --acc-count reads (prefix a_ / b_)"""
+    return "hgtd_ntimed" if count == "timed" else "hgtd_n"
+
+
+def acceptance_line(mode, min_trk, count="timed"):
     """the figures' label line; '' for no restriction"""
     if ACCEPTANCE[mode] is None: return ""
-    trk = "a track" if min_trk == 1 else f"#geq {min_trk} tracks"
-    return f"{ACC_TEXT[mode]} with {trk} in HGTD (2.38 < |#eta_{{trk}}| < 4.0, timed or not)"
+    what = "timed track" if count == "timed" else "track"
+    trk = f"a {what}" if min_trk == 1 else f"#geq {min_trk} {what}s"
+    return f"{ACC_TEXT[mode]} with {trk} in HGTD (2.38 < |#eta_{{trk}}| < 4.0)"
 
 
 def mad(x):

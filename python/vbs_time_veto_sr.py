@@ -127,11 +127,18 @@ for r in list(samples):
         # --acceptance: keep the events whose NO-TIMING tagging pair (j1, j2) is in the
         # category, so every method is measured on one fixed set of events. A variant
         # that removes jets can re-form the pair; it is still judged on those events.
-        if "jet_nhgtd" not in s["J"].fields:
-            raise SystemExit(f"{s['path']}: no jet_nhgtd -- rerun util/vbs_time_veto for --acceptance")
+        # The SR pair is the stored a_/b_ legs (the two leading JVT-passing jets) in
+        # every event that passes -- checked here -- so the legs' counts apply; the
+        # timed count exists only per leg, jet_nhgtd per jet.
+        col = C.acc_column(args.acc_count)
+        if "a_" + col not in s["e"]:
+            raise SystemExit(f"{s['path']}: no {col} -- rerun util/vbs_time_veto for --acceptance")
         ok0 = s["none"]["ok"]
-        acc = ok0 & C.acceptance_mask(take(s["J"].jet_nhgtd, s["none"]["i1"]), take(s["J"].jet_nhgtd, s["none"]["i2"]),
-                                      args.acceptance, args.acc_min_trk)
+        j1, j2 = take(s["J"].jet_idx, s["none"]["i1"]), take(s["J"].jet_idx, s["none"]["i2"])
+        a, b = s["e"]["a_idx"], s["e"]["b_idx"]
+        if not np.all((((j1 == a) & (j2 == b)) | ((j1 == b) & (j2 == a)))[ok0]):
+            raise SystemExit(f"{s['path']}: the no-timing SR pair is not the stored legs in some event")
+        acc = ok0 & C.acceptance_mask(s["e"]["a_" + col], s["e"]["b_" + col], args.acceptance, args.acc_min_trk)
         s["acc_frac"] = (s["w"][acc].sum() / s["w"][ok0].sum(), int(acc.sum()), int(ok0.sum()))
         cal, sg = s["calib"], s["sig"]
         s = samples[r] = subset(s, acc)
@@ -161,7 +168,7 @@ for s in samples.values():
               f"normalisation: {C.NORM[s['norm']]['note'] if s['norm'] != 'none' else 'none'}")
     if ACC:
         f, n, n0 = s["acc_frac"]
-        md.append(f"  - **acceptance `{args.acceptance}`** (>= {args.acc_min_trk} HGTD track(s) on j1 and j2 as no-timing "
+        md.append(f"  - **acceptance `{args.acceptance}`** (>= {args.acc_min_trk} HGTD track(s), {args.acc_count}, on j1 and j2 as no-timing "
                   f"tagging pair): {n:,} of {n0:,} MC events {WHERE}, {100 * f:.1f}% of their weight; every number "
                   "below is within these events")
 md += ["", f"**Cut flow {WHERE} without timing** (cumulative; MC events and the weighted fraction of the stored "
@@ -249,7 +256,7 @@ SEL1 = (("SR" if args.region == "sr" else "SR pair") + f": j_{{1,2}} > {J1:g}, {
 SEL2 = ("2-4 jets > 25 GeV (JVT), j_{3,4}: C < 0.6, m_{rel} < 0.05; fJVT on j_{1,2}; E_{T}^{jet} > 140 GeV"
         if args.region == "sr" else
         f"fJVT on j_{{1,2}};  {args.region} set: no jet veto, no E_{{T}}^{{jet}} cut, no E_{{T}}^{{miss}} bins")
-ACC_LINE = C.acceptance_line(args.acceptance, args.acc_min_trk)
+ACC_LINE = C.acceptance_line(args.acceptance, args.acc_min_trk, args.acc_count)
 TIMING = (f"timing |#Deltat| / #sigma #geq {args.nsigma:g}: filled = event veto on j_{{1,2}}, "
           "open = failing jets removed first")
 CALIB = (f"#sigma_{{jet}} #times {calib.fac[0]:.2f} (1 track) #rightarrow {calib.fac[-1]:.2f} "
