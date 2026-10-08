@@ -166,12 +166,18 @@ def draw_times(at, e, d, i, names):
     ys = np.arange(len(allrows))[::-1]
     vals = [v for _, v, _, _, _ in allrows if np.isfinite(v)]
     sigs = [x for _, v, x, _, _ in allrows if np.isfinite(v) and np.isfinite(x)]
-    lo, hi = min(vals) - 3 * max(sigs + [20]), max(vals) + 3 * max(sigs + [20])
+    lo = min([v - 3 * x for _, v, x, _, _ in allrows if np.isfinite(v) and np.isfinite(x)] + [min(vals) - 40])
+    hi = max([v + 3 * x for _, v, x, _, _ in allrows if np.isfinite(v) and np.isfinite(x)] + [max(vals) + 40])
     pad = 0.08 * (hi - lo)
     for y, (lab, v, sg, col, tag) in zip(ys, allrows):
         if np.isfinite(v):
-            at.errorbar([v], [y], xerr=[[sg], [sg]] if sg > 0 else None, fmt="s" if tag in [x[0] for x in SRC] else "o",
-                        color=col, ms=8, capsize=4, lw=2)
+            if sg > 0:   # thick: +-2 sigma; thin, capped: out to +-3 sigma (the test's threshold)
+                at.plot([v - 3 * sg, v + 3 * sg], [y, y], color=col, lw=1.2, alpha=0.8, solid_capstyle="butt")
+                at.plot([v - 3 * sg] * 2, [y - 0.13, y + 0.13], color=col, lw=1.2, alpha=0.8)
+                at.plot([v + 3 * sg] * 2, [y - 0.13, y + 0.13], color=col, lw=1.2, alpha=0.8)
+                at.plot([v - 2 * sg, v + 2 * sg], [y, y], color=col, lw=5, solid_capstyle="butt")
+            at.plot([v], [y], "s" if tag in [x[0] for x in SRC] else "o", color=col, ms=8,
+                    markeredgecolor="white", markeredgewidth=0.8, zorder=5)
         if tag in [x[0] for x in SRC] + ["truth"] and tag != "truth" or tag == "truth":
             if not e[f"ok_{tag}"][i]:
                 verdict, vcol = "no $t_0$: kept", "#777777"
@@ -188,7 +194,7 @@ def draw_times(at, e, d, i, names):
     at.axhline(len(jets) - 0.5, color="#BBBBBB", lw=0.8)
     at.axvline(tt, color="#5B3A29", lw=0.8, ls=":")
     at.set_xlim(lo - pad, hi + pad); at.set_ylim(-0.6, len(allrows) - 0.4)
-    at.set_xlabel("time [ps]   (bars: $\\pm 1\\sigma$ as used by the test)")
+    at.set_xlabel("time [ps]   (thick: $\\pm 2\\sigma$, thin: $\\pm 3\\sigma$; $\\sigma$ as used by the test)")
     at.text(1.015, len(allrows) - 0.25, f"jet vs $t_0$ at {args.nsigma:g}$\\sigma$\n({names[0]}, {names[1]} pulls)",
             transform=at.get_yaxis_transform(), ha="left", va="bottom", fontsize=11, color="#555555")
 
