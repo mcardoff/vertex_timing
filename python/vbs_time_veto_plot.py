@@ -46,6 +46,7 @@ Writes <out>_{sig,bkg}_eff_mjj.(pdf|png), and with both files
 <out>_s_over_sqrtb.(pdf|png) (S/sqrt(B) change vs no veto in %, per column),
 <out>_s_over_sqrtb_yields.(pdf|png) (S/sqrt(B) from the yields at --lumi), the same two for S/B
 (<out>_s_over_b, <out>_s_over_b_yields), <out>_jet_time_{pulls,calib} (the HS-leg jet-time pulls and f(n)),
+<out>_t0_pulls(_bkg).(pdf|png) (the event t0s against the true vertex time, signal / background),
 <out>_tradeoff.(pdf|png) (signal efficiency against background rejection 1/eps_B,
 threshold scanned) and, with --compare, <out>_veto_vs_repair_tradeoff, plus
 <out>_summary.md (with the scan's points appended).
@@ -689,6 +690,55 @@ def jet_time_figures(stem, e_all, cal):
 
 
 jet_time_figures(args.out, loaded["sig"][5], calibs["sig"])
+
+
+# ── The other side of the test: the event t0 against the true vertex time ────
+def t0_figure(stem, e_all, what):
+    """<stem>_t0_pulls: (t0 - t_HS^truth) / (infl x sigma_t0) for every selected event
+    of the file with that t0, one line per reco t0 -- the t0 half of the jet-vs-t0
+    pull, with the sigma the test uses (inflation included)"""
+    ROOT_ = C.ROOT
+    c = ROOT_.TCanvas("c_t0p_" + what, "", 800, 650); C.KEEP.append(c)
+    c.SetLeftMargin(0.14); c.SetRightMargin(0.05); c.SetLogy(True)
+    leg = ROOT_.TLegend(0.16, 0.565, 0.93, 0.735); ROOT_.StyleLegend(leg, 0.027); C.KEEP.append(leg)
+    first = True
+    nall = len(e_all["t0_truth"])
+    for k, src in enumerate(["trkptz", "waves", "tzp", "hgtd"]):
+        ok = e_all[f"ok_{src}"].astype(bool)
+        sg = e_all[f"infl_{src}"][ok] * e_all[f"sig0_{src}"][ok]
+        good = sg > 0
+        pull = (e_all[f"t0_{src}"][ok][good] - e_all["t0_truth"][ok][good]) / sg[good]
+        h = ROOT_.TH1D(f"h_t0p_{what}_{src}", "", 64, -8, 8); C.KEEP.append(h)
+        for x in np.clip(pull, -7.99, 7.99): h.Fill(x)
+        h.Scale(1.0 / h.Integral())
+        lab, col, _ = STYLE["t0_" + src]
+        h.SetLineColor(C.colour(col)); h.SetLineWidth(2); h.SetLineStyle(1 if src != "hgtd" else 7)
+        if first:
+            h.SetMinimum(2e-5); h.SetMaximum(200.0)
+            h.GetXaxis().SetTitle("(t_{0} - t_{HS}^{truth}) / #sigma_{t_{0}}   (overflow in the edge bins)")
+            h.GetYaxis().SetTitle("Fraction of events with that t_{0}")
+            h.Draw("HIST"); first = False
+        else:
+            h.Draw("HIST SAME")
+        name = lab.replace("Jet vs t_{0}: ", "")
+        leg.AddEntry(h, f"{name}: {100 * np.mean(np.abs(pull) >= args.nsigma):.1f}% beyond {args.nsigma:g};  "
+                     f"#sigma {np.median(sg[good]):.0f} ps (median);  valid in {100 * ok.sum() / nall:.0f}%", "l")
+    g = ROOT_.TF1("f_unit_t0_" + what, "[0]*exp(-0.5*x*x)", -8, 8); C.KEEP.append(g)
+    g.SetParameter(0, 0.25 / np.sqrt(2 * np.pi)); g.SetLineColor(ROOT_.kBlack); g.SetLineStyle(2); g.Draw("SAME")
+    leg.AddEntry(g, "unit Gaussian", "l")
+    leg.Draw()
+    ROOT_.ATLASLabel(0.17, 0.88, "")
+    t = ROOT_.TLatex(); t.SetNDC(); t.SetTextFont(42); t.SetTextSize(0.04); C.KEEP.append(t)
+    t.DrawLatex(0.31, 0.88, "Simulation Internal")
+    t2 = ROOT_.TLatex(); t2.SetNDC(); t2.SetTextFont(42); t2.SetTextSize(0.028); t2.SetTextColor(ROOT_.kGray + 2); C.KEEP.append(t2)
+    t2.DrawLatex(0.17, 0.835, f"{'VBF H#rightarrowinv.' if what == 'sig' else 'Z(#rightarrowll)+jets'}: every selected event, {nall:,}")
+    t2.DrawLatex(0.17, 0.80, "#sigma: the vertex time's quoted #sigma #times its per-sample inflation, as in the test")
+    t2.DrawLatex(0.17, 0.765, "HGTD: Athena's RecoVtx_time, where valid")
+    c.Print(f"{stem}_t0_pulls{'' if what == 'sig' else '_bkg'}.pdf"); c.Print(f"{stem}_t0_pulls{'' if what == 'sig' else '_bkg'}.png")
+    print("wrote", f"{stem}_t0_pulls{'' if what == 'sig' else '_bkg'}.pdf / .png")
+
+
+for r in loaded: t0_figure(args.out, loaded[r][5], r)
 
 # ── The trade-off: eps_S against background rejection as the threshold moves ─
 # (all m_jj columns). Background rejection = 1 / eps_B, the ROC convention.
