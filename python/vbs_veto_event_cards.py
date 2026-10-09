@@ -33,6 +33,10 @@ ap.add_argument("--met-min", type=float, default=100.0)
 ap.add_argument("--zpt-min", type=float, default=100.0)
 ap.add_argument("--nsigma", type=float, default=3.0)
 ap.add_argument("--out", required=True, help="output stem: <out>_<case>.(pdf|png)")
+ap.add_argument("--set", default="findings", choices=["findings", "cases"],
+                help="findings: the five one-per-finding rules (A-E); cases: the talk's case-ordered set -- "
+                     "Forward-Forward (jet time compatibility vetoes where t0 keeps, and the reverse) and "
+                     "Central-Forward (a pileup jet in HGTD caught, and missed), each on --bkg AND --local")
 ap.add_argument("--local", help="apply every rule to THIS VBF file instead (e.g. the local sample, which keeps "
                 "every truth vertex for the displays); the jet-time calibration still comes from --sig")
 args = ap.parse_args()
@@ -71,6 +75,11 @@ def derived(e):
             veto |= e[f"ok_{s}"] & d[L + "_timed"] & (pull >= args.nsigma)
         d["veto_" + s] = veto
     d["nin"] = d["a_in"].astype(int) + d["b_in"].astype(int)
+    bothT = d["a_timed"] & d["b_timed"]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        pj = np.abs(e["a_core_t"] - e["b_core_t"]) / np.sqrt(d["a_s"] ** 2 + d["b_s"] ** 2)
+    d["pull_jj"] = np.where(bothT, pj, np.nan)
+    d["veto_jj"] = bothT & (pj >= args.nsigma)
     return d
 
 
@@ -164,7 +173,47 @@ def build_cases(srole, brole):
     return out
 
 
-cases = build_cases("local", "local") if args.local else build_cases("sig", "bkg")
+def build_case_set(role):
+    """the talk's case-ordered set on one sample (Z+jets or the local VBF file). Within a rule
+    the pair with a hard-scatter AND a pileup leg is preferred, so the decision is about a
+    pileup jet; the score picks the clearest such event"""
+    E, D, _ = SAMPLES[role]
+    nm = {"bkg": "Z+jets", "local": "VBF (local)", "sig": "VBF"}[role]
+    hspu = (E["a_hs"] & E["b_pu"]) | (E["a_pu"] & E["b_hs"])
+    bothT = (D["nin"] == 2) & D["a_timed"] & D["b_timed"]
+    reco_veto = D["veto_waves"] & D["veto_trkptz"]
+    reco_keep = ~D["veto_waves"] & ~D["veto_trkptz"]
+    t0pull = np.fmax(np.nan_to_num(D["a_pull_waves"]), np.nan_to_num(D["b_pull_waves"]))
+    one = D["nin"] == 1
+    pu_in = np.where(D["a_in"], E["a_pu"], E["b_pu"])
+    in_timed = np.where(D["a_in"], D["a_timed"], D["b_timed"])
+    pu_pt = np.where(D["a_in"], E["a_pt"], E["b_pt"])
+    out = []
+    def add(key, title, rule, mask, score, prefer):
+        m = mask & prefer if (mask & prefer).any() else mask
+        out.append((f"{key}_{role}", role, title, f"{nm}: {rule}" + ("" if (mask & prefer).any() else " (no HS+PU pair passes)"),
+                    m, score))
+    add("FF1_jj_vetoes", "Forward-Forward: jet time compatibility rejects where $t_0$ does not",
+        "both legs in HGTD and timed; jet time compatibility vetoes, TRKPTZ and WAVeS keep; HS+PU preferred; largest jet-jet pull",
+        bothT & D["veto_jj"] & reco_keep, np.nan_to_num(D["pull_jj"]), hspu)
+    add("FF2_t0_vetoes", "Forward-Forward: jet time compatibility misses where $t_0$ rejects",
+        "both legs in HGTD and timed; jet time compatibility keeps, TRKPTZ and WAVeS veto; HS+PU preferred; largest WAVeS pull",
+        bothT & ~D["veto_jj"] & reco_veto, t0pull, hspu)
+    add("CF1_caught", "Central-Forward: a pileup jet in HGTD, rejected",
+        "one leg in HGTD, timed and pileup; TRKPTZ and WAVeS veto; highest pileup-leg pT",
+        one & pu_in & in_timed & reco_veto, pu_pt, np.ones(len(pu_pt), bool))
+    add("CF2_missed", "Central-Forward: a pileup jet in HGTD, not rejected",
+        "one leg in HGTD, timed and pileup; TRKPTZ and WAVeS keep; highest pileup-leg pT",
+        one & pu_in & in_timed & reco_keep, pu_pt, np.ones(len(pu_pt), bool))
+    return out
+
+
+if args.set == "cases":
+    if not args.local:
+        raise SystemExit("--set cases needs --local (one event per case from Z+jets and one from the local VBF file)")
+    cases = [c for pair in zip(build_case_set("bkg"), build_case_set("local")) for c in pair]
+else:
+    cases = build_cases("local", "local") if args.local else build_cases("sig", "bkg")
 
 
 def draw_times(at, e, d, i, names):
@@ -220,6 +269,14 @@ def draw_times(at, e, d, i, names):
     at.set_yticklabels([r[0] for r in allrows], fontsize=12)
     for tl, r in zip(at.get_yticklabels(), allrows): tl.set_color(r[3])
     at.axhline(1.6 * (len(jets) - 1) + 0.85, color="#BBBBBB", lw=0.8)
+    # jet time compatibility: the two jets against each other, no t0
+    pj = d["pull_jj"][i]
+    if np.isfinite(pj):
+        jtxt, jcol = ("VETOED" if d["veto_jj"][i] else "kept") + f"  ({pj:.1f}$\\sigma$)", ("#B03A2E" if d["veto_jj"][i] else "#2E7D32")
+    else:
+        jtxt, jcol = "n/a: one jet timed", "#777777"
+    at.text(1.015, 0.8, "jet time compatibility:\n" + jtxt, transform=at.get_yaxis_transform(), ha="left", va="center",
+            fontsize=12, color=jcol, fontweight="bold")
     at.axvline(tt, color="#5B3A29", lw=0.8, ls=":")
     at.set_xlim(lo - pad, hi + pad); at.set_ylim(-0.9, ys.max() + 0.6)
     at.set_xlabel("time [ps]   (thick: $\\pm 2\\sigma$, thin: $\\pm 3\\sigma$; $\\sigma$ as used by the test)")

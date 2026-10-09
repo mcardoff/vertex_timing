@@ -387,7 +387,7 @@ def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_
     """vbs_time_veto_common.column_figure on this script's columns; `methods` defaults to DRAWN"""
     acc = C.acceptance_line(args.acceptance, args.acc_min_trk, args.acc_count)
     if args.compact:
-        lines = [f"{C.ACC_TEXT[args.acceptance]} in HGTD" if acc else "all selected events"]
+        lines = ["**" + C.CASE_TEXT[args.acceptance]]
     elif acc:
         lines = [lines[0], acc] + lines[1:]
     C.column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_title, EDGES, STYLE,

@@ -32,8 +32,8 @@ T0_SRC = ["trkptz", "waves", "hgtd", "tzp", "truth"]
 # (legend, colour, marker): the region talk's case colours; jet-jet in black.
 # Event vetoes filled, jet removal open in the same colour.
 STYLE = {
-    "jj":        ("Jet vs jet (no t_{0})",                     "#000000",    20),
-    "jj_all":    ("Jet vs jet, all timed ghost tracks",        "#8C8C8C",    24),
+    "jj":        ("Jet time compatibility (no t_{0})",         "#000000",    20),
+    "jj_all":    ("Jet time compatibility, all ghost tracks",  "#8C8C8C",    24),
     "t0_trkptz": ("Jet vs t_{0}: TRKPTZ",                      "kP10Red",    21),
     "t0_waves":  ("Jet vs t_{0}: WAVeS",                       "kP10Yellow", 22),
     "t0_hgtd":   ("Jet vs t_{0}: HGTD (Athena)",               "kP10Blue",   23),
@@ -62,6 +62,10 @@ NBINS = [1, 2, 3, 4, 6, 9, 10**6]
 # "all" is no restriction.
 ACCEPTANCE = {"all": None, "both": 2, "one": 1, "neither": 0}
 ACC_TEXT = {"both": "both tagging jets", "one": "exactly one tagging jet", "neither": "neither tagging jet"}
+# the talk's names for the categories (vbs_time_veto_plot.py --compact headline)
+CASE_TEXT = {"both": "Forward-Forward: both tagging jets in HGTD",
+             "one": "Central-Forward: one tagging jet in HGTD",
+             "neither": "neither tagging jet in HGTD", "all": "All selected events"}
 
 
 def add_acceptance_args(ap):
@@ -223,10 +227,15 @@ def atlas_block(label, lines):
     al.DrawLatex(0.305, 0.895, "Simulation Internal")
     ROOT.ATLASEnergyLabel(0.18, 0.85, label)
     p = ROOT.TLatex(); p.SetNDC(); p.SetTextFont(42); p.SetTextSize(0.028); p.SetTextColor(ROOT.kGray + 2)
-    for i, ln in enumerate(lines):
-        p.DrawLatex(0.18, 0.81 - 0.036 * i, ln)
-    KEEP.extend([al, p])
-    return 0.81 - 0.036 * len(lines)
+    h = ROOT.TLatex(); h.SetNDC(); h.SetTextFont(62); h.SetTextSize(0.036)   # a line starting "**": a headline
+    y = 0.81
+    for ln in lines:
+        if ln.startswith("**"):
+            h.DrawLatex(0.18, y - 0.004, ln[2:]); y -= 0.046
+        else:
+            p.DrawLatex(0.18, y, ln); y -= 0.036
+    KEEP.extend([al, p, h])
+    return y
 
 
 def y_range(seriess, methods, ref=1.0, pct=False):
