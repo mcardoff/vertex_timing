@@ -21,6 +21,11 @@ from matplotlib.patches import Rectangle, Polygon
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument("--out", required=True, help="output stem: <out>_{forward_forward,central_forward}.(pdf|png)")
+ap.add_argument("--event-tree", help="draw an ACTUAL selected event per case from this vbs_time_veto output (the local "
+                "VBF file): both legs hard-scatter, the timed legs with >= 3 tracks in their time, kept by every test, "
+                "m_jj > 1 TeV, recoil > 100 GeV, timed legs in 2.6 < |eta| < 3.8; the one whose largest pull is closest to 1. Without it: a labelled schematic")
+ap.add_argument("--calib-sig", help="with --event-tree: the signal file whose HS legs set the jet-time sigma f(n) "
+                "(the grid VBF, as the efficiency figures)")
 args = ap.parse_args()
 plt.rcParams.update({"font.size": 13})
 
@@ -32,7 +37,7 @@ def r_at(z, eta):
     return abs(z) / np.sinh(abs(eta))
 
 
-def jet(ax, eta, length, label, timed):
+def jet(ax, eta, length, label, timed, textpos=None):
     """a jet cone from the origin, R = 0.4 wide in eta, to `length` m along its axis"""
     th = 2 * np.arctan(np.exp(-abs(eta)))
     sgn = np.sign(eta)
@@ -42,7 +47,7 @@ def jet(ax, eta, length, label, timed):
         pts.append((sgn * length * np.cos(th + d), length * np.sin(th + d)))
     ax.add_patch(Polygon(pts, closed=True, facecolor=GREEN, alpha=0.55, edgecolor=GREEN, lw=1.5, zorder=4))
     zm, rm = sgn * 0.62 * length * np.cos(th), 0.62 * length * np.sin(th)   # the cone's middle
-    tz, tr = (sgn * 2.1, 1.2) if abs(eta) > 2 else (2.75, 1.05)
+    tz, tr = textpos or ((sgn * 2.1, 1.2) if abs(eta) > 2 else (2.75, 1.05))
     ax.annotate(label, (zm, rm), xytext=(tz, tr), ha="center", fontsize=12, color=GREEN, fontweight="bold",
                 arrowprops=dict(arrowstyle="-", color=GREEN, lw=1.2), zorder=7,
                 bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.85))
@@ -81,18 +86,80 @@ def detector(ax):
         ax.spines[sp].set_visible(False)
 
 
+def pick_events():
+    """{case: (jets [(eta, pt, t, sigma, role)], header line)} from --event-tree"""
+    import uproot
+    import vbs_time_veto_common as C
+    e = uproot.open(args.event_tree)["events"].arrays(library="np", filter_name=lambda k: not k.startswith("jet_"))
+    cal = C.measure(C.legs(args.calib_sig), True, "signal HS legs")
+    sel = (e["met_truth"] > 100) & (e["mjj"] > 1000) & e["a_hs"] & e["b_hs"]
+    sig = {L: cal(e[L + "_core_n"]) * e[L + "_core_sig"] for L in "ab"}
+    s0 = e["infl_waves"] * e["sig0_waves"]
+    pull = {L: np.abs(e[L + "_core_t"] - e["t0_waves"]) / np.sqrt(sig[L] ** 2 + s0 ** 2) for L in "ab"}
+    timed = {L: (e[L + "_hgtd_ntimed"] >= 1) & (e[L + "_core_n"] >= 3)
+                & (np.abs(e[L + "_eta"]) > 2.6) & (np.abs(e[L + "_eta"]) < 3.8) for L in "ab"}
+    pjj = np.abs(e["a_core_t"] - e["b_core_t"]) / np.sqrt(sig["a"] ** 2 + sig["b"] ** 2)
+    out = {}
+    ff = sel & timed["a"] & timed["b"] & (pull["a"] < 3) & (pull["b"] < 3) & (pjj < 3)
+    worst = np.fmax(np.fmax(pull["a"], pull["b"]), pjj)
+    cen = {L: (np.abs(e[L + "_eta"]) < 1.5) & (e[L + "_hgtd_ntimed"] == 0) for L in "ab"}   # clearly central
+    cf = sel & ((timed["a"] & cen["b"] & (pull["a"] < 3)) | (timed["b"] & cen["a"] & (pull["b"] < 3)))
+    cworst = np.where(timed["a"] & cen["b"], pull["a"], pull["b"])
+    # a TYPICAL kept event, not the most perfect one: the largest pull closest to 1 sigma
+    for key, m, score in (("forward_forward", ff, np.abs(worst - 1.0)), ("central_forward", cf, np.abs(cworst - 1.0))):
+        i = np.flatnonzero(m)[np.argmin(score[m])]
+        jets = []
+        for L in "ab":
+            t = e[L + "_core_t"][i] if e[L + "_core_n"][i] > 0 else None
+            jets.append((float(e[L + "_eta"][i]), float(e[L + "_pt"][i]), t, float(sig[L][i]), int(e[L + "_idx"][i])))
+        verdict = (f"jet time compatibility {pjj[i]:.1f}$\\sigma$, jet vs WAVeS $t_0$ {pull['a'][i]:.1f}$\\sigma$ / "
+                   f"{pull['b'][i]:.1f}$\\sigma$: kept" if key == "forward_forward" else
+                   f"forward jet vs WAVeS $t_0$ {cworst[i]:.1f}$\\sigma$: kept")
+        head = (f"An actual selected event: VBF $H\\to$inv. (local sample), {os.path.basename(str(e['file_path'][i]))} "
+                f"#{e['entry'][i]}, $m_{{jj}}$ = {e['mjj'][i]:.0f} GeV\n"
+                f"$t_{{\\rm HS}}$ = {e['t0_truth'][i]:.0f} ps, WAVeS $t_0$ = {e['t0_waves'][i]:.0f} ps; {verdict}")
+        print(f"[{key}] {int(m.sum())} candidates; {os.path.basename(str(e['file_path'][i]))} #{e['entry'][i]}")
+        out[key] = (jets, head)
+    return out
+
+
+EVENTS = pick_events() if args.event_tree else None
+
+
+def jet_from_event(eta, pt, t, sg, idx):
+    th = 2 * np.arctan(np.exp(-abs(eta)))
+    timed = t is not None
+    length = (Z_HGTD + 0.05) / np.cos(th) if abs(eta) > 2.0 else min(1.45 / np.sin(th), 3.6)
+    lab = f"Jet {idx + 1}: {pt:.0f} GeV, $\\eta$ = {eta:+.2f}" + (f"\n$t_{{\\rm jet}}$ = {t:.0f} $\\pm$ {sg:.0f} ps" if timed
+                                                               else "\nno HGTD time")
+    return eta, length, lab, timed
+
+
 for key, jets, note in [
     ("forward_forward", [(3.1, 3.6, "tagging jet 1: $t_{\\rm jet,1}$", True), (-3.4, 3.6, "tagging jet 2: $t_{\\rm jet,2}$", True)],
      "both jets reach HGTD: $t_{\\rm jet,1}$ vs $t_{\\rm jet,2}$ (jet time compatibility), and each vs $t_0$"),
     ("central_forward", [(0.6, 1.5, "central tagging jet: no HGTD time", False), (-3.0, 3.6, "forward tagging jet: $t_{\\rm jet}$", True)],
      "only the forward jet reaches HGTD: $t_{\\rm jet}$ vs $t_0$ alone"),
 ]:
-    fig, ax = plt.subplots(figsize=(12.5, 3.9))
+    fig, ax = plt.subplots(figsize=(12.5, 4.3 if EVENTS else 3.9))
     detector(ax)
+    if EVENTS:
+        evjets, head = EVENTS[key]
+        jets = [jet_from_event(*j) for j in evjets]
+    fwd_sides = {np.sign(j[0]) for j in jets if abs(j[0]) > 2}
     for eta, length, lab, timed in jets:
-        jet(ax, eta, length, lab, timed)
-    ax.set_title(note + "\nJVT/fJVT: both jets already compatible with the hard-scatter vertex in $z$",
-                 fontsize=12.5, loc="left")
+        pos = None
+        if EVENTS and abs(eta) <= 2:
+            sg = np.sign(eta)
+            pos = (sg * 2.2, 1.15) if sg not in fwd_sides else (sg * 0.6, 1.72)
+        jet(ax, eta, length, lab, timed, pos)
+    if EVENTS:
+        ax.set_title(head + "\n" + note + ";  both jets passed JVT/fJVT", fontsize=11.5, loc="left")
+    else:
+        ax.set_title(note + "\nJVT/fJVT: both jets already compatible with the hard-scatter vertex in $z$",
+                     fontsize=12.5, loc="left")
+        ax.text(0.5, 0.97, "Schematic --- not an actual event", transform=ax.transAxes, ha="center", va="top",
+                fontsize=12, color="#B03A2E", fontweight="bold")
     ax.plot([], [], marker="*", ls="none", ms=13, color="#E69F00", mec="black", label="jet timed by HGTD")
     ax.legend(loc="lower right", bbox_to_anchor=(1.0, 1.0), frameon=False, fontsize=11)
     fig.tight_layout()
