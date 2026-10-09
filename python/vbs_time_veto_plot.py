@@ -101,6 +101,9 @@ ap.add_argument("--bf-hinv", type=float, default=1.0,
                      "normalised to sigma_VBF alone); scales S linearly, cancels in every relative number")
 ap.add_argument("--tag", default="", help="selection note for the third label line (e.g. the JVT working point)")
 ap.add_argument("--out", required=True, help="output stem")
+ap.add_argument("--compact", action="store_true",
+                help="the m_jj-column figures carry only the category line (e.g. 'both tagging jets in HGTD'), "
+                     "not the selection / test / jet-time / calibration lines -- for slides that state those once")
 ap.add_argument("--jet-pulls", default="both", choices=["both", "quoted"],
                 help="<out>_jet_time_pulls: the quoted sigma and sigma x f(n) (both), or the quoted sigma alone")
 C.add_acceptance_args(ap)
@@ -383,9 +386,12 @@ def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_
                   xnote="last bin includes overflow", pct=False, yrange=None):
     """vbs_time_veto_common.column_figure on this script's columns; `methods` defaults to DRAWN"""
     acc = C.acceptance_line(args.acceptance, args.acc_min_trk, args.acc_count)
-    if acc: lines = [lines[0], acc] + lines[1:]
+    if args.compact:
+        lines = [f"{C.ACC_TEXT[args.acceptance]} in HGTD" if acc else "all selected events"]
+    elif acc:
+        lines = [lines[0], acc] + lines[1:]
     C.column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_title, EDGES, STYLE,
-                    methods or DRAWN, ref=ref, xnote=xnote, pct=pct, yrange=yrange)
+                    methods or DRAWN, ref=ref, xnote=xnote, pct=pct, yrange=yrange, compact=args.compact)
 
 
 def fmt_pct(v): return f"  ({100 * v:.1f}%)"

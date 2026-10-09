@@ -245,7 +245,7 @@ def y_range(seriess, methods, ref=1.0, pct=False):
 
 
 def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_title, edges, style, methods,
-                  ref=1.0, xnote="last bin includes overflow", pct=False, yrange=None):
+                  ref=1.0, xnote="last bin includes overflow", pct=False, yrange=None, compact=False):
     """The region plots' layout: per-m_jj-column values on top (one dodged marker
     per method), the MC event count of each column underneath on a log scale.
     `ref` draws a dashed reference line (None: none); `pct`: the values are a
@@ -263,8 +263,9 @@ def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_
     # headroom for the label block and legend; at least enough that the legend's
     # bottom edge (pad NDC; frame from 0.025 to 0.94) stays above the highest point
     legbot = 0.81 - 0.036 * len(lines) - 0.055 * ((len(methods) + 1) // 2)
-    top = max(ytop + (ytop - ymin) * (0.95 + 0.13 * max(0, len(lines) - 3)),
-              ymin + 0.915 * (ytop - ymin) / (legbot - 0.04))
+    top = ymin + 0.915 * (ytop - ymin) / (legbot - 0.04)   # the legend's bottom edge clears the highest point
+    if not compact:   # the long label block needs room of its own
+        top = max(top, ytop + (ytop - ymin) * (0.95 + 0.13 * max(0, len(lines) - 3)))
     frame.SetMinimum(ymin); frame.SetMaximum(top)
     frame.GetXaxis().SetLabelSize(0); frame.GetYaxis().SetTitle(ylab); frame.GetYaxis().SetTitleOffset(1.25)
     frame.Draw("AXIS")
