@@ -383,7 +383,9 @@ def calib_line(cal):
 
 
 # the bottom panel's MC count, split by the talk's cases (>= 1 timed HGTD track per jet)
-CASE_PARTS = [("Forward-Forward", "#5B8DD6", "both"), ("Central-Forward", "#E8A33D", "one"), ("Other", "#BDBDBD", "neither")]
+# colours from vbs_case_regions.py / vbs_region_stack.py: Forward-Forward = R1's (both legs forward),
+# Central-Forward = R2's (forward + central), Other = the light grey
+CASE_PARTS = [("Forward-Forward", "#3F8FFF", "both"), ("Central-Forward", "#B3231C", "one"), ("Other", "#CFCFCF", "neither")]
 
 
 def case_counts(e):

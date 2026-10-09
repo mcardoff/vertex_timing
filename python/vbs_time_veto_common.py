@@ -319,7 +319,7 @@ def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_
         for k, (lab, col, vals) in enumerate(count_parts):
             h = ROOT.TH1D(f"cp_{k}_" + os.path.basename(stem), "", len(edges) - 1, edges); KEEP.append(h)
             for b, n in enumerate(vals): h.SetBinContent(b + 1, n * sc)
-            h.SetFillColor(ROOT.TColor.GetColor(col)); h.SetLineColor(ROOT.TColor.GetColor(col)); h.SetLineWidth(1)
+            h.SetFillColor(ROOT.TColor.GetColor(col)); h.SetLineColor(ROOT.kBlack); h.SetLineWidth(1)   # as the region stacks
             stk.Add(h)
             if sum(vals) > 0: lg.AddEntry(h, lab, "f")
         stk.Draw("HIST SAME")
