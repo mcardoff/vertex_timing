@@ -19,26 +19,62 @@ coloured by their truth labels.
         --out-dir ../figs/time_veto/displays
 """
 import argparse, csv, os, subprocess, sys
+import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TITLE = {"vbf": "VBF H->inv.", "zjets": "Z(->ll)+jets"}
+TITLE = {"vbf": "VBF H->inv.", "zjets": "Z(->ll)+jets", "vbf_local": "VBF H->inv. (local sample)"}
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument("inputs", nargs="+", help="<candidates.csv>:<picked stem> (stem.root and stem_map.csv)")
+ap.add_argument("inputs", nargs="+", help="<candidates.csv>:<picked stem> (stem.root and stem_map.csv), or "
+                "<candidates.csv> alone to read each event from its own file_path (files that are on this machine)")
+ap.add_argument("--veto-tree", help="the vbs_time_veto output the events came from: work out each event's "
+                "analysis-removed jets (tagged_out) when the CSV has no such column")
 ap.add_argument("--out-dir", required=True)
 args = ap.parse_args()
 
+def tagged_out(veto_tree, fpath, entry, src, ent):
+    """jets >= 30 GeV of the event that the vbs_time_veto tree's jet_* arrays (the jets left
+    after the lepton overlap removal and JVT/fJVT) do not hold: within dR < 0.5 of a selected
+    lepton (Track_leptonID, pT > 20 GeV) it is the overlap removal, otherwise JVT/fJVT"""
+    import uproot
+    e = uproot.open(veto_tree)["events"].arrays(["file_path", "entry", "jet_idx", "n_rm_jvt", "n_rm_fjvt"], library="np")
+    i = np.flatnonzero((e["file_path"] == fpath) & (e["entry"] == entry))[0]
+    n = uproot.open(src)["ntuple"]
+    want = ["AntiKt4EMTopoJets_pt", "AntiKt4EMTopoJets_eta", "AntiKt4EMTopoJets_phi", "Track_pt", "Track_eta", "Track_phi"]
+    lep = "Track_leptonID" in n.keys()
+    a = n.arrays(want + (["Track_leptonID"] if lep else []), library="np", entry_start=ent, entry_stop=ent + 1)
+    g = lambda k: a[k][0]
+    kept = set(int(x) for x in e["jet_idx"][i])
+    tags = []
+    for k in range(len(g("AntiKt4EMTopoJets_pt"))):
+        if g("AntiKt4EMTopoJets_pt")[k] < 30 or k in kept:
+            continue
+        near = lep and any(g("Track_leptonID")[t] != 0 and g("Track_pt")[t] > 20 and
+                           np.hypot(g("AntiKt4EMTopoJets_eta")[k] - g("Track_eta")[t],
+                                    (g("AntiKt4EMTopoJets_phi")[k] - g("Track_phi")[t] + np.pi) % (2 * np.pi) - np.pi) < 0.5
+                           for t in range(len(g("Track_leptonID"))))
+        tags.append(f"{k}:{'lepton' if near else 'JVT/fJVT'}")
+    njvt = sum(t.endswith("JVT/fJVT") for t in tags)
+    if njvt != e["n_rm_jvt"][i] + e["n_rm_fjvt"][i]:
+        sys.exit(f"{fpath}#{entry}: {njvt} jets attributed to JVT/fJVT, the tree counts {e['n_rm_jvt'][i] + e['n_rm_fjvt'][i]}")
+    return ",".join(tags)
+
+
 bad = 0
 for spec in args.inputs:
-    cand, stem = spec.split(":")
-    remap = {(m["file_path"], int(m["entry"])): int(m["picked_entry"]) for m in csv.DictReader(open(stem + "_map.csv"))}
+    cand, stem = spec.split(":") if ":" in spec else (spec, None)
+    remap = ({(m["file_path"], int(m["entry"])): int(m["picked_entry"]) for m in csv.DictReader(open(stem + "_map.csv"))}
+             if stem else None)
     for r in csv.DictReader(open(cand)):
         key = (r["file_path"], int(r["entry"]))
+        src, ent = (os.path.abspath(stem + ".root"), remap[key]) if stem else (r["file_path"], int(r["entry"]))
+        if "tagged_out" not in r and args.veto_tree:
+            r["tagged_out"] = tagged_out(args.veto_tree, r["file_path"], int(r["entry"]), src, ent)
         lab = lambda L: "HS" if r[f"{L}_hs"] == "True" else ("PU" if r[f"{L}_pu"] == "True" else "other")
         legs, labels = f"{r['a_idx']},{r['b_idx']}", f"{lab('a')},{lab('b')}"
         t0 = float(r["t0_waves"])
         cmd = [sys.executable, "event_display.py",
-               "--file_path", os.path.abspath(stem + ".root"), "--event_num", str(remap[key]),
+               "--file_path", src, "--event_num", str(ent),
                "--extra_time", repr(t0), "--t0_sigma", r["sig0_waves"], "--infl", r["infl_waves"],
                "--gate_sigma", "3.0", "--assoc_nsigma", "2.5",
                "--legs", legs, "--leg_labels", labels,

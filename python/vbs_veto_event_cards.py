@@ -33,6 +33,8 @@ ap.add_argument("--met-min", type=float, default=100.0)
 ap.add_argument("--zpt-min", type=float, default=100.0)
 ap.add_argument("--nsigma", type=float, default=3.0)
 ap.add_argument("--out", required=True, help="output stem: <out>_<case>.(pdf|png)")
+ap.add_argument("--local", help="apply every rule to THIS VBF file instead (e.g. the local sample, which keeps "
+                "every truth vertex for the displays); the jet-time calibration still comes from --sig")
 args = ap.parse_args()
 
 SRC = [("trkptz", "TRKPTZ $t_0$", "#C0392B"), ("waves", "WAVeS $t_0$", "#E69F00"), ("hgtd", "HGTD $t_0$ (Athena)", "#3B8ED0")]
@@ -73,6 +75,12 @@ def derived(e):
 
 
 SD, BD = derived(S), derived(B)
+if args.local:
+    L, LJ, _ = load(args.local, "met_truth", args.met_min)
+    LD = derived(L)
+SAMPLES = {"sig": (S, SD, SJ), "bkg": (B, BD, BJ)}
+if args.local:
+    SAMPLES["local"] = (L, LD, LJ)
 
 
 def pick(e, d, mask, score, rule):
@@ -98,50 +106,65 @@ def leg_role(e, L, i):
 
 
 # ── the cases: (key, sample, title, rule, mask, score) ───────────────────────
-cases = []
-both, one = BD["nin"] == 2, BD["nin"] == 1
-hspu = (B["a_hs"] & B["b_pu"]) | (B["a_pu"] & B["b_hs"])
-cases.append(("A_both_pu_caught", "bkg",
-              "$Z$+jets, both tagging jets in HGTD: the pileup jet is caught by the reco $t_0$s; Athena has no time",
-              "Z+jets, both legs in HGTD, HS+PU pair, both legs timed; vetoed by TRKPTZ and WAVeS, no valid HGTD t0 "
-              "(every such event a valid HGTD t0 keeps has none: 5 of 5); highest PU-leg pT",
-              both & hspu & BD["a_timed"] & BD["b_timed"] & BD["veto_trkptz"] & BD["veto_waves"] & ~B["ok_hgtd"],
-              np.where(B["a_pu"], B["a_pt"], B["b_pt"])))
-pu_in = np.where(BD["a_in"], B["a_pu"], B["b_pu"])
-oth_hs_cen = np.where(BD["a_in"], B["b_hs"] & (np.abs(B["b_eta"]) < 2.4), B["a_hs"] & (np.abs(B["a_eta"]) < 2.4))
-cases.append(("B_one_r2_caught", "bkg",
-              "$Z$+jets, one tagging jet in HGTD: a forward pileup jet beside a central hard-scatter jet, caught",
-              "Z+jets, exactly one leg in HGTD and it is PU, the other HS with |eta| < 2.4; vetoed by TRKPTZ, WAVeS and HGTD; "
-              "highest PU-leg pT",
-              one & pu_in & oth_hs_cen & BD["veto_trkptz"] & BD["veto_waves"] & BD["veto_hgtd"],
-              np.where(BD["a_in"], B["a_pt"], B["b_pt"])))
-sboth = (SD["nin"] == 2) & S["a_hs"] & S["b_hs"] & SD["a_timed"] & SD["b_timed"]
-fail1 = np.where(SD["a_pull_truth"] >= args.nsigma, S["a_core_n"], np.where(SD["b_pull_truth"] >= args.nsigma, S["b_core_n"], 0))
-worst = np.fmax(SD["a_pull_truth"], SD["b_pull_truth"])
-cases.append(("C_sig_jet_tail", "sig",
-              "VBF $H\\to$inv., both jets hard-scatter and in HGTD: lost to the jet-time tail, even with the true $t_0$",
-              "VBF, both legs HS, in HGTD and timed; vetoed by WAVeS AND by the truth t0, the failing leg single-track; "
-              "pull vs truth closest to 4",
-              sboth & SD["veto_waves"] & SD["veto_truth"] & (fail1 == 1),
-              -np.abs(worst - 4.0)))
-hshs = B["a_hs"] & B["b_hs"] & (BD["a_timed"] | BD["b_timed"])
-with np.errstate(divide="ignore", invalid="ignore"):
-    t0off = np.abs(B["t0_waves"] - B["t0_truth"]) / (B["infl_waves"] * B["sig0_waves"])
-cases.append(("D_bkg_wrong_t0", "bkg",
-              "$Z$+jets, both tagging jets hard-scatter: vetoed only because the reco $t_0$ is wrong",
-              "Z+jets, both legs HS, >= 1 timed; vetoed by WAVeS and TRKPTZ, kept by the truth t0, WAVeS t0 > 3 sigma from truth; "
-              "highest m_jj",
-              hshs & BD["veto_waves"] & BD["veto_trkptz"] & ~BD["veto_truth"] & (t0off > 3.0),
-              B["mjj"]))
-edgeA = B["a_pu"] & (np.abs(B["a_eta"]) > 4.0) & BD["a_in"] & BD["a_timed"]
-edgeB = B["b_pu"] & (np.abs(B["b_eta"]) > 4.0) & BD["b_in"] & BD["b_timed"]
-edge_pull = np.where(edgeA, BD["a_pull_waves"], BD["b_pull_waves"])
-cases.append(("E_edge_pu_caught", "bkg",
-              "$Z$+jets: a pileup tagging jet with its axis past $|\\eta| = 4.0$, timed by HGTD and caught",
-              "Z+jets, a PU leg with |eta_axis| > 4.0 and a timed HGTD track; vetoed by TRKPTZ and WAVeS on THAT leg; "
-              "highest edge-leg |eta|",
-              (edgeA | edgeB) & BD["veto_waves"] & BD["veto_trkptz"] & (edge_pull >= args.nsigma),
-              np.where(edgeA, np.abs(B["a_eta"]), np.abs(B["b_eta"]))))
+def build_cases(srole, brole):
+    """the five rules. C (a hard-scatter pair lost) is evaluated on srole; A, B, D, E
+    (pileup jets caught, a wrong t0) on brole. On the grid that is VBF and Z+jets; with
+    --local, both are the local VBF file, and A drops its 'no valid Athena t0' clause
+    (that clause described Z+jets: every such event a valid Athena t0 keeps has none)"""
+    S, SD, _ = SAMPLES[srole]
+    B, BD, _ = SAMPLES[brole]
+    bname = "VBF $H\\to$inv." if brole != "bkg" else "$Z$+jets"
+    bmd = "VBF" if brole != "bkg" else "Z+jets"
+    out = []
+    both, one = BD["nin"] == 2, BD["nin"] == 1
+    hspu = (B["a_hs"] & B["b_pu"]) | (B["a_pu"] & B["b_hs"])
+    a_mask = both & hspu & BD["a_timed"] & BD["b_timed"] & BD["veto_trkptz"] & BD["veto_waves"]
+    if brole == "bkg":
+        a_mask = a_mask & ~B["ok_hgtd"]
+    out.append(("A_both_pu_caught", brole,
+                f"{bname}, both tagging jets in HGTD: the pileup jet is caught by the reco $t_0$s",
+                f"{bmd}, both legs in HGTD, HS+PU pair, both legs timed; vetoed by TRKPTZ and WAVeS"
+                + ("; no valid HGTD t0 (every such event a valid HGTD t0 keeps has none: 5 of 5)" if brole == "bkg" else "")
+                + "; highest PU-leg pT",
+                a_mask, np.where(B["a_pu"], B["a_pt"], B["b_pt"])))
+    pu_in = np.where(BD["a_in"], B["a_pu"], B["b_pu"])
+    oth_hs_cen = np.where(BD["a_in"], B["b_hs"] & (np.abs(B["b_eta"]) < 2.4), B["a_hs"] & (np.abs(B["a_eta"]) < 2.4))
+    out.append(("B_one_r2_caught", brole,
+                f"{bname}, one tagging jet in HGTD: a forward pileup jet beside a central hard-scatter jet, caught",
+                f"{bmd}, exactly one leg in HGTD and it is PU, the other HS with |eta| < 2.4; vetoed by TRKPTZ, WAVeS "
+                "and HGTD; highest PU-leg pT",
+                one & pu_in & oth_hs_cen & BD["veto_trkptz"] & BD["veto_waves"] & BD["veto_hgtd"],
+                np.where(BD["a_in"], B["a_pt"], B["b_pt"])))
+    sboth = (SD["nin"] == 2) & S["a_hs"] & S["b_hs"] & SD["a_timed"] & SD["b_timed"]
+    fail1 = np.where(SD["a_pull_truth"] >= args.nsigma, S["a_core_n"],
+                     np.where(SD["b_pull_truth"] >= args.nsigma, S["b_core_n"], 0))
+    worst = np.fmax(SD["a_pull_truth"], SD["b_pull_truth"])
+    out.append(("C_sig_jet_tail", srole,
+                "VBF $H\\to$inv., both jets hard-scatter and in HGTD: lost to the jet-time tail, even with the true $t_0$",
+                "VBF, both legs HS, in HGTD and timed; vetoed by WAVeS AND by the truth t0, the failing leg single-track; "
+                "pull vs truth closest to 4",
+                sboth & SD["veto_waves"] & SD["veto_truth"] & (fail1 == 1), -np.abs(worst - 4.0)))
+    hshs = B["a_hs"] & B["b_hs"] & (BD["a_timed"] | BD["b_timed"])
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t0off = np.abs(B["t0_waves"] - B["t0_truth"]) / (B["infl_waves"] * B["sig0_waves"])
+    out.append(("D_bkg_wrong_t0", brole,
+                f"{bname}, both tagging jets hard-scatter: vetoed only because the reco $t_0$ is wrong",
+                f"{bmd}, both legs HS, >= 1 timed; vetoed by WAVeS and TRKPTZ, kept by the truth t0, WAVeS t0 > 3 sigma "
+                "from truth; highest m_jj",
+                hshs & BD["veto_waves"] & BD["veto_trkptz"] & ~BD["veto_truth"] & (t0off > 3.0), B["mjj"]))
+    edgeA = B["a_pu"] & (np.abs(B["a_eta"]) > 4.0) & BD["a_in"] & BD["a_timed"]
+    edgeB = B["b_pu"] & (np.abs(B["b_eta"]) > 4.0) & BD["b_in"] & BD["b_timed"]
+    edge_pull = np.where(edgeA, BD["a_pull_waves"], BD["b_pull_waves"])
+    out.append(("E_edge_pu_caught", brole,
+                f"{bname}: a pileup tagging jet with its axis past $|\\eta| = 4.0$, timed by HGTD and caught",
+                f"{bmd}, a PU leg with |eta_axis| > 4.0 and a timed HGTD track; vetoed by TRKPTZ and WAVeS on THAT leg; "
+                "highest edge-leg |eta|",
+                (edgeA | edgeB) & BD["veto_waves"] & BD["veto_trkptz"] & (edge_pull >= args.nsigma),
+                np.where(edgeA, np.abs(B["a_eta"]), np.abs(B["b_eta"]))))
+    return out
+
+
+cases = build_cases("local", "local") if args.local else build_cases("sig", "bkg")
 
 
 def draw_times(at, e, d, i, names):
@@ -205,7 +228,7 @@ def draw_times(at, e, d, i, names):
 
 
 def card(key, role, title, rule, mask, score):
-    e, d, J = (S, SD, SJ) if role == "sig" else (B, BD, BJ)
+    e, d, J = SAMPLES[role]
     print(f"[{key}] {rule}")
     i = pick(e, d, mask, score, rule)
     fig = plt.figure(figsize=(13.5, 5.2))
@@ -233,9 +256,9 @@ def card(key, role, title, rule, mask, score):
     ax.set_title("green: hard scatter, grey: pileup\noutlined: tagging pair", fontsize=12)
     # ── time axis: one row per t0, then one per tagging jet ──
     draw_times(fig.add_subplot(gs[1]), e, d, i, ("jet 1", "jet 2"))
-    rec = (f"truth $E_T^{{\\rm miss}}$ = {e['met_truth'][i]:.0f} GeV" if role == "sig" else f"$p_T^{{\\ell\\ell}}$ = {e['z_pt'][i]:.0f} GeV")
+    rec = (f"truth $E_T^{{\\rm miss}}$ = {e['met_truth'][i]:.0f} GeV" if role != "bkg" else f"$p_T^{{\\ell\\ell}}$ = {e['z_pt'][i]:.0f} GeV")
     # the slide carries the title; the card keeps only the event's identity
-    fig.text(0.02, 0.955, f"{'VBF H→inv.' if role == 'sig' else 'Z(→ℓℓ)+jets'}  ·  {short_file(e['file_path'][i])}  "
+    fig.text(0.02, 0.955, f"{'VBF H→inv.' if role == 'sig' else ('VBF H→inv. (local sample)' if role == 'local' else 'Z(→ℓℓ)+jets')}  ·  {short_file(e['file_path'][i])}  "
              f"entry {e['entry'][i]}  ·  $m_{{jj}}$ = {e['mjj'][i]:.0f} GeV  ·  {rec}  ·  ATLAS Simulation Internal",
              fontsize=12, color="#555555")
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
@@ -252,7 +275,8 @@ def card(key, role, title, rule, mask, score):
         f2.savefig(f"{args.out}_{key}_times.{ext}", dpi=170, bbox_inches="tight", pad_inches=0.08)
     plt.close(f2)
     print(f"  wrote {args.out}_{key}_times.pdf / .png")
-    return dict(key=key, rule=rule, file=os.path.basename(str(e["file_path"][i])), entry=int(e["entry"][i]))
+    return dict(key=key, rule=rule, file=os.path.basename(str(e["file_path"][i])), entry=int(e["entry"][i]),
+                role=role, i=int(i))
 
 
 picked = [card(*c) for c in cases]
@@ -261,3 +285,15 @@ with open(args.out + "_events.md", "w") as f:
     for p in picked:
         f.write(f"| {p['key']} | {p['rule']} | {p['file']} | {p['entry']} |\n")
 print("wrote", args.out + "_events.md")
+# the candidates CSV vbs_veto_displays.py renders (the display's t0 is WAVeS')
+import csv
+COLS = ["file_path", "entry", "a_idx", "b_idx", "a_hs", "a_pu", "b_hs", "b_pu", "t0_waves", "sig0_waves", "infl_waves",
+        "t0_trkptz", "t0_hgtd", "ok_hgtd", "t0_truth", "mjj"]
+with open(args.out + "_candidates.csv", "w", newline="") as fh:
+    w = csv.DictWriter(fh, fieldnames=["card", "sample"] + COLS)
+    w.writeheader()
+    for p in picked:
+        e = SAMPLES[p["role"]][0]
+        row = {c: (e[c][p["i"]].item() if hasattr(e[c][p["i"]], "item") else str(e[c][p["i"]])) for c in COLS}
+        w.writerow(dict(card=p["key"], sample={"sig": "vbf", "bkg": "zjets", "local": "vbf_local"}[p["role"]], **row))
+print("wrote", args.out + "_candidates.csv")
