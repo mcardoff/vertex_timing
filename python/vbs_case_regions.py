@@ -90,15 +90,14 @@ for role, path, rc, cut, label in [
     leg = ROOT.TLegend(0.17, ytxt - 0.22, 0.93, ytxt - 0.01); ROOT.StyleLegend(leg); leg.SetNColumns(2); C.KEEP.append(leg)
     for h, (lab, _) in zip(hs, BANDS): leg.AddEntry(h, lab, "f")
     leg.Draw(); pTop.RedrawAxis()
-    # the count in the case's colour, linear, as the efficiency figures' bottom panels
-    # (vbs_time_veto_plot.py CASE_PARTS: Forward-Forward = R1's blue, Central-Forward = R2's red)
+    # the MC count per column, linear (in 10^3 when large)
     pBot.cd(); pBot.SetLogy(False)
     tot = ROOT.TH1D("tot" + role, "", len(edges) - 1, edges); C.KEEP.append(tot)
     counts = [int((idx == k).sum()) for k in range(len(edges) - 1)]
     sc = 1e-3 if max(counts + [1]) >= 10000 else 1.0
     for k, n in enumerate(counts): tot.SetBinContent(k + 1, n * sc)
-    case_col = {"both": "#3F8FFF", "one": "#B3231C", "neither": "#CFCFCF"}.get(args.acceptance, "#DCE6F2")
-    tot.SetFillColor(ROOT.TColor.GetColor(case_col)); tot.SetLineColor(ROOT.kBlack)
+    # neutral, unlabelled: a case colour here reads as a REGION (R1 blue / R2 red) of the stack above
+    tot.SetFillColor(ROOT.TColor.GetColor("#DCE6F2")); tot.SetLineColor(ROOT.kBlack)
     tot.GetXaxis().SetTitle("m_{jj} [GeV]   (last bin includes overflow)")
     tot.GetYaxis().SetTitle("MC events" + (" [10^{3}]" if sc != 1.0 else ""))
     tot.GetXaxis().SetTitleSize(0.13); tot.GetXaxis().SetLabelSize(0.11); tot.GetXaxis().SetTitleOffset(1.25)
@@ -106,9 +105,7 @@ for role, path, rc, cut, label in [
     tot.GetYaxis().SetNdivisions(503)
     tot.SetMinimum(0.0); tot.SetMaximum(max(counts + [1]) * sc * 2.45); tot.GetYaxis().SetNdivisions(203)
     tot.Draw("HIST")
-    lgb = ROOT.TLegend(0.16, 0.83, 0.97, 0.965); lgb.SetBorderSize(0); lgb.SetFillStyle(0); C.KEEP.append(lgb)
-    lgb.SetTextSize(0.075); lgb.SetTextFont(42); lgb.SetNColumns(3)
-    lgb.AddEntry(tot, C.CASE_TEXT[args.acceptance].split(":")[0], "f"); lgb.Draw()
+
     q = ROOT.TLatex(); q.SetTextFont(42); q.SetTextSize(0.075); C.KEEP.append(q)
     top = max(counts + [1])
     for k, n in enumerate(counts):

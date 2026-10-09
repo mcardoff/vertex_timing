@@ -400,7 +400,7 @@ def case_counts(e):
 
 
 def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_title, ref=1.0, methods=None,
-                  xnote="last bin includes overflow", pct=False, yrange=None, parts=None):
+                  xnote="last bin includes overflow", pct=False, yrange=None, parts=None, sig=None):
     """vbs_time_veto_common.column_figure on this script's columns; `methods` defaults to DRAWN"""
     acc = C.acceptance_line(args.acceptance, args.acc_min_trk, args.acc_count)
     if args.compact:
@@ -409,7 +409,7 @@ def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_
         lines = [lines[0], acc] + lines[1:]
     C.column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_title, EDGES, STYLE,
                     methods or DRAWN, ref=ref, xnote=xnote, pct=pct, yrange=yrange, compact=args.compact,
-                    count_parts=parts)
+                    count_parts=parts, sig_counts=sig)
 
 
 def fmt_pct(v): return f"  ({100 * v:.1f}%)"
@@ -559,6 +559,9 @@ def label_lines(methods):
 
 XNOTE = "final pair; last bin includes overflow" if ANY_RP else "last bin includes overflow"
 B_COUNTS = [int(np.sum(mjj_index(bk["e"]["mjj"], EDGES) == b)) for b in range(len(EDGES) - 1)]
+# the signal's MC count too, in its own panel above the background's (S/B and S/sqrt(B) figures)
+S_PANEL = ([int(np.sum(mjj_index(sg["e"]["mjj"], EDGES) == b)) for b in range(len(EDGES) - 1)], "S MC",
+           case_counts(sg["e"]))
 
 # ── S / sqrt(B) and S / B per m_jj column relative to no veto, as a change in % ──
 # (S/S0) / f(B/B0) per column, f = sqrt for S/sqrt(B) and the identity for S/B. For
@@ -595,7 +598,7 @@ extra = {m: f"  ({100 * (eff(ws, sg['kept'][m])[0] / np.sqrt(eff(wb, bk['kept'][
 column_figure(f"{args.out}_s_over_sqrtb", "S/#sqrt{B} change vs no veto [%]", change, extra,
               f"S: {args.sig_label.split(', ')[-1]},  B: {args.bkg_label.split(', ')[-1]}",
               label_lines(DRAWN) + ["all m_{jj} columns in brackets; > 0 = the timing test raises S/#sqrt{B}"],
-              B_COUNTS, "B MC events", ref=0.0, pct=True, xnote=XNOTE, parts=case_counts(bk["e"]))
+              B_COUNTS, "B MC", ref=0.0, pct=True, xnote=XNOTE, parts=case_counts(bk["e"]), sig=S_PANEL)
 
 # ── S / sqrt(B) from the YIELDS per m_jj column (absolute, at --lumi) ───────
 # The same information as the change above -- which is exactly this divided by
@@ -619,7 +622,7 @@ if ks and kb:
                   label_lines(DRAWN) +
                   [f"S at B(H#rightarrowinv) = {100 * args.bf_hinv:g}%;  B = Z(#rightarrowll)+jets alone (stand-in for "
                    f"Z(#rightarrow#nu#nu));  all columns in brackets"],
-                  B_COUNTS, "B MC events", ref=None, methods=SB_METHODS, xnote=XNOTE, parts=case_counts(bk["e"]))
+                  B_COUNTS, "B MC", ref=None, methods=SB_METHODS, xnote=XNOTE, parts=case_counts(bk["e"]), sig=S_PANEL)
 
 
 # ── S / B per m_jj column: the change vs no veto, and from the yields ───────
@@ -629,7 +632,7 @@ extra = {m: f"  ({100 * (eff(ws, sg['kept'][m])[0] / eff(wb, bk['kept'][m])[0] -
 column_figure(f"{args.out}_s_over_b", "S/B change vs no veto [%]", change_b, extra,
               f"S: {args.sig_label.split(', ')[-1]},  B: {args.bkg_label.split(', ')[-1]}",
               label_lines(DRAWN) + ["all m_{jj} columns in brackets; > 0 = the timing test raises S/B"],
-              B_COUNTS, "B MC events", ref=0.0, pct=True, xnote=XNOTE, parts=case_counts(bk["e"]))
+              B_COUNTS, "B MC", ref=0.0, pct=True, xnote=XNOTE, parts=case_counts(bk["e"]), sig=S_PANEL)
 if ks and kb:
     absol, extra = {}, {}
     for m in SB_METHODS:
@@ -645,7 +648,7 @@ if ks and kb:
                   label_lines(DRAWN) +
                   [f"S at B(H#rightarrowinv) = {100 * args.bf_hinv:g}%;  B = Z(#rightarrowll)+jets alone (stand-in for "
                    f"Z(#rightarrow#nu#nu));  all columns in brackets"],
-                  B_COUNTS, "B MC events", ref=None, methods=SB_METHODS, xnote=XNOTE, parts=case_counts(bk["e"]))
+                  B_COUNTS, "B MC", ref=None, methods=SB_METHODS, xnote=XNOTE, parts=case_counts(bk["e"]), sig=S_PANEL)
 
 
 # ── How a jet gets a time: the HS-leg pulls against the true vertex time ─────

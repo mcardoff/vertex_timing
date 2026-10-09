@@ -253,18 +253,84 @@ def y_range(seriess, methods, ref=1.0, pct=False):
     return ymin, ytop
 
 
+def _count_panel(pad, stem, counts, count_title, count_parts, edges, xnote, xaxis, ts, legend):
+    """the MC count per m_jj column in `pad`: on a log scale, or -- with count_parts,
+    [(label, colour, per-column counts)] -- a linear stack, in 10^3 when large, the
+    total's outline on top. `ts` scales the text to the pad's height; `xaxis` draws
+    the m_jj axis; `legend` the parts' legend"""
+    pad.cd(); pad.SetLogy(True)
+    name = os.path.basename(stem)
+    tot = ROOT.TH1D("tot_" + name, "", len(edges) - 1, edges); KEEP.append(tot)
+    for b, n in enumerate(counts): tot.SetBinContent(b + 1, n)
+    tot.SetFillColor(ROOT.TColor.GetColor("#DCE6F2")); tot.SetLineColor(ROOT.kBlack); tot.SetLineWidth(1)
+    tot.GetXaxis().SetTitle(f"m_{{jj}} [GeV]   ({xnote})" if xaxis else "")
+    tot.GetYaxis().SetTitle(count_title)
+    tot.GetXaxis().SetTitleSize(0.13 * ts); tot.GetXaxis().SetLabelSize(0.11 * ts if xaxis else 0)
+    tot.GetXaxis().SetTitleOffset(1.25); tot.GetXaxis().SetTickLength(0.03 * ts)
+    tot.GetYaxis().SetTitleSize(0.11 * ts); tot.GetYaxis().SetLabelSize(0.10 * ts); tot.GetYaxis().SetTitleOffset(0.5 if ts == 1.0 else 0.42)
+    tot.GetYaxis().SetNdivisions(503)
+    top = max(max(counts), 1)
+    sc = 1.0
+    tot.SetMinimum(max(0.5, min([n for n in counts if n > 0] or [1]) / 3.0)); tot.SetMaximum(top * 60.0)
+    if count_parts:   # the count split by case: a stack (linear, so the shares read), the total's outline on top
+        pad.SetLogy(False)
+        sc = 1e-3 if top >= 10000 else 1.0   # thousands: the stack in units of 10^3 (the printed counts stay exact)
+        if sc != 1.0:
+            for b in range(len(counts)): tot.SetBinContent(b + 1, counts[b] * sc)
+            tot.GetYaxis().SetTitle(count_title + " [10^{3}]")
+        tot.SetMinimum(0.0); tot.SetMaximum(top * sc * 2.45)
+        ROOT.TGaxis.SetMaxDigits(6)   # full numbers on the axis: the x10^3 exponent sits on the pad edge
+        tot.GetYaxis().SetNdivisions(203 if ts == 1.0 else 202)
+        tot.SetFillStyle(0)
+        tot.Draw("HIST")
+        stk = ROOT.THStack("stk_" + name, ""); KEEP.append(stk)
+        lg = ROOT.TLegend(0.16, 1 - pad.GetTopMargin() - 0.14 * ts, 0.97, 1 - pad.GetTopMargin() - 0.005)
+        lg.SetNColumns(len(count_parts)); KEEP.append(lg)
+        lg.SetBorderSize(0); lg.SetFillStyle(0); lg.SetTextSize(0.075 * ts); lg.SetTextFont(42)
+        for k, (lab, col, vals) in enumerate(count_parts):
+            h = ROOT.TH1D(f"cp_{k}_" + name, "", len(edges) - 1, edges); KEEP.append(h)
+            for b, n in enumerate(vals): h.SetBinContent(b + 1, n * sc)
+            h.SetFillColor(ROOT.TColor.GetColor(col)); h.SetLineColor(ROOT.kBlack); h.SetLineWidth(1)   # as the region stacks
+            stk.Add(h)
+            if sum(vals) > 0: lg.AddEntry(h, lab, "f")
+        stk.Draw("HIST SAME")
+        tot.Draw("HIST SAME")
+        if legend: lg.Draw()
+    else:
+        tot.Draw("HIST")
+    q = ROOT.TLatex(); q.SetTextFont(42); q.SetTextSize(0.075 * ts); KEEP.append(q)
+    for b, n in enumerate(counts):
+        if n <= 0: continue
+        q.SetTextAlign(11 if b == 0 else 21)
+        x = edges[0] + 0.015 * (edges[-1] - edges[0]) if b == 0 else 0.5 * (edges[b] + edges[b + 1])
+        q.DrawLatex(x, top * (sc * (1.34 if b % 2 == 0 else 1.06) if count_parts else (12.0 if b % 2 == 0 else 3.0)),
+                    f"{int(n):,}")
+    pad.RedrawAxis()
+
+
 def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_title, edges, style, methods,
-                  ref=1.0, xnote="last bin includes overflow", pct=False, yrange=None, compact=False, count_parts=None):
+                  ref=1.0, xnote="last bin includes overflow", pct=False, yrange=None, compact=False, count_parts=None,
+                  sig_counts=None):
     """The region plots' layout: per-m_jj-column values on top (one dodged marker
     per method), the MC event count of each column underneath on a log scale.
     `ref` draws a dashed reference line (None: none); `pct`: the values are a
     signed change in %, so the axis may go below zero; `yrange`: (ymin, ytop)
     from y_range() over several figures, to share their axis."""
-    c = ROOT.TCanvas("c_" + os.path.basename(stem), "", 800, 780)
-    pTop = ROOT.TPad("pTop", "", 0.0, 0.30, 1.0, 1.0)
-    pBot = ROOT.TPad("pBot", "", 0.0, 0.00, 1.0, 0.30)
+    if sig_counts is None:
+        c = ROOT.TCanvas("c_" + os.path.basename(stem), "", 800, 780)
+        pTop = ROOT.TPad("pTop", "", 0.0, 0.30, 1.0, 1.0)
+        pBot = ROOT.TPad("pBot", "", 0.0, 0.00, 1.0, 0.30)
+        pBot.SetTopMargin(0.04); pBot.SetBottomMargin(0.40)
+        pSig = None
+    else:   # three pads: values, signal MC count, background MC count (with the m_jj axis)
+        c = ROOT.TCanvas("c_" + os.path.basename(stem), "", 800, 880)
+        pTop = ROOT.TPad("pTop", "", 0.0, 0.41, 1.0, 1.0)
+        pSig = ROOT.TPad("pSig", "", 0.0, 0.25, 1.0, 0.41)
+        pBot = ROOT.TPad("pBot", "", 0.0, 0.00, 1.0, 0.25)
+        pSig.SetTopMargin(0.04); pSig.SetBottomMargin(0.03)
+        pBot.SetTopMargin(0.03); pBot.SetBottomMargin(0.46)
+        pSig.Draw(); KEEP.append(pSig)
     pTop.SetBottomMargin(0.025); pTop.SetTopMargin(0.06)
-    pBot.SetTopMargin(0.04); pBot.SetBottomMargin(0.40)
     pTop.Draw(); pBot.Draw(); KEEP.extend([c, pTop, pBot])
     pTop.cd()
     frame = ROOT.TH1D("frame_" + os.path.basename(stem), "", len(edges) - 1, edges); KEEP.append(frame)
@@ -291,50 +357,12 @@ def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_
         leg.AddEntry(g, style[m][0] + legend_extra.get(m, ""), "p")
     leg.Draw()
     pTop.RedrawAxis()
-    pBot.cd(); pBot.SetLogy(True)
-    tot = ROOT.TH1D("tot_" + os.path.basename(stem), "", len(edges) - 1, edges); KEEP.append(tot)
-    for b, n in enumerate(counts): tot.SetBinContent(b + 1, n)
-    tot.SetFillColor(ROOT.TColor.GetColor("#DCE6F2")); tot.SetLineColor(ROOT.kBlack); tot.SetLineWidth(1)
-    tot.GetXaxis().SetTitle(f"m_{{jj}} [GeV]   ({xnote})")
-    tot.GetYaxis().SetTitle(count_title)
-    tot.GetXaxis().SetTitleSize(0.13); tot.GetXaxis().SetLabelSize(0.11); tot.GetXaxis().SetTitleOffset(1.25)
-    tot.GetYaxis().SetTitleSize(0.11); tot.GetYaxis().SetLabelSize(0.10); tot.GetYaxis().SetTitleOffset(0.5)
-    tot.GetYaxis().SetNdivisions(503)
-    top = max(max(counts), 1)
-    tot.SetMinimum(max(0.5, min([n for n in counts if n > 0] or [1]) / 3.0)); tot.SetMaximum(top * 60.0)
-    if count_parts:   # the count split by case: a stack (linear, so the shares read), the total's outline on top
-        pBot.SetLogy(False)
-        sc = 1e-3 if top >= 10000 else 1.0   # thousands: the stack in units of 10^3 (the printed counts stay exact)
-        if sc != 1.0:
-            for b in range(len(counts)): tot.SetBinContent(b + 1, counts[b] * sc)
-            tot.GetYaxis().SetTitle(count_title + " [10^{3}]")
-        tot.SetMinimum(0.0); tot.SetMaximum(top * sc * 2.45)
-        ROOT.TGaxis.SetMaxDigits(6)   # full numbers on the axis: the x10^3 exponent sits on the pad edge
-        tot.GetYaxis().SetNdivisions(203)
-        tot.SetFillStyle(0)
-        tot.Draw("HIST")
-        stk = ROOT.THStack("stk_" + os.path.basename(stem), ""); KEEP.append(stk)
-        lg = ROOT.TLegend(0.16, 0.83, 0.97, 0.965); lg.SetNColumns(len(count_parts)); KEEP.append(lg)
-        lg.SetBorderSize(0); lg.SetFillStyle(0); lg.SetTextSize(0.075); lg.SetTextFont(42)
-        for k, (lab, col, vals) in enumerate(count_parts):
-            h = ROOT.TH1D(f"cp_{k}_" + os.path.basename(stem), "", len(edges) - 1, edges); KEEP.append(h)
-            for b, n in enumerate(vals): h.SetBinContent(b + 1, n * sc)
-            h.SetFillColor(ROOT.TColor.GetColor(col)); h.SetLineColor(ROOT.kBlack); h.SetLineWidth(1)   # as the region stacks
-            stk.Add(h)
-            if sum(vals) > 0: lg.AddEntry(h, lab, "f")
-        stk.Draw("HIST SAME")
-        tot.Draw("HIST SAME")
-        lg.Draw()
-    else:
-        tot.Draw("HIST")
-    q = ROOT.TLatex(); q.SetTextFont(42); q.SetTextSize(0.075); KEEP.append(q)
-    for b, n in enumerate(counts):
-        if n <= 0: continue
-        q.SetTextAlign(11 if b == 0 else 21)
-        x = edges[0] + 0.015 * (edges[-1] - edges[0]) if b == 0 else 0.5 * (edges[b] + edges[b + 1])
-        q.DrawLatex(x, top * (sc * (1.34 if b % 2 == 0 else 1.06) if count_parts else (12.0 if b % 2 == 0 else 3.0)),
-                    f"{int(n):,}")
-    pBot.RedrawAxis()
+    if sig_counts is None:
+        _count_panel(pBot, stem, counts, count_title, count_parts, edges, xnote, True, 1.0, True)
+    else:   # S/B-type figures: the signal's MC count above the background's
+        scounts, stitle, sparts = sig_counts
+        _count_panel(pSig, stem + "_s", scounts, stitle, sparts, edges, xnote, False, 0.30 / 0.16, True)
+        _count_panel(pBot, stem, counts, count_title, count_parts, edges, xnote, True, 0.30 / 0.25, False)
     c.Print(stem + ".pdf"); c.Print(stem + ".png")
     print("wrote", stem + ".pdf / .png")
 
