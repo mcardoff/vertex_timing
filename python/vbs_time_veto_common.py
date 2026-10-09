@@ -254,7 +254,7 @@ def y_range(seriess, methods, ref=1.0, pct=False):
 
 
 def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_title, edges, style, methods,
-                  ref=1.0, xnote="last bin includes overflow", pct=False, yrange=None, compact=False):
+                  ref=1.0, xnote="last bin includes overflow", pct=False, yrange=None, compact=False, count_parts=None):
     """The region plots' layout: per-m_jj-column values on top (one dodged marker
     per method), the MC event count of each column underneath on a log scale.
     `ref` draws a dashed reference line (None: none); `pct`: the values are a
@@ -302,13 +302,38 @@ def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_
     tot.GetYaxis().SetNdivisions(503)
     top = max(max(counts), 1)
     tot.SetMinimum(max(0.5, min([n for n in counts if n > 0] or [1]) / 3.0)); tot.SetMaximum(top * 60.0)
-    tot.Draw("HIST")
+    if count_parts:   # the count split by case: a stack (linear, so the shares read), the total's outline on top
+        pBot.SetLogy(False)
+        sc = 1e-3 if top >= 10000 else 1.0   # thousands: the stack in units of 10^3 (the printed counts stay exact)
+        if sc != 1.0:
+            for b in range(len(counts)): tot.SetBinContent(b + 1, counts[b] * sc)
+            tot.GetYaxis().SetTitle(count_title + " [10^{3}]")
+        tot.SetMinimum(0.0); tot.SetMaximum(top * sc * 2.45)
+        ROOT.TGaxis.SetMaxDigits(6)   # full numbers on the axis: the x10^3 exponent sits on the pad edge
+        tot.GetYaxis().SetNdivisions(203)
+        tot.SetFillStyle(0)
+        tot.Draw("HIST")
+        stk = ROOT.THStack("stk_" + os.path.basename(stem), ""); KEEP.append(stk)
+        lg = ROOT.TLegend(0.16, 0.83, 0.97, 0.965); lg.SetNColumns(len(count_parts)); KEEP.append(lg)
+        lg.SetBorderSize(0); lg.SetFillStyle(0); lg.SetTextSize(0.075); lg.SetTextFont(42)
+        for k, (lab, col, vals) in enumerate(count_parts):
+            h = ROOT.TH1D(f"cp_{k}_" + os.path.basename(stem), "", len(edges) - 1, edges); KEEP.append(h)
+            for b, n in enumerate(vals): h.SetBinContent(b + 1, n * sc)
+            h.SetFillColor(ROOT.TColor.GetColor(col)); h.SetLineColor(ROOT.TColor.GetColor(col)); h.SetLineWidth(1)
+            stk.Add(h)
+            if sum(vals) > 0: lg.AddEntry(h, lab, "f")
+        stk.Draw("HIST SAME")
+        tot.Draw("HIST SAME")
+        lg.Draw()
+    else:
+        tot.Draw("HIST")
     q = ROOT.TLatex(); q.SetTextFont(42); q.SetTextSize(0.075); KEEP.append(q)
     for b, n in enumerate(counts):
         if n <= 0: continue
         q.SetTextAlign(11 if b == 0 else 21)
         x = edges[0] + 0.015 * (edges[-1] - edges[0]) if b == 0 else 0.5 * (edges[b] + edges[b + 1])
-        q.DrawLatex(x, top * (12.0 if b % 2 == 0 else 3.0), f"{int(n):,}")
+        q.DrawLatex(x, top * (sc * (1.34 if b % 2 == 0 else 1.06) if count_parts else (12.0 if b % 2 == 0 else 3.0)),
+                    f"{int(n):,}")
     pBot.RedrawAxis()
     c.Print(stem + ".pdf"); c.Print(stem + ".png")
     print("wrote", stem + ".pdf / .png")

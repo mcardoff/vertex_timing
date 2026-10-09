@@ -382,8 +382,23 @@ def calib_line(cal):
             f"measured on {src} HS jets, applied to S and B alike")
 
 
+# the bottom panel's MC count, split by the talk's cases (>= 1 timed HGTD track per jet)
+CASE_PARTS = [("Forward-Forward", "#5B8DD6", "both"), ("Central-Forward", "#E8A33D", "one"), ("Other", "#BDBDBD", "neither")]
+
+
+def case_counts(e):
+    """per no-veto m_jj column: MC events of each case, in CASE_PARTS order"""
+    if "a_hgtd_ntimed" not in e: return None
+    idx = mjj_index(e["mjj"], EDGES)
+    out = []
+    for lab, col, mode in CASE_PARTS:
+        m = C.acceptance_mask(e["a_hgtd_ntimed"], e["b_hgtd_ntimed"], mode, 1)
+        out.append((lab, col, [int(np.sum(m & (idx == b))) for b in range(len(EDGES) - 1)]))
+    return out
+
+
 def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_title, ref=1.0, methods=None,
-                  xnote="last bin includes overflow", pct=False, yrange=None):
+                  xnote="last bin includes overflow", pct=False, yrange=None, parts=None):
     """vbs_time_veto_common.column_figure on this script's columns; `methods` defaults to DRAWN"""
     acc = C.acceptance_line(args.acceptance, args.acc_min_trk, args.acc_count)
     if args.compact:
@@ -391,7 +406,8 @@ def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_
     elif acc:
         lines = [lines[0], acc] + lines[1:]
     C.column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_title, EDGES, STYLE,
-                    methods or DRAWN, ref=ref, xnote=xnote, pct=pct, yrange=yrange, compact=args.compact)
+                    methods or DRAWN, ref=ref, xnote=xnote, pct=pct, yrange=yrange, compact=args.compact,
+                    count_parts=parts)
 
 
 def fmt_pct(v): return f"  ({100 * v:.1f}%)"
@@ -413,7 +429,7 @@ for role, ylab, label in [("sig", "Signal efficiency", args.sig_label), ("bkg", 
                   [sel_line(s), veto_line(), jet_line(), calib_line(s["calib"]),
                    "all m_{jj} columns in brackets; generator-weighted"
                    + ("; events binned in their no-veto m_{jj}" if ANY_RP else "")],
-                  counts, "MC events", yrange=EFF_RANGE)
+                  counts, "MC events", yrange=EFF_RANGE, parts=case_counts(s["e"]))
 
 # ── Yields and the summary ───────────────────────────────────────────────────
 def k_factor(s):
@@ -577,7 +593,7 @@ extra = {m: f"  ({100 * (eff(ws, sg['kept'][m])[0] / np.sqrt(eff(wb, bk['kept'][
 column_figure(f"{args.out}_s_over_sqrtb", "S/#sqrt{B} change vs no veto [%]", change, extra,
               f"S: {args.sig_label.split(', ')[-1]},  B: {args.bkg_label.split(', ')[-1]}",
               label_lines(DRAWN) + ["all m_{jj} columns in brackets; > 0 = the timing test raises S/#sqrt{B}"],
-              B_COUNTS, "B MC events", ref=0.0, pct=True, xnote=XNOTE)
+              B_COUNTS, "B MC events", ref=0.0, pct=True, xnote=XNOTE, parts=case_counts(bk["e"]))
 
 # ── S / sqrt(B) from the YIELDS per m_jj column (absolute, at --lumi) ───────
 # The same information as the change above -- which is exactly this divided by
@@ -601,7 +617,7 @@ if ks and kb:
                   label_lines(DRAWN) +
                   [f"S at B(H#rightarrowinv) = {100 * args.bf_hinv:g}%;  B = Z(#rightarrowll)+jets alone (stand-in for "
                    f"Z(#rightarrow#nu#nu));  all columns in brackets"],
-                  B_COUNTS, "B MC events", ref=None, methods=SB_METHODS, xnote=XNOTE)
+                  B_COUNTS, "B MC events", ref=None, methods=SB_METHODS, xnote=XNOTE, parts=case_counts(bk["e"]))
 
 
 # ── S / B per m_jj column: the change vs no veto, and from the yields ───────
@@ -611,7 +627,7 @@ extra = {m: f"  ({100 * (eff(ws, sg['kept'][m])[0] / eff(wb, bk['kept'][m])[0] -
 column_figure(f"{args.out}_s_over_b", "S/B change vs no veto [%]", change_b, extra,
               f"S: {args.sig_label.split(', ')[-1]},  B: {args.bkg_label.split(', ')[-1]}",
               label_lines(DRAWN) + ["all m_{jj} columns in brackets; > 0 = the timing test raises S/B"],
-              B_COUNTS, "B MC events", ref=0.0, pct=True, xnote=XNOTE)
+              B_COUNTS, "B MC events", ref=0.0, pct=True, xnote=XNOTE, parts=case_counts(bk["e"]))
 if ks and kb:
     absol, extra = {}, {}
     for m in SB_METHODS:
@@ -627,7 +643,7 @@ if ks and kb:
                   label_lines(DRAWN) +
                   [f"S at B(H#rightarrowinv) = {100 * args.bf_hinv:g}%;  B = Z(#rightarrowll)+jets alone (stand-in for "
                    f"Z(#rightarrow#nu#nu));  all columns in brackets"],
-                  B_COUNTS, "B MC events", ref=None, methods=SB_METHODS, xnote=XNOTE)
+                  B_COUNTS, "B MC events", ref=None, methods=SB_METHODS, xnote=XNOTE, parts=case_counts(bk["e"]))
 
 
 # ── How a jet gets a time: the HS-leg pulls against the true vertex time ─────
