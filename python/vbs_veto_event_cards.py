@@ -233,7 +233,12 @@ def draw_times(at, e, d, i, names):
         txt = f"{name}: {role_}, $\\eta$ = {e[L + '_eta'][i]:+.2f}\n{e[L + '_hgtd_ntimed'][i]} timed tracks in HGTD"
         if d[L + "_timed"][i]:
             n = e[L + '_core_n'][i]
-            jets.append((txt + f"\njet time: {n}-track cluster" if n > 1 else txt + "\njet time: 1 track", e[L + "_core_t"][i], d[L + "_s"][i],
+            # TRUTH check: the pT share of the time cluster NOT from the hard-scatter vertex (on the grid
+            # samples, whose pileup tracks are unlinked, that is pileup or unlinked)
+            hsf = e[L + '_core_hsfrac'][i]
+            pu = f", {100 * (1 - hsf):.0f}% PU" if hsf >= 0 else ""
+            jets.append((txt + (f"\njet time: {n}-track cluster{pu}" if n > 1 else f"\njet time: 1 track{pu}"),
+                         e[L + "_core_t"][i], d[L + "_s"][i],
                          "#2E9E4F" if role_ == "HS" else "#555555", L))
         else:
             jets.append((txt + "\nno jet time", np.nan, np.nan, "#999999", L))
