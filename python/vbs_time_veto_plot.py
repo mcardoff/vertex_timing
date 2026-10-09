@@ -559,9 +559,8 @@ def label_lines(methods):
 
 XNOTE = "final pair; last bin includes overflow" if ANY_RP else "last bin includes overflow"
 B_COUNTS = [int(np.sum(mjj_index(bk["e"]["mjj"], EDGES) == b)) for b in range(len(EDGES) - 1)]
-# the signal's MC count too, in its own panel above the background's (S/B and S/sqrt(B) figures)
-S_PANEL = ([int(np.sum(mjj_index(sg["e"]["mjj"], EDGES) == b)) for b in range(len(EDGES) - 1)], "S MC",
-           case_counts(sg["e"]))
+# the signal's MC count too, combined with the background's in one panel (S/B and S/sqrt(B) figures)
+S_PANEL = ([int(np.sum(mjj_index(sg["e"]["mjj"], EDGES) == b)) for b in range(len(EDGES) - 1)], case_counts(sg["e"]))
 
 # ── S / sqrt(B) and S / B per m_jj column relative to no veto, as a change in % ──
 # (S/S0) / f(B/B0) per column, f = sqrt for S/sqrt(B) and the identity for S/B. For

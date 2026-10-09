@@ -253,7 +253,7 @@ def y_range(seriess, methods, ref=1.0, pct=False):
     return ymin, ytop
 
 
-def _count_panel(pad, stem, counts, count_title, count_parts, edges, xnote, xaxis, ts, legend):
+def _count_panel(pad, stem, counts, count_title, count_parts, edges, xnote, xaxis, ts, legend, labels=None):
     """the MC count per m_jj column in `pad`: on a log scale, or -- with count_parts,
     [(label, colour, per-column counts)] -- a linear stack, in 10^3 when large, the
     total's outline on top. `ts` scales the text to the pad's height; `xaxis` draws
@@ -285,7 +285,7 @@ def _count_panel(pad, stem, counts, count_title, count_parts, edges, xnote, xaxi
         tot.Draw("HIST")
         stk = ROOT.THStack("stk_" + name, ""); KEEP.append(stk)
         lg = ROOT.TLegend(0.16, 1 - pad.GetTopMargin() - 0.14 * ts, 0.97, 1 - pad.GetTopMargin() - 0.005)
-        lg.SetNColumns(len(count_parts)); KEEP.append(lg)
+        lg.SetNColumns(len(count_parts) + (1 if labels else 0)); KEEP.append(lg)
         lg.SetBorderSize(0); lg.SetFillStyle(0); lg.SetTextSize(0.075 * ts); lg.SetTextFont(42)
         for k, (lab, col, vals) in enumerate(count_parts):
             h = ROOT.TH1D(f"cp_{k}_" + name, "", len(edges) - 1, edges); KEEP.append(h)
@@ -293,18 +293,19 @@ def _count_panel(pad, stem, counts, count_title, count_parts, edges, xnote, xaxi
             h.SetFillColor(ROOT.TColor.GetColor(col)); h.SetLineColor(ROOT.kBlack); h.SetLineWidth(1)   # as the region stacks
             stk.Add(h)
             if sum(vals) > 0: lg.AddEntry(h, lab, "f")
+        if labels: lg.AddEntry(ROOT.nullptr, "numbers: S / B", "")
         stk.Draw("HIST SAME")
         tot.Draw("HIST SAME")
         if legend: lg.Draw()
     else:
         tot.Draw("HIST")
-    q = ROOT.TLatex(); q.SetTextFont(42); q.SetTextSize(0.075 * ts); KEEP.append(q)
+    q = ROOT.TLatex(); q.SetTextFont(42); q.SetTextSize((0.064 if labels else 0.075) * ts); KEEP.append(q)
     for b, n in enumerate(counts):
         if n <= 0: continue
         q.SetTextAlign(11 if b == 0 else 21)
         x = edges[0] + 0.015 * (edges[-1] - edges[0]) if b == 0 else 0.5 * (edges[b] + edges[b + 1])
         q.DrawLatex(x, top * (sc * (1.34 if b % 2 == 0 else 1.06) if count_parts else (12.0 if b % 2 == 0 else 3.0)),
-                    f"{int(n):,}")
+                    labels[b] if labels else f"{int(n):,}")
     pad.RedrawAxis()
 
 
@@ -316,20 +317,10 @@ def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_
     `ref` draws a dashed reference line (None: none); `pct`: the values are a
     signed change in %, so the axis may go below zero; `yrange`: (ymin, ytop)
     from y_range() over several figures, to share their axis."""
-    if sig_counts is None:
-        c = ROOT.TCanvas("c_" + os.path.basename(stem), "", 800, 780)
-        pTop = ROOT.TPad("pTop", "", 0.0, 0.30, 1.0, 1.0)
-        pBot = ROOT.TPad("pBot", "", 0.0, 0.00, 1.0, 0.30)
-        pBot.SetTopMargin(0.04); pBot.SetBottomMargin(0.40)
-        pSig = None
-    else:   # three pads: values, signal MC count, background MC count (with the m_jj axis)
-        c = ROOT.TCanvas("c_" + os.path.basename(stem), "", 800, 880)
-        pTop = ROOT.TPad("pTop", "", 0.0, 0.41, 1.0, 1.0)
-        pSig = ROOT.TPad("pSig", "", 0.0, 0.25, 1.0, 0.41)
-        pBot = ROOT.TPad("pBot", "", 0.0, 0.00, 1.0, 0.25)
-        pSig.SetTopMargin(0.04); pSig.SetBottomMargin(0.03)
-        pBot.SetTopMargin(0.03); pBot.SetBottomMargin(0.46)
-        pSig.Draw(); KEEP.append(pSig)
+    c = ROOT.TCanvas("c_" + os.path.basename(stem), "", 800, 780)
+    pTop = ROOT.TPad("pTop", "", 0.0, 0.30, 1.0, 1.0)
+    pBot = ROOT.TPad("pBot", "", 0.0, 0.00, 1.0, 0.30)
+    pBot.SetTopMargin(0.04); pBot.SetBottomMargin(0.40)
     pTop.SetBottomMargin(0.025); pTop.SetTopMargin(0.06)
     pTop.Draw(); pBot.Draw(); KEEP.extend([c, pTop, pBot])
     pTop.cd()
@@ -359,10 +350,14 @@ def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_
     pTop.RedrawAxis()
     if sig_counts is None:
         _count_panel(pBot, stem, counts, count_title, count_parts, edges, xnote, True, 1.0, True)
-    else:   # S/B-type figures: the signal's MC count above the background's
-        scounts, stitle, sparts = sig_counts
-        _count_panel(pSig, stem + "_s", scounts, stitle, sparts, edges, xnote, False, 0.30 / 0.16, True)
-        _count_panel(pBot, stem, counts, count_title, count_parts, edges, xnote, True, 0.30 / 0.25, False)
+    else:   # S/B-type figures: signal + background MC in ONE panel, case-stacked; labels "S / B"
+        scounts, sparts = sig_counts
+        tot = [a + b for a, b in zip(scounts, counts)]
+        parts = None
+        if count_parts and sparts:
+            parts = [(lab, col, [x + y for x, y in zip(sv, bv)]) for (lab, col, sv), (_, _, bv) in zip(sparts, count_parts)]
+        _count_panel(pBot, stem, tot, "S + B MC", parts, edges, xnote, True, 1.0, True,
+                     labels=[(f"{a / 1000:.1f}k" if a >= 10000 else f"{a:,}") + f" / {b:,}" for a, b in zip(scounts, counts)])
     c.Print(stem + ".pdf"); c.Print(stem + ".png")
     print("wrote", stem + ".pdf / .png")
 
