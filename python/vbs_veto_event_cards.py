@@ -33,6 +33,10 @@ ap.add_argument("--met-min", type=float, default=100.0)
 ap.add_argument("--zpt-min", type=float, default=100.0)
 ap.add_argument("--nsigma", type=float, default=3.0)
 ap.add_argument("--out", required=True, help="output stem: <out>_<case>.(pdf|png)")
+ap.add_argument("--min-trk", type=int, default=1, help="tracks a jet time must be built from for the jet to count as "
+                "timed (vbs_time_veto_plot.py --min-trk); below it the jet is untimed for both tests")
+ap.add_argument("--events", help="instead of picking: draw these events, a CSV with card, sample (vbf / zjets / "
+                "vbf_local), file_path, entry (e.g. an earlier run's <out>_candidates.csv)")
 ap.add_argument("--set", default="findings", choices=["findings", "cases"],
                 help="findings: the five one-per-finding rules (A-E); cases: the talk's case-ordered set -- "
                      "Forward-Forward (jet time compatibility vetoes where t0 keeps, and the reverse) and "
@@ -63,7 +67,7 @@ cal = C.measure(S_all, True, "signal HS legs")   # one jet-time calibration for 
 def derived(e):
     d = {}
     for L in "ab":
-        d[L + "_timed"] = e[L + "_core_n"] >= 1
+        d[L + "_timed"] = e[L + "_core_n"] >= args.min_trk
         d[L + "_s"] = cal(e[L + "_core_n"]) * e[L + "_core_sig"]
         d[L + "_in"] = e[L + "_hgtd_ntimed"] >= 1
     for s, _, _ in SRC + [("truth", "", "")]:
@@ -208,7 +212,15 @@ def build_case_set(role):
     return out
 
 
-if args.set == "cases":
+if args.events:
+    import csv as _csv
+    cases = []
+    for r in _csv.DictReader(open(args.events)):
+        role = {"vbf": "sig", "zjets": "bkg", "vbf_local": "local"}[r["sample"]]
+        E = SAMPLES[role][0]
+        m = (E["file_path"] == r["file_path"]) & (E["entry"] == int(r["entry"]))
+        cases.append((r["card"], role, r["card"], f"fixed event ({r['sample']})", m, np.zeros(len(m))))
+elif args.set == "cases":
     if not args.local:
         raise SystemExit("--set cases needs --local (one event per case from Z+jets and one from the local VBF file)")
     cases = [c for pair in zip(build_case_set("bkg"), build_case_set("local")) for c in pair]
@@ -240,6 +252,10 @@ def draw_times(at, e, d, i, names):
             jets.append((txt + (f"\njet time: {n}-track cluster{pu}" if n > 1 else f"\njet time: 1 track{pu}"),
                          e[L + "_core_t"][i], d[L + "_s"][i],
                          "#2E9E4F" if role_ == "HS" else "#555555", L))
+        elif e[L + '_core_n'][i] > 0:   # has a time, but from fewer tracks than --min-trk: not used, drawn grey
+            n = e[L + '_core_n'][i]
+            jets.append((txt + f"\njet time: {n} track{'s' if n > 1 else ''}, below $\\geq${args.min_trk}: not used",
+                         e[L + "_core_t"][i], d[L + "_s"][i], "#AAAAAA", L))
         else:
             jets.append((txt + "\nno jet time", np.nan, np.nan, "#999999", L))
     allrows = rows + jets

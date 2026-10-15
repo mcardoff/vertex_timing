@@ -35,6 +35,7 @@ ap.add_argument("--bkg", required=True)
 ap.add_argument("--met-min", type=float, default=100.0)
 ap.add_argument("--zpt-min", type=float, default=100.0)
 ap.add_argument("--out", required=True)
+ap.add_argument("--mjj-edges", default=",".join(str(e) for e in MJJ_EDGES), help="m_jj columns (GeV); last includes overflow")
 C.add_acceptance_args(ap)
 args = ap.parse_args()
 
@@ -57,7 +58,7 @@ def bands(e):
 
 
 ROOT = C.setup_root(args.out)
-edges = np.array(MJJ_EDGES, float)
+edges = np.array([float(x) for x in args.mjj_edges.split(",")])
 col = C.acc_column(args.acc_count)
 for role, path, rc, cut, label in [
         ("sig", args.sig, "met_truth", args.met_min, "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv."),

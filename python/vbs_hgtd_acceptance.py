@@ -30,11 +30,13 @@ ap.add_argument("--met-min", type=float, default=100.0)
 ap.add_argument("--zpt-min", type=float, default=100.0)
 ap.add_argument("--min-trk", type=int, default=1, help="the loose case: >= this many TIMED HGTD tracks")
 ap.add_argument("--good-trk", type=int, default=4, help="the 'good time' case: >= this many TIMED HGTD tracks")
+ap.add_argument("--time-trk", type=int, default=0, help="if > 0, the second curve is instead 'a jet time built from "
+                ">= this many tracks' (core_n: the dR < 0.2 time cluster) -- the follow-up's jet-time requirement")
 ap.add_argument("--tag", default="JVT + fJVT loose")
 ap.add_argument("--out", required=True)
 args = ap.parse_args()
 
-COLS = ["weight", "met_truth", "z_pt"] + [f"{L}_{k}" for L in "ab" for k in ["eta", "hgtd_n", "hgtd_ntimed", "hs", "pu"]]
+COLS = ["weight", "met_truth", "z_pt"] + [f"{L}_{k}" for L in "ab" for k in ["eta", "hgtd_n", "hgtd_ntimed", "hs", "pu", "core_n"]]
 ETA_AXIS = (2.38, 4.0)
 EDGES = np.round(np.arange(1.6, 4.61, 0.1), 2)
 
@@ -106,8 +108,10 @@ for r, e in S.items():
     eta = np.concatenate([np.abs(e["a_eta"]), np.abs(e["b_eta"])])
     w = np.concatenate([e["weight"], e["weight"]]).astype(float)
     for key, k, lab in [("n", args.min_trk, "#geq 1 timed track" if args.min_trk == 1 else f"#geq {args.min_trk} timed tracks"),
-                        ("t", args.good_trk, f"#geq {args.good_trk} timed tracks")]:
-        has = np.concatenate([e["a_hgtd_ntimed"], e["b_hgtd_ntimed"]]) >= k
+                        ("t", args.time_trk or args.good_trk,
+                         f"jet time from #geq {args.time_trk} tracks" if args.time_trk else f"#geq {args.good_trk} timed tracks")]:
+        col = "core_n" if (key == "t" and args.time_trk) else "hgtd_ntimed"
+        has = np.concatenate([e[f"a_{col}"], e[f"b_{col}"]]) >= k
         g = ROOT.TGraphAsymmErrors(); C.KEEP.append(g)
         idx = np.digitize(eta, EDGES) - 1
         for b in range(len(EDGES) - 1):

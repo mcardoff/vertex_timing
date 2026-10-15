@@ -663,6 +663,9 @@ def jet_time_figures(stem, e_all, cal):
     c.SetLeftMargin(0.14); c.SetRightMargin(0.05); c.SetLogy(True)
     hs = []
     drawn = [("raw", p, "#9E9E9E", True)] + ([("cal", pc, "kP10Blue", False)] if args.jet_pulls == "both" else [])
+    # --jet-pulls quoted with --min-trk k > 1: the jets the test still times, overlaid (quoted sigma too)
+    kmin = args.min_trk if args.jet_pulls == "quoted" and args.min_trk > 1 else None
+    if kmin: drawn.append(("mink", p[n >= kmin], "kP10Blue", False))
     for name, v, col, fill in drawn:
         h = ROOT_.TH1D(f"h_jtp_{name}", "", 64, -8, 8); C.KEEP.append(h)
         for x in np.clip(v, -7.99, 7.99): h.Fill(x)
@@ -678,8 +681,12 @@ def jet_time_figures(stem, e_all, cal):
     g = ROOT_.TF1("f_unit", "[0]*exp(-0.5*x*x)", -8, 8); C.KEEP.append(g)
     g.SetParameter(0, 0.25 / np.sqrt(2 * np.pi)); g.SetLineColor(ROOT_.kBlack); g.SetLineStyle(2); g.Draw("SAME")
     leg = ROOT_.TLegend(0.16, 0.735 - 0.045 * (len(hs) + 1), 0.60, 0.735); ROOT_.StyleLegend(leg, 0.03); C.KEEP.append(leg)
-    leg.AddEntry(hs[0], f"quoted #sigma: {100 * np.mean(np.abs(p) >= args.nsigma):.0f}% beyond {args.nsigma:g}", "f")
-    if len(hs) > 1:
+    leg.AddEntry(hs[0], (f"all timed jets (quoted #sigma): " if kmin else "quoted #sigma: ") + f"{100 * np.mean(np.abs(p) >= args.nsigma):.0f}% beyond {args.nsigma:g}", "f")
+    if kmin:
+        pk = p[n >= kmin]
+        leg.AddEntry(hs[1], f"time from #geq {kmin} tracks ({100 * len(pk) / len(p):.0f}% of jets): "
+                     f"{100 * np.mean(np.abs(pk) >= args.nsigma):.1f}% beyond {args.nsigma:g}", "l")
+    elif len(hs) > 1:
         leg.AddEntry(hs[1], f"#sigma #times f(n): {100 * np.mean(np.abs(pc) >= args.nsigma):.1f}% beyond {args.nsigma:g}", "l")
     leg.AddEntry(g, "unit Gaussian", "l")
     leg.Draw()

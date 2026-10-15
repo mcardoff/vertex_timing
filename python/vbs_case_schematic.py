@@ -60,7 +60,7 @@ def detector(ax):
     ax.add_patch(Rectangle((-3.0, 0), 6.0, 1.0, facecolor="#F2F4F7", edgecolor=GRID, lw=1, zorder=0))
     ax.text(0, 0.86, "ITk", ha="center", fontsize=12, color="#6B7785")
     ax.add_patch(Rectangle((-3.2, 1.4), 6.4, 0.6, facecolor="#EFE6D8", edgecolor="#C9B79A", lw=1, zorder=0))
-    ax.text(-1.7, 1.62, "calorimeter (barrel)", ha="center", fontsize=11, color="#8A7454")
+    ax.text(0.0, 1.85, "calorimeter (barrel)", ha="center", fontsize=11, color="#8A7454")
     for sgn in (-1, 1):
         ax.add_patch(Rectangle((min(sgn * 3.65, sgn * 4.4), 0.1), 0.75, 1.9, facecolor="#EFE6D8",
                                edgecolor="#C9B79A", lw=1, zorder=0))
@@ -109,9 +109,16 @@ def pick_events():
     for key, m, score in (("forward_forward", ff, np.abs(worst - 1.0)), ("central_forward", cf, np.abs(cworst - 1.0))):
         i = np.flatnonzero(m)[np.argmin(score[m])]
         jets = []
+        # the tracks behind each jet time, with their HGTD times (the event's own ntuple)
+        from vbs_jet_time_tracks import jet_time_tracks
+        fp, en = str(e["file_path"][i]), int(e["entry"][i])
+        jt = jet_time_tracks(args.event_tree, fp, en, fp, en)
+        ttr = uproot.open(fp)["ntuple"].arrays(["Track_time"], library="np", entry_start=en, entry_stop=en + 1)["Track_time"][0]
         for L in "ab":
             t = e[L + "_core_t"][i] if e[L + "_core_n"][i] > 0 else None
-            jets.append((float(e[L + "_eta"][i]), float(e[L + "_pt"][i]), t, float(sig[L][i]), int(e[L + "_idx"][i])))
+            j = int(e[L + "_idx"][i])
+            jets.append((float(e[L + "_eta"][i]), float(e[L + "_pt"][i]), t, float(sig[L][i]), j,
+                         sorted(float(ttr[k]) for k in jt.get(j, []))))
         verdict = (f"jet time compatibility {pjj[i]:.1f}$\\sigma$, jet vs WAVeS $t_0$ {pull['a'][i]:.1f}$\\sigma$ / "
                    f"{pull['b'][i]:.1f}$\\sigma$: kept" if key == "forward_forward" else
                    f"forward jet vs WAVeS $t_0$ {cworst[i]:.1f}$\\sigma$: kept")
@@ -126,12 +133,14 @@ def pick_events():
 EVENTS = pick_events() if args.event_tree else None
 
 
-def jet_from_event(eta, pt, t, sg, idx):
+def jet_from_event(eta, pt, t, sg, idx, trk_times=()):
     th = 2 * np.arctan(np.exp(-abs(eta)))
     timed = t is not None
     length = (Z_HGTD + 0.05) / np.cos(th) if abs(eta) > 2.0 else min(1.45 / np.sin(th), 3.6)
     lab = f"Jet {idx + 1}: {pt:.0f} GeV, $\\eta$ = {eta:+.2f}" + (f"\n$t_{{\\rm jet}}$ = {t:.0f} $\\pm$ {sg:.0f} ps" if timed
                                                                else "\nno HGTD time")
+    if timed and trk_times:   # the timed tracks the jet time is built from
+        lab += f"\nfrom {len(trk_times)} tracks: " + ", ".join(f"{x:.0f}" for x in trk_times) + " ps"
     return eta, length, lab, timed
 
 

@@ -60,6 +60,8 @@ def tagged_out(veto_tree, fpath, entry, src, ent):
     return ",".join(tags)
 
 
+from vbs_jet_time_tracks import jet_time_tracks   # noqa: E402
+
 bad = 0
 for spec in args.inputs:
     cand, stem = spec.split(":") if ":" in spec else (spec, None)
@@ -84,6 +86,10 @@ for spec in args.inputs:
                "--output_dir", os.path.abspath(args.out_dir), "--output_name", r["card"]]
         if r.get("tagged_out"):   # jets the analysis removed (JVT/fJVT, lepton overlap): not drawn
             cmd += ["--tagged_out", r["tagged_out"], "--drop_tagged"]
+        if args.veto_tree:        # each tagging jet's time tracks, drawn on page 2
+            jt = jet_time_tracks(args.veto_tree, r["file_path"], int(r["entry"]), src, ent)
+            if jt:
+                cmd += ["--jet_time_tracks", ";".join(f"{j}:" + ",".join(map(str, v)) for j, v in jt.items())]
         os.makedirs(args.out_dir, exist_ok=True)
         p = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True)
         with open(os.path.join(args.out_dir, r["card"] + ".log"), "w") as f:
