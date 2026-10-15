@@ -952,9 +952,64 @@ with PdfPages(filename) as pdf:
                                 solid_capstyle='round', zorder=8)
         jt_handles.append(mlines.Line2D([], [], color=col, lw=3.2,
                                         label=f'Jet {j + 1} time: {len(idxs)} track' + ('s' if len(idxs) > 1 else '')))
+    # ---- Tagging-jet tracks outside the drawn z window: say where they are ----
+    # The R-Z view spans +-7 mm around the vertex; a pileup jet's tracks can sit 10-100+ mm away
+    # and would otherwise be invisible. Per tagging jet and side: an arrow at the edge with the
+    # number of its ghost tracks out there, their pT and z0 range (time tracks counted separately).
+    zlo, zhi = event_display2.get_xlim()
+    jt_col = {j: col for j, _, col in jet_time_sets}
+    jt_idx = {j: set(idxs) for j, idxs, _ in jet_time_sets}
+    off_rows = {-1: [], +1: []}
+    if vbs_pair[0] is not None:
+        for _p in vbs_pair:
+            _j = jet_info[_p]['idx']
+            gt = list(branch.AntiKt4EMTopoJets_ghostTrack_idx[_j])
+            tot = sum(branch.Track_pt[i] for i in gt)
+            for side in (-1, +1):
+                sel = [i for i in gt if (branch.Track_z0[i] < zlo if side < 0 else branch.Track_z0[i] > zhi)]
+                if not sel: continue
+                zs = [branch.Track_z0[i] for i in sel]
+                ntime = len(jt_idx.get(_j, set()) & set(sel))
+                txt = (f"Jet {_j + 1}: {len(sel)} track{'s' if len(sel) > 1 else ''}, "
+                       f"{sum(branch.Track_pt[i] for i in sel):.0f} of {tot:.0f} GeV\n"
+                       f"z0 = {min(zs):.0f} to {max(zs):.0f} mm" if len(sel) > 1 else
+                       f"Jet {_j + 1}: 1 track, {branch.Track_pt[sel[0]]:.0f} of {tot:.0f} GeV\nz0 = {zs[0]:.0f} mm")
+                if ntime: txt += f" ({ntime} time track{'s' if ntime > 1 else ''})"
+                off_rows[side].append((txt, jt_col.get(_j, '#333333')))
+    nrow = max(len(r) for r in off_rows.values())
+    if nrow:   # a thin panel of its own under the R-Z view: the view itself is left untouched
+        # explicit layout in inches: the R-Z view and the time histogram keep their exact sizes; the
+        # strip goes into the gap between them (under the R-Z x label, above the time histogram's
+        # title), and the figure grows only by what that gap lacks
+        W, H0 = fig2.get_size_inches()
+        rz, th = event_display2.get_position(), time_histo2.get_position()
+        gap = (rz.y0 - th.y1) * H0
+        h_strip = 0.5 * nrow + 0.15
+        need = 0.55 + 0.30 + h_strip + 0.45          # x label, strip title, strip, time-histogram title
+        grow = max(0.0, need - gap)
+        H = H0 + grow
+        fig2.set_size_inches(W, H)
+        event_display2.set_position([rz.x0, (rz.y0 * H0 + grow) / H, rz.width, rz.height * H0 / H])
+        time_histo2.set_position([th.x0, th.y0 * H0 / H, th.width, th.height * H0 / H])
+        strip = fig2.add_axes([rz.x0, (th.y1 * H0 + 0.45) / H, rz.width, h_strip / H])
+        strip.set_xlim(0, 1); strip.set_ylim(-nrow - 0.2, 0.2)
+        strip.set_xticks([]); strip.set_yticks([])
+        strip.set_facecolor('#F7F7F7')
+        strip.set_title('tagging-jet ghost tracks outside the z window above (arrows: which side)',
+                        fontsize=8.5, color='#555555', style='italic', pad=2)
+        for side, rows in off_rows.items():
+            for k, (txt, col) in enumerate(rows):
+                y = -k - 0.4
+                strip.annotate(txt, xy=(0.0 if side < 0 else 1.0, y), xytext=(0.07 if side < 0 else 0.93, y),
+                               ha='left' if side < 0 else 'right', va='center', fontsize=8.5, color=col,
+                               bbox=dict(boxstyle='round,pad=0.25', fc='white', ec=col),
+                               arrowprops=dict(arrowstyle='-|>', color=col, lw=1.6))
     if jt_handles:
-        event_display2.add_artist(event_display2.legend(handles=jt_handles, loc='lower right', fontsize='small',
-                                                        title="Tagging-jet time tracks", title_fontsize='small'))
+        _main_leg = event_display2.get_legend()          # keep the tracks-and-jets legend
+        event_display2.legend(handles=jt_handles, loc='lower right', fontsize='small',
+                              title="Tagging-jet time tracks", title_fontsize='small')
+        if _main_leg is not None:
+            event_display2.add_artist(_main_leg)
 
     # ---- Lower Region: Z-T Display ----
     # No timed clusters (possible when the t0 is not a cluster time, e.g. the
