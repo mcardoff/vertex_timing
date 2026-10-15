@@ -703,6 +703,44 @@ def jet_time_figures(stem, e_all, cal):
     t2.DrawLatex(0.17, 0.80, f"(#DeltaR < 0.3 to a truth HS jet with p_{{T}} > 10 GeV), with a time: {len(p):,} jets")
     t2.DrawLatex(0.17, 0.765, jet_line())
     c.Print(stem + "_jet_time_pulls.pdf"); c.Print(stem + "_jet_time_pulls.png")
+
+    # <stem>_jet_time_dt: the same jets and track requirements, in ps: t_jet - t_HS^truth, not
+    # divided by sigma_jet
+    dts, ns = [], []
+    for L in "ab":
+        m = e_all[f"{L}_hs"] & (e_all[f"{L}_core_n"] > 0)
+        dts.append(e_all[f"{L}_core_t"][m] - e_all["t0_truth"][m]); ns.append(e_all[f"{L}_core_n"][m])
+    dt, nn = np.concatenate(dts), np.concatenate(ns)
+    c2 = ROOT_.TCanvas("c_jdt", "", 800, 650); C.KEEP.append(c2)
+    c2.SetLeftMargin(0.14); c2.SetRightMargin(0.05); c2.SetLogy(True)
+    sets = [("all", dt, "#9E9E9E", True, "all timed jets")]
+    for i, k in enumerate(kall):
+        sets.append((f"dt{k}", dt[nn >= k], ["kP10Blue", "#E69F00", "#C0392B", "#7B3294"][i % 4], False,
+                     f"time from #geq {k} tracks ({100 * np.mean(nn >= k):.0f}% of jets)"))
+    hd = []
+    for name, v, col, fill, _ in sets:
+        h = ROOT_.TH1D(f"h_jdt_{name}", "", 80, -400, 400); C.KEEP.append(h)
+        for x in np.clip(v, -399.9, 399.9): h.Fill(x)
+        h.Scale(1.0 / h.Integral())
+        h.SetLineColor(C.colour(col)); h.SetLineWidth(2)
+        if fill: h.SetFillColor(C.colour(col)); h.SetFillStyle(3004)
+        hd.append(h)
+    hd[0].SetMinimum(2e-5); hd[0].SetMaximum(200.0 if len(hd) <= 2 else 2000.0)
+    hd[0].GetXaxis().SetTitle("t_{jet} - t_{HS}^{truth} [ps]   (overflow in the edge bins)")
+    hd[0].GetYaxis().SetTitle("Fraction of truth-matched HS tagging jets")
+    hd[0].Draw("HIST")
+    for h in hd[1:]: h.Draw("HIST SAME")
+    leg2 = ROOT_.TLegend(0.16, 0.735 - 0.045 * len(hd), 0.60, 0.735); ROOT_.StyleLegend(leg2, 0.03); C.KEEP.append(leg2)
+    for h, (_, v, _, fill, lab) in zip(hd, sets):
+        leg2.AddEntry(h, f"{lab}: core #sigma {C.mad(v):.0f} ps, {100 * np.mean(np.abs(v) > 60):.0f}% beyond 60 ps",
+                      "f" if fill else "l")
+    leg2.Draw()
+    ROOT_.ATLASLabel(0.17, 0.88, "")
+    t.DrawLatex(0.31, 0.88, "Simulation Internal")
+    t2.DrawLatex(0.17, 0.835, "VBF H#rightarrowinv. reco tagging jets truth-matched to a hard-scatter jet")
+    t2.DrawLatex(0.17, 0.80, f"(#DeltaR < 0.3 to a truth HS jet with p_{{T}} > 10 GeV), with a time: {len(dt):,} jets")
+    t2.DrawLatex(0.17, 0.765, jet_line())   # core sigma = 1.4826 x median |dt| (in the slide caption)
+    c2.Print(stem + "_jet_time_dt.pdf"); c2.Print(stem + "_jet_time_dt.png")
     print("wrote", stem + "_jet_time_pulls.pdf / .png")
     # f(n), with each bin's share of the jets and its tail after the correction
     c2 = ROOT_.TCanvas("c_jtc", "", 800, 650); C.KEEP.append(c2)
