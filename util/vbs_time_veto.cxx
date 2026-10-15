@@ -358,7 +358,7 @@ int main(int argc, char** argv) {
     }
     if (a.rfind("--jvt=", 0) != 0) continue;
     const JvtWP* hit = jvtWPByName(a.substr(6));
-    if (!hit) { std::cerr << "[veto] unknown " << a << " (none|loose|tight)\n"; return 1; }
+    if (!hit) { std::cerr << "[veto] unknown " << a << " (none|loose|tight|looseext)\n"; return 1; }
     wpSel = hit;
   }
   const JvtWP& WP = *wpSel;

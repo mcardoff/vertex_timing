@@ -52,12 +52,20 @@ namespace MyUtl {
   inline constexpr double FJVT_CEN_JET_PT_MIN = 20.0;   // central jets entering p_T^miss,i
   inline constexpr double FJVT_TRK_ETA_MAX    = 2.5;    // tracks entering p_T^miss,i
   inline constexpr double CORRJVF_K           = 0.01;
+  // The forward R_pT extension (--jvt=looseext): ITk tracks reach |eta| = 4.0,
+  // so R_pT can be measured over the whole fJVT window up to there. Forward
+  // jets with 2.5 <= |eta| < 4.0 and pT < FJVT_PT_MAX then need R_pT >= rptMin
+  // AS WELL AS fJVT <= fjvtMax. Motivated by a 104 GeV merged-pileup tagging
+  // jet at eta 2.80 with R_pT = 0.009 that passed fJVT (0.16): ~90% of the
+  // pileup tagging legs surviving fJVT loose have R_pT < 0.0167.
+  inline constexpr double RPT_FWD_ETA_MAX     = 4.0;
 
   struct JvtWP {
     const char* name;     // --jvt= value
     const char* tag;      // output-file tag
     double      rptMin;   // JVT proxy: keep a JVT-window jet iff R_pT >= this
     double      fjvtMax;  // keep an fJVT-window jet iff fJVT <= this
+    bool        rptFwd = false;  // also cut R_pT on forward jets (RPT_FWD_ETA_MAX)
   };
   // R_pT thresholds: calibrated on local-VBF paper-HS jets in the JVT window
   // (|eta| < 2.5, 30 < pT < 60 GeV) to the published JVT working-point HS
@@ -68,6 +76,10 @@ namespace MyUtl {
     {"none",  "",          -1.0, 1e9},
     {"loose", "_jvtLoose", 0.0167, 0.5},   // 92.0% HS eff on local VBF, PU eff 13.2%
     {"tight", "_jvtTight", 0.0767, 0.4},   // 85.0% HS eff on local VBF, PU eff  1.9%
+    // loose + the same R_pT cut over 2.5 <= |eta| < 4.0, pT < 120 GeV (NOT
+    // recalibrated forward). Appended last: the indices above are stored as
+    // meta_vbs_jvt_wp / jvt_wp in existing outputs.
+    {"looseext", "_jvtLooseExt", 0.0167, 0.5, true},
   };
 
   // The working point called `name`, or nullptr if there is none.
@@ -83,11 +95,15 @@ namespace MyUtl {
     float rpt = 0.f, corrjvf = -1.f, fjvt = 0.f;
     int   nGhost = 0, nGhostPV = 0;
     bool  jvtWin = false, fjvtWin = false;
+    bool  rptFwdWin = false;   // 2.5 <= |eta| < RPT_FWD_ETA_MAX, pT < FJVT_PT_MAX
   };
 
-  // The removal rule, in one place. The windows are disjoint in |eta|, so a
-  // jet can fail at most one of the two.
-  inline bool jvtRemoves (const JetDisc& d, const JvtWP& wp) { return d.jvtWin  && d.rpt  < wp.rptMin; }
+  // The removal rule, in one place. The JVT and fJVT windows are disjoint in
+  // |eta|; with wp.rptFwd a forward jet can fail both (callers test jvtRemoves
+  // first, so it is counted as a JVT removal).
+  inline bool jvtRemoves (const JetDisc& d, const JvtWP& wp) {
+    return (d.jvtWin || (wp.rptFwd && d.rptFwdWin)) && d.rpt < wp.rptMin;
+  }
   inline bool fjvtRemoves(const JetDisc& d, const JvtWP& wp) { return d.fjvtWin && d.fjvt > wp.fjvtMax; }
 
   inline std::vector<JetDisc> computeJetDiscriminants(const BranchPointerWrapper& b) {
@@ -134,6 +150,7 @@ namespace MyUtl {
                 : -1.f;
       d.jvtWin  = aeta < JVT_ETA_MAX && pt < JVT_PT_MAX;
       d.fjvtWin = aeta >= FJVT_ETA_MIN && aeta < FJVT_ETA_MAX && pt < FJVT_PT_MAX;
+      d.rptFwdWin = aeta >= FJVT_ETA_MIN && aeta < RPT_FWD_ETA_MAX && pt < FJVT_PT_MAX;
       if (aeta < FJVT_TRK_ETA_MAX && pt > FJVT_CEN_JET_PT_MIN && !b.isJetRemoved(j)) {
         int vBest = -1; double best = 0.0;
         for (int v = 0; v < nV; ++v) if (perV[v] > best) { best = perV[v]; vBest = v; }
