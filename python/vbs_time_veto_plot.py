@@ -104,6 +104,8 @@ ap.add_argument("--out", required=True, help="output stem")
 ap.add_argument("--compact", action="store_true",
                 help="the m_jj-column figures carry only the category line (e.g. 'both tagging jets in HGTD'), "
                      "not the selection / test / jet-time / calibration lines -- for slides that state those once")
+ap.add_argument("--jet-pulls-also", default="", help="with --jet-pulls quoted and --min-trk k > 1: further "
+                "track requirements overlaid on the jet-time pull plot only, e.g. 3,4 (nothing else uses them)")
 ap.add_argument("--jet-pulls", default="both", choices=["both", "quoted"],
                 help="<out>_jet_time_pulls: the quoted sigma and sigma x f(n) (both), or the quoted sigma alone")
 C.add_acceptance_args(ap)
@@ -665,7 +667,9 @@ def jet_time_figures(stem, e_all, cal):
     drawn = [("raw", p, "#9E9E9E", True)] + ([("cal", pc, "kP10Blue", False)] if args.jet_pulls == "both" else [])
     # --jet-pulls quoted with --min-trk k > 1: the jets the test still times, overlaid (quoted sigma too)
     kmin = args.min_trk if args.jet_pulls == "quoted" and args.min_trk > 1 else None
-    if kmin: drawn.append(("mink", p[n >= kmin], "kP10Blue", False))
+    kall = ([kmin] + [int(x) for x in args.jet_pulls_also.split(",") if x]) if kmin else []
+    KCOL = ["kP10Blue", "#E69F00", "#C0392B", "#7B3294"]
+    for i, k in enumerate(kall): drawn.append((f"min{k}", p[n >= k], KCOL[i % len(KCOL)], False))
     for name, v, col, fill in drawn:
         h = ROOT_.TH1D(f"h_jtp_{name}", "", 64, -8, 8); C.KEEP.append(h)
         for x in np.clip(v, -7.99, 7.99): h.Fill(x)
@@ -673,7 +677,7 @@ def jet_time_figures(stem, e_all, cal):
         h.SetLineColor(C.colour(col)); h.SetLineWidth(2)
         if fill: h.SetFillColor(C.colour(col)); h.SetFillStyle(3004)
         hs.append(h)
-    hs[0].SetMinimum(2e-5); hs[0].SetMaximum(200.0)   # two decades of headroom: the label and legend sit above the peak
+    hs[0].SetMinimum(2e-5); hs[0].SetMaximum(200.0 if len(hs) <= 2 else 2000.0)   # two decades of headroom: the label and legend sit above the peak
     hs[0].GetXaxis().SetTitle("(t_{jet} - t_{HS}^{truth}) / #sigma_{jet}   (overflow in the edge bins)")
     hs[0].GetYaxis().SetTitle("Fraction of truth-matched HS tagging jets")
     hs[0].Draw("HIST")
@@ -683,9 +687,10 @@ def jet_time_figures(stem, e_all, cal):
     leg = ROOT_.TLegend(0.16, 0.735 - 0.045 * (len(hs) + 1), 0.60, 0.735); ROOT_.StyleLegend(leg, 0.03); C.KEEP.append(leg)
     leg.AddEntry(hs[0], (f"all timed jets (quoted #sigma): " if kmin else "quoted #sigma: ") + f"{100 * np.mean(np.abs(p) >= args.nsigma):.0f}% beyond {args.nsigma:g}", "f")
     if kmin:
-        pk = p[n >= kmin]
-        leg.AddEntry(hs[1], f"time from #geq {kmin} tracks ({100 * len(pk) / len(p):.0f}% of jets): "
-                     f"{100 * np.mean(np.abs(pk) >= args.nsigma):.1f}% beyond {args.nsigma:g}", "l")
+        for i, k in enumerate(kall):
+            pk = p[n >= k]
+            leg.AddEntry(hs[1 + i], f"time from #geq {k} tracks ({100 * len(pk) / len(p):.0f}% of jets): "
+                         f"{100 * np.mean(np.abs(pk) >= args.nsigma):.1f}% beyond {args.nsigma:g}", "l")
     elif len(hs) > 1:
         leg.AddEntry(hs[1], f"#sigma #times f(n): {100 * np.mean(np.abs(pc) >= args.nsigma):.1f}% beyond {args.nsigma:g}", "l")
     leg.AddEntry(g, "unit Gaussian", "l")
