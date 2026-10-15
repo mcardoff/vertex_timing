@@ -820,7 +820,48 @@ def t0_figure(stem, e_all, what):
     print("wrote", f"{stem}_t0_pulls{'' if what == 'sig' else '_bkg'}.pdf / .png")
 
 
-for r in loaded: t0_figure(args.out, loaded[r][5], r)
+def t0_dt_figure(stem, e_all, what):
+    """<stem>_t0_dt: t0 - t_HS^truth in ps (not divided by sigma) for every selected event
+    of the file with that t0, one line per reco t0 -- the companion of <stem>_jet_time_dt"""
+    ROOT_ = C.ROOT
+    c = ROOT_.TCanvas("c_t0dt_" + what, "", 800, 650); C.KEEP.append(c)
+    c.SetLeftMargin(0.14); c.SetRightMargin(0.05); c.SetLogy(True)
+    leg = ROOT_.TLegend(0.16, 0.600, 0.93, 0.735); ROOT_.StyleLegend(leg, 0.027); C.KEEP.append(leg)
+    nall = len(e_all["t0_truth"])
+    for k, src in enumerate(["trkptz", "waves", "hgtd"]):
+        ok = e_all[f"ok_{src}"].astype(bool)
+        dt = e_all[f"t0_{src}"][ok] - e_all["t0_truth"][ok]
+        h = ROOT_.TH1D(f"h_t0dt_{what}_{src}", "", 80, -400, 400); C.KEEP.append(h)
+        for x in np.clip(dt, -399.9, 399.9): h.Fill(x)
+        h.Scale(1.0 / h.Integral())
+        lab, col, _ = STYLE["t0_" + src]
+        h.SetLineColor(C.colour(col)); h.SetLineWidth(2); h.SetLineStyle(1 if src != "hgtd" else 7)
+        if k == 0:
+            h.SetMinimum(2e-5); h.SetMaximum(2000.0)
+            h.GetXaxis().SetTitle("t_{0} - t_{HS}^{truth} [ps]   (overflow in the edge bins)")
+            h.GetYaxis().SetTitle("Fraction of events with that t_{0}")
+            h.Draw("HIST")
+        else:
+            h.Draw("HIST SAME")
+        name = lab.replace("Jet vs t_{0}: ", "")
+        leg.AddEntry(h, f"{name}: core #sigma {C.mad(dt):.0f} ps, {100 * np.mean(np.abs(dt) > 60):.0f}% beyond 60 ps;  "
+                     f"valid in {100 * ok.sum() / nall:.0f}%", "l")
+    leg.Draw()
+    ROOT_.ATLASLabel(0.17, 0.88, "")
+    t = ROOT_.TLatex(); t.SetNDC(); t.SetTextFont(42); t.SetTextSize(0.04); C.KEEP.append(t)
+    t.DrawLatex(0.31, 0.88, "Simulation Internal")
+    t2 = ROOT_.TLatex(); t2.SetNDC(); t2.SetTextFont(42); t2.SetTextSize(0.028); t2.SetTextColor(ROOT_.kGray + 2); C.KEEP.append(t2)
+    t2.DrawLatex(0.17, 0.835, f"{'VBF H#rightarrowinv.' if what == 'sig' else 'Z(#rightarrowll)+jets'}: every selected event, {nall:,}")
+    t2.DrawLatex(0.17, 0.80, "core #sigma = 1.4826 #times median |t_{0} - t_{HS}^{truth}|")
+    t2.DrawLatex(0.17, 0.765, "HGTD: Athena's RecoVtx_time, where valid")
+    out = f"{stem}_t0_dt{'' if what == 'sig' else '_bkg'}"
+    c.Print(out + ".pdf"); c.Print(out + ".png")
+    print("wrote", out + ".pdf / .png")
+
+
+for r in loaded:
+    t0_figure(args.out, loaded[r][5], r)
+    t0_dt_figure(args.out, loaded[r][5], r)
 
 # ── The trade-off: eps_S against background rejection as the threshold moves ─
 # (all m_jj columns). Background rejection = 1 / eps_B, the ROC convention.
