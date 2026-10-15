@@ -101,6 +101,30 @@ def mad(x):
     return 1.4826 * float(np.median(np.abs(x)))
 
 
+_DG_N = [0]
+
+
+def dgaus_core(values, lo=-400.0, hi=400.0, nbins=400):
+    """the project's core resolution: the narrower width of a double-Gaussian fit, the exact
+    recipe of FIT_DBLGAUS in src/plotting_utilities.h (shared mean within +-50 ps, sigma1
+    seeded at 13 ps, both widths >= 5 ps, fit option RQI over the histogram range; the smaller
+    sigma is the core, as fillFromModel's swapBySize). Entries outside [lo, hi] are not
+    filled. Returns (sigma_core, its error)."""
+    R = ROOT
+    _DG_N[0] += 1
+    h = R.TH1D(f"h_dgfit_{_DG_N[0]}", "", nbins, lo, hi)
+    for x in np.asarray(values, float): h.Fill(x)
+    f = R.TF1(f"dgaus_fit_{_DG_N[0]}", "[1]*TMath::Exp(-0.5*((x-[0])/[3])^2) + [2]*TMath::Exp(-0.5*((x-[0])/[4])^2)", lo, hi)
+    f.SetParameters(h.GetMean(), 0.8 * h.GetMaximum(), 1e-2 * h.GetMaximum(), 13.0, h.GetStdDev())
+    f.SetParLimits(0, -50.0, 50.0); f.SetParLimits(1, 0, 1e9); f.SetParLimits(2, 0, 1e9)
+    f.SetParLimits(3, 5.0, 1e6); f.SetParLimits(4, 5.0, 1e6)
+    h.Fit(f, "RQIN0")
+    s1, s2 = abs(f.GetParameter(3)), abs(f.GetParameter(4))
+    k = 3 if s1 <= s2 else 4
+    KEEP.extend([h, f])
+    return abs(f.GetParameter(k)), f.GetParError(k)
+
+
 def hs_pulls(e_all):
     """(t_jet - t_HS) / sigma_jet and n for every paper-HS leg with a core time"""
     p, n = [], []

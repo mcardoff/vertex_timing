@@ -732,14 +732,14 @@ def jet_time_figures(stem, e_all, cal):
     for h in hd[1:]: h.Draw("HIST SAME")
     leg2 = ROOT_.TLegend(0.16, 0.735 - 0.045 * len(hd), 0.60, 0.735); ROOT_.StyleLegend(leg2, 0.03); C.KEEP.append(leg2)
     for h, (_, v, _, fill, lab) in zip(hd, sets):
-        leg2.AddEntry(h, f"{lab}: core #sigma {C.mad(v):.0f} ps, {100 * np.mean(np.abs(v) > 60):.0f}% beyond 60 ps",
+        leg2.AddEntry(h, f"{lab}: core #sigma {C.dgaus_core(v)[0]:.1f} ps, {100 * np.mean(np.abs(v) > 60):.0f}% beyond 60 ps",
                       "f" if fill else "l")
     leg2.Draw()
     ROOT_.ATLASLabel(0.17, 0.88, "")
     t.DrawLatex(0.31, 0.88, "Simulation Internal")
     t2.DrawLatex(0.17, 0.835, "VBF H#rightarrowinv. reco tagging jets truth-matched to a hard-scatter jet")
     t2.DrawLatex(0.17, 0.80, f"(#DeltaR < 0.3 to a truth HS jet with p_{{T}} > 10 GeV), with a time: {len(dt):,} jets")
-    t2.DrawLatex(0.17, 0.765, jet_line())   # core sigma = 1.4826 x median |dt| (in the slide caption)
+    t2.DrawLatex(0.17, 0.765, jet_line())   # core sigma: the narrow width of a double-Gaussian fit
     c2.Print(stem + "_jet_time_dt.pdf"); c2.Print(stem + "_jet_time_dt.png")
     print("wrote", stem + "_jet_time_pulls.pdf / .png")
     # f(n), with each bin's share of the jets and its tail after the correction
@@ -844,7 +844,7 @@ def t0_dt_figure(stem, e_all, what):
         else:
             h.Draw("HIST SAME")
         name = lab.replace("Jet vs t_{0}: ", "")
-        leg.AddEntry(h, f"{name}: core #sigma {C.mad(dt):.0f} ps, {100 * np.mean(np.abs(dt) > 60):.0f}% beyond 60 ps;  "
+        leg.AddEntry(h, f"{name}: core #sigma {C.dgaus_core(dt)[0]:.1f} ps, {100 * np.mean(np.abs(dt) > 60):.0f}% beyond 60 ps;  "
                      f"valid in {100 * ok.sum() / nall:.0f}%", "l")
     leg.Draw()
     ROOT_.ATLASLabel(0.17, 0.88, "")
@@ -852,7 +852,7 @@ def t0_dt_figure(stem, e_all, what):
     t.DrawLatex(0.31, 0.88, "Simulation Internal")
     t2 = ROOT_.TLatex(); t2.SetNDC(); t2.SetTextFont(42); t2.SetTextSize(0.028); t2.SetTextColor(ROOT_.kGray + 2); C.KEEP.append(t2)
     t2.DrawLatex(0.17, 0.835, f"{'VBF H#rightarrowinv.' if what == 'sig' else 'Z(#rightarrowll)+jets'}: every selected event, {nall:,}")
-    t2.DrawLatex(0.17, 0.80, "core #sigma = 1.4826 #times median |t_{0} - t_{HS}^{truth}|")
+    t2.DrawLatex(0.17, 0.80, "core #sigma: the narrow width of a double-Gaussian fit")
     t2.DrawLatex(0.17, 0.765, "HGTD: Athena's RecoVtx_time, where valid")
     out = f"{stem}_t0_dt{'' if what == 'sig' else '_bkg'}"
     c.Print(out + ".pdf"); c.Print(out + ".png")
