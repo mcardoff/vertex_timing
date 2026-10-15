@@ -193,7 +193,12 @@ def build_case_set(role):
     in_timed = np.where(D["a_in"], D["a_timed"], D["b_timed"])
     pu_pt = np.where(D["a_in"], E["a_pt"], E["b_pt"])
     out = []
-    def add(key, title, rule, mask, score, prefer):
+    def add(key, title, rule, mask, score, prefer, relaxed=None):
+        if not mask.any() and relaxed is not None and relaxed[1].any():   # e.g. a small Z+jets sample
+            rule, mask = relaxed
+        if not mask.any():
+            print(f"[{key}_{role}] no {nm} event: {rule} -- skipped")
+            return
         m = mask & prefer if (mask & prefer).any() else mask
         out.append((f"{key}_{role}", role, title, f"{nm}: {rule}" + ("" if (mask & prefer).any() else " (no HS+PU pair passes)"),
                     m, score))
@@ -202,7 +207,9 @@ def build_case_set(role):
         bothT & D["veto_jj"] & reco_keep, np.nan_to_num(D["pull_jj"]), hspu)
     add("FF2_t0_vetoes", "Forward-Forward: jet time compatibility misses where $t_0$ rejects",
         "both legs in HGTD and timed; jet time compatibility keeps, TRKPTZ and WAVeS veto; HS+PU preferred; largest WAVeS pull",
-        bothT & ~D["veto_jj"] & reco_veto, t0pull, hspu)
+        bothT & ~D["veto_jj"] & reco_veto, t0pull, hspu,
+        relaxed=("both legs in HGTD and timed; jet time compatibility keeps, TRKPTZ or WAVeS vetoes; HS+PU preferred; "
+                 "largest WAVeS pull", bothT & ~D["veto_jj"] & (D["veto_waves"] | D["veto_trkptz"])))
     add("CF1_caught", "Central-Forward: a pileup jet in HGTD, rejected",
         "one leg in HGTD, timed and pileup; TRKPTZ and WAVeS veto; highest pileup-leg pT",
         one & pu_in & in_timed & reco_veto, pu_pt, np.ones(len(pu_pt), bool))
@@ -223,7 +230,10 @@ if args.events:
 elif args.set == "cases":
     if not args.local:
         raise SystemExit("--set cases needs --local (one event per case from Z+jets and one from the local VBF file)")
-    cases = [c for pair in zip(build_case_set("bkg"), build_case_set("local")) for c in pair]
+    # by case key, Z+jets then local VBF; a case one sample lacks is simply absent there
+    _cs = build_case_set("bkg") + build_case_set("local")
+    _keys = list(dict.fromkeys(c[0].rsplit("_", 1)[0] for c in _cs))
+    cases = sorted(_cs, key=lambda c: (_keys.index(c[0].rsplit("_", 1)[0]), c[1] != "bkg"))
 else:
     cases = build_cases("local", "local") if args.local else build_cases("sig", "bkg")
 

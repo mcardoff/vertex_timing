@@ -21,6 +21,7 @@ ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDe
 ap.add_argument("--dir", required=True)
 ap.add_argument("--kmax", type=int, default=5)
 ap.add_argument("--out", required=True)
+ap.add_argument("--tag", default="JVT + fJVT loose", help="the jet tagging, for the title")
 args = ap.parse_args()
 plt.rcParams.update({"font.size": 12})
 
@@ -68,7 +69,7 @@ for c, (case, title) in enumerate(CASES):
         a1.set_ylabel("efficiency [%]\nfilled: $Z$+jets, open: VBF")
 axes[0, 0].legend(fontsize=10, frameon=False, loc="upper right")
 fig.suptitle("Timing veto vs the jet-time track requirement: VBF $H\\to$inv. against $Z(\\to\\ell\\ell)$+jets, "
-             "JVT + fJVT loose, recoil > 100 GeV   ATLAS Simulation Internal", fontsize=11.5, x=0.08, ha="left", y=0.97)
+             f"{args.tag}, recoil > 100 GeV   ATLAS Simulation Internal", fontsize=11.5, x=0.08, ha="left", y=0.97)
 os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
 for ext in ("pdf", "png"):
     fig.savefig(f"{args.out}.{ext}", dpi=150, bbox_inches="tight")
