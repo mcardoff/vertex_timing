@@ -141,7 +141,8 @@ namespace {
 // uses (DIST_CUT_T_REFINED). Chosen on local VBF truth, 2026-09-28, against
 // dR 0.4 and 3 sigma: dR 0.2 is worth ~6 points of HS+HS pass rate, the cut
 // ~1 point, and picking the cluster by sum pT rather than track count ~1 point.
-constexpr double JET_TIME_DR       = 0.2;
+constexpr double JET_TIME_DR       = 0.2;   // default; --jet-time-dr=X overrides (output tagged _jtdrXpY)
+static double gJetTimeDr = JET_TIME_DR;
 constexpr double JET_TIME_DIST_CUT = 2.0;
 
 // The clustering input for the t0 rows -- rpt_v5_hist's, verbatim.
@@ -199,7 +200,7 @@ JetTime jetTimeCore(BranchPointerWrapper& b, int j) {
     if (!(b.trackTimeRes[idx] > 0.0)) continue;
     if (!passTrackKinematics((size_t)idx, &b, MIN_TRACK_PT, MAX_TRACK_PT)) continue;
     const double dr = std::hypot(b.trackEta[idx] - je, TVector2::Phi_mpi_pi(b.trackPhi[idx] - jp));
-    if (dr >= JET_TIME_DR) continue;
+    if (dr >= gJetTimeDr) continue;
     cand.push_back(idx);
   }
   out.nCand = (int)cand.size();
@@ -356,6 +357,7 @@ int main(int argc, char** argv) {
       if (v != "jets" && v != "truth") { std::cerr << "[veto] " << a << ": jets | truth\n"; return 1; }
       srMetJets = (v == "jets");
     }
+    if (a.rfind("--jet-time-dr=", 0) == 0) { gJetTimeDr = std::stod(a.substr(14)); continue; }
     if (a.rfind("--jvt=", 0) != 0) continue;
     const JvtWP* hit = jvtWPByName(a.substr(6));
     if (!hit) { std::cerr << "[veto] unknown " << a << " (none|loose|tight|looseext)\n"; return 1; }
@@ -367,6 +369,14 @@ int main(int argc, char** argv) {
     // The discriminants need the vertex fit's track assignment (EXTENDED).
     EXTENDED_BRANCHES = true;
     const std::string tag = std::string(WP.tag).substr(1);
+    SELECTION_TAG = SELECTION_TAG.empty() ? tag : SELECTION_TAG + "_" + tag;
+  }
+  // --jet-time-dr: a different jet-time cone is a different estimator -- tagged, so it can
+  // never overwrite the default (0.2) outputs
+  if (gJetTimeDr != JET_TIME_DR) {
+    if (!(gJetTimeDr > 0.0 && gJetTimeDr <= 1.0)) { std::cerr << "[veto] --jet-time-dr must be in (0, 1]\n"; return 1; }
+    std::ostringstream os; os << "jtdr" << std::fixed << std::setprecision(1) << gJetTimeDr;
+    std::string tag = os.str(); std::replace(tag.begin(), tag.end(), '.', 'p');
     SELECTION_TAG = SELECTION_TAG.empty() ? tag : SELECTION_TAG + "_" + tag;
   }
   // --sr: the legs pass JVT loose; fJVT and everything else is applied offline
@@ -410,7 +420,7 @@ int main(int argc, char** argv) {
   else
     std::cout << " jvt=" << WP.name << " m_jj >= " << VBS_JET_MJJ << " |Deta| >= " << VBS_JET_D_ETA;
   std::cout << "  jet time: core = timed ghost tracks, " << MIN_TRACK_PT << "-" << MAX_TRACK_PT
-            << " GeV, dR < " << JET_TIME_DR << ", " << JET_TIME_DIST_CUT
+            << " GeV, dR < " << gJetTimeDr << ", " << JET_TIME_DIST_CUT
             << "-sigma time clustering, max sum-pT cluster\n";
   std::printf("[veto] t0 inflation (rpt_v5's, '%s'): hgtd %.2f trkptz %.2f waves %.2f tzp %.2f\n",
               SAMPLE_NAME.empty() ? "local (vbf)" : SAMPLE_NAME.c_str(),
@@ -781,7 +791,7 @@ int main(int argc, char** argv) {
   // --sr removes no jet here (jvt_wp -1) and keeps SR candidates (the pair cuts)
   int    jvtWp = srMode ? -1 : (int)(wpSel - JVT_WPS);
   double cutMjj = srMode ? SR_MJJ : VBS_JET_MJJ, cutDeta = srMode ? SR_DETA : VBS_JET_D_ETA;
-  double jdr = JET_TIME_DR, jcut = JET_TIME_DIST_CUT;
+  double jdr = gJetTimeDr, jcut = JET_TIME_DIST_CUT;
   bool   srFlag = srMode, srJetsFlag = srMetJets;
   double srRecoil = srRecoilMin, legRptMin = WPL.rptMin;
   bool   truthMet = hasTruthMet;
