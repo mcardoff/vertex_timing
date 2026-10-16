@@ -36,8 +36,14 @@ ap.add_argument("--met-min", type=float, default=100.0)
 ap.add_argument("--zpt-min", type=float, default=100.0)
 ap.add_argument("--out", required=True)
 ap.add_argument("--mjj-edges", default=",".join(str(e) for e in MJJ_EDGES), help="m_jj columns (GeV); last includes overflow")
+ap.add_argument("--after-veto", default=None, choices=["trkptz", "waves", "hgtd", "truth"],
+                help="only the events this t0's jet-vs-t0 veto KEEPS (vbs_time_veto_common.t0_veto, the slides' veto)")
+ap.add_argument("--min-trk", type=int, default=2, help="with --after-veto: tracks a jet time must be built from")
+ap.add_argument("--of-before", action="store_true", help="with --after-veto: each column as a fraction of its events "
+                "BEFORE the veto (the stack's height is then the veto's efficiency, the gap above it what it removed)")
 C.add_acceptance_args(ap)
 args = ap.parse_args()
+VETO_NAME = {"trkptz": "TRKPTZ", "waves": "WAVeS", "hgtd": "HGTD (Athena)", "truth": "truth"}
 
 
 def bands(e):
@@ -60,12 +66,23 @@ def bands(e):
 ROOT = C.setup_root(args.out)
 edges = np.array([float(x) for x in args.mjj_edges.split(",")])
 col = C.acc_column(args.acc_count)
+VCOLS = []
+if args.after_veto:   # one jet-time calibration, from the signal's HS legs (every selected event)
+    s_ = args.after_veto
+    VCOLS = [f"ok_{s_}", f"t0_{s_}", f"infl_{s_}", f"sig0_{s_}"] + [f"{L}_core_{k}" for L in "ab" for k in ["n", "sig", "t"]]
+    cal = C.measure(C.legs(args.sig), True, "signal HS legs")
 for role, path, rc, cut, label in [
         ("sig", args.sig, "met_truth", args.met_min, "#sqrt{s} = 14 TeV, HL-LHC, VBF H#rightarrowinv."),
         ("bkg", args.bkg, "z_pt", args.zpt_min, "#sqrt{s} = 14 TeV, HL-LHC, Z(#rightarrowll)+jets")]:
     cols = ["weight", "mjj", rc, "a_eta", "b_eta", "a_hs", "b_hs", "a_pu", "b_pu", "a_" + col, "b_" + col]
-    e = uproot.open(path)["events"].arrays(cols, library="np")
+    e = uproot.open(path)["events"].arrays(list(dict.fromkeys(cols + VCOLS)), library="np")
     keep = (e[rc] > cut) & C.acceptance_mask(e["a_" + col], e["b_" + col], args.acceptance, args.acc_min_trk)
+    Wbefore = None
+    if args.after_veto:
+        if args.of_before:   # per-column weight before the veto, for the normalisation
+            ib = C.mjj_index(e["mjj"][keep], edges); wb_ = e["weight"][keep].astype(float)
+            Wbefore = [wb_[ib == k].sum() for k in range(len(edges) - 1)]
+        keep &= ~C.t0_veto(e, cal, args.after_veto, args.min_trk)[0]
     e = {k: v[keep] for k, v in e.items()}
     b, w = bands(e), e["weight"].astype(float)
     idx = C.mjj_index(e["mjj"], edges)
@@ -80,14 +97,22 @@ for role, path, rc, cut, label in [
         h = ROOT.TH1D(f"h{role}{i}", "", len(edges) - 1, edges); C.KEEP.append(h)
         for k in range(len(edges) - 1):
             m = idx == k
-            W = w[m].sum()
+            W = w[m].sum() if Wbefore is None else Wbefore[k]
             h.SetBinContent(k + 1, w[m & (b == i)].sum() / W if W > 0 else 0.0)
         h.SetFillColor(ROOT.TColor.GetColor(hexc)); h.SetLineColor(ROOT.kBlack); h.SetLineWidth(1)
         stk.Add(h); hs.append(h)
     stk.Draw("HIST")
-    stk.GetXaxis().SetLabelSize(0); stk.GetYaxis().SetTitle("Fraction of events (weighted)")
+    stk.GetXaxis().SetLabelSize(0)
+    stk.GetYaxis().SetTitle("Fraction of events (weighted)" if Wbefore is None else "Fraction of the events before the veto")
+    if Wbefore is not None:   # what the veto removed: the gap between the stack and 1
+        one = ROOT.TLine(edges[0], 1.0, edges[-1], 1.0); one.SetLineStyle(2); one.SetLineWidth(2); one.Draw(); C.KEEP.append(one)
+        rq = ROOT.TLatex(); rq.SetTextFont(42); rq.SetTextSize(0.030); rq.SetTextAlign(21); C.KEEP.append(rq)
+        for k in range(len(edges) - 1):
+            kept_k = w[idx == k].sum() / Wbefore[k] if Wbefore[k] > 0 else 0.0
+            rq.DrawLatex(0.5 * (edges[k] + edges[k + 1]), 0.5 * (1.0 + kept_k) - 0.015, f"removed {100 * (1 - kept_k):.0f}%")
     stk.GetYaxis().SetTitleOffset(1.25); stk.SetMaximum(1.85); stk.SetMinimum(0.0)
-    ytxt = C.atlas_block(label, ["**" + C.CASE_TEXT[args.acceptance]])
+    ytxt = C.atlas_block(label, ["**" + C.CASE_TEXT[args.acceptance]
+                                 + (f", after the {VETO_NAME[args.after_veto]} veto" if args.after_veto else "")])
     leg = ROOT.TLegend(0.17, ytxt - 0.22, 0.93, ytxt - 0.01); ROOT.StyleLegend(leg); leg.SetNColumns(2); C.KEEP.append(leg)
     for h, (lab, _) in zip(hs, BANDS): leg.AddEntry(h, lab, "f")
     leg.Draw(); pTop.RedrawAxis()

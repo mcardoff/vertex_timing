@@ -181,6 +181,21 @@ def measure(e_all, binned, source):
     return Calib(g, fac, source, len(p))
 
 
+def t0_veto(e, cal, src, min_trk, nsigma=3.0):
+    """the jet-vs-t0 event veto exactly as vbs_time_veto_plot.decisions(): a leg is tested when its
+    jet time is built from >= min_trk tracks and the t0 exists; it fails when
+    |t_jet - t0| / sqrt((f(n) sigma_jet)^2 + (infl sigma_t0)^2) >= nsigma.
+    Returns (vetoed, failA, failB) per event."""
+    ok, t0, s0 = e[f"ok_{src}"].astype(bool), e[f"t0_{src}"], e[f"infl_{src}"] * e[f"sig0_{src}"]
+    fails = []
+    for L in "ab":
+        sg = cal(e[f"{L}_core_n"]) * e[f"{L}_core_sig"]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            pull = np.abs(e[f"{L}_core_t"] - t0) / np.sqrt(sg ** 2 + s0 ** 2)
+        fails.append(ok & (e[f"{L}_core_n"] >= min_trk) & (pull >= nsigma))
+    return fails[0] | fails[1], fails[0], fails[1]
+
+
 def eff(w, kept):
     """Weighted efficiency, its weighted-binomial error, and a Wilson interval.
 

@@ -213,6 +213,21 @@ def build_case_set(role):
     add("CF1_caught", "Central-Forward: a pileup jet in HGTD, rejected",
         "one leg in HGTD, timed and pileup; TRKPTZ and WAVeS veto; highest pileup-leg pT",
         one & pu_in & in_timed & reco_veto, pu_pt, np.ones(len(pu_pt), bool))
+    if role == "bkg":
+        # a TYPICAL caught pileup jet: inside fJVT's window (2.5 <= |eta| < 4.5, pT < 120 GeV), i.e. one fJVT
+        # already passed -- 96% of the pileup legs the veto catches are -- with pT and WAVeS pull nearest the
+        # medians of all such caught jets (CF1 takes the HIGHEST pT, which picks an atypical >120 GeV jet)
+        eta_in = np.abs(np.where(D["a_in"], E["a_eta"], E["b_eta"]))
+        pull_in = np.where(D["a_in"], np.nan_to_num(D["a_pull_waves"]), np.nan_to_num(D["b_pull_waves"]))
+        hs_other = np.where(D["a_in"], E["b_hs"], E["a_hs"])
+        cand = one & pu_in & in_timed & reco_veto & (eta_in >= 2.5) & (pu_pt < 120.0)
+        if cand.any():
+            mpt, mpl = np.median(pu_pt[cand]), np.median(pull_in[cand])
+            typ = -(np.abs(np.log(np.maximum(pu_pt, 1e-3) / mpt)) + np.abs(np.log(np.maximum(pull_in, 1e-3) / mpl)))
+            add("CF1t_caught", "Central-Forward: a typical pileup jet in HGTD, rejected",
+                f"one leg in HGTD, timed and pileup, inside fJVT's window (2.5 <= |eta| < 4.5, pT < 120 GeV); TRKPTZ "
+                f"and WAVeS veto; other leg HS preferred; pT and WAVeS pull nearest the medians ({mpt:.0f} GeV, {mpl:.1f} sigma)",
+                cand, typ, hs_other)
     add("CF2_missed", "Central-Forward: a pileup jet in HGTD, not rejected",
         "one leg in HGTD, timed and pileup; TRKPTZ and WAVeS keep; highest pileup-leg pT",
         one & pu_in & in_timed & reco_keep, pu_pt, np.ones(len(pu_pt), bool))
