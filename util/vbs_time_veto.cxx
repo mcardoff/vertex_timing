@@ -143,6 +143,7 @@ namespace {
 // ~1 point, and picking the cluster by sum pT rather than track count ~1 point.
 constexpr double JET_TIME_DR       = 0.2;   // default; --jet-time-dr=X overrides (output tagged _jtdrXpY)
 static double gJetTimeDr = JET_TIME_DR;
+static bool   gPureTimes = false;   // --pure-times: write the pure_ (perfect-assignment) jet times; tagged _pure
 constexpr double JET_TIME_DIST_CUT = 2.0;
 
 // The clustering input for the t0 rows -- rpt_v5_hist's, verbatim.
@@ -223,6 +224,39 @@ JetTime jetTimeCore(BranchPointerWrapper& b, int j) {
   return out;
 }
 
+// pure_ (--pure-times, TRUTH): the jet time with a perfect track-to-origin assignment -- the
+// timed ghost tracks passing the track selection in HGTD that come from the hard scatter
+// (truth vertex 0; wantHS) or from anywhere else (pileup, or unlinked), with NO dR cone and
+// no minimum count, clustered in time as core_ and the highest-sum-pT cluster taken. The
+// "ideal jet time" rung of the veto accounting: a hard-scatter jet timed by its own tracks,
+// a pileup jet by its own (dominant) collision's tracks.
+JetTime jetTimePure(BranchPointerWrapper& b, int j, bool wantHS) {
+  JetTime out;
+  const int nT = (int)b.trackPt.GetSize();
+  std::vector<int> cand;
+  for (int idx : b.topoJetGhostTrackIdx[j]) {
+    if (idx < 0 || idx >= nT || b.trackTimeValid[idx] != 1) continue;
+    if (!(b.trackTimeRes[idx] > 0.0)) continue;
+    if (!passTrackKinematics((size_t)idx, &b, MIN_TRACK_PT, MAX_TRACK_PT)) continue;
+    if ((b.trackToTruthvtx[idx] == 0) != wantHS) continue;
+    cand.push_back(idx);
+  }
+  out.nCand = (int)cand.size();
+  if (cand.empty()) return out;
+  static const std::unordered_map<int, double> kNone;
+  std::vector<Cluster> cl = makeSimpleClusters(cand, &b, /*useSmearedTimes=*/false, kNone, kNone,
+                                               /*checkTimeValid=*/true, /*usez0=*/false);
+  doIterativeClustering(&cl, JET_TIME_DIST_CUT);
+  const Cluster* best = nullptr;
+  for (const Cluster& c : cl)
+    if (!best || c.scores.at(Score::TRKPT.id) > best->scores.at(Score::TRKPT.id)) best = &c;
+  out.t = best->values[0];  out.sig = best->sigmas[0];
+  out.n = (int)best->trackIndices.size();
+  out.sumPt = best->scores.at(Score::TRKPT.id);
+  out.hsFrac = wantHS ? 1.0 : 0.0;
+  return out;
+}
+
 // HGTD acceptance of a jet, from its TRACKS rather than its axis: a jet whose
 // axis is past |eta| = 4.0 (or just inside 2.38) can still have ghost tracks
 // in HGTD. n = ghost tracks passing the standard track selection
@@ -253,6 +287,8 @@ struct Leg {
   double all_t = 0.0, all_sig = -1.0, all_hsfrac = -1.0;
   int    all_n = 0;
   int    hgtd_n = 0, hgtd_ntimed = 0;     // hgtdTracks(): ghost tracks in HGTD acceptance
+  double pure_hs_t = 0.0, pure_hs_sig = -1.0, pure_pu_t = 0.0, pure_pu_sig = -1.0;   // --pure-times
+  int    pure_hs_n = 0, pure_pu_n = 0;
 };
 
 // The t0 sources, in column order. truth has sigma 0 and inflation 1.
@@ -358,6 +394,7 @@ int main(int argc, char** argv) {
       srMetJets = (v == "jets");
     }
     if (a.rfind("--jet-time-dr=", 0) == 0) { gJetTimeDr = std::stod(a.substr(14)); continue; }
+    if (a == "--pure-times") { gPureTimes = true; continue; }
     if (a.rfind("--jvt=", 0) != 0) continue;
     const JvtWP* hit = jvtWPByName(a.substr(6));
     if (!hit) { std::cerr << "[veto] unknown " << a << " (none|loose|tight|looseext)\n"; return 1; }
@@ -379,6 +416,7 @@ int main(int argc, char** argv) {
     std::string tag = os.str(); std::replace(tag.begin(), tag.end(), '.', 'p');
     SELECTION_TAG = SELECTION_TAG.empty() ? tag : SELECTION_TAG + "_" + tag;
   }
+  if (gPureTimes) SELECTION_TAG = SELECTION_TAG.empty() ? "pure" : SELECTION_TAG + "_pure";
   // --sr: the legs pass JVT loose; fJVT and everything else is applied offline
   const JvtWP& WPL = *jvtWPByName("loose");
   if (srMetJets && !srMode) { std::cerr << "[veto] --sr-met=jets needs --sr\n"; return 1; }
@@ -490,6 +528,10 @@ int main(int argc, char** argv) {
     br("all_t", &L.all_t, "D");  br("all_sig", &L.all_sig, "D");
     br("all_n", &L.all_n, "I");  br("all_hsfrac", &L.all_hsfrac, "D");
     br("hgtd_n", &L.hgtd_n, "I");  br("hgtd_ntimed", &L.hgtd_ntimed, "I");
+    if (gPureTimes) {
+      br("pure_hs_t", &L.pure_hs_t, "D");  br("pure_hs_sig", &L.pure_hs_sig, "D");  br("pure_hs_n", &L.pure_hs_n, "I");
+      br("pure_pu_t", &L.pure_pu_t, "D");  br("pure_pu_sig", &L.pure_pu_sig, "D");  br("pure_pu_n", &L.pure_pu_n, "I");
+    }
   };
   legBranches("a_", R.a);
   legBranches("b_", R.b);
@@ -738,6 +780,11 @@ int main(int argc, char** argv) {
       L.all_t = g.t;  L.all_sig = g.sig;  L.all_n = g.n;  L.all_hsfrac = g.hsFrac;
       const HgtdCount h = hgtdTracks(branch, j);
       L.hgtd_n = h.n;  L.hgtd_ntimed = h.nTimed;
+      if (gPureTimes) {
+        const JetTime ph = jetTimePure(branch, j, true), pp = jetTimePure(branch, j, false);
+        L.pure_hs_t = ph.t;  L.pure_hs_sig = ph.sig;  L.pure_hs_n = ph.n;
+        L.pure_pu_t = pp.t;  L.pure_pu_sig = pp.sig;  L.pure_pu_n = pp.n;
+      }
       if (L.hs) { calCore.add(c, tHS); calAll.add(g, tHS); }
     };
     if (legI >= 0) fillLeg(legI, R.a);
