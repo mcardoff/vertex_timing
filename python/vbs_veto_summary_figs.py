@@ -9,6 +9,10 @@ jet-time calibration from the signal's HS legs for both samples.
   cf      Central-Forward events by the one jet HGTD times (HS / pileup) and where the other
           jet sits: the fraction the jet-vs-t0 veto keeps, per t0, VBF and Z+jets
   shares  how many tagging jets HGTD sees: the share of VBF and Z+jets in each case
+  budget  the S/sqrt(B) accounting (printed, no figure): an oracle that vetoes every truth-pileup
+          tagging jet, then -- applied in this order -- only those HGTD reaches, those with a jet
+          time, from >= --min-trk tracks, >= nsigma from the true t0; then the real test against
+          the true t0 (adds hard-scatter / unlabelled false vetoes) and against TRKPTZ / WAVeS
   cone    the jet-time cone, --sig/--bkg against --sig2/--bkg2 (e.g. dR < 0.2 vs 0.4), all
           events: S/sqrt(B) change and efficiencies per method at each cone
 
@@ -25,7 +29,7 @@ import matplotlib.pyplot as plt
 import vbs_time_veto_common as C
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument("what", choices=["cases", "cf", "shares", "cone"])
+ap.add_argument("what", choices=["cases", "cf", "shares", "cone", "budget"])
 ap.add_argument("--sig", required=True)
 ap.add_argument("--bkg", required=True)
 ap.add_argument("--sig2", help="cone: the second cone's signal tree")
@@ -184,6 +188,39 @@ elif args.what == "shares":
     ax.legend(fontsize=10.5, frameon=False, ncol=3, loc="upper center", bbox_to_anchor=(0.45, 1.32))
     ax.set_xlabel("share of the selected events (generator-weighted); a jet is in HGTD with $\\geq$ 1 timed ghost track", fontsize=10.5)
     save(fig)
+
+elif args.what == "budget":
+    cal = C.measure(load(args.sig, "met_truth")[1], True, "signal HS legs")
+    def chain(e):
+        s0 = e["infl_truth"] * e["sig0_truth"]
+        lg = {}
+        for L in "ab":
+            sg = cal(e[f"{L}_core_n"]) * e[f"{L}_core_sig"]
+            with np.errstate(divide="ignore", invalid="ignore"):
+                pt = np.abs(e[f"{L}_core_t"] - e["t0_truth"]) / np.sqrt(sg ** 2 + s0 ** 2)
+            tm = e[f"{L}_core_n"] >= args.min_trk
+            lg[L] = dict(pu=e[f"{L}_pu"], reach=e[f"{L}_hgtd_ntimed"] >= 1, time=e[f"{L}_core_ncand"] >= 1,
+                         timed=tm, out=tm & (pt >= args.nsigma))
+        anyl = lambda f: f(lg["a"]) | f(lg["b"])
+        return [("no veto", np.zeros(len(e["weight"]), bool)),
+                ("oracle: veto every truth-pileup tagging jet", anyl(lambda x: x["pu"])),
+                ("... only those HGTD reaches (>= 1 timed track)", anyl(lambda x: x["pu"] & x["reach"])),
+                ("... with a jet time (a timed track within the cone)", anyl(lambda x: x["pu"] & x["time"])),
+                (f"... from >= {args.min_trk} tracks", anyl(lambda x: x["pu"] & x["timed"])),
+                (f"... out of time (>= {args.nsigma:g} sigma from the true t0)", anyl(lambda x: x["pu"] & x["out"])),
+                ("the test against the true t0 (adds false vetoes)", d["vS" if e is S else "vB"]["truth"]),
+                ("the test against the WAVeS t0", d["vS" if e is S else "vB"]["waves"]),
+                ("the test against the TRKPTZ t0", d["vS" if e is S else "vB"]["trkptz"])]
+    # each step against the one before it, from the ROUNDED cumulative values so the steps sum exactly;
+    # the WAVeS and TRKPTZ lines both against the true-t0 line
+    prev, truth = None, None
+    print(f"{'step':58s} {'eps_S':>7s} {'eps_B':>7s} {'S/sqrt(B)':>10s} {'step':>7s}")
+    for (lab, vs), (_, vb) in zip(chain(S), chain(B)):
+        es = ws[~vs].sum() / ws.sum(); eb = wb[~vb].sum() / wb.sum(); g = round(100 * (es / np.sqrt(eb) - 1), 1)
+        ref = truth if ("WAVeS" in lab or "TRKPTZ" in lab) else prev
+        print(f"{lab:58s} {100 * es:6.1f}% {100 * eb:6.1f}% {g:+9.1f}% " + (f"{g - ref:+6.1f}" if ref is not None else ""))
+        prev = g
+        if "true t0" in lab: truth = g
 
 else:   # cone
     if not (args.sig2 and args.bkg2): raise SystemExit("cone needs --sig2 and --bkg2")
