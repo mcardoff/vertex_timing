@@ -13,6 +13,13 @@ jet-time calibration from the signal's HS legs for both samples.
           tagging jet, then -- applied in this order -- only those HGTD reaches, those with a jet
           time, from >= --min-trk tracks, >= nsigma from the true t0; then the real test against
           the true t0 (adds hard-scatter / unlabelled false vetoes) and against TRKPTZ / WAVeS
+  money   the money plot, per m_jj column and for all events: the S/sqrt(B) change from no veto up
+          to an oracle that vetoes every truth-pileup tagging jet, split into the gain achieved
+          (WAVeS), our failures (WAVeS vetoes an ideal veto would not make), the loss reducible by
+          a perfect t0 and by a perfect jet time, and the irreducible loss. The ideal veto: the
+          true t0 and pure jet times (util/vbs_time_veto --pure-times: a hard-scatter jet timed by
+          its own tracks, a pileup jet by its own collision's; unlabelled jets untested). Needs the
+          _pure trees.
   cone    the jet-time cone, --sig/--bkg against --sig2/--bkg2 (e.g. dR < 0.2 vs 0.4), all
           events: S/sqrt(B) change and efficiencies per method at each cone
 
@@ -29,7 +36,7 @@ import matplotlib.pyplot as plt
 import vbs_time_veto_common as C
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument("what", choices=["cases", "cf", "shares", "cone", "budget"])
+ap.add_argument("what", choices=["cases", "cf", "shares", "cone", "budget", "money"])
 ap.add_argument("--sig", required=True)
 ap.add_argument("--bkg", required=True)
 ap.add_argument("--sig2", help="cone: the second cone's signal tree")
@@ -221,6 +228,87 @@ elif args.what == "budget":
         print(f"{lab:58s} {100 * es:6.1f}% {100 * eb:6.1f}% {g:+9.1f}% " + (f"{g - ref:+6.1f}" if ref is not None else ""))
         prev = g
         if "true t0" in lab: truth = g
+
+elif args.what == "money":
+    if "a_pure_hs_n" not in S: raise SystemExit("money needs the --pure-times trees (*_pure_vbs_time_veto.root)")
+    S_all = load(args.sig, "met_truth")[1]
+    # the pure times' sigma, calibrated like f(n): on the signal's HS legs, against the true t0
+    pure = {"t0_truth": S_all["t0_truth"]}
+    for L in "ab":
+        pure.update({f"{L}_hs": S_all[f"{L}_hs"], f"{L}_core_n": S_all[f"{L}_pure_hs_n"],
+                     f"{L}_core_t": S_all[f"{L}_pure_hs_t"], f"{L}_core_sig": S_all[f"{L}_pure_hs_sig"]})
+    pcal = C.measure(pure, True, "pure HS legs")
+    def ideal(e):
+        """the true t0 and perfect-assignment jet times; unlabelled legs untested"""
+        v = np.zeros(len(e["weight"]), bool)
+        for L in "ab":
+            for lab, key in (("hs", "pure_hs"), ("pu", "pure_pu")):
+                n = e[f"{L}_{key}_n"]
+                sg = pcal(n) * e[f"{L}_{key}_sig"]
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    pull = np.abs(e[f"{L}_{key}_t"] - e["t0_truth"]) / sg
+                v |= e[f"{L}_{lab}"] & (n >= 1) & (pull >= args.nsigma)
+        return v
+    oracle = lambda e: e["a_pu"] | e["b_pu"]
+    V = {r: dict(waves=d["v" + r]["waves"], t0=d["v" + r]["truth"], ideal=ideal(d[r]), oracle=oracle(d[r])) for r in "SB"}
+    edges = np.array([200, 1000, 2000, 4000.])
+    cs, cb = C.mjj_index(S["mjj"], edges), C.mjj_index(B["mjj"], edges)
+    cols = [(f"{edges[k]:.0f}-{edges[k + 1]:.0f} GeV" if k < 2 else f"> {edges[k]:.0f} GeV", cs == k, cb == k) for k in range(3)]
+    cols.append(("all events", np.ones(len(ws), bool), np.ones(len(wb), bool)))
+    def Z(vs, vb, ms, mb):
+        es = ws[ms & ~vs].sum() / ws[ms].sum(); eb = wb[mb & ~vb].sum() / wb[mb].sum()
+        return 100 * (es / np.sqrt(eb) - 1)
+    rows = []
+    for lab, ms, mb in cols:
+        A, Bv = V["S"], V["B"]
+        net = Z(A["waves"], Bv["waves"], ms, mb)
+        cor = Z(A["waves"] & A["ideal"], Bv["waves"] & Bv["ideal"], ms, mb)              # our correct vetoes only
+        r_t0 = lambda X: (X["waves"] & X["ideal"]) | (X["ideal"] & ~X["waves"] & X["t0"])  # + what a perfect t0 adds
+        zt0 = Z(r_t0(A), r_t0(Bv), ms, mb)
+        zid = Z(A["ideal"], Bv["ideal"], ms, mb)
+        zor = Z(A["oracle"], Bv["oracle"], ms, mb)
+        rung_t0 = Z(A["t0"], Bv["t0"], ms, mb)
+        rows.append(dict(lab=lab, net=net, cor=cor, zt0=zt0, zid=zid, zor=zor, rung_t0=rung_t0, nB=int(mb.sum())))
+        print(f"{lab:16s} where we are {net:+5.1f} | correct only {cor:+5.1f} (failures {cor - net:+4.1f}) | "
+              f"+perfect t0 {zt0:+5.1f} ({zt0 - cor:+4.1f}) | +perfect jet time = ideal {zid:+5.1f} ({zid - zt0:+4.1f}) | "
+              f"oracle {zor:+5.1f} (irreducible {zor - zid:+4.1f}) | rung: truth t0 + real jet times {rung_t0:+5.1f} | {mb.sum()} B MC")
+    # ── the figure: one stacked bar per column, segments from level to level; the ladder as markers
+    SEG = [("gain achieved (WAVeS veto)", "#2E9E4F", None, lambda r: (0.0, r["net"])),
+           ("our failures: vetoes a perfect veto would not make", "#C0392B", "//", lambda r: (r["net"], r["cor"])),
+           ("reducible: a perfect $t_0$ or a perfect jet time catches it", "#F2C53D", None, lambda r: (r["cor"], r["zid"])),
+           ("irreducible: pileup HGTD cannot see, or in time", "#B8B8B8", None, lambda r: (r["zid"], r["zor"]))]
+    YMAX = 62.0
+    fig, ax = plt.subplots(figsize=(12, 6.4))
+    xs = np.arange(len(rows)); wbar = 0.5
+    for lab, col, hatch, f in SEG:
+        for x, r in zip(xs, rows):
+            lo, hi = f(r)
+            ax.bar(x, hi - lo, bottom=lo, width=wbar, color=col, edgecolor="black", lw=0.8, hatch=hatch,
+                   label=lab if x == 0 else None)
+    for x, r in zip(xs, rows):
+        ax.plot([x - wbar / 2 - 0.05, x + wbar / 2 + 0.05], [r["net"]] * 2, color="black", lw=2.4,
+                label="where we are: WAVeS" if x == 0 else None)
+        ax.plot(x + wbar / 2 + 0.11, r["rung_t0"], "D", color="#1F4E9A", ms=8, mec="white",
+                label="+ perfect $t_0$" if x == 0 else None)
+        ax.plot(x + wbar / 2 + 0.11, r["zid"], "*", color="#7A5A00", ms=14, mec="white",
+                label="+ perfect $t_0$ and jet time" if x == 0 else None)
+        if r["zor"] > YMAX:   # off scale: say so inside the top of the bar
+            ax.text(x, YMAX - 1.5, f"ceiling {r['zor']:+.0f}%\n(off scale) $\\uparrow$", ha="center", va="top",
+                    fontsize=10, fontweight="bold")
+        else:
+            ax.text(x, r["zor"] + 0.8, f"ceiling {r['zor']:+.0f}%", ha="center", va="bottom", fontsize=10, fontweight="bold")
+    ax.axhline(0, color="black", lw=1.0)
+    ax.set_xticks(xs)
+    ax.set_xticklabels([f"{r['lab']}\n({r['nB']:,} $Z$+jets MC)\nnow {r['net']:+.1f}%\nperfect $t_0$: {r['rung_t0']:+.1f}%\n"
+                        f"+ perfect jet time: {r['zid']:+.1f}%" for r in rows], fontsize=9.5)
+    ax.axvline(len(rows) - 1.5, color="#888888", lw=1.0, ls="--")
+    ax.set_ylabel("$S/\\sqrt{B}$ change vs no veto [%]  (0: where we were)")
+    ax.set_xlim(-0.55, len(rows) - 0.4)
+    ax.set_ylim(min(-3.0, min(r["net"] for r in rows) - 2), YMAX)
+    ax.legend(fontsize=9.5, frameon=False, loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=3)
+    ax.grid(alpha=0.25, axis="y")
+    ax.text(1.0, 1.0, "ATLAS Simulation Internal", transform=ax.transAxes, ha="right", va="bottom", fontsize=9, color="#555555")
+    save(fig)
 
 else:   # cone
     if not (args.sig2 and args.bkg2): raise SystemExit("cone needs --sig2 and --bkg2")
