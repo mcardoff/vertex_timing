@@ -251,6 +251,14 @@ elif args.what == "money":
         return v
     oracle = lambda e: e["a_pu"] | e["b_pu"]
     V = {r: dict(waves=d["v" + r]["waves"], t0=d["v" + r]["truth"], ideal=ideal(d[r]), oracle=oracle(d[r])) for r in "SB"}
+    # between the ideal veto and the oracle: perfect time resolution (every pileup tagging jet with a timed
+    # track in HGTD caught), then perfect HGTD timing efficiency (every one with a track in HGTD's range,
+    # timed or not); what is left is HGTD's acceptance (pileup jets with no track in 2.38 < |eta| < 4.0)
+    for r in "SB":
+        e = d[r]
+        pu_with = lambda col: (e["a_pu"] & (e["a_" + col] >= 1)) | (e["b_pu"] & (e["b_" + col] >= 1))
+        V[r]["res"] = V[r]["ideal"] | pu_with("pure_pu_n")
+        V[r]["eff"] = V[r]["res"] | pu_with("hgtd_n")
     edges = np.array([200, 1000, 2000, 4000.])
     cs, cb = C.mjj_index(S["mjj"], edges), C.mjj_index(B["mjj"], edges)
     cols = [(f"{edges[k]:.0f}-{edges[k + 1]:.0f} GeV" if k < 2 else f"> {edges[k]:.0f} GeV", cs == k, cb == k) for k in range(3)]
@@ -285,13 +293,17 @@ elif args.what == "money":
              "nofail": (nofail(V["S"]), nofail(V["B"])),
              "t0": (V["S"]["t0"], V["B"]["t0"]),
              "ideal": (V["S"]["ideal"], V["B"]["ideal"]),
+             "res": (V["S"]["res"], V["B"]["res"]),
+             "eff": (V["S"]["eff"], V["B"]["eff"]),
              "oracle": (V["S"]["oracle"], V["B"]["oracle"])}
-    STY = {"none":   ("No timing veto: where we were",                    "#7F7F7F",    25),
-           "waves":  ("WAVeS t_{0} veto: where we are",                   "kP10Yellow", 22),
-           "nofail": ("WAVeS, without its failures",                      "kP10Yellow", 26),
-           "t0":     ("+ perfect t_{0}",                                  "kP10Brown",  34),
-           "ideal":  ("+ perfect t_{0} and jet time",                     "#1B7837",    20),
-           "oracle": ("Ceiling: veto every pileup tagging jet",           "#000000",    21)}
+    STY = {"none":   ("No veto: where we were",          "#7F7F7F",    25),
+           "waves":  ("WAVeS veto: where we are",        "kP10Yellow", 22),
+           "nofail": ("WAVeS, no failures",              "kP10Yellow", 26),
+           "t0":     ("+ perfect t_{0}",                 "kP10Brown",  34),
+           "ideal":  ("+ perfect jet-time assignment",   "#1B7837",    20),
+           "res":    ("+ perfect time resolution",       "kP10Blue",   23),
+           "eff":    ("+ perfect HGTD efficiency",       "#7B3294",    32),
+           "oracle": ("+ full acceptance: ceiling",      "#000000",    21)}
     absol, change, ex_abs, ex_chg = {}, {}, {}, {}
     for m, (vs, vb) in RUNGS.items():
         absol[m], change[m] = [], []
@@ -319,10 +331,10 @@ elif args.what == "money":
     label = "S: VBF H#rightarrowinv.,  B: Z(#rightarrowll)+jets"
     head = ["**All selected events: where we were, are, could be"]
     C.column_figure(args.out + "_yields", "S / #sqrt{B}  per m_{jj} column", absol, ex_abs, label + ",  3000 fb^{-1}", head,
-                    bcount, "B MC", EDG, STY, ["none", "waves", "nofail", "t0", "ideal", "oracle"], ref=None,
+                    bcount, "B MC", EDG, STY, ["none", "waves", "nofail", "t0", "ideal", "res", "eff", "oracle"], ref=None,
                     compact=True, count_parts=bp, sig_counts=(scount, sp))
     C.column_figure(args.out, "S/#sqrt{B} change vs no veto [%]", change, ex_chg, label, head + [ceil],
-                    bcount, "B MC", EDG, STY, ["waves", "nofail", "t0", "ideal"], ref=0.0, pct=True,
+                    bcount, "B MC", EDG, STY, ["waves", "nofail", "t0", "ideal", "res", "eff"], ref=0.0, pct=True,
                     compact=True, count_parts=bp, sig_counts=(scount, sp))
 
 else:   # cone
