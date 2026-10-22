@@ -252,8 +252,22 @@ elif args.what == "money":
                     pull = np.abs(e[f"{L}_{key}_t"] - e["t0_truth"]) / sg
                 v |= e[f"{L}_{lab}"] & (n >= 1) & (pull >= args.nsigma)
         return v
+    def jj_ideal(e):
+        """jet time compatibility (jet 1 vs jet 2, no t0) with the perfect-assignment jet times: both legs
+        labelled and timed (>= 1 track), vetoed when they differ by >= nsigma"""
+        t, sg, ok = {}, {}, {}
+        for L in "ab":
+            hs, pu = e[f"{L}_hs"], e[f"{L}_pu"]
+            n = np.where(hs, e[f"{L}_pure_hs_n"], np.where(pu, e[f"{L}_pure_pu_n"], 0))
+            t[L] = np.where(hs, e[f"{L}_pure_hs_t"], e[f"{L}_pure_pu_t"])
+            sg[L] = pcal(n) * np.where(hs, e[f"{L}_pure_hs_sig"], e[f"{L}_pure_pu_sig"])
+            ok[L] = (hs | pu) & (n >= 1)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            pull = np.abs(t["a"] - t["b"]) / np.sqrt(sg["a"] ** 2 + sg["b"] ** 2)
+        return ok["a"] & ok["b"] & (pull >= args.nsigma)
     oracle = lambda e: e["a_pu"] | e["b_pu"]
-    V = {r: dict(waves=d["v" + r]["waves"], t0=d["v" + r]["truth"], ideal=ideal(d[r]), oracle=oracle(d[r])) for r in "SB"}
+    V = {r: dict(waves=d["v" + r]["waves"], t0=d["v" + r]["truth"], ideal=ideal(d[r]), oracle=oracle(d[r]),
+                 jjideal=jj_ideal(d[r])) for r in "SB"}
     # between the ideal veto and the oracle: perfect time resolution (every pileup tagging jet with a timed
     # track in HGTD caught), then perfect HGTD timing efficiency (every one with a track in HGTD's range,
     # timed or not); what is left is HGTD's acceptance (pileup jets with no track in 2.38 < |eta| < 4.0)
@@ -279,10 +293,12 @@ elif args.what == "money":
         zid = Z(A["ideal"], Bv["ideal"], ms, mb)
         zor = Z(A["oracle"], Bv["oracle"], ms, mb)
         rung_t0 = Z(A["t0"], Bv["t0"], ms, mb)
+        zjj = Z(A["jjideal"], Bv["jjideal"], ms, mb)
         rows.append(dict(lab=lab, net=net, cor=cor, zt0=zt0, zid=zid, zor=zor, rung_t0=rung_t0, nB=int(mb.sum())))
         print(f"{lab:16s} where we are {net:+5.1f} | correct only {cor:+5.1f} (failures {cor - net:+4.1f}) | "
               f"+perfect t0 {zt0:+5.1f} ({zt0 - cor:+4.1f}) | +perfect jet time = ideal {zid:+5.1f} ({zid - zt0:+4.1f}) | "
-              f"oracle {zor:+5.1f} (irreducible {zor - zid:+4.1f}) | rung: truth t0 + real jet times {rung_t0:+5.1f} | {mb.sum()} B MC")
+              f"oracle {zor:+5.1f} (irreducible {zor - zid:+4.1f}) | rung: truth t0 + real jet times {rung_t0:+5.1f} | "
+              f"jet 1 vs jet 2, perfect assignment {zjj:+5.1f} | {mb.sum()} B MC")
     # ── the figures, in the style of the deck's m_jj-column plots (vbs_time_veto_common.column_figure):
     # absolute S/sqrt(B) at 3000 fb^-1 per column (left) and its change vs no veto (right), one dodged
     # marker per rung of the ladder, the case-stacked S + B MC count underneath
@@ -296,6 +312,7 @@ elif args.what == "money":
              "nofail": (nofail(V["S"]), nofail(V["B"])),
              "t0": (V["S"]["t0"], V["B"]["t0"]),
              "ideal": (V["S"]["ideal"], V["B"]["ideal"]),
+             "jjideal": (V["S"]["jjideal"], V["B"]["jjideal"]),
              "res": (V["S"]["res"], V["B"]["res"]),
              "eff": (V["S"]["eff"], V["B"]["eff"]),
              "oracle": (V["S"]["oracle"], V["B"]["oracle"])}
@@ -304,6 +321,7 @@ elif args.what == "money":
            "nofail": ("WAVeS, no failures",              "kP10Yellow", 26),
            "t0":     ("+ perfect t_{0}",                 "kP10Brown",  34),
            "ideal":  ("+ perfect jet-time assignment",   "#1B7837",    20),
+           "jjideal": ("jet 1 vs jet 2, perfect assignment", "#1B7837", 24),
            "res":    ("+ perfect time resolution",       "kP10Blue",   23),
            "eff":    ("+ perfect HGTD efficiency",       "#7B3294",    32),
            "oracle": ("+ full acceptance: ceiling",      "#000000",    21)}
@@ -334,10 +352,10 @@ elif args.what == "money":
     label = "S: VBF H#rightarrowinv.,  B: Z(#rightarrowll)+jets"
     head = ["**All selected events: where we were, are, could be"]
     C.column_figure(args.out + "_yields", "S / #sqrt{B}  per m_{jj} column", absol, ex_abs, label + ",  3000 fb^{-1}", head,
-                    bcount, "B MC", EDG, STY, ["none", "waves", "nofail", "t0", "ideal", "res", "eff", "oracle"], ref=None,
+                    bcount, "B MC", EDG, STY, ["none", "waves", "nofail", "t0", "ideal", "jjideal", "res", "eff", "oracle"], ref=None,
                     compact=True, count_parts=bp, sig_counts=(scount, sp))
     C.column_figure(args.out, "S/#sqrt{B} change vs no veto [%]", change, ex_chg, label, head + [ceil],
-                    bcount, "B MC", EDG, STY, ["waves", "nofail", "t0", "ideal", "res", "eff"], ref=0.0, pct=True,
+                    bcount, "B MC", EDG, STY, ["waves", "nofail", "t0", "ideal", "jjideal", "res", "eff"], ref=0.0, pct=True,
                     compact=True, count_parts=bp, sig_counts=(scount, sp))
 
 elif args.what == "puretime":
