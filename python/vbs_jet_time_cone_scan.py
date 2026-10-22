@@ -243,8 +243,8 @@ if dw in LEGS:
             for L, num, den, col, mk, ax, lab in [
                     (hs, hs["n"] >= args.min_trk, hs["inh"], "#2E9E4F", "o", axes[0, c], "hard-scatter jets (VBF)"),
                     (pu, pu["n"] >= args.min_trk, pu["inh"], "#555555", "s", axes[0, c], "pileup jets ($Z$+jets)"),
-                    (hs, hs["hsf"] < 0.5, hs["inh"] & (hs["n"] >= args.min_trk), "#B3231C", "D", axes[1, c], "mostly-pileup time cluster"),
-                    (hs, np.abs(hs["dt"]) > 60, hs["inh"] & (hs["n"] >= args.min_trk), "#E69F00", "v", axes[1, c], "$|t_{\\rm jet} - t_{\\rm HS}| > 60$ ps")]:
+                    (hs, hs["hsf"] < 0.5, hs["inh"] & (hs["n"] >= args.min_trk), "#B3231C", "D", axes[1, c], "timed mostly by pileup tracks"),
+                    (hs, np.abs(hs["dt"]) > 60, hs["inh"] & (hs["n"] >= args.min_trk), "#E69F00", "v", axes[1, c], "time wrong by $> 60$ ps")]:
                 v = np.array([frac(L["w"], num, den & inb(L, b)) if (den & inb(L, b)).sum() else (np.nan,) * 3 for b in range(len(edges) - 1)])
                 ax.errorbar(xs, v[:, 0], yerr=v[:, 1:].T, fmt=mk, ls=ls, color=col, mfc=mfc or col, ms=6.5, capsize=2, lw=1.6,
                             label=f"{lab}, $\\Delta R < {dr:.1f}$")
@@ -255,7 +255,7 @@ if dw in LEGS:
             for a in axes[:, c]: a.axvspan(2.38, 4.0, color="#DDDDDD", alpha=0.5, lw=0)
         axes[1, c].set_xlabel(xlab)
         for a in axes[:, c]: a.grid(alpha=0.3)
-    axes[0, 0].set_ylabel("of the jets in HGTD:\nwith a jet time [%]"); axes[1, 0].set_ylabel("of the timed\nhard-scatter jets [%]")
+    axes[0, 0].set_ylabel("of the jets in HGTD:\nwith a jet time [%]"); axes[1, 0].set_ylabel("timed hard-scatter jets\nwith a bad time [%]")
     for a in axes[0]: a.set_ylim(0, 105)
     top = np.nanmax([l.get_ydata().max() for a in axes[1] for l in a.get_lines() if len(l.get_ydata())])
     for a in axes[1]: a.set_ylim(0, 1.3 * top)
