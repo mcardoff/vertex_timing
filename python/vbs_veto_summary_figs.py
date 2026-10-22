@@ -272,43 +272,58 @@ elif args.what == "money":
         print(f"{lab:16s} where we are {net:+5.1f} | correct only {cor:+5.1f} (failures {cor - net:+4.1f}) | "
               f"+perfect t0 {zt0:+5.1f} ({zt0 - cor:+4.1f}) | +perfect jet time = ideal {zid:+5.1f} ({zid - zt0:+4.1f}) | "
               f"oracle {zor:+5.1f} (irreducible {zor - zid:+4.1f}) | rung: truth t0 + real jet times {rung_t0:+5.1f} | {mb.sum()} B MC")
-    # ── the figure: one stacked bar per column, segments from level to level; the ladder as markers
-    SEG = [("gain achieved (WAVeS veto)", "#2E9E4F", None, lambda r: (0.0, r["net"])),
-           ("our failures: vetoes a perfect veto would not make", "#C0392B", "//", lambda r: (r["net"], r["cor"])),
-           ("reducible: a perfect $t_0$ or a perfect jet time catches it", "#F2C53D", None, lambda r: (r["cor"], r["zid"])),
-           ("irreducible: pileup HGTD cannot see, or in time", "#B8B8B8", None, lambda r: (r["zid"], r["zor"]))]
-    YMAX = 62.0
-    fig, ax = plt.subplots(figsize=(12, 6.4))
-    xs = np.arange(len(rows)); wbar = 0.5
-    for lab, col, hatch, f in SEG:
-        for x, r in zip(xs, rows):
-            lo, hi = f(r)
-            ax.bar(x, hi - lo, bottom=lo, width=wbar, color=col, edgecolor="black", lw=0.8, hatch=hatch,
-                   label=lab if x == 0 else None)
-    for x, r in zip(xs, rows):
-        ax.plot([x - wbar / 2 - 0.05, x + wbar / 2 + 0.05], [r["net"]] * 2, color="black", lw=2.4,
-                label="where we are: WAVeS" if x == 0 else None)
-        ax.plot(x + wbar / 2 + 0.11, r["rung_t0"], "D", color="#1F4E9A", ms=8, mec="white",
-                label="+ perfect $t_0$" if x == 0 else None)
-        ax.plot(x + wbar / 2 + 0.11, r["zid"], "*", color="#7A5A00", ms=14, mec="white",
-                label="+ perfect $t_0$ and jet time" if x == 0 else None)
-        if r["zor"] > YMAX:   # off scale: say so inside the top of the bar
-            ax.text(x, YMAX - 1.5, f"ceiling {r['zor']:+.0f}%\n(off scale) $\\uparrow$", ha="center", va="top",
-                    fontsize=10, fontweight="bold")
-        else:
-            ax.text(x, r["zor"] + 0.8, f"ceiling {r['zor']:+.0f}%", ha="center", va="bottom", fontsize=10, fontweight="bold")
-    ax.axhline(0, color="black", lw=1.0)
-    ax.set_xticks(xs)
-    ax.set_xticklabels([f"{r['lab']}\n({r['nB']:,} $Z$+jets MC)\nnow {r['net']:+.1f}%\nperfect $t_0$: {r['rung_t0']:+.1f}%\n"
-                        f"+ perfect jet time: {r['zid']:+.1f}%" for r in rows], fontsize=9.5)
-    ax.axvline(len(rows) - 1.5, color="#888888", lw=1.0, ls="--")
-    ax.set_ylabel("$S/\\sqrt{B}$ change vs no veto [%]  (0: where we were)")
-    ax.set_xlim(-0.55, len(rows) - 0.4)
-    ax.set_ylim(min(-3.0, min(r["net"] for r in rows) - 2), YMAX)
-    ax.legend(fontsize=9.5, frameon=False, loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=3)
-    ax.grid(alpha=0.25, axis="y")
-    ax.text(1.0, 1.0, "ATLAS Simulation Internal", transform=ax.transAxes, ha="right", va="bottom", fontsize=9, color="#555555")
-    save(fig)
+    # ── the figures, in the style of the deck's m_jj-column plots (vbs_time_veto_common.column_figure):
+    # absolute S/sqrt(B) at 3000 fb^-1 per column (left) and its change vs no veto (right), one dodged
+    # marker per rung of the ladder, the case-stacked S + B MC count underneath
+    R = C.setup_root(args.out)
+    EDG = np.array([200, 1000, 2000, 4000.])
+    ks = 3000e3 * C.NORM["vbf"]["xs_pb"] / C.NORM["vbf"]["sumw"]
+    kb = 3000e3 * C.NORM["zjets"]["xs_pb"] / C.NORM["zjets"]["sumw"]
+    nofail = lambda X: X["waves"] & X["ideal"]
+    RUNGS = {"none": (np.zeros(len(ws), bool), np.zeros(len(wb), bool)),
+             "waves": (V["S"]["waves"], V["B"]["waves"]),
+             "nofail": (nofail(V["S"]), nofail(V["B"])),
+             "t0": (V["S"]["t0"], V["B"]["t0"]),
+             "ideal": (V["S"]["ideal"], V["B"]["ideal"]),
+             "oracle": (V["S"]["oracle"], V["B"]["oracle"])}
+    STY = {"none":   ("No timing veto: where we were",                    "#7F7F7F",    25),
+           "waves":  ("WAVeS t_{0} veto: where we are",                   "kP10Yellow", 22),
+           "nofail": ("WAVeS, without its failures",                      "kP10Yellow", 26),
+           "t0":     ("+ perfect t_{0}",                                  "kP10Brown",  34),
+           "ideal":  ("+ perfect t_{0} and jet time",                     "#1B7837",    20),
+           "oracle": ("Ceiling: veto every pileup tagging jet",           "#000000",    21)}
+    absol, change, ex_abs, ex_chg = {}, {}, {}, {}
+    for m, (vs, vb) in RUNGS.items():
+        absol[m], change[m] = [], []
+        for k in range(len(EDG) - 1):
+            ms, mb = cs == k, cb == k
+            S_ = ks * ws[ms & ~vs].sum(); dS = ks * np.sqrt((ws[ms & ~vs] ** 2).sum())
+            B_ = kb * wb[mb & ~vb].sum(); dB = kb * np.sqrt((wb[mb & ~vb] ** 2).sum())
+            z = S_ / np.sqrt(B_)
+            absol[m].append((z, z * np.hypot(dS / S_, 0.5 * dB / B_), z * np.hypot(dS / S_, 0.5 * dB / B_), 0))
+            es, ses, _, _ = C.eff(ws[ms], ~vs[ms]); eb, seb, _, _ = C.eff(wb[mb], ~vb[mb])
+            r = es / np.sqrt(eb); er = r * np.hypot(ses / es, 0.5 * seb / eb)
+            change[m].append((100 * (r - 1), 100 * er, 100 * er, 0))
+        Sall, Ball = ks * ws[~vs].sum(), kb * wb[~vb].sum()
+        ex_abs[m] = f"  ({Sall / np.sqrt(Ball):.0f})"
+        ex_chg[m] = f"  ({100 * ((ws[~vs].sum() / ws.sum()) / np.sqrt(wb[~vb].sum() / wb.sum()) - 1):+.1f}%)"
+    ceil = "ceiling (veto every pileup tagging jet): " + ", ".join(f"{v[0]:+.0f}%" for v in change["oracle"][:3]) \
+        + f";  all events {ex_chg['oracle'].strip()[1:-1]}"
+    # the S + B MC panel: each column's MC events by case
+    def parts(e, col):
+        n = nin(e)
+        return [(lab, cc, [int(((n == nn) & (col == k)).sum()) for k in range(len(EDG) - 1)])
+                for lab, cc, nn in [("Forward-Forward", "#3F8FFF", 2), ("Central-Forward", "#B3231C", 1), ("Other", "#CFCFCF", 0)]]
+    sp, bp = parts(S, cs), parts(B, cb)
+    scount = [sum(x[2][k] for x in sp) for k in range(3)]; bcount = [sum(x[2][k] for x in bp) for k in range(3)]
+    label = "S: VBF H#rightarrowinv.,  B: Z(#rightarrowll)+jets"
+    head = ["**All selected events: where we were, are, could be"]
+    C.column_figure(args.out + "_yields", "S / #sqrt{B}  per m_{jj} column", absol, ex_abs, label + ",  3000 fb^{-1}", head,
+                    bcount, "B MC", EDG, STY, ["none", "waves", "nofail", "t0", "ideal", "oracle"], ref=None,
+                    compact=True, count_parts=bp, sig_counts=(scount, sp))
+    C.column_figure(args.out, "S/#sqrt{B} change vs no veto [%]", change, ex_chg, label, head + [ceil],
+                    bcount, "B MC", EDG, STY, ["waves", "nofail", "t0", "ideal"], ref=0.0, pct=True,
+                    compact=True, count_parts=bp, sig_counts=(scount, sp))
 
 else:   # cone
     if not (args.sig2 and args.bkg2): raise SystemExit("cone needs --sig2 and --bkg2")
