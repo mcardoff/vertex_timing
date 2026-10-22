@@ -18,7 +18,7 @@ jet-time calibration from the signal's HS legs for both samples.
           (WAVeS), our failures (WAVeS vetoes an ideal veto would not make), the loss reducible by
           a perfect t0 and by a perfect jet time, and the irreducible loss. The ideal veto: the
           true t0 and pure jet times (util/vbs_time_veto --pure-times: a hard-scatter jet timed by
-          its own tracks, a pileup jet by its own collision's; unlabelled jets untested). Needs the
+          its hard-scatter tracks, a pileup jet by its non-hard-scatter tracks; unlabelled jets untested). Needs the
           _pure trees.
   puretime  the perfect-assignment jet times (--pure-times trees) against the true t_HS: hard-scatter
           tagging jets (their hard-scatter tracks) and pileup tagging jets (their own, non-HS
@@ -361,8 +361,8 @@ elif args.what == "puretime":
     fig, ax = plt.subplots(figsize=(8.6, 5.6))
     bins = np.linspace(-600, 600, 121)
     for e, lab, key, nm, col, fill in [(S_all, "hs", "pure_hs", "hard-scatter tagging jets (VBF): their hard-scatter tracks", "#2E9E4F", True),
-                                       (B_all, "pu", "pure_pu", "pileup tagging jets ($Z$+jets): their own tracks", "#555555", False),
-                                       (S_all, "pu", "pure_pu", "pileup tagging jets (VBF): their own tracks", "#999999", False)]:
+                                       (B_all, "pu", "pure_pu", "pileup tagging jets ($Z$+jets): their non-hard-scatter tracks", "#555555", False),
+                                       (S_all, "pu", "pure_pu", "pileup tagging jets (VBF): their non-hard-scatter tracks", "#999999", False)]:
         dt, pull, n, inh = series(e, lab, key)
         ok = n >= 1
         h, _ = np.histogram(np.clip(dt[ok], -599, 599), bins=bins)
