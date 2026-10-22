@@ -20,6 +20,13 @@ jet-time calibration from the signal's HS legs for both samples.
           true t0 and pure jet times (util/vbs_time_veto --pure-times: a hard-scatter jet timed by
           its hard-scatter tracks, a pileup jet by its non-hard-scatter tracks; unlabelled jets untested). Needs the
           _pure trees.
+  steps   the money plot's ladder taken apart (all events; same trees and definitions as money):
+          <out>_waterfall  where the S/sqrt(B) gain comes from, step by step, with the perfect
+                           jet-time assignment split into its pileup-jet / hard-scatter-jet /
+                           unlabelled-jet parts and the ceiling into the hard-scatter false vetoes
+                           it undoes and the acceptance; signal and Z+jets kept underneath
+          <out>_pu_legs    every pileup tagging jet by the step that catches it
+          <out>_failures   WAVeS's failures (vetoes the perfect veto would not make) by cause and pair
   puretime  the perfect-assignment jet times (--pure-times trees) against the true t_HS: hard-scatter
           tagging jets (their hard-scatter tracks) and pileup tagging jets (their own, non-HS
           tracks), all selected events -- what the "+ perfect jet-time assignment" rung tests
@@ -39,7 +46,7 @@ import matplotlib.pyplot as plt
 import vbs_time_veto_common as C
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument("what", choices=["cases", "cf", "shares", "cone", "budget", "money", "puretime"])
+ap.add_argument("what", choices=["cases", "cf", "shares", "cone", "budget", "money", "steps", "puretime"])
 ap.add_argument("--sig", required=True)
 ap.add_argument("--bkg", required=True)
 ap.add_argument("--sig2", help="cone: the second cone's signal tree")
@@ -232,7 +239,7 @@ elif args.what == "budget":
         prev = g
         if "true t0" in lab: truth = g
 
-elif args.what == "money":
+elif args.what in ("money", "steps"):
     if "a_pure_hs_n" not in S: raise SystemExit("money needs the --pure-times trees (*_pure_vbs_time_veto.root)")
     S_all = load(args.sig, "met_truth")[1]
     # the pure times' sigma, calibrated like f(n): on the signal's HS legs, against the true t0
@@ -299,6 +306,146 @@ elif args.what == "money":
               f"+perfect t0 {zt0:+5.1f} ({zt0 - cor:+4.1f}) | +perfect jet time = ideal {zid:+5.1f} ({zid - zt0:+4.1f}) | "
               f"oracle {zor:+5.1f} (irreducible {zor - zid:+4.1f}) | rung: truth t0 + real jet times {rung_t0:+5.1f} | "
               f"jet 1 vs jet 2, perfect assignment {zjj:+5.1f} | {mb.sum()} B MC")
+    if args.what == "steps":
+        P = lambda w, m: 100 * w[m].sum() / w.sum()
+        Zc = lambda vs, vb: 100 * ((ws[~vs].sum() / ws.sum()) / np.sqrt(wb[~vb].sum() / wb.sum()) - 1)
+        cal = C.measure(S_all, True, "signal HS legs")
+        def leg_veto(e, L, lab_mask, pure_key=None):
+            """leg L vetoed against the true t0: by its perfect-assignment time (pure_key) or as used"""
+            if pure_key:
+                n = e[f"{L}_{pure_key}_n"]; sg = pcal(n) * e[f"{L}_{pure_key}_sig"]; t = e[f"{L}_{pure_key}_t"]; ok = n >= 1
+            else:
+                n = e[f"{L}_core_n"]; sg = cal(n) * e[f"{L}_core_sig"]; t = e[f"{L}_core_t"]; ok = n >= args.min_trk
+            with np.errstate(divide="ignore", invalid="ignore"):
+                return lab_mask & ok & (np.abs(t - e["t0_truth"]) / sg >= args.nsigma)
+        def variant(e, hs_pure, pu_pure, unl):
+            v = np.zeros(len(e["weight"]), bool)
+            for L in "ab":
+                hs, pu = e[f"{L}_hs"], e[f"{L}_pu"]
+                v |= leg_veto(e, L, hs, "pure_hs" if hs_pure else None)
+                v |= leg_veto(e, L, pu, "pure_pu" if pu_pure else None)
+                if unl: v |= leg_veto(e, L, ~hs & ~pu)
+            return v
+        has_pu = lambda e: e["a_pu"] | e["b_pu"]
+        # the main chain, its sub-steps marked: (label, colour, rung it ends, S vetoes, B vetoes)
+        CHAIN = [("WAVeS\nveto", "#FFA90E", "waves", V["S"]["waves"], V["B"]["waves"]),
+                 ("+ perfect\n$t_0$", "#A96B59", "t0", V["S"]["t0"], V["B"]["t0"]),
+                 ("pileup\njets:\nperfect\ntimes", "#1B7837", None, variant(S, False, True, True), variant(B, False, True, True)),
+                 ("hard-\nscatter\njets:\nperfect\ntimes", "#5AAE61", None, variant(S, True, True, True), variant(B, True, True, True)),
+                 ("unlabelled\njets: no\nlonger\ntested", "#A6DBA0", "ideal", V["S"]["ideal"], V["B"]["ideal"]),
+                 ("+ perfect\nresolution", "#3F90DA", "res", V["S"]["res"], V["B"]["res"]),
+                 ("+ perfect\nHGTD\nefficiency", "#7B3294", "eff", V["S"]["eff"], V["B"]["eff"]),
+                 ("no hard-\nscatter\nfalse\nvetoes", "#717581", None, V["S"]["eff"] & has_pu(S), V["B"]["eff"] & has_pu(B)),
+                 ("+ full\naccept-\nance:\nceiling", "#000000", "oracle", V["S"]["oracle"], V["B"]["oracle"])]
+        z = [0.0] + [Zc(vs, vb) for *_, vs, vb in CHAIN]
+        kS = [100.0] + [100 - P(ws, vs) for *_, vs, vb in CHAIN]; kB = [100.0] + [100 - P(wb, vb) for *_, vs, vb in CHAIN]
+        for (lab, *_), z0, z1, s_, b_ in zip(CHAIN, z[:-1], z[1:], kS[1:], kB[1:]):
+            print(f"{lab.replace(chr(10), ' '):34s} {z0:+5.1f} -> {z1:+5.1f}  ({z1 - z0:+5.1f})   VBF kept {s_:5.1f}%  Z+jets kept {b_:5.1f}%")
+        # figure 1: the waterfall
+        fig, (a0, a1) = plt.subplots(2, 1, figsize=(12, 7.6), sharex=True, gridspec_kw=dict(height_ratios=[1.5, 1], hspace=0.06))
+        xs = np.arange(len(CHAIN))
+        for i, ((lab, col, rung, *_), z0, z1) in enumerate(zip(CHAIN, z[:-1], z[1:])):
+            a0.bar(i, z1 - z0, bottom=z0, color=col, width=0.62, edgecolor="black" if col != "#000000" else "#000000", lw=0.6,
+                   alpha=0.95 if rung else 0.7, hatch=None if rung else "//")
+            a0.text(i, max(z0, z1) + 0.6, f"{z1 - z0:+.1f}" + (f"\n= {z1:+.1f}%" if rung else ""), ha="center", va="bottom",
+                    fontsize=12, fontweight="bold", linespacing=1.15)
+            if rung: a0.plot([i - 0.42, i + 0.42], [z1, z1], color="black", lw=1.4)
+            if i + 1 < len(CHAIN): a0.plot([i + 0.31, i + 0.69], [z1, z1], color="#888888", lw=0.8, ls=":")
+        a0.axhline(0, color="#888888", lw=0.8)
+        a0.set_ylabel("$S/\\sqrt{B}$ change vs no veto [%]"); a0.set_ylim(min(z) - 2, max(z) + 7)
+        a0.text(0.01, 0.97, "solid: a step of the money plot (the line: where it ends); hatched: a part of one, measured here\n"
+                "side branches (WAVeS no failures, jet 1 vs jet 2) are not in this chain", transform=a0.transAxes, va="top", fontsize=9.5, color="#444444")
+        a0.grid(alpha=0.3, axis="y")
+        a1.plot(np.arange(-1, len(CHAIN)), kB, "s-", color="#555555", ms=7, lw=1.6, label="$Z$+jets kept")
+        a1.plot(np.arange(-1, len(CHAIN)), kS, "o-", color="#2E9E4F", mfc="white", ms=7, lw=1.6, label="VBF kept")
+        for i in range(len(CHAIN)):
+            a1.text(i, kS[i + 1] + 2.5, f"{kS[i + 1]:.0f}", ha="center", fontsize=10.5, color="#2E9E4F")
+            a1.text(i, kB[i + 1] - 8.5, f"{kB[i + 1]:.0f}", ha="center", fontsize=10.5, color="#555555")
+        a1.set_ylabel("kept [%]"); a1.set_ylim(20, 108); a1.legend(fontsize=10, frameon=False, loc="lower left"); a1.grid(alpha=0.3, axis="y")
+        a1.set_xticks(np.arange(-1, len(CHAIN))); a1.set_xticklabels(["no\nveto"] + [c[0] for c in CHAIN], fontsize=11)
+        a1.set_xlim(-1.4, len(CHAIN) - 0.5)
+        fig.text(0.5, -0.07, "all selected events, recoil > 100 GeV, JVT + fJVT loose; perfect steps: true $t_{\\rm HS}$, a jet timed by its own-origin tracks "
+                 "(hard-scatter / non-hard-scatter)   ATLAS Simulation Internal", ha="center", fontsize=9, color="#555555")
+        args.out, base = args.out + "_waterfall", args.out
+        save(fig); args.out = base
+        # figure 2: every pileup tagging jet by the step that catches it
+        fig, ax = plt.subplots(figsize=(11, 3.4))
+        CATS = [("caught by perfect\nassignment ($\\geq 3\\sigma$)", "#1B7837"), ("in time ($< 3\\sigma$):\nresolution step", "#3F90DA"),
+                ("tracks in HGTD, none\ntimed: efficiency step", "#7B3294"), ("no track in HGTD,\naxis $|\\eta| < 2.4$", "#555555"),
+                ("no track in HGTD,\naxis $|\\eta| > 2.4$", "#AAAAAA")]
+        for row, (r, e, nm) in enumerate((("B", B, "$Z$+jets"), ("S", S, "VBF $H\\to$inv."))):
+            w = np.concatenate([e["weight"][e[f"{L}_pu"]] for L in "ab"]).astype(float)
+            g = lambda k: np.concatenate([e[f"{L}_{k}"][e[f"{L}_pu"]] for L in "ab"])
+            n, hn, eta = g("pure_pu_n"), g("hgtd_n"), np.abs(g("eta"))
+            with np.errstate(divide="ignore", invalid="ignore"):
+                pull = np.abs(g("pure_pu_t") - np.concatenate([e["t0_truth"][e[f"{L}_pu"]] for L in "ab"])) / (pcal(n) * g("pure_pu_sig"))
+            masks = [(n >= 1) & (pull >= 3), (n >= 1) & (pull < 3), (n < 1) & (hn >= 1), (n < 1) & (hn < 1) & (eta < 2.4), (n < 1) & (hn < 1) & (eta >= 2.4)]
+            left = 0.0
+            for (lab, col), m in zip(CATS, masks):
+                f = 100 * w[m].sum() / w.sum()
+                ax.barh(row, f, left=left, color=col, height=0.6, label=lab if row == 0 else None, edgecolor="white")
+                if f > 3: ax.text(left + f / 2, row, f"{f:.0f}%", ha="center", va="center", color="white", fontsize=11, fontweight="bold")
+                left += f
+            beyond = (n < 1) & (hn < 1) & (eta >= 2.4)
+            print(f"{nm}: pileup legs " + ", ".join(f"{100 * w[m].sum() / w.sum():.1f}%" for m in masks)
+                  + f";  of 'no track, |eta| > 2.4': axis |eta| > 4.0 {100 * w[beyond & (eta > 4.0)].sum() / max(w[beyond].sum(), 1e-12):.0f}%")
+        ax.set_yticks([0, 1]); ax.set_yticklabels(["$Z(\\to\\ell\\ell)$+jets", "VBF $H\\to$inv."]); ax.set_xlim(0, 100)
+        ax.set_xlabel("pileup tagging jets [%]")
+        ax.legend(fontsize=9, frameon=False, ncol=5, loc="lower center", bbox_to_anchor=(0.5, 1.0))
+        fig.text(0.5, -0.08, "every truth-pileup tagging jet, all selected events: what its perfect-assignment time (non-hard-scatter tracks) does against $t_{\\rm HS}$   "
+                 "ATLAS Simulation Internal", ha="center", fontsize=9, color="#555555")
+        args.out = base + "_pu_legs"; save(fig); args.out = base
+        # figure 2b: in-time pileup -- the pileup jets' perfect-assignment times against t_HS, linear, with the
+        # 3-sigma window and the spread two independent collisions (175 ps each) would give
+        fig, ax = plt.subplots(figsize=(8.6, 5.0))
+        bins = np.linspace(-800, 800, 81); xc = 0.5 * (bins[1:] + bins[:-1])
+        sig_med = []
+        for r, e, nm, col in (("B", B, "pileup tagging jets ($Z$+jets)", "#555555"), ("S", S, "pileup tagging jets (VBF)", "#AAAAAA")):
+            g = lambda k: np.concatenate([e[f"{L}_{k}"][e[f"{L}_pu"]] for L in "ab"])
+            n = g("pure_pu_n"); m = n >= 1
+            dt = (g("pure_pu_t") - np.concatenate([e["t0_truth"][e[f"{L}_pu"]] for L in "ab"]))[m]
+            sg = (pcal(n) * g("pure_pu_sig"))[m]
+            inw = 100 * np.mean(np.abs(dt) < 3 * sg); sig_med.append(np.median(sg))
+            h, _ = np.histogram(dt, bins=bins); h = h / m.sum() / (bins[1] - bins[0]) * 100
+            ax.step(xc, h, where="mid", color=col, lw=2, label=f"{nm}: {inw:.0f}% within 3$\\sigma$ of $t_{{\\rm HS}}$")
+        s3 = 3 * np.mean(sig_med)
+        ax.axvspan(-s3, s3, color="#3F90DA", alpha=0.18, lw=0, label=f"$\\pm 3\\sigma$ (median $\\sigma$ {np.mean(sig_med):.0f} ps): in time, cannot be told apart")
+        sp = np.sqrt(2) * 175.0
+        ax.plot(xc, 100 * np.exp(-0.5 * (xc / sp) ** 2) / (np.sqrt(2 * np.pi) * sp), color="#B3231C", lw=1.4, ls="--",
+                label=f"two independent collisions, 175 ps each: Gaussian $\\sigma$ = {sp:.0f} ps")
+        ax.set_xlim(-800, 800); ax.set_ylim(0, 0.33)
+        ax.set_xlabel("perfect-assignment pileup-jet time $-\\ t_{\\rm HS}^{\\rm truth}$ [ps]")
+        ax.set_ylabel("pileup jets [% per ps]")
+        ax.legend(fontsize=9, frameon=False, loc="upper left")
+        ax.grid(alpha=0.25)
+        ax.text(1.0, 1.01, "all selected events   ATLAS Simulation Internal", transform=ax.transAxes, ha="right", va="bottom", fontsize=9, color="#555555")
+        args.out = base + "_intime"; save(fig); args.out = base
+        # figure 3: WAVeS's failures
+        fig, axes = plt.subplots(1, 2, figsize=(11, 3.2), sharey=True, gridspec_kw=dict(wspace=0.08))
+        for row, (r, e, w, nm) in enumerate((("B", B, wb, "$Z(\\to\\ell\\ell)$+jets"), ("S", S, ws, "VBF $H\\to$inv."))):
+            X = V[r]; f = X["waves"] & ~X["ideal"]
+            hs2 = e["a_hs"] & e["b_hs"]; pu = has_pu(e); un = ~hs2 & ~pu
+            for ax, parts in ((axes[0], [("wrong $t_0$ (the true $t_0$ keeps it)", "#A96B59", f & ~X["t0"]),
+                                         ("jet time (the true $t_0$ still vetoes it)", "#1B7837", f & X["t0"])]),
+                              (axes[1], [("both jets hard scatter", "#2E9E4F", f & hs2), ("a pileup jet, in time or untimed", "#555555", f & pu),
+                                         ("an unlabelled jet", "#BBBBBB", f & un)])):
+                left = 0.0
+                for lab, col, m in parts:
+                    v = P(w, m)
+                    ax.barh(row, v, left=left, color=col, height=0.6, label=lab if row == 0 else None, edgecolor="white")
+                    if v > 0.85: ax.text(left + v / 2, row, f"{v:.1f}", ha="center", va="center", color="white", fontsize=10.5, fontweight="bold")
+                    left += v
+            share = 100 * w[f].sum() / w[X["waves"]].sum()
+            axes[1].text(left + 0.2, row, f"{P(w, f):.1f}% of the events\n= {share:.0f}% of WAVeS's vetoes", va="center", fontsize=9.5)
+        axes[0].set_yticks([0, 1]); axes[0].set_yticklabels(["$Z(\\to\\ell\\ell)$+jets", "VBF $H\\to$inv."])
+        axes[0].set_title("by cause", fontsize=11); axes[1].set_title("by the tagging pair", fontsize=11)
+        for ax in axes:
+            ax.set_xlabel("WAVeS failures [% of all events]"); ax.set_xlim(0, 10.5)
+            ax.legend(fontsize=9, frameon=False, loc="upper center", bbox_to_anchor=(0.5, -0.27), ncol=1)
+        fig.text(0.5, 1.02, "a failure: WAVeS vetoes an event that the perfect veto (true $t_{\\rm HS}$, perfect jet-time assignment) keeps   "
+                 "ATLAS Simulation Internal", ha="center", fontsize=9.5, color="#555555")
+        args.out = base + "_failures"; save(fig); args.out = base
+        raise SystemExit(0)
     # ── the figures, in the style of the deck's m_jj-column plots (vbs_time_veto_common.column_figure):
     # absolute S/sqrt(B) at 3000 fb^-1 per column (left) and its change vs no veto (right), one dodged
     # marker per rung of the ladder, the case-stacked S + B MC count underneath
