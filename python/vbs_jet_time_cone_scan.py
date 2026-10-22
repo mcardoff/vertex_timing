@@ -17,6 +17,8 @@ Two figures:
               dR < 0.2, with a paired bootstrap error -- every cone sees the SAME events (the
               cone does not touch the selection), so the difference is far better measured
               than either point.
+  <out>_where --ref against --where (default 0.4) in bins of the jet's |eta| and pT: where the wider
+              cone adds jet times (top) and where it adds pileup times (bottom).
 Each cone's jet-time sigma calibration f(n) is measured on its own signal HS legs, as in the deck.
 
     cd python && PYTHONNOUSERSITE=1 PYTHONPATH=/opt/homebrew/Cellar/root/6.40.04/lib/root \\
@@ -39,6 +41,7 @@ ap.add_argument("--ref", type=float, default=0.2, help="the default cone (untagg
 ap.add_argument("--min-trk", type=int, default=2)
 ap.add_argument("--nsigma", type=float, default=3.0)
 ap.add_argument("--nboot", type=int, default=200)
+ap.add_argument("--where", default="0.4", help="the cone compared with --ref in |eta| and pT bins (<out>_where)")
 ap.add_argument("--out", required=True)
 args = ap.parse_args()
 C.ROOT = ROOT
@@ -79,7 +82,7 @@ def vetoes(e, cal):
 def legs(e, lab):
     w = np.concatenate([e["weight"][e[f"{L}_{lab}"]] for L in "ab"]).astype(float)
     g = lambda k: np.concatenate([e[f"{L}_{k}"][e[f"{L}_{lab}"]] for L in "ab"])
-    return dict(w=w, inh=g("hgtd_ntimed") >= 1, n=g("core_n"), hsf=g("core_hsfrac"),
+    return dict(w=w, inh=g("hgtd_ntimed") >= 1, n=g("core_n"), hsf=g("core_hsfrac"), aeta=np.abs(g("eta")), pt=g("pt"),
                 dt=g("core_t") - np.concatenate([e["t0_truth"][e[f"{L}_{lab}"]] for L in "ab"]))
 
 
@@ -89,7 +92,7 @@ def frac(w, num, den):
 
 
 # ── per cone: the jet-time figures and the vetoes ──
-J, V, KEYS = {}, {}, None
+J, V, KEYS, LEGS = {}, {}, None, {}
 for dr in CONES:
     ps, pb = path("vbf", dr), path("zjets", dr)
     if not (os.path.exists(ps) and os.path.exists(pb)):
@@ -104,6 +107,7 @@ for dr in CONES:
     hs, pu = legs(S_all, "hs"), legs(B_all, "pu")
     tm = hs["n"] >= args.min_trk
     good = tm & (np.abs(hs["dt"]) < 60)
+    LEGS[dr] = (hs, pu)
     J[dr] = dict(hs_timed=frac(hs["w"], tm, hs["inh"]), pu_timed=frac(pu["w"], pu["n"] >= args.min_trk, pu["inh"]),
                  hs_core=frac(hs["w"], good, hs["inh"]), hs_mostlypu=frac(hs["w"], hs["hsf"] < 0.5, hs["inh"] & tm),
                  hs_tail=frac(hs["w"], np.abs(hs["dt"]) > 60, hs["inh"] & tm),
@@ -224,3 +228,45 @@ a2.text(0.02, 0.96, "paired bootstrap: the same events\nat every cone; each case
 finish(fig, (a0, a1, a2), "VBF $H\\to$inv. against $Z(\\to\\ell\\ell)$+jets, JVT + fJVT loose, recoil > 100 GeV, 3$\\sigma$, all events unless labelled\n"
        + SUB + "   " + FOOT)
 save(fig, args.out + "_veto")
+
+# ── figure 3: where the wider cone acts -- --ref against --where, in |eta| and pT ──
+dw = float(args.where)
+if dw in LEGS:
+    XB = [("aeta", "tagging-jet axis $|\\eta|$", np.array([2.0, 2.4, 2.8, 3.2, 3.6, 4.0, 4.4]), False),
+          ("pt", "tagging-jet $p_T$ [GeV]", np.array([30, 40, 60, 100, 200, 1e9]), True)]
+    fig, axes = plt.subplots(2, 2, figsize=(11, 7.4), sharex="col", gridspec_kw=dict(hspace=0.08, wspace=0.2))
+    for c, (key, xlab, edges, cat) in enumerate(XB):
+        xs = np.arange(len(edges) - 1) if cat else 0.5 * (edges[1:] + edges[:-1])
+        for dr, ls, mfc in [(args.ref, "-", None), (dw, "--", "white")]:
+            hs, pu = LEGS[dr]
+            inb = lambda L, b: (L[key] >= edges[b]) & (L[key] < edges[b + 1])
+            for L, num, den, col, mk, ax, lab in [
+                    (hs, hs["n"] >= args.min_trk, hs["inh"], "#2E9E4F", "o", axes[0, c], "hard-scatter jets (VBF)"),
+                    (pu, pu["n"] >= args.min_trk, pu["inh"], "#555555", "s", axes[0, c], "pileup jets ($Z$+jets)"),
+                    (hs, hs["hsf"] < 0.5, hs["inh"] & (hs["n"] >= args.min_trk), "#B3231C", "D", axes[1, c], "mostly-pileup time cluster"),
+                    (hs, np.abs(hs["dt"]) > 60, hs["inh"] & (hs["n"] >= args.min_trk), "#E69F00", "v", axes[1, c], "$|t_{\\rm jet} - t_{\\rm HS}| > 60$ ps")]:
+                v = np.array([frac(L["w"], num, den & inb(L, b)) if (den & inb(L, b)).sum() else (np.nan,) * 3 for b in range(len(edges) - 1)])
+                ax.errorbar(xs, v[:, 0], yerr=v[:, 1:].T, fmt=mk, ls=ls, color=col, mfc=mfc or col, ms=6.5, capsize=2, lw=1.6,
+                            label=f"{lab}, $\\Delta R < {dr:.1f}$")
+        if cat:
+            axes[1, c].set_xticks(xs)
+            axes[1, c].set_xticklabels([f"{edges[b]:.0f}-{edges[b + 1]:.0f}" if edges[b + 1] < 1e8 else f"> {edges[b]:.0f}" for b in range(len(edges) - 1)])
+        else:
+            for a in axes[:, c]: a.axvspan(2.38, 4.0, color="#DDDDDD", alpha=0.5, lw=0)
+        axes[1, c].set_xlabel(xlab)
+        for a in axes[:, c]: a.grid(alpha=0.3)
+    axes[0, 0].set_ylabel("of the jets in HGTD:\nwith a jet time [%]"); axes[1, 0].set_ylabel("of the timed\nhard-scatter jets [%]")
+    for a in axes[0]: a.set_ylim(0, 105)
+    top = np.nanmax([l.get_ydata().max() for a in axes[1] for l in a.get_lines() if len(l.get_ydata())])
+    for a in axes[1]: a.set_ylim(0, 1.3 * top)
+    axes[0, 1].legend(fontsize=9, frameon=False, loc="lower right")
+    axes[1, 1].legend(fontsize=9, frameon=False, loc="upper right", ncol=1)
+    fig.text(0.5, 0.0, f"truth-matched tagging jets with $\\geq$1 timed track in HGTD, all selected events; solid $\\Delta R < {args.ref:.1f}$, "
+             f"dashed $\\Delta R < {dw:.1f}$; shaded: the axis inside HGTD   " + FOOT, ha="center", va="top", fontsize=9.5, color="#555555")
+    save(fig, args.out + "_where")
+    for dr in (args.ref, dw):
+        hs, pu = LEGS[dr]
+        for nm, L, num, den in [("HS timed", hs, hs["n"] >= args.min_trk, hs["inh"]), ("PU timed", pu, pu["n"] >= args.min_trk, pu["inh"]),
+                                ("HS mostly-PU", hs, hs["hsf"] < 0.5, hs["inh"] & (hs["n"] >= args.min_trk))]:
+            for key, edges in [("pt", [30, 40, 60, 100, 200, 1e9]), ("aeta", [2.0, 2.4, 2.8, 3.2, 3.6, 4.0, 4.4])]:
+                print(f"dR < {dr:.1f} {nm:13s} vs {key:4s}: " + "  ".join(f"{frac(L['w'], num, den & (L[key] >= edges[b]) & (L[key] < edges[b + 1]))[0]:5.1f}" for b in range(len(edges) - 1)))
