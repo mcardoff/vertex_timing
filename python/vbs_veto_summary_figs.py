@@ -360,13 +360,15 @@ elif args.what == "puretime":
         return [np.concatenate(x) for x in (dt, pull, n, inh)]
     fig, ax = plt.subplots(figsize=(8.6, 5.6))
     bins = np.linspace(-600, 600, 121)
+    offs = []
     for e, lab, key, nm, col, fill in [(S_all, "hs", "pure_hs", "hard-scatter tagging jets (VBF): their hard-scatter tracks", "#2E9E4F", True),
                                        (B_all, "pu", "pure_pu", "pileup tagging jets ($Z$+jets): their non-hard-scatter tracks", "#555555", False),
                                        (S_all, "pu", "pure_pu", "pileup tagging jets (VBF): their non-hard-scatter tracks", "#999999", False)]:
         dt, pull, n, inh = series(e, lab, key)
         ok = n >= 1
-        h, _ = np.histogram(np.clip(dt[ok], -599, 599), bins=bins)
-        h = h / h.sum()
+        h, _ = np.histogram(dt[ok], bins=bins)   # no overflow bins: entries beyond the range go off the plot
+        h = h / ok.sum()                         # ... but stay in the normalisation (a fraction of the timed jets)
+        offs.append(100 * np.mean(np.abs(dt[ok]) >= bins[-1]))
         ax.step(0.5 * (bins[1:] + bins[:-1]), h, where="mid", color=col, lw=2,
                 label=f"{nm}\n  {100 * ok[inh].mean():.0f}% of those in HGTD timed; "
                       f"{100 * np.mean(pull[ok] >= args.nsigma):.0f}% beyond {args.nsigma:g}$\\sigma$ of $t_{{\\rm HS}}$")
@@ -374,7 +376,9 @@ elif args.what == "puretime":
         print(f"{nm}: timed (>= 1 own track) {100 * ok[inh].mean():.1f}% of those in HGTD; beyond {args.nsigma:g} sigma of t_HS {100 * np.mean(pull[ok] >= args.nsigma):.1f}%; "
               f"|dt| < 60 ps {100 * np.mean(np.abs(dt[ok]) < 60):.1f}%; median sigma {np.median((pcal(n) * 1.0)[ok]):.2f} x quoted")
     ax.set_yscale("log"); ax.set_ylim(1e-4, 40)
-    ax.set_xlabel("perfect-assignment jet time $-\\ t_{\\rm HS}^{\\rm truth}$ [ps]   (overflow in the edge bins)")
+    ax.set_xlim(bins[0], bins[-1])
+    ax.set_xlabel("perfect-assignment jet time $-\\ t_{\\rm HS}^{\\rm truth}$ [ps]   (beyond $\\pm$600 ps, off scale: "
+                  + ", ".join(f"{o:.1f}%" for o in offs) + " of the jets)")
     ax.set_ylabel("fraction of jets")
     ax.legend(fontsize=9, frameon=False, loc="upper left")
     ax.grid(alpha=0.25)
