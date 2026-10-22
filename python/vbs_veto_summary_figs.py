@@ -21,10 +21,9 @@ jet-time calibration from the signal's HS legs for both samples.
           its hard-scatter tracks, a pileup jet by its non-hard-scatter tracks; unlabelled jets untested). Needs the
           _pure trees.
   steps   the money plot's ladder taken apart (all events; same trees and definitions as money):
-          <out>_waterfall  where the S/sqrt(B) gain comes from, step by step, with the perfect
-                           jet-time assignment split into its pileup-jet / hard-scatter-jet /
-                           unlabelled-jet parts and the ceiling into the hard-scatter false vetoes
-                           it undoes and the acceptance; signal and Z+jets kept underneath
+          <out>_waterfall  where the S/sqrt(B) gain comes from, step by step, with the ceiling
+                           split into the hard-scatter false vetoes it undoes and the acceptance;
+                           signal and Z+jets kept underneath
           <out>_pu_legs    every pileup tagging jet by the step that catches it
           <out>_failures   WAVeS's failures (vetoes the perfect veto would not make) by cause and pair
   puretime  the perfect-assignment jet times (--pure-times trees) against the true t_HS: hard-scatter
@@ -330,9 +329,7 @@ elif args.what in ("money", "steps"):
         # the main chain, its sub-steps marked: (label, colour, rung it ends, S vetoes, B vetoes)
         CHAIN = [("WAVeS\nveto", "#FFA90E", "waves", V["S"]["waves"], V["B"]["waves"]),
                  ("+ perfect\n$t_0$", "#A96B59", "t0", V["S"]["t0"], V["B"]["t0"]),
-                 ("pileup\njets:\nperfect\ntimes", "#1B7837", None, variant(S, False, True, True), variant(B, False, True, True)),
-                 ("hard-\nscatter\njets:\nperfect\ntimes", "#5AAE61", None, variant(S, True, True, True), variant(B, True, True, True)),
-                 ("unlabelled\njets: no\nlonger\ntested", "#A6DBA0", "ideal", V["S"]["ideal"], V["B"]["ideal"]),
+                 ("+ perfect\njet-time\nassign-\nment", "#1B7837", "ideal", V["S"]["ideal"], V["B"]["ideal"]),
                  ("+ perfect\nresolution", "#3F90DA", "res", V["S"]["res"], V["B"]["res"]),
                  ("+ perfect\nHGTD\nefficiency", "#7B3294", "eff", V["S"]["eff"], V["B"]["eff"]),
                  ("no hard-\nscatter\nfalse\nvetoes", "#717581", None, V["S"]["eff"] & has_pu(S), V["B"]["eff"] & has_pu(B)),
@@ -347,7 +344,8 @@ elif args.what in ("money", "steps"):
         for i, ((lab, col, rung, *_), z0, z1) in enumerate(zip(CHAIN, z[:-1], z[1:])):
             a0.bar(i, z1 - z0, bottom=z0, color=col, width=0.62, edgecolor="black" if col != "#000000" else "#000000", lw=0.6,
                    alpha=0.95 if rung else 0.7, hatch=None if rung else "//")
-            a0.text(i, max(z0, z1) + 0.6, f"{z1 - z0:+.1f}" + (f"\n= {z1:+.1f}%" if rung else ""), ha="center", va="bottom",
+            dz = round(z1, 1) - round(z0, 1)   # the difference of the rounded totals: the labels add up to the last one
+            a0.text(i, max(z0, z1) + 0.6, f"{dz:+.1f}" + (f"\n= {z1:+.1f}%" if rung else ""), ha="center", va="bottom",
                     fontsize=12, fontweight="bold", linespacing=1.15)
             if rung: a0.plot([i - 0.42, i + 0.42], [z1, z1], color="black", lw=1.4)
             if i + 1 < len(CHAIN): a0.plot([i + 0.31, i + 0.69], [z1, z1], color="#888888", lw=0.8, ls=":")
