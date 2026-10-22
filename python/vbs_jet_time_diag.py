@@ -32,6 +32,8 @@ ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDe
 ap.add_argument("--sig", required=True)
 ap.add_argument("--bkg", required=True)
 ap.add_argument("--min-trk", type=int, default=2)
+ap.add_argument("--sig2", help="the same signal tree at another --jet-time-dr (e.g. 0.4): its as-used curves added, dashed")
+ap.add_argument("--bkg2", help="the same background tree at that cone")
 ap.add_argument("--out", required=True)
 args = ap.parse_args()
 C.ROOT = ROOT
@@ -44,9 +46,12 @@ COLS = ["weight", "t0_truth"] + [f"{L}_{k}" for L in "ab" for k in
 
 def legs(path, lab):
     """the tagging legs carrying truth label `lab` ('hs' / 'pu'), both legs stacked"""
-    e = uproot.open(path)["events"].arrays(COLS, library="np")
+    t = uproot.open(path)["events"]
+    cols = [c for c in COLS if c in t.keys()]
+    e = t.arrays(cols, library="np")
     out = {}
     for k in ["eta", "pt", "hgtd_ntimed", "core_n", "core_t", "core_hsfrac", "pure_hs_n", "pure_hs_t"]:
+        if f"a_{k}" not in e: continue
         out[k] = np.concatenate([e[f"{L}_{k}"][e[f"{L}_{lab}"]] for L in "ab"])
     out["t0"] = np.concatenate([e["t0_truth"][e[f"{L}_{lab}"]] for L in "ab"])
     out["w"] = np.concatenate([e["weight"][e[f"{L}_{lab}"]] for L in "ab"]).astype(float)
@@ -54,8 +59,14 @@ def legs(path, lab):
     return out
 
 
+def cone(path):
+    return float(np.unique(uproot.open(path)["meta"].arrays(["jet_time_dr"], library="np")["jet_time_dr"])[0])
 HS = legs(args.sig, "hs")
 PU_Z = legs(args.bkg, "pu")
+DR1 = cone(args.sig)
+ALT = None
+if args.sig2:
+    ALT = (legs(args.sig2, "hs"), legs(args.bkg2, "pu"), cone(args.sig2))
 XV = [("aeta", "tagging-jet axis $|\\eta|$", np.array([2.0, 2.4, 2.8, 3.2, 3.6, 4.0, 4.4])),
       ("pt", "tagging-jet $p_T$ [GeV]", np.array([30, 40, 60, 100, 200, 1000.])),
       ("hgtd_ntimed", "timed ghost tracks in HGTD", np.array([1, 2, 3, 5, 9, 15, 100]))]
@@ -78,6 +89,12 @@ for c, (key, xlab, edges) in enumerate(XV):
         v = np.array([frac(pop["w"], timed, inbin(pop, b) & inh) for b in range(len(edges) - 1)])
         axes[0, c].errorbar(xc, v[:, 0], yerr=[v[:, 1], v[:, 2]], fmt=mk + "-", color=col, ms=7, lw=1.6, capsize=3,
                             label=nm if c == 0 else None)
+    if ALT:
+        for pop, col, mk in [(ALT[0], "#2E9E4F", "o"), (ALT[1], "#555555", "s")]:
+            inh2, timed2 = pop["hgtd_ntimed"] >= 1, pop["core_n"] >= args.min_trk
+            v = np.array([frac(pop["w"], timed2, inbin(pop, b) & inh2) for b in range(len(edges) - 1)])
+            axes[0, c].errorbar(xc, v[:, 0], yerr=[v[:, 1], v[:, 2]], fmt=mk + "--", color=col, ms=5, lw=1.2, capsize=2, alpha=0.8,
+                                label=(f"  ... jet-time cone $\\Delta R < {ALT[2]:.1f}$" if pop is ALT[0] else None) if c == 0 else None)
     # the HS jets with a perfect track assignment: >= min-trk timed HS tracks (any ghost track in HGTD)
     inh, timed = HS["hgtd_ntimed"] >= 1, HS["pure_hs_n"] >= args.min_trk
     v = np.array([frac(HS["w"], timed, inbin(HS, b) & inh) for b in range(len(edges) - 1)])
@@ -91,6 +108,12 @@ for c, (key, xlab, edges) in enumerate(XV):
         v = np.array([frac(HS["w"], ok, inbin(HS, b) & inh) for b in range(len(edges) - 1)])
         axes[1, c].errorbar(xc, v[:, 0], yerr=[v[:, 1], v[:, 2]], fmt="o-", color="#2E9E4F", ms=7, lw=1.6, capsize=3,
                             mfc="#2E9E4F" if fill else "white", label=("core fraction, " + lab) if c == 0 else None)
+    if ALT:
+        H2 = ALT[0]; inh2 = H2["hgtd_ntimed"] >= 1
+        ok = (H2["core_n"] >= args.min_trk) & (np.abs(H2["core_t"] - H2["t0"]) < 60)
+        v = np.array([frac(H2["w"], ok, (H2[key] >= edges[b]) & (H2[key] < edges[b + 1]) & inh2) for b in range(len(edges) - 1)])
+        axes[1, c].errorbar(xc, v[:, 0], yerr=[v[:, 1], v[:, 2]], fmt="o--", color="#2E9E4F", ms=5, lw=1.2, capsize=2, alpha=0.8,
+                            label=f"core fraction, jet-time cone $\\Delta R < {ALT[2]:.1f}$" if c == 0 else None)
     timed = HS["core_n"] >= args.min_trk
     v = np.array([frac(HS["w"], HS["core_hsfrac"] >= 0.5, inbin(HS, b) & timed) for b in range(len(edges) - 1)])
     axes[1, c].errorbar(xc, v[:, 0], yerr=[v[:, 1], v[:, 2]], fmt="d--", color="#7B3294", ms=6, lw=1.3, capsize=3,
@@ -104,6 +127,13 @@ for c, (key, xlab, edges) in enumerate(XV):
             sig.append(C.dgaus_core(HS[tcol][m] - HS["t0"][m])[0] if m.sum() >= 300 else np.nan)
         axes[2, c].plot(xc, sig, "o-", color="#2E9E4F", ms=7, lw=1.6, mfc="#2E9E4F" if fill else "white",
                         label=lab if c == 0 else None)
+    if ALT:
+        H2 = ALT[0]; sig = []
+        for b in range(len(edges) - 1):
+            m = (H2[key] >= edges[b]) & (H2[key] < edges[b + 1]) & (H2["core_n"] >= args.min_trk)
+            sig.append(C.dgaus_core(H2["core_t"][m] - H2["t0"][m])[0] if m.sum() >= 300 else np.nan)
+        axes[2, c].plot(xc, sig, "o--", color="#2E9E4F", ms=5, lw=1.2, alpha=0.8,
+                        label=f"as used, jet-time cone $\\Delta R < {ALT[2]:.1f}$" if c == 0 else None)
     axes[2, c].set_xlabel(xlab)
     if key in CAT:
         if key == "pt":
@@ -143,6 +173,14 @@ for tcol, ncol, nm in [("core_t", "core_n", "as used"), ("pure_hs_t", "pure_hs_n
     ok = (HS[ncol] >= args.min_trk) & (np.abs(HS[tcol] - HS["t0"]) < 60)
     print(f"HS core fraction (of jets in HGTD, untimed = failure), {nm}: {100 * frac(HS['w'], ok, inh)[0]:.1f}%")
 print(f"HS timed with a perfect assignment (>= {args.min_trk} timed HS tracks), of jets in HGTD: {100 * frac(HS['w'], HS['pure_hs_n'] >= args.min_trk, inh)[0]:.1f}%")
+if ALT:
+    H2, P2, dr2 = ALT; inh2 = H2["hgtd_ntimed"] >= 1
+    ok = (H2["core_n"] >= args.min_trk) & (np.abs(H2["core_t"] - H2["t0"]) < 60)
+    m2 = H2["core_n"] >= args.min_trk
+    print(f"cone dR < {dr2}: HS timed {100 * frac(H2['w'], m2, inh2)[0]:.1f}%, core fraction {100 * frac(H2['w'], ok, inh2)[0]:.1f}%, "
+          f"core sigma {C.dgaus_core(H2['core_t'][m2] - H2['t0'][m2])[0]:.1f} ps ({100 * np.mean(np.abs(H2['core_t'][m2] - H2['t0'][m2]) > 60):.1f}% beyond 60 ps); "
+          f"PU timed {100 * frac(P2['w'], P2['core_n'] >= args.min_trk, P2['hgtd_ntimed'] >= 1)[0]:.1f}%; "
+          f"timed HS jets with a mostly-HS cluster {100 * frac(H2['w'], H2['core_hsfrac'] >= 0.5, m2)[0]:.1f}%")
 mt = HS["core_n"] >= args.min_trk; mp = HS["pure_hs_n"] >= args.min_trk
 print(f"HS core sigma: as used {C.dgaus_core(HS['core_t'][mt] - HS['t0'][mt])[0]:.1f} ps ({100 * np.mean(np.abs(HS['core_t'][mt] - HS['t0'][mt]) > 60):.1f}% beyond 60 ps); "
       f"perfect assignment {C.dgaus_core(HS['pure_hs_t'][mp] - HS['t0'][mp])[0]:.1f} ps ({100 * np.mean(np.abs(HS['pure_hs_t'][mp] - HS['t0'][mp]) > 60):.1f}% beyond 60 ps)")
