@@ -20,6 +20,9 @@ jet-time calibration from the signal's HS legs for both samples.
           true t0 and pure jet times (util/vbs_time_veto --pure-times: a hard-scatter jet timed by
           its own tracks, a pileup jet by its own collision's; unlabelled jets untested). Needs the
           _pure trees.
+  puretime  the perfect-assignment jet times (--pure-times trees) against the true t_HS: hard-scatter
+          tagging jets (their hard-scatter tracks) and pileup tagging jets (their own, non-HS
+          tracks), all selected events -- what the "+ perfect jet-time assignment" rung tests
   cone    the jet-time cone, --sig/--bkg against --sig2/--bkg2 (e.g. dR < 0.2 vs 0.4), all
           events: S/sqrt(B) change and efficiencies per method at each cone
 
@@ -36,7 +39,7 @@ import matplotlib.pyplot as plt
 import vbs_time_veto_common as C
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument("what", choices=["cases", "cf", "shares", "cone", "budget", "money"])
+ap.add_argument("what", choices=["cases", "cf", "shares", "cone", "budget", "money", "puretime"])
 ap.add_argument("--sig", required=True)
 ap.add_argument("--bkg", required=True)
 ap.add_argument("--sig2", help="cone: the second cone's signal tree")
@@ -336,6 +339,47 @@ elif args.what == "money":
     C.column_figure(args.out, "S/#sqrt{B} change vs no veto [%]", change, ex_chg, label, head + [ceil],
                     bcount, "B MC", EDG, STY, ["waves", "nofail", "t0", "ideal", "res", "eff"], ref=0.0, pct=True,
                     compact=True, count_parts=bp, sig_counts=(scount, sp))
+
+elif args.what == "puretime":
+    S_all = load(args.sig, "met_truth")[1]
+    B_all = load(args.bkg, "z_pt")[1]
+    pure = {"t0_truth": S_all["t0_truth"]}
+    for L in "ab":
+        pure.update({f"{L}_hs": S_all[f"{L}_hs"], f"{L}_core_n": S_all[f"{L}_pure_hs_n"],
+                     f"{L}_core_t": S_all[f"{L}_pure_hs_t"], f"{L}_core_sig": S_all[f"{L}_pure_hs_sig"]})
+    pcal = C.measure(pure, True, "pure HS legs")
+    def series(e, lab, key):
+        dt, pull, n, inh = [], [], [], []
+        for L in "ab":
+            m = e[f"{L}_{lab}"]
+            nn = e[f"{L}_{key}_n"][m]
+            d = (e[f"{L}_{key}_t"] - e["t0_truth"])[m]
+            sg = pcal(nn) * e[f"{L}_{key}_sig"][m]
+            dt.append(d); pull.append(np.where(nn >= 1, np.abs(d) / np.where(sg > 0, sg, np.inf), np.nan))
+            n.append(nn); inh.append(e[f"{L}_hgtd_ntimed"][m] >= 1)
+        return [np.concatenate(x) for x in (dt, pull, n, inh)]
+    fig, ax = plt.subplots(figsize=(8.6, 5.6))
+    bins = np.linspace(-600, 600, 121)
+    for e, lab, key, nm, col, fill in [(S_all, "hs", "pure_hs", "hard-scatter tagging jets (VBF): their hard-scatter tracks", "#2E9E4F", True),
+                                       (B_all, "pu", "pure_pu", "pileup tagging jets ($Z$+jets): their own tracks", "#555555", False),
+                                       (S_all, "pu", "pure_pu", "pileup tagging jets (VBF): their own tracks", "#999999", False)]:
+        dt, pull, n, inh = series(e, lab, key)
+        ok = n >= 1
+        h, _ = np.histogram(np.clip(dt[ok], -599, 599), bins=bins)
+        h = h / h.sum()
+        ax.step(0.5 * (bins[1:] + bins[:-1]), h, where="mid", color=col, lw=2,
+                label=f"{nm}\n  {100 * ok[inh].mean():.0f}% of those in HGTD timed; "
+                      f"{100 * np.mean(pull[ok] >= args.nsigma):.0f}% beyond {args.nsigma:g}$\\sigma$ of $t_{{\\rm HS}}$")
+        if fill: ax.fill_between(0.5 * (bins[1:] + bins[:-1]), h, step="mid", color=col, alpha=0.15)
+        print(f"{nm}: timed (>= 1 own track) {100 * ok[inh].mean():.1f}% of those in HGTD; beyond {args.nsigma:g} sigma of t_HS {100 * np.mean(pull[ok] >= args.nsigma):.1f}%; "
+              f"|dt| < 60 ps {100 * np.mean(np.abs(dt[ok]) < 60):.1f}%; median sigma {np.median((pcal(n) * 1.0)[ok]):.2f} x quoted")
+    ax.set_yscale("log"); ax.set_ylim(1e-4, 40)
+    ax.set_xlabel("perfect-assignment jet time $-\\ t_{\\rm HS}^{\\rm truth}$ [ps]   (overflow in the edge bins)")
+    ax.set_ylabel("fraction of jets")
+    ax.legend(fontsize=9, frameon=False, loc="upper left")
+    ax.grid(alpha=0.25)
+    ax.text(1.0, 1.01, "all selected events   ATLAS Simulation Internal", transform=ax.transAxes, ha="right", va="bottom", fontsize=9, color="#555555")
+    save(fig)
 
 else:   # cone
     if not (args.sig2 and args.bkg2): raise SystemExit("cone needs --sig2 and --bkg2")
