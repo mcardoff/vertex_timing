@@ -32,6 +32,8 @@ ap.add_argument("--dir", default=os.path.join(os.path.dirname(os.path.abspath(__
 ap.add_argument("--nsigma", type=float, default=3.0)
 ap.add_argument("--nboot", type=int, default=300)
 ap.add_argument("--out", help="figure stem: the fixes against each chain step's available gain")
+ap.add_argument("--wide", default="jvtLoose_jtdr0p4", help="the tree tag of the wide jet time the coverage fixes fall back to "
+                "(e.g. jvtLoose_jtdr1p0_jtwaves: no cone, the WAVeS-score cluster)")
 args = ap.parse_args()
 C.ROOT = ROOT
 ROOT.gErrorIgnoreLevel = ROOT.kWarning
@@ -47,7 +49,7 @@ def load(p):
 D = {}
 for smp, rc in (("vbf", "met_truth"), ("zjets", "z_pt")):
     e2 = load(f"{args.dir}/{smp}/{smp}_jvtLoose_pure_vbs_time_veto.root")
-    e4 = load(f"{args.dir}/{smp}/{smp}_jvtLoose_jtdr0p4_vbs_time_veto.root")
+    e4 = load(f"{args.dir}/{smp}/{smp}_{args.wide}_vbs_time_veto.root")
     assert np.array_equal(e2["entry"], e4["entry"]) and np.array_equal(e2["file_path"], e4["file_path"])
     D[smp] = (e2, e4, e2[rc] > 100)
 cal2 = C.measure(D["vbf"][0], True, "HS legs, dR < 0.2")
