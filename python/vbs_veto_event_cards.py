@@ -62,6 +62,15 @@ def load(path, col, cut):
 S, SJ, S_all = load(args.sig, "met_truth", args.met_min)
 B, BJ, _ = load(args.bkg, "z_pt", args.zpt_min)
 cal = C.measure(S_all, True, "signal HS legs")   # one jet-time calibration for S and B, as the slides
+# with the --pure-times trees: each pileup tagging jet's perfect-assignment time (its non-hard-scatter
+# tracks) is drawn too, with sigma calibrated on the pure hard-scatter legs as the money plot's chain
+PURE = "a_pure_pu_t" in S_all
+if PURE:
+    _p = {"t0_truth": S_all["t0_truth"]}
+    for _L in "ab":
+        _p.update({f"{_L}_hs": S_all[f"{_L}_hs"], f"{_L}_core_n": S_all[f"{_L}_pure_hs_n"],
+                   f"{_L}_core_t": S_all[f"{_L}_pure_hs_t"], f"{_L}_core_sig": S_all[f"{_L}_pure_hs_sig"]})
+    pcal = C.measure(_p, True, "pure HS legs")
 
 
 def derived(e):
@@ -283,6 +292,10 @@ def draw_times(at, e, d, i, names):
                          e[L + "_core_t"][i], d[L + "_s"][i], "#AAAAAA", L))
         else:
             jets.append((txt + "\nno jet time", np.nan, np.nan, "#999999", L))
+        if PURE and role_ == "PU" and e[L + "_pure_pu_n"][i] >= 1:
+            n = e[L + "_pure_pu_n"][i]
+            jets.append((f"{name}, perfect assignment:\nits {n} non-hard-scatter\ntrack{'s' if n > 1 else ''} in HGTD",
+                         e[L + "_pure_pu_t"][i], pcal(np.array([n]))[0] * e[L + "_pure_pu_sig"][i], "#7A0177", L + "_pure"))
     allrows = rows + jets
     # t0 rows one unit apart; the three-line jet rows 1.6 apart
     ys = np.array([1.6 * len(jets) - 0.3 + (len(rows) - 1 - k) for k in range(len(rows))]
@@ -299,7 +312,7 @@ def draw_times(at, e, d, i, names):
                 at.plot([v - 3 * sg] * 2, [y - 0.13, y + 0.13], color=col, lw=1.2, alpha=0.8)
                 at.plot([v + 3 * sg] * 2, [y - 0.13, y + 0.13], color=col, lw=1.2, alpha=0.8)
                 at.plot([v - 2 * sg, v + 2 * sg], [y, y], color=col, lw=5, solid_capstyle="butt")
-            at.plot([v], [y], "s" if tag in [x[0] for x in SRC] else "o", color=col, ms=8,
+            at.plot([v], [y], "s" if tag in [x[0] for x in SRC] else ("D" if tag.endswith("_pure") else "o"), color=col, ms=8,
                     markeredgecolor="white", markeredgewidth=0.8, zorder=5)
         if tag in [x[0] for x in SRC] + ["truth"] and tag != "truth" or tag == "truth":
             if not e[f"ok_{tag}"][i]:
@@ -315,6 +328,11 @@ def draw_times(at, e, d, i, names):
     at.set_yticklabels([r[0] for r in allrows], fontsize=12)
     for tl, r in zip(at.get_yticklabels(), allrows): tl.set_color(r[3])
     at.axhline(1.6 * (len(jets) - 1) + 0.85, color="#BBBBBB", lw=0.8)
+    for y, (lab, v, sg, col, tag) in zip(ys, allrows):   # a perfect-assignment time against t_HS: the chain's test
+        if tag.endswith("_pure") and np.isfinite(v) and sg > 0:
+            pp = abs(v - tt) / sg
+            at.text(1.015, y, ("out of time" if pp >= args.nsigma else "in time") + f" ({pp:.1f}$\\sigma$ from $t_{{\\rm HS}}$)",
+                    transform=at.get_yaxis_transform(), ha="left", va="center", fontsize=12, color=col, fontweight="bold")
     # jet time compatibility: the two jets against each other, no t0
     pj = d["pull_jj"][i]
     if np.isfinite(pj):

@@ -26,6 +26,10 @@ jet-time calibration from the signal's HS legs for both samples.
                            signal and Z+jets kept underneath
           <out>_pu_legs    every pileup tagging jet by the step that catches it
           <out>_failures   WAVeS's failures (vetoes the perfect veto would not make) by cause and pair
+  chainevents  one typical event per step of the money plot's chain that the step before gets wrong
+          (vetoes when it should keep, or keeps when it should veto) and this step fixes; writes
+          <out>.csv in the candidates format of vbs_veto_event_cards.py / vbs_veto_displays.py
+          (rpt_region_displays.py pick copies them out of the ntuples on the AF) and prints each
   puretime  the perfect-assignment jet times (--pure-times trees) against the true t_HS: hard-scatter
           tagging jets (their hard-scatter tracks) and pileup tagging jets (their own, non-HS
           tracks), all selected events -- what the "+ perfect jet-time assignment" rung tests
@@ -45,7 +49,7 @@ import matplotlib.pyplot as plt
 import vbs_time_veto_common as C
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument("what", choices=["cases", "cf", "shares", "cone", "budget", "money", "steps", "puretime"])
+ap.add_argument("what", choices=["cases", "cf", "shares", "cone", "budget", "money", "steps", "chainevents", "puretime"])
 ap.add_argument("--sig", required=True)
 ap.add_argument("--bkg", required=True)
 ap.add_argument("--sig2", help="cone: the second cone's signal tree")
@@ -54,6 +58,7 @@ ap.add_argument("--min-trk", type=int, default=2)
 ap.add_argument("--nsigma", type=float, default=3.0)
 ap.add_argument("--tag", default="JVT + fJVT loose")
 ap.add_argument("--out", required=True)
+ap.add_argument("--min-pu-pt", type=float, default=0.0, help="chainevents: ignore nothing by default")
 args = ap.parse_args()
 plt.rcParams.update({"font.size": 12})
 
@@ -238,7 +243,7 @@ elif args.what == "budget":
         prev = g
         if "true t0" in lab: truth = g
 
-elif args.what in ("money", "steps"):
+elif args.what in ("money", "steps", "chainevents"):
     if "a_pure_hs_n" not in S: raise SystemExit("money needs the --pure-times trees (*_pure_vbs_time_veto.root)")
     S_all = load(args.sig, "met_truth")[1]
     # the pure times' sigma, calibrated like f(n): on the signal's HS legs, against the true t0
@@ -329,6 +334,85 @@ elif args.what in ("money", "steps"):
               f"+perfect t0 {zt0:+5.1f} ({zt0 - cor:+4.1f}) | +perfect jet time = ideal {zid:+5.1f} ({zid - zt0:+4.1f}) | "
               f"oracle {zor:+5.1f} (irreducible {zor - zid:+4.1f}) | rung: truth t0 + real jet times {rung_t0:+5.1f} | "
               f"jet 1 vs jet 2, perfect assignment {zjj:+5.1f} | chain {chain} | {mb.sum()} B MC")
+    if args.what == "chainevents":
+        import csv
+        cal = C.measure(S_all, True, "signal HS legs")   # the veto's jet-time calibration, for the printout
+        def legs_of(e, i):
+            return [L for L in "ab"]
+        def pu_info(e, L):
+            n = e[f"{L}_pure_pu_n"]; sg = pcal(n) * e[f"{L}_pure_pu_sig"]
+            with np.errstate(divide="ignore", invalid="ignore"):
+                pull = np.abs(e[f"{L}_pure_pu_t"] - e["t0_truth"]) / sg
+            return n, pull
+        def typical(e, cand, keys):
+            """the candidate nearest the middle of the candidates in each key (rank distance)"""
+            idx = np.flatnonzero(cand)
+            if len(idx) == 0: raise SystemExit("no candidate")
+            dist = np.zeros(len(idx))
+            for k in keys:
+                v = k[idx]; r = np.argsort(np.argsort(v)) / max(len(v) - 1, 1)
+                dist += (r - 0.5) ** 2
+            return idx[np.argmin(dist)], len(idx)
+        hs_pu = lambda e, L, O: e[f"{L}_pu"] & e[f"{O}_hs"]
+        picks = []
+        # + perfect t0: a hard-scatter pair WAVeS vetoes because its t0 is wrong, kept with the true t0
+        e = S; X = V["S"]
+        dt0 = np.abs(e["t0_waves"] - e["t0_truth"]); s0 = e["infl_waves"] * e["sig0_waves"]
+        cand = X["waves"] & ~X["t0"] & e["a_hs"] & e["b_hs"] & (dt0 > args.nsigma * s0)
+        i, n = typical(e, cand, [dt0, e["mjj"]]); picks.append(("chain_t0", "S", i, n, "WAVeS vetoes a hard-scatter pair: its t0 is wrong"))
+        # the pileup steps (Z+jets, a hard-scatter + pileup pair): the step before keeps the event
+        e = B; X = V["B"]
+        for key, prev, sel, what in [("chain_oot", "t0", "oot", "an out-of-time pileup jet the jet time misses"),
+                                     ("chain_itpu", "oot", "itpu", "an in-time pileup jet"),
+                                     ("chain_untimed", "itpu", "untimed", "a pileup jet whose HGTD tracks got no time")]:
+            best = None
+            for L, O in (("a", "b"), ("b", "a")):
+                n_, pull = pu_info(e, L)
+                inside = (np.abs(e[f"{L}_eta"]) > 2.4) & (np.abs(e[f"{L}_eta"]) < 4.0)
+                # the in-time example: a pileup jet inside HGTD timed by >= 2 of its tracks -- in time, not
+                # merely within a wide one-track sigma
+                c = {"oot": (n_ >= 1) & (pull >= args.nsigma), "itpu": (n_ >= 2) & (pull < args.nsigma) & inside,
+                     "untimed": (n_ < 1) & (e[f"{L}_hgtd_n"] >= 1)}[sel]
+                m = ~X[prev] & X[sel] & hs_pu(e, L, O) & c
+                best = m if best is None else (best | m)
+            # the pileup leg's pT and its perfect-time pull, for the typical pick
+            pt_pu = np.where(e["a_pu"], e["a_pt"], e["b_pt"])
+            i, n = typical(e, best, [pt_pu, e["mjj"]]); picks.append((key, "B", i, n, f"the step before keeps {what}"))
+        # + false vetoes undone: a hard-scatter pair vetoed (the true t0, the real jet times): a jet timed by pileup tracks
+        e = S; X = V["S"]
+        pu_frac = lambda L: (e[f"{L}_core_hsfrac"] >= 0) & (e[f"{L}_core_hsfrac"] < 0.5) & (e[f"{L}_core_n"] >= args.min_trk)
+        cand = X["untimed"] & ~X["nofalse"] & e["a_hs"] & e["b_hs"] & (pu_frac("a") | pu_frac("b"))
+        print(f"VBF false vetoes at the untimed step: {100 * ws[X['untimed'] & ~X['nofalse']].sum() / ws.sum():.1f}% of events; "
+              f"hard-scatter pairs with a pileup-timed jet {100 * ws[cand].sum() / ws.sum():.1f}%")
+        i, n = typical(e, cand, [e["mjj"]]); picks.append(("chain_false", "S", i, n, "a hard-scatter pair vetoed: a jet timed by pileup tracks"))
+        # the ceiling: a pileup jet past |eta| = 4, no track in HGTD's range, kept by every timing step
+        e = B; X = V["B"]
+        best = None
+        for L, O in (("a", "b"), ("b", "a")):
+            m = ~X["nofalse"] & X["oracle"] & hs_pu(e, L, O) & (e[f"{L}_hgtd_n"] < 1) & (np.abs(e[f"{L}_eta"]) > 4.0)
+            best = m if best is None else (best | m)
+        pt_pu = np.where(e["a_pu"], e["a_pt"], e["b_pt"])
+        i, n = typical(e, best, [pt_pu, e["mjj"]]); picks.append(("chain_ceiling", "B", i, n, "a pileup jet past HGTD, kept by every timing step"))
+        COLS = ["file_path", "entry", "a_idx", "b_idx", "a_hs", "a_pu", "b_hs", "b_pu", "t0_waves", "sig0_waves", "infl_waves",
+                "t0_trkptz", "t0_hgtd", "ok_hgtd", "t0_truth", "mjj"]
+        with open(args.out + ".csv", "w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=["card", "sample"] + COLS); w.writeheader()
+            for key, r, i, n, what in picks:
+                e = S if r == "S" else B
+                w.writerow(dict(card=key, sample="vbf" if r == "S" else "zjets", **{c: (e[c][i].decode() if isinstance(e[c][i], bytes) else e[c][i]) for c in COLS}))
+                print(f"\n{key} ({'VBF' if r == 'S' else 'Z+jets'}, {n:,} candidates): {what}")
+                print(f"  {e['file_path'][i]} #{e['entry'][i]}  m_jj {e['mjj'][i]:.0f} GeV  t_HS {e['t0_truth'][i]:+.0f} ps  WAVeS t0 {e['t0_waves'][i]:+.0f} ps "
+                      f"(sigma {e['infl_waves'][i] * e['sig0_waves'][i]:.0f})")
+                for L in "ab":
+                    role = "HS" if e[f"{L}_hs"][i] else ("PU" if e[f"{L}_pu"][i] else "unlabelled")
+                    sg = cal(np.array([e[f"{L}_core_n"][i]]))[0] * e[f"{L}_core_sig"][i]
+                    pn, ppull = pu_info(e, L)
+                    print(f"  jet {L} (idx {e[f'{L}_idx'][i]}): {role}, pT {e[f'{L}_pt'][i]:.0f} GeV, eta {e[f'{L}_eta'][i]:+.2f}; HGTD tracks {e[f'{L}_hgtd_n'][i]} "
+                          f"({e[f'{L}_hgtd_ntimed'][i]} timed); jet time {e[f'{L}_core_t'][i]:+.0f} ps from {e[f'{L}_core_n'][i]} tracks (sigma {sg:.0f}, "
+                          f"{100 * (1 - e[f'{L}_core_hsfrac'][i]):.0f}% PU)" + (f"; perfect PU time {e[f'{L}_pure_pu_t'][i]:+.0f} ps from {pn[i]} tracks, {ppull[i]:.1f} sigma from t_HS"
+                          if e[f"{L}_pu"][i] and pn[i] >= 1 else ""))
+        print("wrote", args.out + ".csv")
+        raise SystemExit(0)
     if args.what == "steps":
         P = lambda w, m: 100 * w[m].sum() / w.sum()
         Zc = lambda vs, vb: 100 * ((ws[~vs].sum() / ws.sum()) / np.sqrt(wb[~vb].sum() / wb.sum()) - 1)
