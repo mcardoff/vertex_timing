@@ -76,8 +76,8 @@ Summary summarize(AnalysisObj& a) {
                                          TString::Format("tot_%p", (void*)&a)));
   if (total->GetEntries() > 0) {
     std::unique_ptr<TF1> fit(ACTIVE_FIT_MODEL.makeFit(total.get()));
-    s.sigma    = fit->GetParameter("Sigma1");
-    s.sigmaErr = fit->GetParError("Sigma1");
+    s.sigma    = fit->GetParameter(ACTIVE_FIT_MODEL.params.sigmaCore);
+    s.sigmaErr = fit->GetParError(ACTIVE_FIT_MODEL.params.sigmaCore);
 
     std::unique_ptr<TH1D> trunc((TH1D*)total->Clone(TString::Format("trc_%p", (void*)&a)));
     trunc->GetXaxis()->SetRangeUser(-PASS_SIGMA, PASS_SIGMA);
@@ -90,7 +90,7 @@ Summary summarize(AnalysisObj& a) {
                                        TString::Format("low_%p", (void*)&a)));
   if (low->GetEntries() > 0) {
     std::unique_ptr<TF1> fitLow(ACTIVE_FIT_MODEL.makeFit(low.get()));
-    s.sigmaLow = fitLow->GetParameter("Sigma1");
+    s.sigmaLow = fitLow->GetParameter(ACTIVE_FIT_MODEL.params.sigmaCore);
   }
 
   // Core fraction: same definition inclusivePlot() uses, under/overflow in.
