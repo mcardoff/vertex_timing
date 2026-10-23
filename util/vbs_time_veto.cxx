@@ -144,6 +144,11 @@ namespace {
 constexpr double JET_TIME_DR       = 0.2;   // default; --jet-time-dr=X overrides (output tagged _jtdrXpY)
 static double gJetTimeDr = JET_TIME_DR;
 static bool   gPureTimes = false;   // --pure-times: write the pure_ (perfect-assignment) jet times; tagged _pure
+// --jet-time-score=waves: pick the jet's time cluster by the WAVeS proximity weight, sum pT_i / max(dR_i,
+// WAVES_DR_FLOOR) over its tracks (the jet's own pT is common to all its clusters and drops out), instead
+// of the highest sum pT: tracks near the axis -- the jet's own -- decide; output tagged _jtwaves.
+// Meant with no cone (--jet-time-dr=1.0): every timed ghost track enters, the score does the selection.
+static bool   gJetTimeWaves = false;
 constexpr double JET_TIME_DIST_CUT = 2.0;
 
 // The clustering input for the t0 rows -- rpt_v5_hist's, verbatim.
@@ -211,8 +216,18 @@ JetTime jetTimeCore(BranchPointerWrapper& b, int j) {
                                                /*checkTimeValid=*/true, /*usez0=*/false);
   doIterativeClustering(&cl, JET_TIME_DIST_CUT);
   const Cluster* best = nullptr;   // TRKPT score = sum pT (summed on every merge)
-  for (const Cluster& c : cl)
-    if (!best || c.scores.at(Score::TRKPT.id) > best->scores.at(Score::TRKPT.id)) best = &c;
+  double bestScore = -1.0;
+  for (const Cluster& c : cl) {
+    double sc = c.scores.at(Score::TRKPT.id);
+    if (gJetTimeWaves) {   // the WAVeS proximity weight, per track
+      sc = 0.0;
+      for (int idx : c.trackIndices) {
+        const double dr = std::hypot(b.trackEta[idx] - je, TVector2::Phi_mpi_pi(b.trackPhi[idx] - jp));
+        sc += b.trackPt[idx] / std::max(dr, WAVES_DR_FLOOR);
+      }
+    }
+    if (!best || sc > bestScore) { best = &c; bestScore = sc; }
+  }
   out.t     = best->values[0];
   out.sig   = best->sigmas[0];
   out.n     = (int)best->trackIndices.size();
@@ -395,6 +410,8 @@ int main(int argc, char** argv) {
     }
     if (a.rfind("--jet-time-dr=", 0) == 0) { gJetTimeDr = std::stod(a.substr(14)); continue; }
     if (a == "--pure-times") { gPureTimes = true; continue; }
+    if (a == "--jet-time-score=waves") { gJetTimeWaves = true; continue; }
+    if (a == "--jet-time-score=sumpt") { gJetTimeWaves = false; continue; }
     if (a.rfind("--jvt=", 0) != 0) continue;
     const JvtWP* hit = jvtWPByName(a.substr(6));
     if (!hit) { std::cerr << "[veto] unknown " << a << " (none|loose|tight|looseext)\n"; return 1; }
@@ -416,6 +433,7 @@ int main(int argc, char** argv) {
     std::string tag = os.str(); std::replace(tag.begin(), tag.end(), '.', 'p');
     SELECTION_TAG = SELECTION_TAG.empty() ? tag : SELECTION_TAG + "_" + tag;
   }
+  if (gJetTimeWaves) SELECTION_TAG = SELECTION_TAG.empty() ? "jtwaves" : SELECTION_TAG + "_jtwaves";
   if (gPureTimes) SELECTION_TAG = SELECTION_TAG.empty() ? "pure" : SELECTION_TAG + "_pure";
   // --sr: the legs pass JVT loose; fJVT and everything else is applied offline
   const JvtWP& WPL = *jvtWPByName("loose");
@@ -839,6 +857,7 @@ int main(int argc, char** argv) {
   int    jvtWp = srMode ? -1 : (int)(wpSel - JVT_WPS);
   double cutMjj = srMode ? SR_MJJ : VBS_JET_MJJ, cutDeta = srMode ? SR_DETA : VBS_JET_D_ETA;
   double jdr = gJetTimeDr, jcut = JET_TIME_DIST_CUT;
+  int    jscore = gJetTimeWaves ? 1 : 0;   // 0: highest sum pT, 1: WAVeS proximity weight
   bool   srFlag = srMode, srJetsFlag = srMetJets;
   double srRecoil = srRecoilMin, legRptMin = WPL.rptMin;
   bool   truthMet = hasTruthMet;
@@ -857,6 +876,7 @@ int main(int argc, char** argv) {
   meta.Branch("vbs_mjj_cut", &cutMjj, "vbs_mjj_cut/D");
   meta.Branch("vbs_deta_cut", &cutDeta, "vbs_deta_cut/D");
   meta.Branch("jet_time_dr", &jdr, "jet_time_dr/D");
+  meta.Branch("jet_time_score", &jscore, "jet_time_score/I");
   meta.Branch("jet_time_dist_cut", &jcut, "jet_time_dist_cut/D");
   meta.Branch("has_truth_met", &truthMet, "has_truth_met/O");
   meta.Branch("sample", &sample);
