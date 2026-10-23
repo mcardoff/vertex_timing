@@ -46,11 +46,11 @@ ap.add_argument("--out", required=True)
 args = ap.parse_args()
 
 T0NAME = {"trkptz": "TRKPTZ", "waves": "WAVeS", "hgtd": "HGTD (Athena)", "truth": "truth"}[args.t0]
-REMOVED = [("a pileup tagging jet fails",                          "#555555"),
-           ("hard-scatter jet fails: t_{0} wrong (> 3#sigma)",     "#D55E00"),
-           ("hard-scatter jet fails: timed by pileup tracks",       "#CC79A7"),
-           ("hard-scatter jet fails: own tracks, resolution tail",  "#2E9E4F"),
-           ("only jets without a truth label fail",                 "#C79BF5")]
+REMOVED = [("Rejected a PU jet",                                  "#555555"),
+           ("Rejected a HS jet due to wrong t_{0}",               "#D55E00"),
+           ("Rejected a HS jet due to PU tracks",                 "#CC79A7"),
+           ("Rejected a HS jet due to track time misassignment",  "#2E9E4F"),
+           ("only jets without a truth label fail",               "#C79BF5")]
 KEPT = [("no timed track in HGTD: axis central (|#eta| < 2.38)",         "#CFCFCF"),
         ("no timed track in HGTD: axis past |#eta| = 4",                 "#8C8C8C"),
         ("axis outside HGTD, timed tracks only at its edge: no jet time", "#56B4E9"),
