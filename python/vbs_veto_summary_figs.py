@@ -393,30 +393,52 @@ elif args.what in ("money", "steps"):
         fig.text(0.5, -0.08, "every truth-pileup tagging jet, all selected events: what its perfect-assignment time (non-hard-scatter tracks) does against $t_{\\rm HS}$   "
                  "ATLAS Simulation Internal", ha="center", fontsize=9, color="#555555")
         args.out = base + "_pu_legs"; save(fig); args.out = base
-        # figure 2b: in-time pileup -- the pileup jets' perfect-assignment times against t_HS, linear, with the
-        # 3-sigma window and the spread two independent collisions (175 ps each) would give
-        fig, ax = plt.subplots(figsize=(8.6, 5.0))
-        bins = np.linspace(-800, 800, 81); xc = 0.5 * (bins[1:] + bins[:-1])
-        sig_med = []
-        for r, e, nm, col in (("B", B, "pileup tagging jets ($Z$+jets)", "#555555"), ("S", S, "pileup tagging jets (VBF)", "#AAAAAA")):
+        # figure 2b: in-time pileup -- the pileup jets' perfect-assignment times against t_HS (generator-weighted),
+        # each with a Gaussian fit; the expectation for two independent collisions, from a Gaussian fit to the
+        # true t_HS spread; and the 3-sigma test window, sigma from the double-Gaussian core width of the
+        # hard-scatter jets' perfect-assignment times (the project's core-resolution recipe)
+        import ROOT as _R
+        _R.gROOT.SetBatch(True); _R.gErrorIgnoreLevel = _R.kWarning; C.ROOT = _R
+        def gaus_fit(x, w, lo, hi, nb):
+            h = _R.TH1D(f"h_gfit_{len(C.KEEP)}", "", nb, lo, hi); h.Sumw2()
+            for xi, wi in zip(x, w): h.Fill(xi, wi)
+            f = _R.TF1(f"f_gfit_{len(C.KEEP)}", "gaus", lo, hi); f.SetParameters(h.GetMaximum(), 0.0, h.GetStdDev())
+            h.Fit(f, "RQN0"); C.KEEP.extend([h, f])
+            return f.GetParameter(1), abs(f.GetParameter(2)), f.GetParError(2)
+        hsdt = np.concatenate([(S[f"{L}_pure_hs_t"] - S["t0_truth"])[S[f"{L}_hs"] & (S[f"{L}_pure_hs_n"] >= 1)] for L in "ab"])
+        s_res, s_res_e = C.dgaus_core(hsdt)
+        _, s_hs, s_hs_e = gaus_fit(S["t0_truth"], ws, -800, 800, 160)
+        fig, ax = plt.subplots(figsize=(8.6, 5.2))
+        bins = np.linspace(-800, 800, 41); xc = 0.5 * (bins[1:] + bins[:-1])
+        for r, e, w_ev, nm, col in (("B", B, wb, "pileup tagging jets ($Z$+jets)", "#555555"), ("S", S, ws, "pileup tagging jets (VBF)", "#AAAAAA")):
             g = lambda k: np.concatenate([e[f"{L}_{k}"][e[f"{L}_pu"]] for L in "ab"])
+            w = np.concatenate([w_ev[e[f"{L}_pu"]] for L in "ab"]).astype(float)
             n = g("pure_pu_n"); m = n >= 1
             dt = (g("pure_pu_t") - np.concatenate([e["t0_truth"][e[f"{L}_pu"]] for L in "ab"]))[m]
-            sg = (pcal(n) * g("pure_pu_sig"))[m]
-            inw = 100 * np.mean(np.abs(dt) < 3 * sg); sig_med.append(np.median(sg))
-            h, _ = np.histogram(dt, bins=bins); h = h / m.sum() / (bins[1] - bins[0]) * 100
-            ax.step(xc, h, where="mid", color=col, lw=2, label=f"{nm}: {inw:.0f}% within 3$\\sigma$ of $t_{{\\rm HS}}$")
-        s3 = 3 * np.mean(sig_med)
-        ax.axvspan(-s3, s3, color="#3F90DA", alpha=0.18, lw=0, label=f"$\\pm 3\\sigma$ (median $\\sigma$ {np.mean(sig_med):.0f} ps): in time, cannot be told apart")
-        sp = np.sqrt(2) * 175.0
+            sg = (pcal(n) * g("pure_pu_sig"))[m]; wm = w[m]
+            in_test = 100 * wm[np.abs(dt) < 3 * sg].sum() / wm.sum()
+            in_band = 100 * wm[np.abs(dt) < 3 * s_res].sum() / wm.sum()
+            neff = wm.sum() ** 2 / (wm ** 2).sum()
+            mu, sfit, sfit_e = gaus_fit(dt, wm, -800, 800, 80)
+            h, _ = np.histogram(dt, bins=bins, weights=wm); h = h / wm.sum() / (bins[1] - bins[0]) * 100
+            ax.step(xc, h, where="mid", color=col, lw=2,
+                    label=f"{nm}: {m.sum():,} MC jets ($N_{{\\rm eff}}$ = {neff:,.0f}); Gaussian fit $\\sigma$ = {sfit:.0f} $\\pm$ {sfit_e:.0f} ps")
+            ax.plot(xc, 100 * np.exp(-0.5 * ((xc - mu) / sfit) ** 2) / (np.sqrt(2 * np.pi) * sfit), color=col, lw=1.0, ls=":")
+            print(f"{nm}: {m.sum()} MC jets, N_eff {neff:.0f}; Gaussian fit mean {mu:.1f} ps, sigma {sfit:.1f} +- {sfit_e:.1f} ps; "
+                  f"within the per-jet 3-sigma test {in_test:.1f}%, within +-3 x {s_res:.1f} ps {in_band:.1f}%")
+        sp = np.sqrt(2) * s_hs
         ax.plot(xc, 100 * np.exp(-0.5 * (xc / sp) ** 2) / (np.sqrt(2 * np.pi) * sp), color="#B3231C", lw=1.4, ls="--",
-                label=f"two independent collisions, 175 ps each: Gaussian $\\sigma$ = {sp:.0f} ps")
-        ax.set_xlim(-800, 800); ax.set_ylim(0, 0.33)
+                label=f"two independent collisions: $\\sqrt{{2}} \\times$ {s_hs:.0f} ps = {sp:.0f} ps ($t_{{\\rm HS}}$ spread, Gaussian fit)")
+        ax.axvspan(-3 * s_res, 3 * s_res, color="#3F90DA", alpha=0.18, lw=0,
+                   label=f"$\\pm 3\\sigma$, $\\sigma$ = {s_res:.1f} ps (hard-scatter perfect-assignment times, double-Gaussian core)")
+        print(f"t_HS spread (VBF, Gaussian fit) {s_hs:.1f} +- {s_hs_e:.1f} ps -> sqrt(2) x = {sp:.1f} ps; HS perfect-assignment core sigma {s_res:.1f} +- {s_res_e:.1f} ps")
+        ax.set_xlim(-800, 800); ax.set_ylim(0, 0.34)
         ax.set_xlabel("perfect-assignment pileup-jet time $-\\ t_{\\rm HS}^{\\rm truth}$ [ps]")
         ax.set_ylabel("pileup jets [% per ps]")
-        ax.legend(fontsize=9, frameon=False, loc="upper left")
+        ax.legend(fontsize=8.6, frameon=False, loc="upper left")
         ax.grid(alpha=0.25)
-        ax.text(1.0, 1.01, "all selected events   ATLAS Simulation Internal", transform=ax.transAxes, ha="right", va="bottom", fontsize=9, color="#555555")
+        ax.text(1.0, 1.01, "all selected events, generator-weighted; dotted: the Gaussian fits   ATLAS Simulation Internal",
+                transform=ax.transAxes, ha="right", va="bottom", fontsize=9, color="#555555")
         args.out = base + "_intime"; save(fig); args.out = base
         # figure 3: WAVeS's failures
         fig, axes = plt.subplots(1, 2, figsize=(11, 3.2), sharey=True, gridspec_kw=dict(wspace=0.08))
