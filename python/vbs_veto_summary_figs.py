@@ -282,6 +282,22 @@ elif args.what in ("money", "steps"):
         pu_with = lambda col: (e["a_pu"] & (e["a_" + col] >= 1)) | (e["b_pu"] & (e["b_" + col] >= 1))
         V[r]["res"] = V[r]["ideal"] | pu_with("pure_pu_n")
         V[r]["eff"] = V[r]["res"] | pu_with("hgtd_n")
+    # side branch on the WAVeS veto: fix the pileup tagging jets by their perfect-assignment time against
+    # t_HS -- first the out-of-time ones (>= nsigma: what better jet times could catch), then the in-time
+    # ones (timed, < nsigma: what needs better resolution). WAVeS's own vetoes are kept as they are.
+    def pu_by_time(e):
+        out_, in_ = np.zeros(len(e["weight"]), bool), np.zeros(len(e["weight"]), bool)
+        for L in "ab":
+            n = e[f"{L}_pure_pu_n"]; sg = pcal(n) * e[f"{L}_pure_pu_sig"]
+            with np.errstate(divide="ignore", invalid="ignore"):
+                pull = np.abs(e[f"{L}_pure_pu_t"] - e["t0_truth"]) / sg
+            out_ |= e[f"{L}_pu"] & (n >= 1) & (pull >= args.nsigma)
+            in_ |= e[f"{L}_pu"] & (n >= 1) & (pull < args.nsigma)
+        return out_, in_
+    for r, e in (("S", d["S"]), ("B", d["B"])):
+        o_, i_ = pu_by_time(e)
+        V[r]["fixout"] = V[r]["waves"] | o_
+        V[r]["fixin"] = V[r]["fixout"] | i_
     edges = np.array([200, 1000, 2000, 4000.])
     cs, cb = C.mjj_index(S["mjj"], edges), C.mjj_index(B["mjj"], edges)
     cols = [(f"{edges[k]:.0f}-{edges[k + 1]:.0f} GeV" if k < 2 else f"> {edges[k]:.0f} GeV", cs == k, cb == k) for k in range(3)]
@@ -300,11 +316,12 @@ elif args.what in ("money", "steps"):
         zor = Z(A["oracle"], Bv["oracle"], ms, mb)
         rung_t0 = Z(A["t0"], Bv["t0"], ms, mb)
         zjj = Z(A["jjideal"], Bv["jjideal"], ms, mb)
+        zfo, zfi = Z(A["fixout"], Bv["fixout"], ms, mb), Z(A["fixin"], Bv["fixin"], ms, mb)
         rows.append(dict(lab=lab, net=net, cor=cor, zt0=zt0, zid=zid, zor=zor, rung_t0=rung_t0, nB=int(mb.sum())))
         print(f"{lab:16s} where we are {net:+5.1f} | correct only {cor:+5.1f} (failures {cor - net:+4.1f}) | "
               f"+perfect t0 {zt0:+5.1f} ({zt0 - cor:+4.1f}) | +perfect jet time = ideal {zid:+5.1f} ({zid - zt0:+4.1f}) | "
               f"oracle {zor:+5.1f} (irreducible {zor - zid:+4.1f}) | rung: truth t0 + real jet times {rung_t0:+5.1f} | "
-              f"jet 1 vs jet 2, perfect assignment {zjj:+5.1f} | {mb.sum()} B MC")
+              f"jet 1 vs jet 2, perfect assignment {zjj:+5.1f} | WAVeS + out-of-time PU fixed {zfo:+5.1f}, + in-time too {zfi:+5.1f} | {mb.sum()} B MC")
     if args.what == "steps":
         P = lambda w, m: 100 * w[m].sum() / w.sum()
         Zc = lambda vs, vb: 100 * ((ws[~vs].sum() / ws.sum()) / np.sqrt(wb[~vb].sum() / wb.sum()) - 1)
@@ -480,6 +497,8 @@ elif args.what in ("money", "steps"):
              "t0": (V["S"]["t0"], V["B"]["t0"]),
              "ideal": (V["S"]["ideal"], V["B"]["ideal"]),
              "jjideal": (V["S"]["jjideal"], V["B"]["jjideal"]),
+             "fixout": (V["S"]["fixout"], V["B"]["fixout"]),
+             "fixin": (V["S"]["fixin"], V["B"]["fixin"]),
              "res": (V["S"]["res"], V["B"]["res"]),
              "eff": (V["S"]["eff"], V["B"]["eff"]),
              "oracle": (V["S"]["oracle"], V["B"]["oracle"])}
@@ -488,7 +507,9 @@ elif args.what in ("money", "steps"):
            "nofail": ("WAVeS, no failures",              "kP10Yellow", 26),
            "t0":     ("+ perfect t_{0}",                 "kP10Brown",  34),
            "ideal":  ("+ perfect jet-time assignment",   "#1B7837",    20),
-           "jjideal": ("jet 1 vs jet 2, perfect assignment", "#1B7837", 24),
+           "jjideal": ("jet 1 vs jet 2, perfect times", "#1B7837", 24),
+           "fixout": ("WAVeS + out-of-time pileup fixed", "#00897B", 29),
+           "fixin":  ("+ in-time pileup fixed too", "#00897B", 30),
            "res":    ("+ perfect time resolution",       "kP10Blue",   23),
            "eff":    ("+ perfect HGTD efficiency",       "#7B3294",    32),
            "oracle": ("+ full acceptance: ceiling",      "#000000",    21)}
@@ -519,10 +540,15 @@ elif args.what in ("money", "steps"):
     label = "S: VBF H#rightarrowinv.,  B: Z(#rightarrowll)+jets"
     head = ["**All selected events: where we were, are, could be"]
     C.column_figure(args.out + "_yields", "S / #sqrt{B}  per m_{jj} column", absol, ex_abs, label + ",  3000 fb^{-1}", head,
-                    bcount, "B MC", EDG, STY, ["none", "waves", "nofail", "t0", "ideal", "jjideal", "res", "eff", "oracle"], ref=None,
+                    bcount, "B MC", EDG, STY, ["none", "waves", "nofail", "t0", "ideal", "jjideal", "res", "eff", "fixout", "fixin", "oracle"], ref=None,
                     compact=True, count_parts=bp, sig_counts=(scount, sp))
     C.column_figure(args.out, "S/#sqrt{B} change vs no veto [%]", change, ex_chg, label, head + [ceil],
-                    bcount, "B MC", EDG, STY, ["waves", "nofail", "t0", "ideal", "jjideal", "res", "eff"], ref=0.0, pct=True,
+                    bcount, "B MC", EDG, STY, ["waves", "nofail", "t0", "ideal", "jjideal", "res", "eff", "fixout", "fixin"], ref=0.0, pct=True,
+                    compact=True, count_parts=bp, sig_counts=(scount, sp))
+    # the split on its own, for the deck: WAVeS, + out-of-time pileup fixed, + in-time pileup fixed too
+    C.column_figure(args.out + "_split", "S/#sqrt{B} change vs no veto [%]", change, ex_chg, label,
+                    ["**WAVeS, then its pileup tagging jets fixed by time"],
+                    bcount, "B MC", EDG, STY, ["waves", "fixout", "fixin"], ref=0.0, pct=True,
                     compact=True, count_parts=bp, sig_counts=(scount, sp))
 
 elif args.what == "puretime":

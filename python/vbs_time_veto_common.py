@@ -255,7 +255,8 @@ def graph(series, k, n_meth, key, edges, style):
         g.SetPointError(i, 0, 0, lo, hi)
     lab, c, mk = style[key]
     g.SetMarkerColor(colour(c)); g.SetLineColor(colour(c)); g.SetMarkerStyle(mk)
-    g.SetMarkerSize(1.15 if key == "jj" else 1.0); g.SetLineWidth(2)
+    # stars (29/30) and diamonds (33/27) draw small at the common size
+    g.SetMarkerSize(1.15 if key == "jj" else 1.7 if mk in (29, 30, 33, 27) else 1.0); g.SetLineWidth(2)
     KEEP.append(g)
     return g
 
