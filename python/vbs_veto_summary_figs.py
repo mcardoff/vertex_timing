@@ -282,22 +282,29 @@ elif args.what in ("money", "steps"):
         pu_with = lambda col: (e["a_pu"] & (e["a_" + col] >= 1)) | (e["b_pu"] & (e["b_" + col] >= 1))
         V[r]["res"] = V[r]["ideal"] | pu_with("pure_pu_n")
         V[r]["eff"] = V[r]["res"] | pu_with("hgtd_n")
-    # side branch on the WAVeS veto: fix the pileup tagging jets by their perfect-assignment time against
-    # t_HS -- first the out-of-time ones (>= nsigma: what better jet times could catch), then the in-time
-    # ones (timed, < nsigma: what needs better resolution). WAVeS's own vetoes are kept as they are.
-    def pu_by_time(e):
-        out_, in_ = np.zeros(len(e["weight"]), bool), np.zeros(len(e["weight"]), bool)
+    # THE CHAIN (the money plot since 2026-10-23): each step fixes one kind of mistake and builds on the
+    # one before -- WAVeS -> the true t0 (real jet times) -> the out-of-time pileup tagging jets caught
+    # (perfect-assignment time >= nsigma from t_HS: what better jet times could reach) -> the in-time ones
+    # (timed, < nsigma: what needs better resolution) -> the untimed ones with a track in HGTD -> the false
+    # vetoes undone (only events with a pileup tagging jet stay vetoed) -> every pileup tagging jet (the
+    # ceiling: the rest is pileup HGTD cannot reach). Unlabelled jets keep their real-time test throughout.
+    def pu_classes(e):
+        o_, i_, u_ = (np.zeros(len(e["weight"]), bool) for _ in range(3))
         for L in "ab":
             n = e[f"{L}_pure_pu_n"]; sg = pcal(n) * e[f"{L}_pure_pu_sig"]
             with np.errstate(divide="ignore", invalid="ignore"):
                 pull = np.abs(e[f"{L}_pure_pu_t"] - e["t0_truth"]) / sg
-            out_ |= e[f"{L}_pu"] & (n >= 1) & (pull >= args.nsigma)
-            in_ |= e[f"{L}_pu"] & (n >= 1) & (pull < args.nsigma)
-        return out_, in_
+            pu = e[f"{L}_pu"]
+            o_ |= pu & (n >= 1) & (pull >= args.nsigma)
+            i_ |= pu & (n >= 1) & (pull < args.nsigma)
+            u_ |= pu & (n < 1) & (e[f"{L}_hgtd_n"] >= 1)
+        return o_, i_, u_
     for r, e in (("S", d["S"]), ("B", d["B"])):
-        o_, i_ = pu_by_time(e)
-        V[r]["fixout"] = V[r]["waves"] | o_
-        V[r]["fixin"] = V[r]["fixout"] | i_
+        o_, i_, u_ = pu_classes(e)
+        V[r]["oot"] = V[r]["t0"] | o_
+        V[r]["itpu"] = V[r]["oot"] | i_
+        V[r]["untimed"] = V[r]["itpu"] | u_
+        V[r]["nofalse"] = V[r]["untimed"] & (e["a_pu"] | e["b_pu"])
     edges = np.array([200, 1000, 2000, 4000.])
     cs, cb = C.mjj_index(S["mjj"], edges), C.mjj_index(B["mjj"], edges)
     cols = [(f"{edges[k]:.0f}-{edges[k + 1]:.0f} GeV" if k < 2 else f"> {edges[k]:.0f} GeV", cs == k, cb == k) for k in range(3)]
@@ -316,12 +323,12 @@ elif args.what in ("money", "steps"):
         zor = Z(A["oracle"], Bv["oracle"], ms, mb)
         rung_t0 = Z(A["t0"], Bv["t0"], ms, mb)
         zjj = Z(A["jjideal"], Bv["jjideal"], ms, mb)
-        zfo, zfi = Z(A["fixout"], Bv["fixout"], ms, mb), Z(A["fixin"], Bv["fixin"], ms, mb)
+        chain = " -> ".join(f"{Z(A[k], Bv[k], ms, mb):+5.1f}" for k in ("waves", "t0", "oot", "itpu", "untimed", "nofalse", "oracle"))
         rows.append(dict(lab=lab, net=net, cor=cor, zt0=zt0, zid=zid, zor=zor, rung_t0=rung_t0, nB=int(mb.sum())))
         print(f"{lab:16s} where we are {net:+5.1f} | correct only {cor:+5.1f} (failures {cor - net:+4.1f}) | "
               f"+perfect t0 {zt0:+5.1f} ({zt0 - cor:+4.1f}) | +perfect jet time = ideal {zid:+5.1f} ({zid - zt0:+4.1f}) | "
               f"oracle {zor:+5.1f} (irreducible {zor - zid:+4.1f}) | rung: truth t0 + real jet times {rung_t0:+5.1f} | "
-              f"jet 1 vs jet 2, perfect assignment {zjj:+5.1f} | WAVeS + out-of-time PU fixed {zfo:+5.1f}, + in-time too {zfi:+5.1f} | {mb.sum()} B MC")
+              f"jet 1 vs jet 2, perfect assignment {zjj:+5.1f} | chain {chain} | {mb.sum()} B MC")
     if args.what == "steps":
         P = lambda w, m: 100 * w[m].sum() / w.sum()
         Zc = lambda vs, vb: 100 * ((ws[~vs].sum() / ws.sum()) / np.sqrt(wb[~vb].sum() / wb.sum()) - 1)
@@ -343,14 +350,14 @@ elif args.what in ("money", "steps"):
                 if unl: v |= leg_veto(e, L, ~hs & ~pu)
             return v
         has_pu = lambda e: e["a_pu"] | e["b_pu"]
-        # the main chain, its sub-steps marked: (label, colour, rung it ends, S vetoes, B vetoes)
+        # the money plot's chain: (label, colour, rung it ends, S vetoes, B vetoes)
         CHAIN = [("WAVeS\nveto", "#FFA90E", "waves", V["S"]["waves"], V["B"]["waves"]),
                  ("+ perfect\n$t_0$", "#A96B59", "t0", V["S"]["t0"], V["B"]["t0"]),
-                 ("+ perfect\njet-time\nassign-\nment", "#1B7837", "ideal", V["S"]["ideal"], V["B"]["ideal"]),
-                 ("+ perfect\nresolution", "#3F90DA", "res", V["S"]["res"], V["B"]["res"]),
-                 ("+ perfect\nHGTD\nefficiency", "#7B3294", "eff", V["S"]["eff"], V["B"]["eff"]),
-                 ("no hard-\nscatter\nfalse\nvetoes", "#717581", None, V["S"]["eff"] & has_pu(S), V["B"]["eff"] & has_pu(B)),
-                 ("+ full\naccept-\nance:\nceiling", "#000000", "oracle", V["S"]["oracle"], V["B"]["oracle"])]
+                 ("+ out-of-\ntime pileup\ncaught", "#1B7837", "oot", V["S"]["oot"], V["B"]["oot"]),
+                 ("+ in-time\npileup\ncaught", "#3F90DA", "itpu", V["S"]["itpu"], V["B"]["itpu"]),
+                 ("+ untimed\npileup in\nHGTD caught", "#7B3294", "untimed", V["S"]["untimed"], V["B"]["untimed"]),
+                 ("+ false\nvetoes\nundone", "#717581", "nofalse", V["S"]["nofalse"], V["B"]["nofalse"]),
+                 ("+ pileup\nHGTD cannot\nreach:\nceiling", "#000000", "oracle", V["S"]["oracle"], V["B"]["oracle"])]
         z = [0.0] + [Zc(vs, vb) for *_, vs, vb in CHAIN]
         kS = [100.0] + [100 - P(ws, vs) for *_, vs, vb in CHAIN]; kB = [100.0] + [100 - P(wb, vb) for *_, vs, vb in CHAIN]
         for (lab, *_), z0, z1, s_, b_ in zip(CHAIN, z[:-1], z[1:], kS[1:], kB[1:]):
@@ -368,8 +375,8 @@ elif args.what in ("money", "steps"):
             if i + 1 < len(CHAIN): a0.plot([i + 0.31, i + 0.69], [z1, z1], color="#888888", lw=0.8, ls=":")
         a0.axhline(0, color="#888888", lw=0.8)
         a0.set_ylabel("$S/\\sqrt{B}$ change vs no veto [%]"); a0.set_ylim(min(z) - 2, max(z) + 7)
-        a0.text(0.01, 0.97, "solid: a step of the money plot (the line: where it ends); hatched: a part of one, measured here\n"
-                "side branches (WAVeS no failures, jet 1 vs jet 2) are not in this chain", transform=a0.transAxes, va="top", fontsize=9.5, color="#444444")
+        a0.text(0.01, 0.97, "each step builds on the one before; the line: where the money plot's marker sits\n"
+                "the side branch (WAVeS, no failures) is not in this chain", transform=a0.transAxes, va="top", fontsize=9.5, color="#444444")
         a0.grid(alpha=0.3, axis="y")
         a1.plot(np.arange(-1, len(CHAIN)), kB, "s-", color="#555555", ms=7, lw=1.6, label="$Z$+jets kept")
         a1.plot(np.arange(-1, len(CHAIN)), kS, "o-", color="#2E9E4F", mfc="white", ms=7, lw=1.6, label="VBF kept")
@@ -379,14 +386,14 @@ elif args.what in ("money", "steps"):
         a1.set_ylabel("kept [%]"); a1.set_ylim(20, 108); a1.legend(fontsize=10, frameon=False, loc="lower left"); a1.grid(alpha=0.3, axis="y")
         a1.set_xticks(np.arange(-1, len(CHAIN))); a1.set_xticklabels(["no\nveto"] + [c[0] for c in CHAIN], fontsize=11)
         a1.set_xlim(-1.4, len(CHAIN) - 0.5)
-        fig.text(0.5, -0.07, "all selected events, recoil > 100 GeV, JVT + fJVT loose; perfect steps: true $t_{\\rm HS}$, a jet timed by its own-origin tracks "
-                 "(hard-scatter / non-hard-scatter)   ATLAS Simulation Internal", ha="center", fontsize=9, color="#555555")
+        fig.text(0.5, -0.07, "all selected events, recoil > 100 GeV, JVT + fJVT loose; from the perfect $t_0$ on, $t_0 = t_{\\rm HS}$; a pileup tagging jet's time: "
+                 "its non-hard-scatter tracks (perfect assignment)   ATLAS Simulation Internal", ha="center", fontsize=9, color="#555555")
         args.out, base = args.out + "_waterfall", args.out
         save(fig); args.out = base
         # figure 2: every pileup tagging jet by the step that catches it
         fig, ax = plt.subplots(figsize=(11, 3.4))
-        CATS = [("caught by perfect\nassignment ($\\geq 3\\sigma$)", "#1B7837"), ("in time ($< 3\\sigma$):\nresolution step", "#3F90DA"),
-                ("tracks in HGTD, none\ntimed: efficiency step", "#7B3294"), ("no track in HGTD,\naxis $|\\eta| < 2.4$", "#555555"),
+        CATS = [("out of time ($\\geq 3\\sigma$):\nthe out-of-time step", "#1B7837"), ("in time ($< 3\\sigma$):\nthe in-time step", "#3F90DA"),
+                ("tracks in HGTD, none\ntimed: the untimed step", "#7B3294"), ("no track in HGTD,\naxis $|\\eta| < 2.4$", "#555555"),
                 ("no track in HGTD,\naxis $|\\eta| > 2.4$", "#AAAAAA")]
         for row, (r, e, nm) in enumerate((("B", B, "$Z$+jets"), ("S", S, "VBF $H\\to$inv."))):
             w = np.concatenate([e["weight"][e[f"{L}_pu"]] for L in "ab"]).astype(float)
@@ -495,24 +502,20 @@ elif args.what in ("money", "steps"):
              "waves": (V["S"]["waves"], V["B"]["waves"]),
              "nofail": (nofail(V["S"]), nofail(V["B"])),
              "t0": (V["S"]["t0"], V["B"]["t0"]),
-             "ideal": (V["S"]["ideal"], V["B"]["ideal"]),
-             "jjideal": (V["S"]["jjideal"], V["B"]["jjideal"]),
-             "fixout": (V["S"]["fixout"], V["B"]["fixout"]),
-             "fixin": (V["S"]["fixin"], V["B"]["fixin"]),
-             "res": (V["S"]["res"], V["B"]["res"]),
-             "eff": (V["S"]["eff"], V["B"]["eff"]),
+             "oot": (V["S"]["oot"], V["B"]["oot"]),
+             "itpu": (V["S"]["itpu"], V["B"]["itpu"]),
+             "untimed": (V["S"]["untimed"], V["B"]["untimed"]),
+             "nofalse": (V["S"]["nofalse"], V["B"]["nofalse"]),
              "oracle": (V["S"]["oracle"], V["B"]["oracle"])}
     STY = {"none":   ("No veto: where we were",          "#7F7F7F",    25),
            "waves":  ("WAVeS veto: where we are",        "kP10Yellow", 22),
            "nofail": ("WAVeS, no failures",              "kP10Yellow", 26),
            "t0":     ("+ perfect t_{0}",                 "kP10Brown",  34),
-           "ideal":  ("+ perfect jet-time assignment",   "#1B7837",    20),
-           "jjideal": ("jet 1 vs jet 2, perfect times", "#1B7837", 24),
-           "fixout": ("WAVeS + out-of-time pileup fixed", "#00897B", 29),
-           "fixin":  ("+ in-time pileup fixed too", "#00897B", 30),
-           "res":    ("+ perfect time resolution",       "kP10Blue",   23),
-           "eff":    ("+ perfect HGTD efficiency",       "#7B3294",    32),
-           "oracle": ("+ full acceptance: ceiling",      "#000000",    21)}
+           "oot":    ("+ out-of-time pileup caught",     "#1B7837",    20),
+           "itpu":   ("+ in-time pileup caught",         "kP10Blue",   23),
+           "untimed": ("+ untimed pileup in HGTD caught", "#7B3294",   32),
+           "nofalse": ("+ false vetoes undone",          "#717581",    33),
+           "oracle": ("+ pileup HGTD cannot reach: ceiling", "#000000", 21)}
     absol, change, ex_abs, ex_chg = {}, {}, {}, {}
     for m, (vs, vb) in RUNGS.items():
         absol[m], change[m] = [], []
@@ -540,15 +543,10 @@ elif args.what in ("money", "steps"):
     label = "S: VBF H#rightarrowinv.,  B: Z(#rightarrowll)+jets"
     head = ["**All selected events: where we were, are, could be"]
     C.column_figure(args.out + "_yields", "S / #sqrt{B}  per m_{jj} column", absol, ex_abs, label + ",  3000 fb^{-1}", head,
-                    bcount, "B MC", EDG, STY, ["none", "waves", "nofail", "t0", "ideal", "jjideal", "res", "eff", "fixout", "fixin", "oracle"], ref=None,
+                    bcount, "B MC", EDG, STY, ["none", "waves", "nofail", "t0", "oot", "itpu", "untimed", "nofalse", "oracle"], ref=None,
                     compact=True, count_parts=bp, sig_counts=(scount, sp))
     C.column_figure(args.out, "S/#sqrt{B} change vs no veto [%]", change, ex_chg, label, head + [ceil],
-                    bcount, "B MC", EDG, STY, ["waves", "nofail", "t0", "ideal", "jjideal", "res", "eff", "fixout", "fixin"], ref=0.0, pct=True,
-                    compact=True, count_parts=bp, sig_counts=(scount, sp))
-    # the split on its own, for the deck: WAVeS, + out-of-time pileup fixed, + in-time pileup fixed too
-    C.column_figure(args.out + "_split", "S/#sqrt{B} change vs no veto [%]", change, ex_chg, label,
-                    ["**WAVeS, then its pileup tagging jets fixed by time"],
-                    bcount, "B MC", EDG, STY, ["waves", "fixout", "fixin"], ref=0.0, pct=True,
+                    bcount, "B MC", EDG, STY, ["waves", "nofail", "t0", "oot", "itpu", "untimed", "nofalse"], ref=0.0, pct=True,
                     compact=True, count_parts=bp, sig_counts=(scount, sp))
 
 elif args.what == "puretime":
