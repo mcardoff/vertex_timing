@@ -86,6 +86,10 @@ ap.add_argument("--jet-infl", default="sig-ntrk",
                      "sig: one global factor from the signal file; per-file / per-file-ntrk: each file its own; "
                      "or a number")
 ap.add_argument("--min-trk", type=int, default=1, help="tracks a jet-time estimate needs for the jet to count as timed")
+ap.add_argument("--t0-dt-sources", default="trkptz,waves,hgtd",
+                help="the reco t0s drawn in <out>_t0_dt (e.g. trkptz,waves: no Athena)")
+ap.add_argument("--t0-dt-only", action="store_true",
+                help="load the files and write only <out>_t0_dt (and _bkg), nothing else")
 ap.add_argument("--methods", default="jj,t0_trkptz,t0_waves,t0_hgtd,t0_truth",
                 help="drawn methods, e.g. t0_trkptz,t0_waves (event veto) or rp_trkptz,rp_waves (jet "
                      "removal + re-pairing); the summary always has every method the files support")
@@ -290,6 +294,51 @@ loaded = {}
 for role, path, col, cut, norm in [("sig", args.sig, "met_truth", args.met_min, args.sig_norm),
                                    ("bkg", args.bkg, "z_pt", args.zpt_min, args.bkg_norm)]:
     if path: loaded[role] = (path, col, cut, norm) + load(path, col, cut, role)
+def t0_dt_figure(stem, e_all, what):
+    """<stem>_t0_dt: t0 - t_HS^truth in ps (not divided by sigma) for every selected event
+    of the file with that t0, one line per reco t0 -- the companion of <stem>_jet_time_dt"""
+    ROOT_ = C.ROOT if C.ROOT is not None else C.setup_root(stem)
+    c = ROOT_.TCanvas("c_t0dt_" + what, "", 800, 650); C.KEEP.append(c)
+    c.SetLeftMargin(0.14); c.SetRightMargin(0.05); c.SetLogy(True)
+    nsrc = len(args.t0_dt_sources.split(","))
+    leg = ROOT_.TLegend(0.16, 0.735 - 0.045 * nsrc, 0.93, 0.735); ROOT_.StyleLegend(leg, 0.027); C.KEEP.append(leg)
+    nall = len(e_all["t0_truth"])
+    for k, src in enumerate(args.t0_dt_sources.split(",")):
+        ok = e_all[f"ok_{src}"].astype(bool)
+        dt = e_all[f"t0_{src}"][ok] - e_all["t0_truth"][ok]
+        h = ROOT_.TH1D(f"h_t0dt_{what}_{src}", "", 80, -400, 400); C.KEEP.append(h)
+        for x in np.clip(dt, -399.9, 399.9): h.Fill(x)
+        h.Scale(1.0 / h.Integral())
+        lab, col, _ = STYLE["t0_" + src]
+        h.SetLineColor(C.colour(col)); h.SetLineWidth(2); h.SetLineStyle(1 if src != "hgtd" else 7)
+        if k == 0:
+            h.SetMinimum(2e-5); h.SetMaximum(2000.0)
+            h.GetXaxis().SetTitle("t_{0} - t_{HS}^{truth} [ps]   (overflow in the edge bins)")
+            h.GetYaxis().SetTitle("Fraction of events with that t_{0}")
+            h.Draw("HIST")
+        else:
+            h.Draw("HIST SAME")
+        name = lab.replace("Jet vs t_{0}: ", "")
+        leg.AddEntry(h, f"{name}: core #sigma {C.dgaus_core(dt)[0]:.1f} ps, {100 * np.mean(np.abs(dt) > 60):.0f}% beyond 60 ps;  "
+                     f"valid in {100 * ok.sum() / nall:.0f}%", "l")
+    leg.Draw()
+    ROOT_.ATLASLabel(0.17, 0.88, "")
+    t = ROOT_.TLatex(); t.SetNDC(); t.SetTextFont(42); t.SetTextSize(0.04); C.KEEP.append(t)
+    t.DrawLatex(0.31, 0.88, "Simulation Internal")
+    t2 = ROOT_.TLatex(); t2.SetNDC(); t2.SetTextFont(42); t2.SetTextSize(0.028); t2.SetTextColor(ROOT_.kGray + 2); C.KEEP.append(t2)
+    t2.DrawLatex(0.17, 0.835, f"{'VBF H#rightarrowinv.' if what == 'sig' else 'Z(#rightarrowll)+jets'}: every selected event, {nall:,}")
+    t2.DrawLatex(0.17, 0.80, "core #sigma: the narrow width of a double-Gaussian fit")
+    if "hgtd" in args.t0_dt_sources.split(","):
+        t2.DrawLatex(0.17, 0.765, "HGTD: Athena's RecoVtx_time, where valid")
+    out = f"{stem}_t0_dt{'' if what == 'sig' else '_bkg'}"
+    c.Print(out + ".pdf"); c.Print(out + ".png")
+    print("wrote", out + ".pdf / .png")
+
+
+if args.t0_dt_only:
+    for r in loaded:
+        t0_dt_figure(args.out, loaded[r][5], r)
+    raise SystemExit(0)
 HAS_JETS = all(v[4]["jets"] is not None for v in loaded.values())
 ALL_METHODS = VETO_METHODS + (REPAIR_METHODS if HAS_JETS else [])
 for m in DRAWN + [f"rp_{s}" for s in COMPARE]:
@@ -818,45 +867,6 @@ def t0_figure(stem, e_all, what):
     t2.DrawLatex(0.17, 0.765, "HGTD: Athena's RecoVtx_time, where valid")
     c.Print(f"{stem}_t0_pulls{'' if what == 'sig' else '_bkg'}.pdf"); c.Print(f"{stem}_t0_pulls{'' if what == 'sig' else '_bkg'}.png")
     print("wrote", f"{stem}_t0_pulls{'' if what == 'sig' else '_bkg'}.pdf / .png")
-
-
-def t0_dt_figure(stem, e_all, what):
-    """<stem>_t0_dt: t0 - t_HS^truth in ps (not divided by sigma) for every selected event
-    of the file with that t0, one line per reco t0 -- the companion of <stem>_jet_time_dt"""
-    ROOT_ = C.ROOT
-    c = ROOT_.TCanvas("c_t0dt_" + what, "", 800, 650); C.KEEP.append(c)
-    c.SetLeftMargin(0.14); c.SetRightMargin(0.05); c.SetLogy(True)
-    leg = ROOT_.TLegend(0.16, 0.600, 0.93, 0.735); ROOT_.StyleLegend(leg, 0.027); C.KEEP.append(leg)
-    nall = len(e_all["t0_truth"])
-    for k, src in enumerate(["trkptz", "waves", "hgtd"]):
-        ok = e_all[f"ok_{src}"].astype(bool)
-        dt = e_all[f"t0_{src}"][ok] - e_all["t0_truth"][ok]
-        h = ROOT_.TH1D(f"h_t0dt_{what}_{src}", "", 80, -400, 400); C.KEEP.append(h)
-        for x in np.clip(dt, -399.9, 399.9): h.Fill(x)
-        h.Scale(1.0 / h.Integral())
-        lab, col, _ = STYLE["t0_" + src]
-        h.SetLineColor(C.colour(col)); h.SetLineWidth(2); h.SetLineStyle(1 if src != "hgtd" else 7)
-        if k == 0:
-            h.SetMinimum(2e-5); h.SetMaximum(2000.0)
-            h.GetXaxis().SetTitle("t_{0} - t_{HS}^{truth} [ps]   (overflow in the edge bins)")
-            h.GetYaxis().SetTitle("Fraction of events with that t_{0}")
-            h.Draw("HIST")
-        else:
-            h.Draw("HIST SAME")
-        name = lab.replace("Jet vs t_{0}: ", "")
-        leg.AddEntry(h, f"{name}: core #sigma {C.dgaus_core(dt)[0]:.1f} ps, {100 * np.mean(np.abs(dt) > 60):.0f}% beyond 60 ps;  "
-                     f"valid in {100 * ok.sum() / nall:.0f}%", "l")
-    leg.Draw()
-    ROOT_.ATLASLabel(0.17, 0.88, "")
-    t = ROOT_.TLatex(); t.SetNDC(); t.SetTextFont(42); t.SetTextSize(0.04); C.KEEP.append(t)
-    t.DrawLatex(0.31, 0.88, "Simulation Internal")
-    t2 = ROOT_.TLatex(); t2.SetNDC(); t2.SetTextFont(42); t2.SetTextSize(0.028); t2.SetTextColor(ROOT_.kGray + 2); C.KEEP.append(t2)
-    t2.DrawLatex(0.17, 0.835, f"{'VBF H#rightarrowinv.' if what == 'sig' else 'Z(#rightarrowll)+jets'}: every selected event, {nall:,}")
-    t2.DrawLatex(0.17, 0.80, "core #sigma: the narrow width of a double-Gaussian fit")
-    t2.DrawLatex(0.17, 0.765, "HGTD: Athena's RecoVtx_time, where valid")
-    out = f"{stem}_t0_dt{'' if what == 'sig' else '_bkg'}"
-    c.Print(out + ".pdf"); c.Print(out + ".png")
-    print("wrote", out + ".pdf / .png")
 
 
 for r in loaded:
