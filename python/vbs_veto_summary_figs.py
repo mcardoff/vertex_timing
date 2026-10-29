@@ -460,7 +460,7 @@ elif args.what in ("money", "steps", "chainevents"):
         a0.axhline(0, color="#888888", lw=0.8)
         a0.set_ylabel("$S/\\sqrt{B}$ change vs no veto [%]"); a0.set_ylim(min(z) - 2, max(z) + 7)
         a0.text(0.01, 0.97, "each step builds on the one before; the line: where the money plot's marker sits\n"
-                "the side branch (WAVeS, no failures) is not in this chain", transform=a0.transAxes, va="top", fontsize=9.5, color="#444444")
+                "the side branch (WAVeS, no wrong-reason vetoes) is not in this chain", transform=a0.transAxes, va="top", fontsize=9.5, color="#444444")
         a0.grid(alpha=0.3, axis="y")
         a1.plot(np.arange(-1, len(CHAIN)), kB, "s-", color="#555555", ms=7, lw=1.6, label="$Z$+jets kept")
         a1.plot(np.arange(-1, len(CHAIN)), kS, "o-", color="#2E9E4F", mfc="white", ms=7, lw=1.6, label="VBF kept")
@@ -568,9 +568,9 @@ elif args.what in ("money", "steps", "chainevents"):
         axes[0].set_yticks([0, 1]); axes[0].set_yticklabels(["$Z(\\to\\ell\\ell)$+jets", "VBF $H\\to$inv."])
         axes[0].set_title("by cause", fontsize=11); axes[1].set_title("by the tagging pair", fontsize=11)
         for ax in axes:
-            ax.set_xlabel("WAVeS failures [% of all events]"); ax.set_xlim(0, 10.5)
+            ax.set_xlabel("wrong-reason vetoes [% of all events]"); ax.set_xlim(0, 10.5)
             ax.legend(fontsize=9, frameon=False, loc="upper center", bbox_to_anchor=(0.5, -0.27), ncol=1)
-        fig.text(0.5, 1.02, "a failure: WAVeS vetoes an event that the perfect veto (true $t_{\\rm HS}$, perfect jet-time assignment) keeps   "
+        fig.text(0.5, 1.02, "a wrong-reason veto: WAVeS vetoes an event that the perfect veto (true $t_{\\rm HS}$, perfect jet-time assignment) keeps   "
                  "ATLAS Simulation Internal", ha="center", fontsize=9.5, color="#555555")
         args.out = base + "_failures"; save(fig); args.out = base
         raise SystemExit(0)
@@ -593,7 +593,7 @@ elif args.what in ("money", "steps", "chainevents"):
              "oracle": (V["S"]["oracle"], V["B"]["oracle"])}
     STY = {"none":   ("No veto: where we were",          "#7F7F7F",    25),
            "waves":  ("WAVeS veto: where we are",        "kP10Yellow", 22),
-           "nofail": ("WAVeS, no failures",              "kP10Yellow", 26),
+           "nofail": ("WAVeS, no wrong-reason vetoes", "kP10Yellow", 26),
            "t0":     ("+ perfect t_{0}",                 "kP10Brown",  34),
            "oot":    ("+ out-of-time pileup caught",     "#1B7837",    20),
            "itpu":   ("+ in-time pileup caught",         "kP10Blue",   23),
