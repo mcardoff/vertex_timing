@@ -56,6 +56,7 @@ gate = float(np.unique(meta["gate_sigma"])[0])
 clean = str(meta["time_cleaning"][0]) if "time_cleaning" in meta else "off"   # trees before 2026-11-03: uncleaned
 CLEAN_TXT = {"all": None, "t0": "Cleaned t_{0} only", "off": "Track times as in the ntuple"}   # the default (all) unlabelled
 clean_line = [CLEAN_TXT[clean]] if CLEAN_TXT[clean] else []
+gate_txt = "" if gate == 2.0 else f", t_{{0}} gate {gate:g}#sigma"     # the TDR's 2 sigma is the standard: unlabelled
 
 ae = np.abs(J["eta"])
 ENERGY = "#sqrt{s} = 14 TeV, HL-LHC, #LT#mu#GT = 200"
@@ -126,7 +127,7 @@ for c, (lab, lo, hi) in enumerate(SLICES):
         S.style(S.graph(EFF, rej, rerr), colour, mk, 1, 2, 1.3).Draw("P SAME")         # solid error bars
         leg.AddEntry(g, name, "LP")
     leg.Draw()
-    S.header(0.20, 0.87, [ENERGY, f"{args.label}, t_{{0}} gate {gate:g}#sigma", f"{lab}, 2.4 < |#eta| < 4.0"] + clean_line, size=TS_M)
+    S.header(0.20, 0.87, [ENERGY, args.label + gate_txt, f"{lab}, 2.4 < |#eta| < 4.0"] + clean_line, size=TS_M)
 
     cv.cd()
     p2 = S.pad(f"ratio{c}", 0.5 * c, 0.0, 0.5 * c + 0.5, RAT, top=0.03, bottom=0.36)
@@ -156,20 +157,18 @@ for col, *_ in TAGGERS:
         if col == "rpt_itk": nbin.append((int(H.sum()), int(P.sum())))
     rel[col], effhs[col] = v, e
 cv = S.keep(R.TCanvas("eta", "", 800, 600))
-allv = [x for v in rel.values() for x in v if np.isfinite(x)]
-ylo = min(0.4, np.floor(10 * (min(allv) - 0.1)) / 10)              # fitted to the data,
-yhi = max(1.6, ylo + 1.75 * (max(allv) - ylo))                        # room above it for the labels
-fr = S.keep(cv.DrawFrame(2.4, ylo, 4.0, yhi))
+fr = S.keep(cv.DrawFrame(2.4, 0.0, 4.0, 1.6))                         # the TDR's y range
 S.axes(fr, "Jet |#eta|", "Pileup jet rate relative to ITk only")
 fr.GetYaxis().ChangeLabel(1, -1, 0)
-leg = S.legend(0.70, 0.66, 0.93, 0.92, size=0.04)
+leg = S.legend(0.20, 0.19, 0.93, 0.33, size=0.04, ncol=3)          # along the bottom: the curves sit above 0.5
 for col, name, short, colour, mk, ls in TAGGERS:
     h = S.keep(R.TH1D(f"h_eta_{col}", "", len(EB) - 1, EB))
     for b, x in enumerate(rel[col]): h.SetBinContent(b + 1, x)
     S.style(h, colour, 0, ls, 3 if col in ("rpt_itk", "rpt_t0_truth") else 2); h.Draw("HIST SAME")
     leg.AddEntry(h, short, "L")
 leg.Draw()
-S.header(0.20, 0.87, ["#sqrt{s} = 14 TeV, #LT#mu#GT = 200", f"{args.label}, {gate:g}#sigma gate", "30 < p_{T} < 50 GeV, 85% HS efficiency"] + clean_line)
+S.header(0.20, 0.87, [f"#sqrt{{s}} = 14 TeV, #LT#mu#GT = 200, {args.label}{gate_txt}",
+                      "2.4 < |#eta| < 4.0, 30 < p_{T} < 50 GeV, 85% HS efficiency"] + clean_line)
 cv.RedrawAxis()
 S.save(cv, f"{args.out}_eta")
 print("\nrelative pileup-jet rate, 30-50 GeV, ONE 85% working point over 2.4-4.0, |eta| bins " + " ".join(f"{EB[b]:.1f}-{EB[b + 1]:.1f}" for b in range(len(EB) - 1)) + "   (HS efficiency per bin)")

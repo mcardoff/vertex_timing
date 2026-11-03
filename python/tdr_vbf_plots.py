@@ -113,7 +113,7 @@ for key, lab, E, _ in samples:
     # the all-jets selection must reproduce tdr_vbf's own flag
     assert np.array_equal(R[key, None][0], E["presel_all"]), "offline preselection disagrees with presel_all"
 sample_line = lambda lab: lab + (f" ({args.note})" if args.note else "")
-gate_txt = f"t_{{0}} gate {gate_wp:g}#sigma"
+gate_txt = "" if gate_wp == 2.0 else f", t_{{0}} gate {gate_wp:g}#sigma"   # the TDR's 2 sigma is the standard: unlabelled
 
 # ── Fig 3.24 analogue ─────────────────────────────────────────────────────────
 CC = {"CC": S.COL["cc"], "CF": S.COL["cf"], "FF": S.COL["ff"]}  # the TDR's black / red / blue, in the usual palette
@@ -196,7 +196,7 @@ for key, lab, E, _ in samples:
     hatch = S.keep(R_.TH1D(f"hatch_{key}", "", 1, 0, 1)); hatch.SetFillColor(R_.kGray + 1); hatch.SetFillStyle(3354); hatch.SetLineColor(R_.kGray + 1)
     leg.AddEntry(hatch, "Pileup jet at |#eta| #geq 4.0", "F")
     leg.Draw()
-    S.header(0.20, 0.87, ["#sqrt{s} = 14 TeV, #LT#mu#GT = 200", sample_line(lab), "R_{p_{T}} taggers at 85%, " + gate_txt] + clean_line)
+    S.header(0.20, 0.87, ["#sqrt{s} = 14 TeV, #LT#mu#GT = 200", sample_line(lab), "R_{p_{T}} taggers at 85%" + gate_txt] + clean_line)
     R_.gPad.RedrawAxis()
 
     # right: preselected events relative to the ITk-only tagger
