@@ -30,8 +30,10 @@
 // With it on, a timed track counts as untimed unless it passes the TDR's two
 // reconstruction-level cuts (Sec. 3.2.1): its last ITk hit on the layer nearest the
 // HGTD (Track_hitInLastLayer), and >= 2 HGTD hits at 3.5 < |eta| < 3.9. The third
-// TDR step (outlier removal among a track's hits) needs per-hit times the ntuples do
-// not store. It applies to the TRKPTZ/WAVeS t0 inputs, the gate and self-tagging;
+// TDR step (outlier removal among a track's hits) looks already applied upstream:
+// Track_hasValidTime is 0 for 14.5% of 2-hit tracks, ~1% of 3-hit, 0.1% of 4-hit and
+// never for 1-hit ones, with Track_time = 0 (inferred from the data, not the Athena
+// code). It applies to the TRKPTZ/WAVeS t0 inputs, the gate and self-tagging;
 // Athena's t0 (RecoVtx_time) comes from upstream and cannot be recomputed.
 // -----------------------------------------------------------------------------
 #pragma once
