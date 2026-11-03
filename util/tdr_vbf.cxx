@@ -6,13 +6,18 @@
 //   vertex |z_reco - z_truth| < MAX_VTX_DZ; Z+jets: Z->ll with the leptons made
 //   invisible (lepton-jet overlap removal), standing in for the TDR's Z->nunu;
 //   >= 2 jets (EMTopo, pT > 30 GeV, |eta| < 4.5), the leading pT > 75 GeV and the
-//   second pT > 50 GeV, |Delta eta(j1, j2)| > 3.
-// NOT applied here: "all jets pass the ITk-only R_pT pileup tagger at 85% HS
-// efficiency". Its thresholds come from tdr_pujet's working points, so every jet's
-// R_pT is stored and the cut is made offline (python/tdr_vbf_plots.py), where the
-// timing taggers are also applied.
+//   second pT > 50 GeV, |Delta eta(j1, j2)| > 3, after "all jets are required to
+//   pass an ITk-only R_pT pileup jet tagger operating at 85% hard-scatter
+//   efficiency" -- read as a jet cleaning: a failing jet is dropped and the
+//   selection runs on the jets that remain.
+// The tagger is NOT applied here. Its thresholds come from tdr_pujet's working
+// points, and the timing taggers replace it offline (python/tdr_vbf_plots.py), so
+// the tree keeps every event that could pass once jets are dropped: some pair of
+// jets with pT > 75 / > 50 GeV and |Delta eta| > 3. presel_all flags the events
+// that pass on all jets, before any tagging; mjj, deta, dphi and cat describe that
+// all-jets leading pair, and the offline step recomputes them on the survivors.
 // Categories (Fig 3.24): central-central / central-forward / forward-forward by
-// the leading two jets' |eta| > 2.4 -- stored as cat = 0 / 1 / 2.
+// the leading two jets' |eta| > 2.4 -- cat = 0 / 1 / 2.
 // Recoil proxies, stored only (the TDR preselection has no E_T^miss cut):
 //   met_truth  |sum pT(nu)| of the truth record (raw ntuples only; -1 otherwise)
 //   z_pt       the dilepton pT (Z+jets; -1 otherwise)
@@ -94,8 +99,9 @@ int main(int argc, char** argv) {
 
   TFile out(outPath.c_str(), "RECREATE");
   if (out.IsZombie()) { std::cerr << "[tdr_vbf] cannot open " << outPath << "\n"; return 1; }
-  TTree tree("events", "TDR 3.4.1: one row per event passing the VBF preselection (before the R_pT tagger)");
+  TTree tree("events", "TDR 3.4.1: every event that can pass the VBF preselection once R_pT-tagged jets are dropped");
   int file_idx = -1, cat = -1, nJets = 0;
+  bool presel = false;
   Long64_t entry = -1;
   float weight = 0.f, metTruth = -1.f, zPt = -1.f;
   double mjj = 0.0, deta = 0.0, dphi = 0.0;
@@ -115,6 +121,7 @@ int main(int argc, char** argv) {
   tree.Branch("deta", &deta, "deta/D");
   tree.Branch("dphi", &dphi, "dphi/D");
   tree.Branch("cat", &cat, "cat/I");
+  tree.Branch("presel_all", &presel, "presel_all/O");
   for (int k = 0; k < tdr::N_T0; ++k) {
     const std::string s = tdr::T0_NAMES[k];
     tree.Branch(("t0_" + s).c_str(), &t0[k], ("t0_" + s + "/D").c_str());
@@ -135,7 +142,7 @@ int main(int argc, char** argv) {
   tree.Branch("jet_rpt_self", &jSelf);
   tree.Branch("jet_rpt_comb", &jComb);
 
-  Long64_t nRead = 0, nVtx = 0, nLep = 0, nSel = 0;
+  Long64_t nRead = 0, nVtx = 0, nLep = 0, nSel = 0, nPresel = 0;
   double sumw = 0.0;
   while (reader.Next()) {
     if (maxEvents > 0 && nRead >= maxEvents) break;
@@ -158,11 +165,21 @@ int main(int argc, char** argv) {
     }
     if (js.size() < 2) continue;
     std::sort(js.begin(), js.end(), [&](int x, int y) { return branch.topoJetPt[x] > branch.topoJetPt[y]; });
-    const int j1 = js[0], j2 = js[1];
-    if (branch.topoJetPt[j1] <= J1_PT_MIN || branch.topoJetPt[j2] <= J2_PT_MIN) continue;
-    deta = std::abs((double)branch.topoJetEta[j1] - (double)branch.topoJetEta[j2]);
-    if (deta <= DETA_MIN) continue;
+    // could some pair still pass once jets are dropped? (a superset of every tagger's selection)
+    bool anyPair = false;
+    for (size_t a = 0; a < js.size() && !anyPair; ++a) {
+      if (branch.topoJetPt[js[a]] <= J1_PT_MIN) break;          // sorted: no leading candidate left
+      for (size_t c = a + 1; c < js.size() && !anyPair; ++c) {
+        if (branch.topoJetPt[js[c]] <= J2_PT_MIN) break;
+        anyPair = std::abs((double)branch.topoJetEta[js[a]] - (double)branch.topoJetEta[js[c]]) > DETA_MIN;
+      }
+    }
+    if (!anyPair) continue;
     ++nSel;
+    const int j1 = js[0], j2 = js[1];
+    deta = std::abs((double)branch.topoJetEta[j1] - (double)branch.topoJetEta[j2]);
+    presel = branch.topoJetPt[j1] > J1_PT_MIN && branch.topoJetPt[j2] > J2_PT_MIN && deta > DETA_MIN;
+    nPresel += presel;
 
     TLorentzVector v1, v2;
     v1.SetPtEtaPhiM(branch.topoJetPt[j1], branch.topoJetEta[j1], branch.topoJetPhi[j1], 0.0);
@@ -248,6 +265,7 @@ int main(int argc, char** argv) {
   meta.Branch("n_pass_vtx", &nVtx, "n_pass_vtx/L");
   meta.Branch("n_pass_lepton", &nLep, "n_pass_lepton/L");
   meta.Branch("n_selected", &nSel, "n_selected/L");
+  meta.Branch("n_presel_all", &nPresel, "n_presel_all/L");
   meta.Branch("gate_sigma", &gate, "gate_sigma/D");
   meta.Branch("j1_pt_min", &j1, "j1_pt_min/D");
   meta.Branch("j2_pt_min", &j2, "j2_pt_min/D");
@@ -258,8 +276,8 @@ int main(int argc, char** argv) {
   meta.Fill();
   out.Write();
   out.Close();
-  std::printf("[tdr_vbf] read %lld, vertex %lld, lepton/OR %lld, VBF preselection %lld\n",
-              (long long)nRead, (long long)nVtx, (long long)nLep, (long long)nSel);
+  std::printf("[tdr_vbf] read %lld, vertex %lld, lepton/OR %lld; written %lld (some pair passes), of which %lld pass on all jets\n",
+              (long long)nRead, (long long)nVtx, (long long)nLep, (long long)nSel, (long long)nPresel);
   std::cout << "[tdr_vbf] wrote " << outPath << "\n";
   return 0;
 }
