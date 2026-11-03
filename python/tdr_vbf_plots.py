@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TDR Sec. 3.4.1 figures from util/tdr_vbf's event tree.
+"""TDR Sec. 3.4.1 figures from util/tdr_vbf's event tree, in the ATLAS style (python/tdr_root_style.py).
 
 The TDR preselection: >= 2 jets, leading pT > 75 GeV, second > 50 GeV, |Delta eta(j1, j2)| > 3, after
 "all jets are required to pass an ITk-only R_pT pileup jet tagger operating at 85% hard-scatter
@@ -13,41 +13,40 @@ tagger replaces the ITk one at its own 85% working point, from tdr_pujet_plots.p
   <out>_pupair    per category and tagger: the share of preselected events whose VBF pair (the two
                   leading surviving jets) contains a pileup jet (TDR labels) -- hatched where that
                   jet is at |eta| >= 4.0, beyond tracking and HGTD, where no R_pT tagger can act --
-                  and the preselected events relative to the ITk-only tagger
+                  (left) and the preselected events relative to the ITk-only tagger (right)
 
 Events are weighted by `weight`; errors are binomial on the effective entries.
 
     cd python && PYTHONNOUSERSITE=1 ~/.venv-hgtd/bin/python tdr_vbf_plots.py --sig ../figs/hists/tdr_vbf.root \\
-        --wp ../figs/tdr/local_tdr_pujet_wp85.json --out ../figs/tdr/local_tdr_vbf
+        --wp ../figs/tdr/local_tdr_pujet_wp85.json --note "local sample" --out ../figs/tdr/local_tdr_vbf
 """
 import argparse, json, os
 import numpy as np
 import uproot
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.patches
+import tdr_root_style as S
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument("--sig", required=True, help="tdr_vbf output, VBF H->inv")
 ap.add_argument("--bkg", help="tdr_vbf output, Z+jets (optional)")
 ap.add_argument("--wp", required=True, help="tdr_pujet_plots.py's <out>_wp85.json")
-ap.add_argument("--sig-label", default="VBF $H\\to$inv.")
+ap.add_argument("--sig-label", default="VBF H#rightarrowinv.", help="ROOT TLatex")
 ap.add_argument("--bkg-label", default="Z+jets")
-ap.add_argument("--note", default="", help="appended to the footer, e.g. '(local sample)'")
+ap.add_argument("--note", default="", help="appended to the sample line, e.g. 'local sample'")
 ap.add_argument("--out", required=True)
 args = ap.parse_args()
-plt.rcParams.update({"font.size": 12})
 os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+R_ = S.setup()
 
 J1, J2, DETA = 75.0, 50.0, 3.0
-# (key, legend, colour) -- the colours of tdr_pujet_plots.py; None = no pileup tagging at all
-TAGGERS = [(None, "no pileup-jet tagging", "#B8B8B8"),
-           ("rpt_itk", "ITk only (TDR)", "#000000"),
-           ("rpt_t0_hgtd", "ITk + HGTD, $t_0$: HGTD (Athena)", "#3B8ED0"),
-           ("rpt_t0_trkptz", "ITk + HGTD, $t_0$: TRKPTZ", "#C0392B"),
-           ("rpt_t0_waves", "ITk + HGTD, $t_0$: WAVeS", "#E69F00"),
-           ("rpt_t0_truth", "ITk + HGTD, truth $t_0$ (reference)", "#A0522D")]
+# (key, legend, colour, ROOT marker) -- tdr_pujet_plots.py's colours; None = no pileup tagging at all
+TAGGERS = [(None, "No pileup jet tagging", "#B8B8B8", 0),
+           ("rpt_itk", "ITk only (TDR)", "#000000", 24),
+           ("rpt_t0_hgtd", "HGTD (Athena) t_{0}", "#3B8ED0", 23),
+           ("rpt_t0_trkptz", "TRKPTZ t_{0}", "#C0392B", 21),
+           ("rpt_t0_waves", "WAVeS t_{0}", "#E69F00", 20),
+           ("rpt_t0_truth", "Truth t_{0}", "#A0522D", 25)]
+plain = lambda s: s.replace("_{0}", "0").replace("#", "")
+ENERGY = "#sqrt{s} = 14 TeV, HL-LHC, #LT#mu#GT = 200"
 CATS = ["CC", "CF", "FF"]
 WP = json.load(open(args.wp))
 gate_wp = WP["gate_sigma"]
@@ -97,51 +96,56 @@ def select(E, col):
     return ok, mjj, cat, pupair, pu40
 
 
-samples = [("sig", args.sig_label, load(args.sig), "-")]
-if args.bkg: samples.append(("bkg", args.bkg_label, load(args.bkg), ":"))
+samples = [("sig", args.sig_label, load(args.sig), 1)]
+if args.bkg: samples.append(("bkg", args.bkg_label, load(args.bkg), 3))
 R = {}
 for key, lab, E, _ in samples:
     for col, *_ in TAGGERS:
         R[key, col] = select(E, col)
     # the all-jets selection must reproduce tdr_vbf's own flag
     assert np.array_equal(R[key, None][0], E["presel_all"]), "offline preselection disagrees with presel_all"
-
-foot = f"$t_0$ gate {gate_wp:g}$\\sigma$, R$_{{p_T}}$ taggers at 85% hard-scatter efficiency   ATLAS Simulation Internal"
-foot = (args.note + "; " if args.note else "") + foot
+sample_line = lambda lab: lab + (f" ({args.note})" if args.note else "")
+gate_txt = f"t_{{0}} gate {gate_wp:g}#sigma"
 
 # ── Fig 3.24 analogue ─────────────────────────────────────────────────────────
 CC = {"CC": "#222222", "CF": "#C0392B", "FF": "#3B8ED0"}       # the TDR's black / red / blue
+CNAME = {"CC": "Central-central", "CF": "Central-forward", "FF": "Forward-forward"}
 X = np.linspace(0, 3000, 301)
-fig, ax = plt.subplots(figsize=(8.6, 5.6))
+cv = S.keep(R_.TCanvas("catmjj", "", 800, 600))
+fr = S.keep(cv.DrawFrame(0.0, 0.0, 3000.0, 1.8))
+S.axes(fr, "m_{jj} threshold [GeV]", "Fraction of preselected events")
+fr.GetYaxis().ChangeLabel(1, -1, 0)
+leg = S.legend(0.58, 0.58 - 0.05 * 4 * len(samples) / (2 if len(samples) > 1 else 1), 0.93, 0.58,
+               size=0.035, ncol=2 if len(samples) > 1 else 1)
 print("Fig 3.24 analogue (ITk-only tagger): fraction of preselected events with m_jj above the threshold")
 for key, lab, E, ls in samples:
     ok, mjj, cat, *_ = R[key, "rpt_itk"]
     w = E["weight"].astype(float)
     tot = w[ok].sum()
     frac = lambda m: np.array([w[m & (mjj > x)].sum() for x in X]) / tot
-    ax.plot(X, frac(ok), color="#777777", lw=2.0, ls=(0, (6, 3)) if key == "sig" else (0, (1, 2)), label=f"{lab}, all")
+    pre = (plain(lab) if False else lab) + ", " if len(samples) > 1 else ""
+    g = S.style(S.graph(X, frac(ok)), "#777777", 0, 2 if key == "sig" else 4, 3); g.Draw("L SAME")
+    leg.AddEntry(g, f"{pre}All", "L")
     for c, name in enumerate(CATS):
-        ax.plot(X, frac(ok & (cat == c)), color=CC[name], lw=2.0, ls=ls, label=f"{lab}, {name}")
-    print(f"  {lab}: {ok.sum()} events;  " + "  ".join(f"{name} {100 * w[ok & (cat == c)].sum() / tot:.1f}%" for c, name in enumerate(CATS))
+        g = S.style(S.graph(X, frac(ok & (cat == c))), CC[name], 0, ls, 3); g.Draw("L SAME")
+        leg.AddEntry(g, f"{pre}{CNAME[name]}", "L")
+    print(f"  {plain(lab)}: {ok.sum()} events;  " + "  ".join(f"{name} {100 * w[ok & (cat == c)].sum() / tot:.1f}%" for c, name in enumerate(CATS))
           + "  | m_jj > 1 TeV: " + "  ".join(f"{name} {100 * w[ok & (cat == c) & (mjj > 1000)].sum() / tot:.1f}%" for c, name in enumerate(CATS)))
-ax.set_xlim(0, 3000); ax.set_ylim(0, 1.05)
-ax.set_xlabel("$m_{jj}$ threshold [GeV]"); ax.set_ylabel("fraction of preselected events")
-ax.grid(alpha=0.25); ax.legend(fontsize=9.5, frameon=False, loc="upper right")
-ax.text(0.98, 0.62, "VBF preselection, ITk-only R$_{p_T}$ tagger at 85%\nforward: $|\\eta|$ > 2.4",
-        transform=ax.transAxes, fontsize=9.5, color="#555555", ha="right", va="top")
-fig.text(0.5, -0.01, foot, ha="center", fontsize=9, color="#555555")
-for ext in ("png", "pdf"): fig.savefig(f"{args.out}_cat_mjj.{ext}", dpi=140, bbox_inches="tight")
-print("wrote", args.out + "_cat_mjj.png")
+leg.Draw()
+S.header(0.20, 0.87, [ENERGY, sample_line(", ".join(s[1] for s in samples)) + ", VBF preselection",
+                      "ITk-only R_{p_{T}} tagger at 85%, forward: |#eta| > 2.4"])
+cv.RedrawAxis()
+S.save(cv, f"{args.out}_cat_mjj")
 
 # ── pileup jets in the VBF pair, per category and tagger ──────────────────────
+LABELS = ["Central-central", "Central-forward", "Forward-forward"]
 for key, lab, E, _ in samples:
     w = E["weight"].astype(float)
-    fig, (a1, a2) = plt.subplots(1, 2, figsize=(14, 5.4), gridspec_kw=dict(wspace=0.22))
-    nT = len(TAGGERS); bw = 0.8 / nT
     ref = R[key, "rpt_itk"]
-    print(f"\n{lab}: per category -- events (weighted share with a pileup jet in the pair; of which beyond |eta| 4.0) [relative to ITk only]")
+    rows = []
+    print(f"\n{plain(lab)}: per category -- events (weighted share with a pileup jet in the pair; of which beyond |eta| 4.0) [relative to ITk only]")
     print("  " + f"{'tagger':40s}" + "".join(f"{c:>30s}" for c in CATS))
-    for k, (col, name, colour) in enumerate(TAGGERS):
+    for col, name, colour, mk in TAGGERS:
         ok, _, cat, pp, p40 = R[key, col]
         frac, f40, err, rel, rerr, line = [], [], [], [], [], ""
         for c in range(3):
@@ -155,29 +159,53 @@ for key, lab, E, _ in samples:
             rel.append(sw / sref if sref > 0 else np.nan)
             rerr.append(np.sqrt(sw2) / sref if sref > 0 else np.nan)
             line += f"{int(m.sum()):>7d} ({100 * f:5.2f}%; {f40[-1]:5.2f}%) [{rel[-1]:5.3f}]"
-        x = np.arange(3) + (k - (nT - 1) / 2) * bw
-        a1.bar(x, frac, bw * 0.9, yerr=err, color=colour, edgecolor="white", lw=1, label=name, capsize=2, error_kw=dict(lw=1, ecolor="#444444"))
-        a1.bar(x, f40, bw * 0.9, color="none", edgecolor="white", lw=0, hatch="////")
-        if col is None:
-            noTag = rel
-            continue
-        a2.bar(x, rel, bw * 0.9, yerr=rerr, color=colour, edgecolor="white", lw=1, capsize=2, error_kw=dict(lw=1, ecolor="#444444"))
-        print("  " + f"{name.replace('$', ''):40s}" + line)
-    for a in (a1, a2):
-        a.set_xticks(range(3)); a.set_xticklabels(["central-central", "central-forward", "forward-forward"])
-        a.grid(alpha=0.25, axis="y")
-    a1.set_ylabel("events with a pileup jet in the VBF pair [%]")
-    a2.set_ylabel("preselected events, relative to ITk only")
-    a2.axhline(1.0, color="#888888", lw=0.8)
-    a2.set_ylim(0.95, 1.05)
-    a2.text(0.02, 0.97, "without any tagging: " + " / ".join(f"{v:.2f}" for v in noTag) + " (CC / CF / FF)",
-            transform=a2.transAxes, fontsize=9.5, color="#555555", va="top")
-    a1.set_ylim(0, 1.12 * np.nanmax([b.get_height() for b in a1.patches]))
-    h, l = a1.get_legend_handles_labels()
-    h.append(matplotlib.patches.Patch(facecolor="#B8B8B8", edgecolor="white", hatch="////")); l.append("hatched: that pileup jet is at $|\\eta|$ $\\geq$ 4.0 (no tracks)")
-    fig.legend(h, l, fontsize=9.5, frameon=False, loc="lower center", ncol=4, bbox_to_anchor=(0.5, -0.1))
-    a1.set_title(f"{lab}: pileup jets in the selected pair", fontsize=12)
-    a2.set_title(f"{lab}: preselected events", fontsize=12)
-    fig.text(0.5, -0.13, foot, ha="center", fontsize=9, color="#555555")
-    for ext in ("png", "pdf"): fig.savefig(f"{args.out}_pupair_{key}.{ext}", dpi=140, bbox_inches="tight")
-    print("wrote", f"{args.out}_pupair_{key}.png")
+        rows.append((frac, f40, err, rel, rerr))
+        print("  " + f"{plain(name):40s}" + line)
+    cv = S.keep(R_.TCanvas(f"pupair_{key}", "", 1600, 600))
+
+    # left: the share of events with a pileup jet in the pair, bars per tagger, hatched beyond |eta| 4.0
+    cv.cd(); S.pad(f"bars_{key}", 0.0, 0.0, 0.5, 1.0)
+    ymax = 1.9 * np.nanmax([np.nanmax(r[0]) for r in rows])
+    hf = S.keep(R_.TH1D(f"frame_{key}", "", 3, 0, 3))
+    for b, t in enumerate(LABELS): hf.GetXaxis().SetBinLabel(b + 1, t)
+    hf.SetMinimum(0); hf.SetMaximum(ymax)
+    S.axes(hf, "", "Pileup jet in the VBF pair [%]", size=0.05, ytoff=1.35)
+    hf.GetXaxis().SetLabelSize(0.055); hf.GetYaxis().ChangeLabel(1, -1, 0)
+    hf.Draw("AXIS")
+    nT = len(TAGGERS); slot = 0.84 / nT; bw = 0.86 * slot
+    leg = S.legend(0.63, 0.53, 0.93, 0.92, size=0.033, margin=0.25)
+    for k, ((col, name, colour, mk), (frac, f40, err, _, _)) in enumerate(zip(TAGGERS, rows)):
+        off = 0.08 + k * slot + (slot - bw) / 2
+        h = S.keep(R_.TH1D(f"bar_{key}_{k}", "", 3, 0, 3))
+        h4 = S.keep(R_.TH1D(f"bar40_{key}_{k}", "", 3, 0, 3))
+        for b in range(3): h.SetBinContent(b + 1, frac[b]); h4.SetBinContent(b + 1, f40[b])
+        for hh in (h, h4): hh.SetBarWidth(bw); hh.SetBarOffset(off)
+        h.SetFillColor(S.colour(colour)); h.SetLineColor(S.colour(colour)); h.Draw("BAR SAME")
+        h4.SetFillColor(R_.kWhite); h4.SetFillStyle(3354); h4.SetLineWidth(0); h4.Draw("BAR SAME")
+        ge = S.graph(np.arange(3) + off + bw / 2, frac, err)
+        ge.SetMarkerSize(0); ge.SetLineColor(R_.kGray + 3); ge.SetLineWidth(1); ge.Draw("P SAME")
+        leg.AddEntry(h, name, "F")
+    hatch = S.keep(R_.TH1D(f"hatch_{key}", "", 1, 0, 1)); hatch.SetFillColor(R_.kGray + 1); hatch.SetFillStyle(3354); hatch.SetLineColor(R_.kGray + 1)
+    leg.AddEntry(hatch, "Pileup jet at |#eta| #geq 4.0", "F")
+    leg.Draw()
+    S.header(0.20, 0.87, ["#sqrt{s} = 14 TeV, #LT#mu#GT = 200", sample_line(lab), "R_{p_{T}} taggers at 85%, " + gate_txt])
+    R_.gPad.RedrawAxis()
+
+    # right: preselected events relative to the ITk-only tagger
+    cv.cd(); S.pad(f"rel_{key}", 0.5, 0.0, 1.0, 1.0)
+    hr = S.keep(R_.TH1D(f"frame_rel_{key}", "", 3, 0, 3))
+    for b, t in enumerate(LABELS): hr.GetXaxis().SetBinLabel(b + 1, t)
+    hr.SetMinimum(0.94); hr.SetMaximum(1.12)
+    S.axes(hr, "", "Preselected events / ITk only", size=0.05, ytoff=1.45)
+    hr.GetXaxis().SetLabelSize(0.055)
+    hr.Draw("AXIS")
+    one = S.keep(R_.TLine(0, 1, 3, 1)); one.SetLineStyle(2); one.SetLineColor(R_.kGray + 2); one.Draw()
+    leg2 = S.legend(0.63, 0.64, 0.93, 0.92, size=0.033, margin=0.25)
+    for k, ((col, name, colour, mk), (_, _, _, rel, rerr)) in enumerate(zip(TAGGERS, rows)):
+        if col is None: continue
+        g = S.style(S.graph(np.arange(3) + 0.5 + (k - 3) * 0.13, rel, rerr), colour, mk, 1, 2, 1.4)
+        g.Draw("P SAME"); leg2.AddEntry(g, name, "P")
+    leg2.Draw()
+    S.header(0.20, 0.87, ["#sqrt{s} = 14 TeV, #LT#mu#GT = 200", sample_line(lab)])
+    S.text(0.20, 0.20, "No tagging: " + " / ".join(f"{v:.2f}" for v in rows[0][3]) + " (CC / CF / FF)", 0.042)
+    S.save(cv, f"{args.out}_pupair_{key}")
