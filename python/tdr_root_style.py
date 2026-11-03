@@ -38,7 +38,7 @@ def keep(obj):
 # The t0 colours of the project's ROOT figures (rpt_region_dists.py, vbs_time_veto_common.py): ROOT's
 # Petroff 10-colour set. ITk only is black, "no tagging" grey.
 COL = {"itk": "#000000", "hgtd": "kP10Blue", "trkptz": "kP10Red", "waves": "kP10Yellow", "truth": "kP10Brown",
-       "none": "#B8B8B8", "cc": "#000000", "cf": "kP10Red", "ff": "kP10Blue"}
+       "none": "#B8B8B8", "cc": "#4D4D4D", "cf": "kP10Red", "ff": "kP10Blue"}   # cc: the TDR's black, softened for fills
 
 
 def colour(c):

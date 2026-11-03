@@ -7,9 +7,12 @@ efficiency". The tagger is applied here as a jet cleaning: a jet failing it is d
 selection runs on the jets that remain (jets beyond |eta| = 4.0 have no tracks and are kept). A timing
 tagger replaces the ITk one at its own 85% working point, from tdr_pujet_plots.py's json.
 
-  <out>_cat_mjj   TDR Fig 3.24: the fraction of preselected events with m_jj above a threshold (dashed)
-                  and its split into central-central / central-forward / forward-forward (forward:
-                  |eta| > 2.4), ITk-only tagger; signal solid, background (--bkg) dotted
+  <out>_cat_mjj   TDR Fig 3.24: the central-central / central-forward / forward-forward fractions
+                  (forward: |eta| > 2.4) among the events with m_jj above each threshold -- normalised per
+                  point, as the TDR's -- ITk-only tagger; signal solid, background (--bkg) dotted; lower
+                  panel: the events above each threshold
+  <out>_cat_mjj_stack_<sig|bkg>  the same categories per m_jj bin, each column normalised to 1, the
+                  event count underneath (python/vbs_region_stack.py's logic)
   <out>_pupair    per category and tagger: the share of preselected events whose VBF pair (the two
                   leading surviving jets) contains a pileup jet (TDR labels) -- hatched where that
                   jet is at |eta| >= 4.0, beyond tracking and HGTD, where no R_pT tagger can act --
@@ -120,35 +123,97 @@ for key, lab, E, _ in samples:
 sample_line = lambda lab: lab + (f" ({args.note})" if args.note else "")
 gate_txt = "" if gate_wp == 2.0 else f", t_{{0}} gate {gate_wp:g}#sigma"   # the TDR's 2 sigma is the standard: unlabelled
 
-# ── Fig 3.24 analogue ─────────────────────────────────────────────────────────
+# ── Fig 3.24 analogue: category fractions among the events above each m_jj threshold ──
+# Normalised PER POINT, as the TDR's: at each threshold the CC / CF / FF fractions of the events with
+# m_jj above it sum to 1 (the TDR's forward-forward fraction rises with m_jj). Lower panel: the events
+# passing each threshold, i.e. the statistics behind every point.
 CC = {"CC": S.COL["cc"], "CF": S.COL["cf"], "FF": S.COL["ff"]}  # the TDR's black / red / blue, in the usual palette
 CNAME = {"CC": "Central-central", "CF": "Central-forward", "FF": "Forward-forward"}
-X = np.linspace(0, 3000, 301)
-cv = S.keep(R_.TCanvas("catmjj", "", 800, 600))
-fr = S.keep(cv.DrawFrame(0.0, 0.0, 3000.0, 1.8))
-S.axes(fr, "m_{jj} threshold [GeV]", "Fraction of preselected events")
-fr.GetYaxis().ChangeLabel(1, -1, 0)
-leg = S.legend(0.58, 0.58 - 0.05 * 4 * len(samples) / (2 if len(samples) > 1 else 1), 0.93, 0.58,
-               size=0.035, ncol=2 if len(samples) > 1 else 1)
-print("Fig 3.24 analogue (ITk-only tagger): fraction of preselected events with m_jj above the threshold")
+X = np.linspace(0, 2000, 201)
+MAIN, RAT = 0.68, 0.32
+TS_M, TS_R = 0.05 * 600 / (800 * MAIN), 0.05 * 600 / (800 * RAT)
+cv = S.keep(R_.TCanvas("catmjj", "", 800, 800))
+cv.cd(); S.pad("catmjj_m", 0.0, RAT, 1.0, 1.0, top=0.05 / MAIN * 0.6, bottom=0.02)
+fr = S.keep(R_.gPad.DrawFrame(0.0, 0.0, 2000.0, 1.4))
+S.axes(fr, "", "Fraction of events", size=TS_M, ytoff=1.35)
+fr.GetXaxis().SetLabelSize(0); fr.GetYaxis().ChangeLabel(1, -1, 0)
+leg = S.legend(0.20, 0.555, 0.93, 0.615, size=0.75 * TS_M, ncol=3, margin=0.3)   # one row under the header
+counts = {}
+print("Fig 3.24 analogue (ITk-only tagger): category fractions among the events above each m_jj threshold")
 for key, lab, E, ls in samples:
     ok, mjj, cat, *_ = R[key, "rpt_itk"]
     w = E["weight"].astype(float)
-    tot = w[ok].sum()
-    frac = lambda m: np.array([w[m & (mjj > x)].sum() for x in X]) / tot
-    pre = (plain(lab) if False else lab) + ", " if len(samples) > 1 else ""
-    g = S.style(S.graph(X, frac(ok)), "#777777", 0, 2 if key == "sig" else 4, 3); g.Draw("L SAME")
-    leg.AddEntry(g, f"{pre}All", "L")
+    above = np.array([w[ok & (mjj > x)].sum() for x in X])
+    counts[key] = np.array([np.sum(ok & (mjj > x)) for x in X])
     for c, name in enumerate(CATS):
-        g = S.style(S.graph(X, frac(ok & (cat == c))), CC[name], 0, ls, 3); g.Draw("L SAME")
-        leg.AddEntry(g, f"{pre}{CNAME[name]}", "L")
-    print(f"  {plain(lab)}: {ok.sum()} events;  " + "  ".join(f"{name} {100 * w[ok & (cat == c)].sum() / tot:.1f}%" for c, name in enumerate(CATS))
-          + "  | m_jj > 1 TeV: " + "  ".join(f"{name} {100 * w[ok & (cat == c) & (mjj > 1000)].sum() / tot:.1f}%" for c, name in enumerate(CATS)))
+        f = np.array([w[ok & (cat == c) & (mjj > x)].sum() for x in X]) / np.where(above > 0, above, np.nan)
+        g = S.style(S.graph(X, f), CC[name], 0, ls, 3); g.Draw("L SAME")
+        if key == "sig": leg.AddEntry(g, CNAME[name], "L")
+    for x in (0, 500, 1000, 1500):
+        i = int(np.argmin(np.abs(X - x))); m = ok & (mjj > X[i])
+        print(f"  {plain(lab)} m_jj > {X[i]:.0f}: {counts[key][i]} events;  " + "  ".join(f"{name} {100 * w[m & (cat == c)].sum() / w[m].sum():.1f}%" for c, name in enumerate(CATS)))
 leg.Draw()
-S.header(0.20, 0.87, [ENERGY, sample_line(", ".join(s[1] for s in samples)) + ", VBF preselection",
-                      "ITk-only R_{p_{T}} tagger at 85%, forward: |#eta| > 2.4"])
-cv.RedrawAxis()
+if len(samples) > 1:
+    leg2 = S.legend(0.62, 0.70, 0.93, 0.84, size=0.75 * TS_M)
+    for key, lab, E, ls in samples:
+        d = S.keep(R_.TGraph(1)); d.SetLineStyle(ls); d.SetLineWidth(3); d.SetLineColor(R_.kGray + 3)
+        leg2.AddEntry(d, lab, "L")
+    leg2.Draw()
+S.header(0.20, 0.87, [ENERGY + ", " + sample_line(", ".join(s[1] for s in samples)),
+                      "VBF preselection, ITk-only R_{p_{T}} at 85%", "Forward: |#eta| > 2.4"] + clean_line, size=TS_M)
+R_.gPad.RedrawAxis()
+cv.cd(); S.pad("catmjj_r", 0.0, 0.0, 1.0, RAT, top=0.03, bottom=0.36)
+R_.gPad.SetLogy()
+cmax = max(c.max() for c in counts.values())
+fr2 = S.keep(R_.gPad.DrawFrame(0.0, 3.0, 2000.0, 30.0 * cmax))
+S.axes(fr2, "m_{jj} threshold [GeV]", "Events above", size=TS_R, ytoff=1.35 * TS_M / TS_R, xtoff=1.2)
+for key, lab, E, ls in samples:
+    S.style(S.graph(X, counts[key].astype(float)), "#555555", 0, ls, 2).Draw("L SAME")
 S.save(cv, f"{args.out}_cat_mjj")
+
+# ── companion: the same categories per m_jj bin, each column normalised to 1 ──
+# The vbs_region_stack.py logic (a column per m_jj bin, normalised to 1, the event count underneath)
+# applied to the TDR preselection's CC / CF / FF categories.
+EDGES = np.array([0, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500, 3000, 4000], float)
+for key, lab, E, ls in samples:
+    ok, mjj, cat, *_ = R[key, "rpt_itk"]
+    w = E["weight"].astype(float)
+    xm = np.clip(mjj, EDGES[0], EDGES[-1] - 1e-6)            # overflow folded into the top bin
+    tot = np.histogram(xm[ok], EDGES, weights=w[ok])[0]
+    nraw = np.histogram(xm[ok], EDGES)[0]
+    cv = S.keep(R_.TCanvas(f"catstack_{key}", "", 800, 800))
+    cv.cd(); S.pad(f"cs_m_{key}", 0.0, RAT, 1.0, 1.0, top=0.05 / MAIN * 0.6, bottom=0.02)
+    st = S.keep(R_.THStack(f"st_{key}", ""))
+    hs = []
+    for c, name in enumerate(CATS):
+        h = S.keep(R_.TH1D(f"cs_{key}_{name}", "", len(EDGES) - 1, EDGES))
+        part = np.histogram(xm[ok & (cat == c)], EDGES, weights=w[ok & (cat == c)])[0]
+        for b in range(len(EDGES) - 1):
+            h.SetBinContent(b + 1, part[b] / tot[b] if tot[b] > 0 else 0.0)
+        h.SetFillColor(S.colour(CC[name])); h.SetLineColor(R_.kBlack); h.SetLineWidth(1)
+        st.Add(h); hs.append((name, h))
+    fr = S.keep(R_.gPad.DrawFrame(EDGES[0], 0.0, EDGES[-1], 1.6))
+    S.axes(fr, "", "Fraction of events", size=TS_M, ytoff=1.35)
+    fr.GetXaxis().SetLabelSize(0); fr.GetYaxis().ChangeLabel(1, -1, 0)
+    st.Draw("HIST SAME")
+    leg = S.legend(0.62, 0.72, 0.93, 0.90, size=0.75 * TS_M)
+    for name, h in reversed(hs): leg.AddEntry(h, CNAME[name], "F")
+    leg.Draw()
+    S.header(0.20, 0.87, [ENERGY, sample_line(lab), "VBF preselection, ITk-only R_{p_{T}} at 85%"] + clean_line, size=TS_M)
+    R_.gPad.RedrawAxis()
+    cv.cd(); S.pad(f"cs_r_{key}", 0.0, 0.0, 1.0, RAT, top=0.03, bottom=0.36)
+    R_.gPad.SetLogy()
+    hn = S.keep(R_.TH1D(f"cs_n_{key}", "", len(EDGES) - 1, EDGES))
+    for b in range(len(EDGES) - 1): hn.SetBinContent(b + 1, nraw[b])
+    hn.SetFillColor(R_.TColor.GetColor("#DCE3EE")); hn.SetLineColor(R_.kBlack)
+    hn.SetMinimum(max(1.0, 0.3 * nraw[nraw > 0].min())); hn.SetMaximum(30.0 * nraw.max())
+    S.axes(hn, "m_{jj} [GeV]   (last bin includes overflow)", "Events", size=TS_R, ytoff=1.35 * TS_M / TS_R, xtoff=1.2)
+    hn.Draw("HIST")
+    t = R_.TLatex(); t.SetTextSize(0.55 * TS_R); t.SetTextAlign(21)
+    for b in range(len(EDGES) - 1):
+        S.keep(t.DrawLatex(0.5 * (EDGES[b] + EDGES[b + 1]), nraw[b] * 1.8, f"{nraw[b]}"))
+    print(f"  {plain(lab)} per m_jj bin " + " ".join(f"[{EDGES[b]:.0f},{EDGES[b+1]:.0f}) {nraw[b]}" for b in range(len(EDGES) - 1)))
+    S.save(cv, f"{args.out}_cat_mjj_stack_{key}")
 
 # ── pileup jets in the VBF pair, per category and tagger ──────────────────────
 LABELS = ["Central-central", "Central-forward", "Forward-forward"]
