@@ -24,8 +24,8 @@ ap.add_argument("--out", required=True)
 args = ap.parse_args()
 R = S.setup()
 
-T0S = [("rpt_t0_hgtd", "HGTD (Athena) t_{0}", "#3B8ED0", 23), ("rpt_t0_trkptz", "TRKPTZ t_{0}", "#C0392B", 21),
-       ("rpt_t0_waves", "WAVeS t_{0}", "#E69F00", 20), ("rpt_t0_truth", "Truth t_{0}", "#A0522D", 25)]
+T0S = [("rpt_t0_hgtd", "HGTD (Athena) t_{0}", S.COL["hgtd"], 23), ("rpt_t0_trkptz", "TRKPTZ t_{0}", S.COL["trkptz"], 21),
+       ("rpt_t0_waves", "WAVeS t_{0}", S.COL["waves"], 20), ("rpt_t0_truth", "Truth t_{0}", S.COL["truth"], 25)]
 
 EFF = np.round(np.arange(0.800, 0.9751, 0.025), 3)
 SLICES = [("30 < p_{T} < 50 GeV", 30.0, 50.0), ("p_{T} > 50 GeV", 50.0, 1e9)]

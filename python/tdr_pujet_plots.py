@@ -39,11 +39,11 @@ os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
 R = S.setup()
 
 # taggers: (column, legend, short legend, colour, ROOT marker, ROOT line style); ITk first (the reference)
-TAGGERS = [("rpt_itk", "ITk only", "ITk only", "#000000", 24, 2),
-           ("rpt_t0_hgtd", "HGTD (Athena) t_{0}", "HGTD t_{0}", "#3B8ED0", 23, 1),
-           ("rpt_t0_trkptz", "TRKPTZ t_{0}", "TRKPTZ t_{0}", "#C0392B", 21, 1),
-           ("rpt_t0_waves", "WAVeS t_{0}", "WAVeS t_{0}", "#E69F00", 20, 1),
-           ("rpt_t0_truth", "Truth t_{0} (reference)", "Truth t_{0}", "#A0522D", 25, 3)]
+TAGGERS = [("rpt_itk", "ITk only", "ITk only", S.COL["itk"], 24, 2),
+           ("rpt_t0_hgtd", "HGTD (Athena) t_{0}", "HGTD t_{0}", S.COL["hgtd"], 23, 1),
+           ("rpt_t0_trkptz", "TRKPTZ t_{0}", "TRKPTZ t_{0}", S.COL["trkptz"], 21, 1),
+           ("rpt_t0_waves", "WAVeS t_{0}", "WAVeS t_{0}", S.COL["waves"], 20, 1),
+           ("rpt_t0_truth", "Truth t_{0} (reference)", "Truth t_{0}", S.COL["truth"], 25, 3)]
 EFF = np.round(np.arange(0.800, 0.9751, 0.025), 3)    # the sampled working points
 plain = lambda s: s.replace("_{0}", "0").replace("#", "")
 

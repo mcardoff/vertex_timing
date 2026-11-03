@@ -35,8 +35,15 @@ def keep(obj):
     return obj
 
 
-def colour(hexcode):
-    return ROOT.TColor.GetColor(hexcode)
+# The t0 colours of the project's ROOT figures (rpt_region_dists.py, vbs_time_veto_common.py): ROOT's
+# Petroff 10-colour set. ITk only is black, "no tagging" grey.
+COL = {"itk": "#000000", "hgtd": "kP10Blue", "trkptz": "kP10Red", "waves": "kP10Yellow", "truth": "kP10Brown",
+       "none": "#B8B8B8", "cc": "#000000", "cf": "kP10Red", "ff": "kP10Blue"}
+
+
+def colour(c):
+    """a ROOT colour from '#rrggbb' or a ROOT constant's name such as 'kP10Red'"""
+    return getattr(ROOT, c) if c.startswith("k") else ROOT.TColor.GetColor(c)
 
 
 def pad(name, x1, y1, x2, y2, top=0.05, bottom=0.16, left=0.16, right=0.05):

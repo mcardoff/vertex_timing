@@ -39,12 +39,12 @@ R_ = S.setup()
 
 J1, J2, DETA = 75.0, 50.0, 3.0
 # (key, legend, colour, ROOT marker) -- tdr_pujet_plots.py's colours; None = no pileup tagging at all
-TAGGERS = [(None, "No pileup jet tagging", "#B8B8B8", 0),
-           ("rpt_itk", "ITk only (TDR)", "#000000", 24),
-           ("rpt_t0_hgtd", "HGTD (Athena) t_{0}", "#3B8ED0", 23),
-           ("rpt_t0_trkptz", "TRKPTZ t_{0}", "#C0392B", 21),
-           ("rpt_t0_waves", "WAVeS t_{0}", "#E69F00", 20),
-           ("rpt_t0_truth", "Truth t_{0}", "#A0522D", 25)]
+TAGGERS = [(None, "No pileup jet tagging", S.COL["none"], 0),
+           ("rpt_itk", "ITk only (TDR)", S.COL["itk"], 24),
+           ("rpt_t0_hgtd", "HGTD (Athena) t_{0}", S.COL["hgtd"], 23),
+           ("rpt_t0_trkptz", "TRKPTZ t_{0}", S.COL["trkptz"], 21),
+           ("rpt_t0_waves", "WAVeS t_{0}", S.COL["waves"], 20),
+           ("rpt_t0_truth", "Truth t_{0}", S.COL["truth"], 25)]
 plain = lambda s: s.replace("_{0}", "0").replace("#", "")
 ENERGY = "#sqrt{s} = 14 TeV, HL-LHC, #LT#mu#GT = 200"
 CATS = ["CC", "CF", "FF"]
@@ -115,7 +115,7 @@ sample_line = lambda lab: lab + (f" ({args.note})" if args.note else "")
 gate_txt = f"t_{{0}} gate {gate_wp:g}#sigma"
 
 # ── Fig 3.24 analogue ─────────────────────────────────────────────────────────
-CC = {"CC": "#222222", "CF": "#C0392B", "FF": "#3B8ED0"}       # the TDR's black / red / blue
+CC = {"CC": S.COL["cc"], "CF": S.COL["cf"], "FF": S.COL["ff"]}  # the TDR's black / red / blue, in the usual palette
 CNAME = {"CC": "Central-central", "CF": "Central-forward", "FF": "Forward-forward"}
 X = np.linspace(0, 3000, 301)
 cv = S.keep(R_.TCanvas("catmjj", "", 800, 600))

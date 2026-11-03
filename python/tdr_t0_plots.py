@@ -7,7 +7,7 @@
                   lowers the area. Lower panels: cleaned / as is in 20 ps bins.
   <out>_core_nhs  core fraction (|t0 - t_HS| < 60 ps over all events, a missing t0 a failure) against
                   the number of forward hard-scatter tracks with a time (folded at 20, as the main
-                  analysis); lower panel: cleaned minus as is.
+                  analysis); lower panel: cleaned / as is (errors from the events that move, paired).
 
     cd python && PYTHONNOUSERSITE=1 ~/.venv-hgtd/bin/python tdr_t0_plots.py ../figs/hists/tdr_t0.root \\
         --label "VBF H#rightarrowinv. (local sample)" --out ../figs/tdr/local_tdr_t0
@@ -42,7 +42,7 @@ for s in ("trkptz", "waves"):
     gain, loss = np.sum(~a & b), np.sum(a & ~b)
     print(f"  {s}: cleaning moves {gain} events into the core and {loss} out: {100 * (gain - loss) / N:+.2f} +- {100 * np.sqrt(gain + loss) / N:.2f} points (paired)")
 
-T0S = [("trkptz", "TRKPTZ t_{0}", "#C0392B"), ("waves", "WAVeS t_{0}", "#E69F00")]
+T0S = [("trkptz", "TRKPTZ t_{0}", S.COL["trkptz"]), ("waves", "WAVeS t_{0}", S.COL["waves"])]
 MAIN, RAT = 0.68, 0.32
 TS_M, TS_R = 0.05 * 600 / (800 * MAIN), 0.05 * 600 / (800 * RAT)
 
@@ -52,7 +52,7 @@ for c, (key, title, colour) in enumerate(T0S):
     cv.cd(); S.pad(f"m{c}", 0.5 * c, RAT, 0.5 * c + 0.5, 1.0, top=0.05 / MAIN * 0.6, bottom=0.02)
     R.gPad.SetLogy()
     hs = {}
-    for name, col, ls, w in [("hgtd", "#8C8C8C", 1, 2), (f"{key}_raw", colour, 2, 3), (f"{key}_clean", colour, 1, 3)]:
+    for name, col, ls, w in [("hgtd", S.COL["hgtd"], 1, 2), (f"{key}_raw", colour, 2, 3), (f"{key}_clean", colour, 1, 3)]:
         h = S.keep(fits.Get(f"h_{name}").Clone(f"c_{name}_{c}"))
         h.GetListOfFunctions().Clear()
         h.Scale(1.0 / N)
@@ -102,27 +102,29 @@ fr = S.keep(R.gPad.DrawFrame(-0.5, 0.0, FOLD + 0.5, 1.45))
 S.axes(fr, "", "Core fraction", size=TS_M, ytoff=1.35)
 fr.GetXaxis().SetLabelSize(0); fr.GetYaxis().ChangeLabel(1, -1, 0)
 leg = S.legend(0.45, 0.30, 0.93, 0.60, size=0.75 * TS_M, margin=0.18)
-for name, lab, col, mk, ls in [("hgtd", "HGTD (Athena) t_{0}", "#8C8C8C", 22, 1),
-                               ("trkptz_raw", "TRKPTZ t_{0}, as is", "#C0392B", 25, 2), ("trkptz_clean", "TRKPTZ t_{0}, cleaned", "#C0392B", 21, 1),
-                               ("waves_raw", "WAVeS t_{0}, as is", "#E69F00", 24, 2), ("waves_clean", "WAVeS t_{0}, cleaned", "#E69F00", 20, 1)]:
+for name, lab, col, mk, ls in [("hgtd", "HGTD (Athena) t_{0}", S.COL["hgtd"], 23, 1),
+                               ("trkptz_raw", "TRKPTZ t_{0}, as is", S.COL["trkptz"], 25, 2), ("trkptz_clean", "TRKPTZ t_{0}, cleaned", S.COL["trkptz"], 21, 1),
+                               ("waves_raw", "WAVeS t_{0}, as is", S.COL["waves"], 24, 2), ("waves_clean", "WAVeS t_{0}, cleaned", S.COL["waves"], 20, 1)]:
     f, e = per_bin(core[name])
     g = S.style(S.graph(bins, f, e), col, mk, ls, 2, 1.1); g.Draw("LP SAME")
     leg.AddEntry(g, lab, "LP")
 leg.Draw()
 S.header(0.20, 0.87, [f"{ENERGY}, {args.label}", "Core fraction: |t_{0} #minus t_{HS}| < 60 ps, all events"], size=TS_M)
 cv.cd(); S.pad("r", 0.0, 0.0, 1.0, RAT, top=0.03, bottom=0.36)
-fr2 = S.keep(R.gPad.DrawFrame(-0.5, -0.04, FOLD + 0.5, 0.06))
-S.axes(fr2, f"Forward hard-scatter tracks with a time (last bin: #geq {FOLD})", "Cleaned #minus as is", size=TS_R, ytoff=1.35 * TS_M / TS_R, xtoff=1.2, ndiv_y=505)
-zero = S.keep(R.TLine(-0.5, 0, FOLD + 0.5, 0)); zero.SetLineStyle(2); zero.SetLineColor(R.kGray + 2); zero.Draw()
-print(f"\ncore fraction, cleaned minus as is, by forward HS tracks (0..{FOLD - 1}, >= {FOLD}); events per bin:")
+fr2 = S.keep(R.gPad.DrawFrame(-0.5, 0.92, FOLD + 0.5, 1.12))
+S.axes(fr2, f"Forward hard-scatter tracks with a time (last bin: #geq {FOLD})", "Cleaned / as is", size=TS_R, ytoff=1.35 * TS_M / TS_R, xtoff=1.2, ndiv_y=504)
+fr2.GetYaxis().ChangeLabel(1, -1, 0)
+one = S.keep(R.TLine(-0.5, 1, FOLD + 0.5, 1)); one.SetLineStyle(2); one.SetLineColor(R.kGray + 2); one.Draw()
+print(f"\ncore fraction, cleaned / as is, by forward HS tracks (0..{FOLD - 1}, >= {FOLD}); events per bin:")
 print("  " + " ".join(f"{np.sum(x == b):6d}" for b in bins))
 for k, (key, title, colour) in enumerate(T0S):
     a, b_ = core[f"{key}_raw"], core[f"{key}_clean"]
     d, de = [], []
     for b in bins:
         sel = x == b; n = sel.sum()
-        gain, loss = np.sum(sel & ~a & b_), np.sum(sel & a & ~b_)
-        d.append((gain - loss) / n if n else np.nan); de.append(np.sqrt(gain + loss) / n if n else np.nan)
+        gain, loss, base = np.sum(sel & ~a & b_), np.sum(sel & a & ~b_), np.sum(sel & a)
+        # paired: cleaned / as is = 1 + (gain - loss) / base, the error from the events that moved
+        d.append(1 + (gain - loss) / base if base else np.nan); de.append(np.sqrt(gain + loss) / base if base else np.nan)
     g = S.style(S.graph(bins + (k - 0.5) * 0.25, d, de), colour, 21 if key == "trkptz" else 20, 1, 2, 1.0); g.Draw("P SAME")
-    print(f"  {key:7s} " + " ".join(f"{100 * v:+6.2f}" for v in d))
+    print(f"  {key:7s} " + " ".join(f"{v:6.3f}" for v in d))
 S.save(cv, f"{args.out}_core_nhs")
