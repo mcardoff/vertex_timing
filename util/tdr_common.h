@@ -8,9 +8,14 @@
 // conventions differ, and this keeps the TDR presentation free to follow the TDR.
 // The ingredients are COPIED from them, so the numbers stay comparable:
 //   R_pT tracks   util/rpt_v5_hist.cxx: ghost-associated, 1 < pT < 30 GeV, quality,
-//                 within dR < 0.2 of the axis, associated to PV0 by the forward
-//                 parameterisation (getNewDzpara x 1.4) or, for the central list,
-//                 a z0 significance < 5
+//                 associated to PV0 by the forward parameterisation (getNewDzpara x 1.4,
+//                 = 2.4 sigma of the HS z0 resolution: the 2022 PUB note's "2.5 times")
+//                 or, for the central list, a z0 significance < 5.
+//                 Matching (--rpt-match): ghost association only by DEFAULT -- the TDR's
+//                 (its ref. [12]) and the 2022 PUB note's definition; "dr02" adds rpt_v5's
+//                 dR < 0.2 to the axis (from the PUB note's macro, not its text), tagged
+//                 dr02_ and kept for the presentation's backup. The cone strengthens ITk
+//                 only and takes the work timing would do (notes/tdr_presentation.md).
 //   t0s           util/vbs_time_veto.cxx (rpt_v5's, verbatim): HGTD = Athena's
 //                 RecoVtx_time; TRKPTZ and WAVeS from one time clustering of the
 //                 associated tracks; truth = t_HS (reference only)
@@ -189,13 +194,31 @@ inline TrackLists rptTrackLists(BranchPointerWrapper& b) {
   return L;
 }
 
-// The jet's R_pT tracks: ghost-associated, in the PV0 list, within the R_pT cone.
-inline std::vector<int> jetRptTracks(BranchPointerWrapper& b, int j, const std::unordered_set<int>& assoc) {
+enum class RptMatch { GHOST, DR02 };
+inline const char* rptMatchName(RptMatch m) { return m == RptMatch::GHOST ? "ghost" : "dr02"; }
+// --rpt-match=ghost|dr02 (default ghost). Call before the output path is built: dr02 tags the file.
+inline RptMatch rptMatchMode(int argc, char** argv) {
+  RptMatch m = RptMatch::GHOST;
+  for (int i = 1; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a.rfind("--rpt-match=", 0) != 0) continue;
+    const std::string v = a.substr(12);
+    if (v == "ghost") m = RptMatch::GHOST;
+    else if (v == "dr02") m = RptMatch::DR02;
+    else { std::cerr << "[tdr] --rpt-match=" << v << ": expected ghost or dr02\n"; std::exit(1); }
+  }
+  if (m == RptMatch::DR02) SELECTION_TAG = SELECTION_TAG.empty() ? "dr02" : SELECTION_TAG + "_dr02";
+  return m;
+}
+
+// The jet's R_pT tracks: ghost-associated, in the PV0 list, and (dr02) within the cone.
+inline std::vector<int> jetRptTracks(BranchPointerWrapper& b, int j, const std::unordered_set<int>& assoc,
+                                     RptMatch match) {
   std::vector<int> out;
   const double je = b.topoJetEta[j], jp = b.topoJetPhi[j];
   for (int idx : b.topoJetGhostTrackIdx[j]) {
     if (!assoc.count(idx)) continue;
-    if (dR(je, jp, b.trackEta[idx], b.trackPhi[idx]) > RPT_TRACK_JET_DR) continue;
+    if (match == RptMatch::DR02 && dR(je, jp, b.trackEta[idx], b.trackPhi[idx]) > RPT_TRACK_JET_DR) continue;
     out.push_back(idx);
   }
   return out;
@@ -256,11 +279,11 @@ struct JetRpt {
   double comb = 0.0;                    // Athena t0 where it exists, self-tagging otherwise
 };
 inline JetRpt jetRpt(BranchPointerWrapper& b, int j, const TrackLists& L, const T0Set& T, double gate,
-                     const TimeCleaning& C) {
+                     const TimeCleaning& C, RptMatch match) {
   JetRpt r;
   const double pt = b.topoJetPt[j];
   const bool fwd = std::abs((double)b.topoJetEta[j]) >= FWD_ETA_MIN;
-  const std::vector<int> trk = jetRptTracks(b, j, fwd ? L.fwd : L.cen);
+  const std::vector<int> trk = jetRptTracks(b, j, fwd ? L.fwd : L.cen, match);
   r.ntrk = (int)trk.size();
   r.itk = sumPt(b, trk) / pt;
   for (int k = 0; k < N_T0; ++k)

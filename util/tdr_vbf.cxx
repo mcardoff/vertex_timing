@@ -23,7 +23,7 @@
 //   z_pt       the dilepton pT (Z+jets; -1 otherwise)
 //
 // Usage:  tdr_vbf [--sample=<s>] [--ntuple-dir=<d>] [--file-shard=i/N]
-//                 [--max-events=N] [--gate-sigma=X (default 2)] [--clean-times=all|t0|off (default all)] [--out=<path>]
+//                 [--max-events=N] [--gate-sigma=X (default 2)] [--clean-times=all|t0|off (default all)] [--rpt-match=ghost|dr02 (default ghost)] [--out=<path>]
 // Output: <prefix>tdr_vbf.root (TTrees "events", "meta"; merge shards with hadd -f).
 // -----------------------------------------------------------------------------
 #include <TChain.h>
@@ -74,6 +74,7 @@ int main(int argc, char** argv) {
     SELECTION_TAG = SELECTION_TAG.empty() ? tag : SELECTION_TAG + "_" + tag;
   }
   const tdr::CleanMode cleanMode = tdr::cleaningMode(argc, argv);   // before the output path: it tags the file
+  const tdr::RptMatch rptMatch = tdr::rptMatchMode(argc, argv);     // likewise
   const Inflation INFL = inflationFor(SAMPLE_NAME);
   const std::string outPath = outOverride.empty() ? histFilePath("tdr_vbf.root") : outOverride;
   {
@@ -82,7 +83,7 @@ int main(int argc, char** argv) {
   }
   std::printf("[tdr_vbf] sample=%s: jets > %.0f / %.0f GeV, |Deta(j1,j2)| > %.0f; gate %.1f sigma\n",
               SAMPLE_NAME.empty() ? "local" : SAMPLE_NAME.c_str(), J1_PT_MIN, J2_PT_MIN, DETA_MIN, gate);
-  std::cout << "[tdr_vbf] track-time cleaning: " << tdr::cleanModeName(cleanMode) << "\n";
+  std::cout << "[tdr_vbf] track-time cleaning: " << tdr::cleanModeName(cleanMode) << "; R_pT matching: " << tdr::rptMatchName(rptMatch) << "\n";
   std::cout << "[tdr_vbf] out=" << outPath << "\n";
 
   TChain chain("ntuple");
@@ -237,7 +238,7 @@ int main(int argc, char** argv) {
       jPu.push_back(branch.isJetPaperPU(e, p) ? 1 : 0);
       // R_pT needs tracks: beyond |eta| = 4.0 it is undefined (stored as -1)
       if (std::abs((double)e) < tdr::FWD_ETA_MAX) {
-        const tdr::JetRpt r = tdr::jetRpt(branch, j, L, T, gate, CLEAN);
+        const tdr::JetRpt r = tdr::jetRpt(branch, j, L, T, gate, CLEAN, rptMatch);
         jNtrk.push_back(r.ntrk);  jNtimed.push_back(r.ntimed);
         jItk.push_back(r.itk);  jSelf.push_back(r.self);  jComb.push_back(r.comb);
         for (int k = 0; k < tdr::N_T0; ++k) jT0[k].push_back(r.t0[k]);
@@ -272,6 +273,8 @@ int main(int argc, char** argv) {
   meta.Branch("gate_sigma", &gate, "gate_sigma/D");
   std::string cleanName = tdr::cleanModeName(cleanMode);
   meta.Branch("time_cleaning", &cleanName);
+  std::string matchName = tdr::rptMatchName(rptMatch);
+  meta.Branch("rpt_match", &matchName);
   meta.Branch("j1_pt_min", &j1, "j1_pt_min/D");
   meta.Branch("j2_pt_min", &j2, "j2_pt_min/D");
   meta.Branch("deta_min", &dEtaMin, "deta_min/D");

@@ -58,8 +58,10 @@ J = t["jets"].arrays(library="np")
 meta = t["meta"].arrays(library="np")
 gate = float(np.unique(meta["gate_sigma"])[0])
 clean = str(meta["time_cleaning"][0]) if "time_cleaning" in meta else "off"   # trees before 2026-11-03: uncleaned
+match = str(meta["rpt_match"][0]) if "rpt_match" in meta else "dr02"         # trees before the switch: the cone
 CLEAN_TXT = {"all": None, "t0": "Cleaned t_{0} only", "off": "Track times as in the ntuple"}   # the default (all) unlabelled
-clean_line = [CLEAN_TXT[clean]] if CLEAN_TXT[clean] else []
+MATCH_TXT = {"ghost": None, "dr02": "R_{p_{T}} tracks within #DeltaR < 0.2"}   # the default (ghost) unlabelled
+clean_line = [t for t in (CLEAN_TXT[clean], MATCH_TXT[match]) if t]   # the non-default modes, one line each
 gate_txt = "" if gate == 2.0 else f", t_{{0}} gate {gate:g}#sigma"     # the TDR's 2 sigma is the standard: unlabelled
 
 ae = np.abs(J["eta"])
@@ -102,7 +104,7 @@ SLICES = [("30 < p_{T} < 50 GeV", 30.0, 50.0), ("p_{T} > 50 GeV", 50.0, 1e9)]
 cv = S.keep(R.TCanvas("roc", "", 1600, 800))
 MAIN, RAT = 0.68, 0.32                     # pad heights: text sizes are scaled to match 0.05 of 600 px
 TS_M, TS_R = 0.05 * 600 / (800 * MAIN), 0.05 * 600 / (800 * RAT)
-print(f"{args.tree}: gate {gate:g} sigma, track-time cleaning {clean}\n\nrejection at matched hard-scatter efficiency, 2.4 < |eta| < 4.0 (ratio to ITk in brackets)")
+print(f"{args.tree}: gate {gate:g} sigma, track-time cleaning {clean}, R_pT matching {match}\n\nrejection at matched hard-scatter efficiency, 2.4 < |eta| < 4.0 (ratio to ITk in brackets)")
 for c, (lab, lo, hi) in enumerate(SLICES):
     m = sel(lo, hi, 2.4, 4.0)
     nhs, npu = int(np.sum(m & (J["hs"] == 1))), int(np.sum(m & (J["pu"] == 1)))
@@ -164,7 +166,8 @@ cv = S.keep(R.TCanvas("eta", "", 800, 600))
 fr = S.keep(cv.DrawFrame(2.4, 0.0, 4.0, 1.6))                         # the TDR's y range
 S.axes(fr, "Jet |#eta|", "Pileup jet rate relative to ITk only")
 fr.GetYaxis().ChangeLabel(1, -1, 0)
-leg = S.legend(0.20, 0.19, 0.93, 0.33, size=0.04, ncol=3)          # along the bottom: the curves sit above 0.5
+leg = S.legend(0.20, 0.19, 0.93, 0.33 + (0.06 if clean_line else 0), size=0.04, ncol=3)   # along the bottom
+if clean_line: leg.SetHeader(", ".join(clean_line))   # the non-default modes: no room in the header on the TDR's y range
 for col, name, short, colour, mk, ls in TAGGERS:
     h = S.keep(R.TH1D(f"h_eta_{col}", "", len(EB) - 1, EB))
     for b, x in enumerate(rel[col]): h.SetBinContent(b + 1, x)
@@ -172,7 +175,7 @@ for col, name, short, colour, mk, ls in TAGGERS:
     leg.AddEntry(h, short, "L")
 leg.Draw()
 S.header(0.20, 0.87, [f"#sqrt{{s}} = 14 TeV, #LT#mu#GT = 200, {args.label}{gate_txt}",
-                      "2.4 < |#eta| < 4.0, 30 < p_{T} < 50 GeV, 85% HS efficiency"] + clean_line)
+                      "2.4 < |#eta| < 4.0, 30 < p_{T} < 50 GeV, 85% HS efficiency"])
 cv.RedrawAxis()
 S.save(cv, f"{args.out}_eta")
 
@@ -202,14 +205,15 @@ h_c = S.keep(R.TH1D("h_eta_tdr_comb", "", len(EB) - 1, EB))
 for b, x in enumerate(rc): h_c.SetBinContent(b + 1, x)
 S.style(h_c, "kP10Violet", 0, 1, 3); h_c.Draw("HIST SAME")
 g_c = S.style(S.graph(0.5 * (EB[:-1] + EB[1:]), rc, rce), "kP10Violet", 20, 1, 2, 1.2); g_c.Draw("P SAME")
-leg = S.legend(0.20, 0.19, 0.93, 0.35, size=0.038)
+leg = S.legend(0.20, 0.19, 0.93, 0.35 + (0.055 if clean_line else 0), size=0.038)
+if clean_line: leg.SetHeader(", ".join(clean_line))
 leg.AddEntry(h_itk, "ITk only", "L")
 leg.AddEntry(h_tdr, "ATLAS-TDR-031, Fig. 3.21 (combined)", "L")
 leg.AddEntry(g_c, "This study, TDR method: Athena t_{0}, else self-tagging", "LP")
 leg.Draw()
 # the header starts right of the first bin, whose error bar reaches ~1.3
 S.header(0.40, 0.87, [f"#sqrt{{s}} = 14 TeV, #LT#mu#GT = 200, {args.label}{gate_txt}",
-                      "2.4 < |#eta| < 4.0, 30 < p_{T} < 50 GeV", "85% HS efficiency"] + clean_line, size=0.045)
+                      "2.4 < |#eta| < 4.0, 30 < p_{T} < 50 GeV", "85% HS efficiency"], size=0.045)
 cv.RedrawAxis()
 S.save(cv, f"{args.out}_eta_tdr")
 okH = np.mean(J["ok_hgtd"][mf])
@@ -236,5 +240,5 @@ for col, name, *_ in TAGGERS:
             wp[col][key] = dict(threshold=thr, hs_eff=ehs, pu_eff=epu, n_hs=int(len(hs)), n_pu=int(len(pu)))
             line += f"  {key} {thr:.3f}/{ehs:.3f}/{epu:.4f}"
     print(line)
-json.dump(dict(tree=os.path.abspath(args.tree), hs_eff=0.85, gate_sigma=gate, time_cleaning=clean, working_points=wp), open(args.out + "_wp85.json", "w"), indent=1)
+json.dump(dict(tree=os.path.abspath(args.tree), hs_eff=0.85, gate_sigma=gate, time_cleaning=clean, rpt_match=match, working_points=wp), open(args.out + "_wp85.json", "w"), indent=1)
 print("wrote", args.out + "_wp85.json")

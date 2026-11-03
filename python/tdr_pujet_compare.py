@@ -56,8 +56,9 @@ for spec in args.runs:
     meta = t["meta"].arrays(library="np")
     gate = float(np.unique(meta["gate_sigma"])[0])
     clean = str(meta["time_cleaning"][0]) if "time_cleaning" in meta else "off"   # trees before 2026-11-03: uncleaned
+    match = str(meta["rpt_match"][0]) if "rpt_match" in meta else "dr02"
     runs.append((lab or path, J, gate, clean))
-    print(f"{lab or path}: {path}  (gate {gate:g} sigma, track-time cleaning {clean})")
+    print(f"{lab or path}: {path}  (gate {gate:g} sigma, track-time cleaning {clean}, R_pT matching {match})")
 
 
 def ratio(J, col, lo, hi, elo, ehi, effs):
@@ -77,7 +78,7 @@ for c, (lab, lo, hi) in enumerate(SLICES):
             print(f"  {lab_r[:24]:24s} {plain(name):20s} " + " ".join(f"{x:5.2f}" for x in vals[k, col]))
     cv.cd(); S.pad(f"p{c}", 0.5 * c, 0.0, 0.5 * c + 0.5, 1.0)
     shown = [v for (k, _), v in vals.items() if k < args.plot_runs]
-    ymax = max(2.0, 1.45 * np.nanmax(shown))
+    ymax = max(2.0, 1.75 * np.nanmax(shown))
     fr = S.keep(R.gPad.DrawFrame(0.80, 0.0, 1.0, ymax))
     S.axes(fr, "Hard-scatter jet efficiency", "Rejection relative to ITk only")
     fr.GetXaxis().SetNdivisions(505); fr.GetYaxis().ChangeLabel(1, -1, 0)

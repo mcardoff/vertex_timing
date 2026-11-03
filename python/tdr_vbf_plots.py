@@ -51,8 +51,10 @@ CATS = ["CC", "CF", "FF"]
 WP = json.load(open(args.wp))
 gate_wp = WP["gate_sigma"]
 clean_wp = WP.get("time_cleaning", "off")
+match_wp = WP.get("rpt_match", "dr02")
+MATCH_TXT = {"ghost": None, "dr02": "R_{p_{T}} tracks within #DeltaR < 0.2"}   # the default (ghost) unlabelled
 CLEAN_TXT = {"all": None, "t0": "Cleaned t_{0} only", "off": "Track times as in the ntuple"}   # the default (all) unlabelled
-clean_line = [CLEAN_TXT[clean_wp]] if CLEAN_TXT[clean_wp] else []
+clean_line = [t for t in (CLEAN_TXT[clean_wp], MATCH_TXT[match_wp]) if t]   # the non-default modes, one line each
 
 
 
@@ -62,6 +64,9 @@ def load(path):
     meta = t["meta"].arrays(library="np")
     g = float(np.unique(meta["gate_sigma"])[0])
     cl = str(meta["time_cleaning"][0]) if "time_cleaning" in meta else "off"
+    mt = str(meta["rpt_match"][0]) if "rpt_match" in meta else "dr02"
+    if mt != match_wp:
+        raise SystemExit(f"{path}: R_pT matching '{mt}', but the working points were made with '{match_wp}'")
     if abs(g - gate_wp) > 1e-9:
         raise SystemExit(f"{path}: gate {g} sigma, but the working points were made at {gate_wp}")
     if cl != clean_wp:
