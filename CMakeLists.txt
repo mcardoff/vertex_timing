@@ -70,6 +70,7 @@ add_executable(skim_ntuples util/skim_ntuples.cxx)
 add_executable(hist_merge util/hist_merge.cxx)
 add_executable(tdr_pujet util/tdr_pujet.cxx)
 add_executable(tdr_vbf util/tdr_vbf.cxx)
+add_executable(tdr_t0 util/tdr_t0.cxx)
 
 # Specify the include directories for your header files
 foreach(_tgt
@@ -99,6 +100,7 @@ foreach(_tgt
     hist_merge
     tdr_pujet
     tdr_vbf
+    tdr_t0
 )
     target_include_directories(${_tgt}
         PRIVATE

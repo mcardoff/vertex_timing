@@ -50,14 +50,21 @@ ENERGY = "#sqrt{s} = 14 TeV, HL-LHC, #LT#mu#GT = 200"
 CATS = ["CC", "CF", "FF"]
 WP = json.load(open(args.wp))
 gate_wp = WP["gate_sigma"]
+clean_wp = WP.get("time_cleaning", "off")
+CLEAN_TXT = {"all": "Cleaned track times (TDR)", "t0": "Cleaned t_{0} only", "off": "Track times as in the ntuple"}
+
 
 
 def load(path):
     t = uproot.open(path)
     E = t["events"].arrays(library="np")
-    g = float(np.unique(t["meta"].arrays(["gate_sigma"], library="np")["gate_sigma"])[0])
+    meta = t["meta"].arrays(library="np")
+    g = float(np.unique(meta["gate_sigma"])[0])
+    cl = str(meta["time_cleaning"][0]) if "time_cleaning" in meta else "off"
     if abs(g - gate_wp) > 1e-9:
         raise SystemExit(f"{path}: gate {g} sigma, but the working points were made at {gate_wp}")
+    if cl != clean_wp:
+        raise SystemExit(f"{path}: track-time cleaning '{cl}', but the working points were made with '{clean_wp}'")
     return E
 
 
@@ -188,7 +195,7 @@ for key, lab, E, _ in samples:
     hatch = S.keep(R_.TH1D(f"hatch_{key}", "", 1, 0, 1)); hatch.SetFillColor(R_.kGray + 1); hatch.SetFillStyle(3354); hatch.SetLineColor(R_.kGray + 1)
     leg.AddEntry(hatch, "Pileup jet at |#eta| #geq 4.0", "F")
     leg.Draw()
-    S.header(0.20, 0.87, ["#sqrt{s} = 14 TeV, #LT#mu#GT = 200", sample_line(lab), "R_{p_{T}} taggers at 85%, " + gate_txt])
+    S.header(0.20, 0.87, ["#sqrt{s} = 14 TeV, #LT#mu#GT = 200", sample_line(lab), "R_{p_{T}} taggers at 85%, " + gate_txt, CLEAN_TXT[clean_wp]])
     R_.gPad.RedrawAxis()
 
     # right: preselected events relative to the ITk-only tagger
@@ -206,6 +213,6 @@ for key, lab, E, _ in samples:
         g = S.style(S.graph(np.arange(3) + 0.5 + (k - 3) * 0.13, rel, rerr), colour, mk, 1, 2, 1.4)
         g.Draw("P SAME"); leg2.AddEntry(g, name, "P")
     leg2.Draw()
-    S.header(0.20, 0.87, ["#sqrt{s} = 14 TeV, #LT#mu#GT = 200", sample_line(lab)])
+    S.header(0.20, 0.87, ["#sqrt{s} = 14 TeV, #LT#mu#GT = 200", sample_line(lab), CLEAN_TXT[clean_wp]])
     S.text(0.20, 0.20, "No tagging: " + " / ".join(f"{v:.2f}" for v in rows[0][3]) + " (CC / CF / FF)", 0.042)
     S.save(cv, f"{args.out}_pupair_{key}")

@@ -23,7 +23,7 @@
 //   z_pt       the dilepton pT (Z+jets; -1 otherwise)
 //
 // Usage:  tdr_vbf [--sample=<s>] [--ntuple-dir=<d>] [--file-shard=i/N]
-//                 [--max-events=N] [--gate-sigma=X (default 2)] [--clean-times] [--out=<path>]
+//                 [--max-events=N] [--gate-sigma=X (default 2)] [--clean-times=all|t0|off (default all)] [--out=<path>]
 // Output: <prefix>tdr_vbf.root (TTrees "events", "meta"; merge shards with hadd -f).
 // -----------------------------------------------------------------------------
 #include <TChain.h>
@@ -73,7 +73,7 @@ int main(int argc, char** argv) {
     std::string tag = os.str(); std::replace(tag.begin(), tag.end(), '.', 'p');
     SELECTION_TAG = SELECTION_TAG.empty() ? tag : SELECTION_TAG + "_" + tag;
   }
-  bool cleanTimes = tdr::wantCleaning(argc, argv);   // before the output path: it tags the file
+  const tdr::CleanMode cleanMode = tdr::cleaningMode(argc, argv);   // before the output path: it tags the file
   const Inflation INFL = inflationFor(SAMPLE_NAME);
   const std::string outPath = outOverride.empty() ? histFilePath("tdr_vbf.root") : outOverride;
   {
@@ -82,6 +82,7 @@ int main(int argc, char** argv) {
   }
   std::printf("[tdr_vbf] sample=%s: jets > %.0f / %.0f GeV, |Deta(j1,j2)| > %.0f; gate %.1f sigma\n",
               SAMPLE_NAME.empty() ? "local" : SAMPLE_NAME.c_str(), J1_PT_MIN, J2_PT_MIN, DETA_MIN, gate);
+  std::cout << "[tdr_vbf] track-time cleaning: " << tdr::cleanModeName(cleanMode) << "\n";
   std::cout << "[tdr_vbf] out=" << outPath << "\n";
 
   TChain chain("ntuple");
@@ -89,7 +90,7 @@ int main(int argc, char** argv) {
   recordAvailableBranches(chain);
   TTreeReader reader(&chain);
   BranchPointerWrapper branch(reader);
-  const tdr::TimeCleaning CLEAN = tdr::setupCleaning(reader, cleanTimes);
+  const tdr::TimeCleaning CLEAN = tdr::setupCleaning(reader, cleanMode);
   const bool hasTruthMet = hasBranch("TruthPart_pdgId") && hasBranch("TruthPart_pt") && hasBranch("TruthPart_phi");
   std::unique_ptr<TTreeReaderArray<float>> tpPdg, tpPt, tpPhi;
   if (hasTruthMet) {
@@ -269,7 +270,8 @@ int main(int argc, char** argv) {
   meta.Branch("n_selected", &nSel, "n_selected/L");
   meta.Branch("n_presel_all", &nPresel, "n_presel_all/L");
   meta.Branch("gate_sigma", &gate, "gate_sigma/D");
-  meta.Branch("clean_times", &cleanTimes, "clean_times/O");
+  std::string cleanName = tdr::cleanModeName(cleanMode);
+  meta.Branch("time_cleaning", &cleanName);
   meta.Branch("j1_pt_min", &j1, "j1_pt_min/D");
   meta.Branch("j2_pt_min", &j2, "j2_pt_min/D");
   meta.Branch("deta_min", &dEtaMin, "deta_min/D");

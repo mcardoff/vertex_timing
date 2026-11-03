@@ -25,16 +25,21 @@
 //               < 2 timed tracks: unchanged
 //   combined    the t0 version where that t0 exists, self-tagging where it does not
 //               (the TDR's "when no t0 is found"); only Athena's t0 can be absent
-// Track-time cleaning (--clean-times, off by default): the ntuples' track times are
-// NOT hit-cleaned, and a third of the timed forward tracks carry a misassigned time.
-// With it on, a timed track counts as untimed unless it passes the TDR's two
-// reconstruction-level cuts (Sec. 3.2.1): its last ITk hit on the layer nearest the
+// Track-time cleaning (ON by default since 2026-11-03, the user's call: "fold this into
+// our presentation"): the ntuples' track times are NOT hit-cleaned, and a third of the
+// timed forward tracks carry a misassigned time. A timed track counts as untimed unless
+// it passes the TDR's two reconstruction-level cuts (Sec. 3.2.1): its last ITk hit on the
 // HGTD (Track_hitInLastLayer), and >= 2 HGTD hits at 3.5 < |eta| < 3.9. The third
 // TDR step (outlier removal among a track's hits) looks already applied upstream:
 // Track_hasValidTime is 0 for 14.5% of 2-hit tracks, ~1% of 3-hit, 0.1% of 4-hit and
 // never for 1-hit ones, with Track_time = 0 (inferred from the data, not the Athena
-// code). It applies to the TRKPTZ/WAVeS t0 inputs, the gate and self-tagging;
-// Athena's t0 (RecoVtx_time) comes from upstream and cannot be recomputed.
+// code). Modes (--clean-times=all|t0|off):
+//   all  (default, untagged)  every track time used here: the TRKPTZ/WAVeS t0 inputs,
+//                             the gate and self-tagging -- the TDR's own reconstruction
+//   t0   (tag cleant0_)       the t0 inputs only; the jets' tracks keep the ntuple times
+//   off  (tag rawtimes_)      the ntuple as is (what rpt_v5 and every other study use)
+// Athena's t0 (RecoVtx_time) comes from upstream and cannot be recomputed. Needs
+// Track_hitInLastLayer, which the skims drop: read the raw ntuples (--ntuple-dir=).
 // -----------------------------------------------------------------------------
 #pragma once
 
@@ -91,36 +96,47 @@ inline double dR(double e1, double p1, double e2, double p2) {
 }
 
 // ── Track-time cleaning ───────────────────────────────────────────────────────
+enum class CleanMode { OFF, T0, ALL };
+inline const char* cleanModeName(CleanMode m) { return m == CleanMode::OFF ? "off" : m == CleanMode::T0 ? "t0" : "all"; }
 struct TimeCleaning {
-  bool on = false;
+  CleanMode mode = CleanMode::OFF;
   std::unique_ptr<TTreeReaderValue<std::vector<bool>>> lastLayer;   // Track_hitInLastLayer
+  bool t0() const { return mode != CleanMode::OFF; }                // clean the t0 inputs?
+  bool jets() const { return mode == CleanMode::ALL; }              // clean the jets' tracks?
 };
-// --clean-times? Call before the output path is built: it tags the file name.
-inline bool wantCleaning(int argc, char** argv) {
-  for (int i = 1; i < argc; ++i)
-    if (std::string(argv[i]) == "--clean-times") {
-      SELECTION_TAG = SELECTION_TAG.empty() ? "cleantimes" : SELECTION_TAG + "_cleantimes";
-      return true;
-    }
-  return false;
+// --clean-times=all|t0|off (default all). Call before the output path is built: it tags the file.
+inline CleanMode cleaningMode(int argc, char** argv) {
+  CleanMode m = CleanMode::ALL;
+  for (int i = 1; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a.rfind("--clean-times", 0) != 0) continue;
+    const std::string v = a.size() > 14 && a[13] == '=' ? a.substr(14) : "all";
+    if (v == "all") m = CleanMode::ALL;
+    else if (v == "t0") m = CleanMode::T0;
+    else if (v == "off") m = CleanMode::OFF;
+    else { std::cerr << "[tdr] --clean-times=" << v << ": expected all, t0 or off\n"; std::exit(1); }
+  }
+  const char* tag = m == CleanMode::OFF ? "rawtimes" : m == CleanMode::T0 ? "cleant0" : nullptr;
+  if (tag) SELECTION_TAG = SELECTION_TAG.empty() ? tag : SELECTION_TAG + "_" + tag;
+  return m;
 }
 // bind the branch the cleaning needs (before the first reader.Next())
-inline TimeCleaning setupCleaning(TTreeReader& reader, bool on) {
+inline TimeCleaning setupCleaning(TTreeReader& reader, CleanMode m) {
   TimeCleaning C;
-  C.on = on;
-  if (!C.on) return C;
+  C.mode = m;
+  if (m == CleanMode::OFF) return C;
   if (!hasBranch("Track_hitInLastLayer")) {
-    std::cerr << "[tdr] --clean-times needs Track_hitInLastLayer, which this input lacks"
-                 " (the skims drop it: read the raw ntuples with --ntuple-dir=)\n";
+    std::cerr << "[tdr] track-time cleaning needs Track_hitInLastLayer, which this input lacks"
+                 " (the skims drop it: read the raw ntuples with --ntuple-dir=, or run --clean-times=off)\n";
     std::exit(1);
   }
   C.lastLayer = std::make_unique<TTreeReaderValue<std::vector<bool>>>(reader, "Track_hitInLastLayer");
   return C;
 }
-// does this track carry a usable time?
-inline bool timed(BranchPointerWrapper& b, int idx, const TimeCleaning& C) {
+// does this track carry a usable time? (clean: apply the TDR cuts)
+inline bool timed(BranchPointerWrapper& b, int idx, const TimeCleaning& C, bool clean) {
   if (b.trackTimeValid[idx] != 1) return false;
-  if (!C.on) return true;
+  if (!clean) return true;
   if (!(**C.lastLayer)[idx]) return false;
   const double ae = std::abs((double)b.trackEta[idx]);
   return !(ae > 3.5 && ae < 3.9 && b.trackHgtdHits[idx] < 2);
@@ -133,9 +149,9 @@ inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL, const Ti
   s.sig[T0_HGTD] = b.recoVtxTimeRes[0];
   s.ok[T0_HGTD]  = (b.recoVtxValid[0] == 1);
   std::vector<int> trk_z = getAssociatedTracks(&b, MIN_TRACK_PT, MAX_TRACK_PT, T0_ASSOC_NSIGMA);
-  if (C.on)   // the clustering drops untimed tracks itself; drop the timed ones cleaning un-times
+  if (C.t0())   // the clustering drops untimed tracks itself; drop the timed ones cleaning un-times
     trk_z.erase(std::remove_if(trk_z.begin(), trk_z.end(),
-                               [&](int i) { return b.trackTimeValid[i] == 1 && !timed(b, i, C); }), trk_z.end());
+                               [&](int i) { return b.trackTimeValid[i] == 1 && !timed(b, i, C, true); }), trk_z.end());
   const auto clusters = clusterTracksInTime(
       trk_z, &b, DIST_CUT_CONE,
       /*useSmearedTimes=*/false, /*checkTimeValid=*/true, IDEAL_TRACK_RES,
@@ -198,7 +214,7 @@ inline std::vector<int> timeGate(BranchPointerWrapper& b, const std::vector<int>
   std::vector<int> out;
   out.reserve(base.size());
   for (int idx : base) {
-    if (!ok || !timed(b, idx, C)) { out.push_back(idx); continue; }
+    if (!ok || !timed(b, idx, C, C.jets())) { out.push_back(idx); continue; }
     const double dt = b.trackTime[idx] - t0;
     const double vt = b.trackTimeRes[idx] * b.trackTimeRes[idx];
     if (std::abs(dt) / std::sqrt(infl * infl * sig0 * sig0 + vt) < gate) out.push_back(idx);
@@ -213,7 +229,7 @@ inline double selfTagSumPt(BranchPointerWrapper& b, const std::vector<int>& trk,
   std::vector<int> tt;
   double untimed = 0.0;
   for (int i : trk) {
-    if (timed(b, i, C) && b.trackTimeRes[i] > 0.0) tt.push_back(i);
+    if (timed(b, i, C, C.jets()) && b.trackTimeRes[i] > 0.0) tt.push_back(i);
     else untimed += b.trackPt[i];
   }
   if (nTimedOut) *nTimedOut = (int)tt.size();

@@ -2,13 +2,13 @@
 """Compare tdr_pujet runs: each t0-gated tagger's pileup jet rejection relative to ITk only, against
 hard-scatter efficiency, 2.4 < |eta| < 4.0, 30-50 GeV (left) and > 50 GeV (right), ATLAS style.
 
-Colour = the t0 (HGTD, TRKPTZ, WAVeS, truth); line style = the run (first run dashed, second solid,
-any further ones dotted and dash-dotted). Each run's ratio is to its own ITk-only curve. The console
+Colour = the t0 (HGTD, TRKPTZ, WAVeS, truth); line style = the run (the first dashed, the last -- the
+result -- solid, any between dotted then dash-dotted); the legends are drawn in the left panel only. Each run's ratio is to its own ITk-only curve. The console
 prints the rejection ratios at the sampled working points and at 85% per |eta| bin, for every run.
 A quick-test tool (e.g. track-time cleaning on/off, the gate width), not a TDR figure.
 
     cd python && PYTHONNOUSERSITE=1 ~/.venv-hgtd/bin/python tdr_pujet_compare.py \\
-        ../figs/hists/tdr_pujet.root:"As in the ntuple" ../figs/hists/cleantimes_tdr_pujet.root:"TDR cleaning" \\
+        ../figs/hists/rawtimes_tdr_pujet.root:"As in the ntuple" ../figs/hists/tdr_pujet.root:"TDR cleaning" \\
         --label "VBF H#rightarrowinv. (local sample)" --out ../figs/tdr/local_tdr_pujet_cleaning
 """
 import argparse
@@ -26,7 +26,7 @@ R = S.setup()
 
 T0S = [("rpt_t0_hgtd", "HGTD (Athena) t_{0}", "#3B8ED0", 23), ("rpt_t0_trkptz", "TRKPTZ t_{0}", "#C0392B", 21),
        ("rpt_t0_waves", "WAVeS t_{0}", "#E69F00", 20), ("rpt_t0_truth", "Truth t_{0}", "#A0522D", 25)]
-STYLES = [2, 1, 3, 4]
+
 EFF = np.round(np.arange(0.800, 0.9751, 0.025), 3)
 SLICES = [("30 < p_{T} < 50 GeV", 30.0, 50.0), ("p_{T} > 50 GeV", 50.0, 1e9)]
 plain = lambda s: s.replace("_{0}", "0").replace("#", "")
@@ -47,15 +47,17 @@ def rejection(hs, pu, effs):
 
 
 runs = []
+nplot = min(args.plot_runs, len(args.runs))
+STYLES = [2] + [3, 4][: max(0, nplot - 2)] + [1] if nplot > 1 else [1]   # first dashed, last (the result) solid
 for spec in args.runs:
     path, _, lab = spec.partition(":")
     t = uproot.open(path)
     J = t["jets"].arrays(library="np")
     meta = t["meta"].arrays(library="np")
     gate = float(np.unique(meta["gate_sigma"])[0])
-    clean = bool(np.unique(meta["clean_times"])[0]) if "clean_times" in meta else False
+    clean = str(meta["time_cleaning"][0]) if "time_cleaning" in meta else "off"   # trees before 2026-11-03: uncleaned
     runs.append((lab or path, J, gate, clean))
-    print(f"{lab or path}: {path}  (gate {gate:g} sigma, track-time cleaning {'on' if clean else 'off'})")
+    print(f"{lab or path}: {path}  (gate {gate:g} sigma, track-time cleaning {clean})")
 
 
 def ratio(J, col, lo, hi, elo, ehi, effs):
@@ -86,12 +88,12 @@ for c, (lab, lo, hi) in enumerate(SLICES):
             g = S.style(S.graph(EFF, vals[k, col]), colour, mk, STYLES[k], 2, 1.1 if k else 0.9)
             g.Draw("LP SAME")
             if k == 0: leg.AddEntry(g, name, "LP")
-    leg.Draw()
+    if c == 0: leg.Draw()                  # the legends once, in the left panel: the right one has no room
     leg2 = S.legend(0.20, 0.17, 0.60, 0.17 + 0.055 * min(args.plot_runs, len(runs)), size=0.036)
     for k in range(min(args.plot_runs, len(runs))):
         d = S.keep(R.TGraph(1)); d.SetLineStyle(STYLES[k]); d.SetLineWidth(2); d.SetLineColor(R.kGray + 3)
         leg2.AddEntry(d, runs[k][0], "L")
-    leg2.Draw()
+    if c == 0: leg2.Draw()
     S.header(0.20, 0.87, ["#sqrt{s} = 14 TeV, HL-LHC, #LT#mu#GT = 200", args.label, f"{lab}, 2.4 < |#eta| < 4.0"])
 S.save(cv, args.out)
 

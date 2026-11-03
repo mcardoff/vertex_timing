@@ -49,8 +49,11 @@ plain = lambda s: s.replace("_{0}", "0").replace("#", "")
 
 t = uproot.open(args.tree)
 J = t["jets"].arrays(library="np")
-meta = t["meta"].arrays(["gate_sigma", "n_read"], library="np")
+meta = t["meta"].arrays(library="np")
 gate = float(np.unique(meta["gate_sigma"])[0])
+clean = str(meta["time_cleaning"][0]) if "time_cleaning" in meta else "off"   # trees before 2026-11-03: uncleaned
+CLEAN_TXT = {"all": "Cleaned track times (TDR)", "t0": "Cleaned t_{0} only", "off": "Track times as in the ntuple"}
+
 ae = np.abs(J["eta"])
 ENERGY = "#sqrt{s} = 14 TeV, HL-LHC, #LT#mu#GT = 200"
 
@@ -91,7 +94,7 @@ SLICES = [("30 < p_{T} < 50 GeV", 30.0, 50.0), ("p_{T} > 50 GeV", 50.0, 1e9)]
 cv = S.keep(R.TCanvas("roc", "", 1600, 800))
 MAIN, RAT = 0.68, 0.32                     # pad heights: text sizes are scaled to match 0.05 of 600 px
 TS_M, TS_R = 0.05 * 600 / (800 * MAIN), 0.05 * 600 / (800 * RAT)
-print(f"{args.tree}: gate {gate:g} sigma\n\nrejection at matched hard-scatter efficiency, 2.4 < |eta| < 4.0 (ratio to ITk in brackets)")
+print(f"{args.tree}: gate {gate:g} sigma, track-time cleaning {clean}\n\nrejection at matched hard-scatter efficiency, 2.4 < |eta| < 4.0 (ratio to ITk in brackets)")
 for c, (lab, lo, hi) in enumerate(SLICES):
     m = sel(lo, hi, 2.4, 4.0)
     nhs, npu = int(np.sum(m & (J["hs"] == 1))), int(np.sum(m & (J["pu"] == 1)))
@@ -114,13 +117,13 @@ for c, (lab, lo, hi) in enumerate(SLICES):
     fr = S.keep(p1.DrawFrame(0.80, 0.0, 1.0, ymax))
     S.axes(fr, "", "Pileup jet rejection", size=TS_M, ytoff=1.35)
     fr.GetXaxis().SetLabelSize(0); fr.GetXaxis().SetNdivisions(505)
-    leg = S.legend(0.52, 0.40, 0.94, 0.64, size=0.75 * TS_M)
+    leg = S.legend(0.52, 0.32, 0.94, 0.56, size=0.75 * TS_M)
     for (col, name, short, colour, mk, ls), (rej, rerr, _) in zip(TAGGERS, rows):
         g = S.style(S.graph(EFF, rej), colour, mk, ls, 2, 1.3); g.Draw("L SAME")      # the line in its style
         S.style(S.graph(EFF, rej, rerr), colour, mk, 1, 2, 1.3).Draw("P SAME")         # solid error bars
         leg.AddEntry(g, name, "LP")
     leg.Draw()
-    S.header(0.20, 0.87, [ENERGY, f"{args.label}, t_{{0}} gate {gate:g}#sigma", f"{lab}, 2.4 < |#eta| < 4.0"], size=TS_M)
+    S.header(0.20, 0.87, [ENERGY, f"{args.label}, t_{{0}} gate {gate:g}#sigma", f"{lab}, 2.4 < |#eta| < 4.0", CLEAN_TXT[clean]], size=TS_M)
 
     cv.cd()
     p2 = S.pad(f"ratio{c}", 0.5 * c, 0.0, 0.5 * c + 0.5, RAT, top=0.03, bottom=0.36)
@@ -159,7 +162,7 @@ for col, name, short, colour, mk, ls in TAGGERS:
     S.style(h, colour, 0, ls, 3 if col in ("rpt_itk", "rpt_t0_truth") else 2); h.Draw("HIST SAME")
     leg.AddEntry(h, short, "L")
 leg.Draw()
-S.header(0.20, 0.87, [ENERGY + ", " + args.label, f"30 < p_{{T}} < 50 GeV, 85% hard-scatter efficiency, t_{{0}} gate {gate:g}#sigma"])
+S.header(0.20, 0.87, [ENERGY + ", " + args.label, f"30 < p_{{T}} < 50 GeV, 85% hard-scatter efficiency, t_{{0}} gate {gate:g}#sigma", CLEAN_TXT[clean]])
 cv.RedrawAxis()
 S.save(cv, f"{args.out}_eta")
 print("\nrelative pileup-jet rate at 85%, 30-50 GeV, |eta| bins " + " ".join(f"{EB[b]:.1f}-{EB[b + 1]:.1f}" for b in range(len(EB) - 1)))
@@ -182,5 +185,5 @@ for col, name, *_ in TAGGERS:
             wp[col][key] = dict(threshold=thr, hs_eff=ehs, pu_eff=epu, n_hs=int(len(hs)), n_pu=int(len(pu)))
             line += f"  {key} {thr:.3f}/{ehs:.3f}/{epu:.4f}"
     print(line)
-json.dump(dict(tree=os.path.abspath(args.tree), hs_eff=0.85, gate_sigma=gate, working_points=wp), open(args.out + "_wp85.json", "w"), indent=1)
+json.dump(dict(tree=os.path.abspath(args.tree), hs_eff=0.85, gate_sigma=gate, time_cleaning=clean, working_points=wp), open(args.out + "_wp85.json", "w"), indent=1)
 print("wrote", args.out + "_wp85.json")
