@@ -23,7 +23,7 @@
 //   z_pt       the dilepton pT (Z+jets; -1 otherwise)
 //
 // Usage:  tdr_vbf [--sample=<s>] [--ntuple-dir=<d>] [--file-shard=i/N]
-//                 [--max-events=N] [--gate-sigma=X (default 2)] [--out=<path>]
+//                 [--max-events=N] [--gate-sigma=X (default 2)] [--clean-times] [--out=<path>]
 // Output: <prefix>tdr_vbf.root (TTrees "events", "meta"; merge shards with hadd -f).
 // -----------------------------------------------------------------------------
 #include <TChain.h>
@@ -73,6 +73,7 @@ int main(int argc, char** argv) {
     std::string tag = os.str(); std::replace(tag.begin(), tag.end(), '.', 'p');
     SELECTION_TAG = SELECTION_TAG.empty() ? tag : SELECTION_TAG + "_" + tag;
   }
+  bool cleanTimes = tdr::wantCleaning(argc, argv);   // before the output path: it tags the file
   const Inflation INFL = inflationFor(SAMPLE_NAME);
   const std::string outPath = outOverride.empty() ? histFilePath("tdr_vbf.root") : outOverride;
   {
@@ -88,6 +89,7 @@ int main(int argc, char** argv) {
   recordAvailableBranches(chain);
   TTreeReader reader(&chain);
   BranchPointerWrapper branch(reader);
+  const tdr::TimeCleaning CLEAN = tdr::setupCleaning(reader, cleanTimes);
   const bool hasTruthMet = hasBranch("TruthPart_pdgId") && hasBranch("TruthPart_pt") && hasBranch("TruthPart_phi");
   std::unique_ptr<TTreeReaderArray<float>> tpPdg, tpPt, tpPhi;
   if (hasTruthMet) {
@@ -221,7 +223,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    const tdr::T0Set T = tdr::computeT0s(branch, INFL);
+    const tdr::T0Set T = tdr::computeT0s(branch, INFL, CLEAN);
     const tdr::TrackLists L = tdr::rptTrackLists(branch);
     for (int k = 0; k < tdr::N_T0; ++k) { t0[k] = T.t[k]; sig0[k] = T.sig[k]; infl[k] = T.infl[k]; ok0[k] = T.ok[k]; }
     jPt.clear(); jEta.clear(); jPhi.clear(); jHs.clear(); jPu.clear(); jNtrk.clear(); jNtimed.clear();
@@ -234,7 +236,7 @@ int main(int argc, char** argv) {
       jPu.push_back(branch.isJetPaperPU(e, p) ? 1 : 0);
       // R_pT needs tracks: beyond |eta| = 4.0 it is undefined (stored as -1)
       if (std::abs((double)e) < tdr::FWD_ETA_MAX) {
-        const tdr::JetRpt r = tdr::jetRpt(branch, j, L, T, gate);
+        const tdr::JetRpt r = tdr::jetRpt(branch, j, L, T, gate, CLEAN);
         jNtrk.push_back(r.ntrk);  jNtimed.push_back(r.ntimed);
         jItk.push_back(r.itk);  jSelf.push_back(r.self);  jComb.push_back(r.comb);
         for (int k = 0; k < tdr::N_T0; ++k) jT0[k].push_back(r.t0[k]);
@@ -267,6 +269,7 @@ int main(int argc, char** argv) {
   meta.Branch("n_selected", &nSel, "n_selected/L");
   meta.Branch("n_presel_all", &nPresel, "n_presel_all/L");
   meta.Branch("gate_sigma", &gate, "gate_sigma/D");
+  meta.Branch("clean_times", &cleanTimes, "clean_times/O");
   meta.Branch("j1_pt_min", &j1, "j1_pt_min/D");
   meta.Branch("j2_pt_min", &j2, "j2_pt_min/D");
   meta.Branch("deta_min", &dEtaMin, "deta_min/D");

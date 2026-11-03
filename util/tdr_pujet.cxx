@@ -16,7 +16,7 @@
 // 3 sigma; this program follows the TDR); the ingredients are copied from it.
 //
 // Usage:  tdr_pujet [--sample=<s>] [--ntuple-dir=<d>] [--file-shard=i/N]
-//                   [--max-events=N] [--gate-sigma=X (default 2)] [--out=<path>]
+//                   [--max-events=N] [--gate-sigma=X (default 2)] [--clean-times] [--out=<path>]
 // Output: <prefix>tdr_pujet.root (TTrees "jets", "meta"; merge shards with hadd -f).
 // -----------------------------------------------------------------------------
 #include <TChain.h>
@@ -58,6 +58,7 @@ int main(int argc, char** argv) {
     std::string tag = os.str(); std::replace(tag.begin(), tag.end(), '.', 'p');
     SELECTION_TAG = SELECTION_TAG.empty() ? tag : SELECTION_TAG + "_" + tag;
   }
+  bool cleanTimes = tdr::wantCleaning(argc, argv);   // before the output path: it tags the file
   const Inflation INFL = inflationFor(SAMPLE_NAME);
   const std::string outPath = outOverride.empty() ? histFilePath("tdr_pujet.root") : outOverride;
   {
@@ -73,6 +74,7 @@ int main(int argc, char** argv) {
   recordAvailableBranches(chain);
   TTreeReader reader(&chain);
   BranchPointerWrapper branch(reader);
+  const tdr::TimeCleaning CLEAN = tdr::setupCleaning(reader, cleanTimes);
 
   TFile out(outPath.c_str(), "RECREATE");
   if (out.IsZombie()) { std::cerr << "[tdr_pujet] cannot open " << outPath << "\n"; return 1; }
@@ -124,7 +126,7 @@ int main(int argc, char** argv) {
       js.push_back(j);
     }
     if (js.empty()) continue;
-    const tdr::T0Set T = tdr::computeT0s(branch, INFL);
+    const tdr::T0Set T = tdr::computeT0s(branch, INFL, CLEAN);
     const tdr::TrackLists L = tdr::rptTrackLists(branch);
 
     const std::string fpath = chain.GetCurrentFile()->GetName();
@@ -137,7 +139,7 @@ int main(int argc, char** argv) {
       pt = branch.topoJetPt[j];  eta = branch.topoJetEta[j];  phi = branch.topoJetPhi[j];
       hs = branch.isJetPaperHS(eta, phi) ? 1 : 0;
       pu = branch.isJetPaperPU(eta, phi) ? 1 : 0;
-      const tdr::JetRpt r = tdr::jetRpt(branch, j, L, T, gate);
+      const tdr::JetRpt r = tdr::jetRpt(branch, j, L, T, gate, CLEAN);
       ntrk = r.ntrk;  ntimed = r.ntimed;
       rItk = r.itk;  rSelf = r.self;  rComb = r.comb;
       for (int k = 0; k < tdr::N_T0; ++k) rT0[k] = r.t0[k];
@@ -159,6 +161,7 @@ int main(int argc, char** argv) {
   meta.Branch("n_pass_lepton", &nLep, "n_pass_lepton/L");
   meta.Branch("n_jets", &nJetRows, "n_jets/L");
   meta.Branch("gate_sigma", &gate, "gate_sigma/D");
+  meta.Branch("clean_times", &cleanTimes, "clean_times/O");
   meta.Branch("jet_pt_min", &ptMin, "jet_pt_min/D");
   meta.Branch("fwd_eta_min", &fwdMin, "fwd_eta_min/D");
   meta.Branch("fwd_eta_max", &fwdMax, "fwd_eta_max/D");

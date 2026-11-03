@@ -25,10 +25,22 @@
 //               < 2 timed tracks: unchanged
 //   combined    the t0 version where that t0 exists, self-tagging where it does not
 //               (the TDR's "when no t0 is found"); only Athena's t0 can be absent
+// Track-time cleaning (--clean-times, off by default): the ntuples' track times are
+// NOT hit-cleaned, and a third of the timed forward tracks carry a misassigned time.
+// With it on, a timed track counts as untimed unless it passes the TDR's two
+// reconstruction-level cuts (Sec. 3.2.1): its last ITk hit on the layer nearest the
+// HGTD (Track_hitInLastLayer), and >= 2 HGTD hits at 3.5 < |eta| < 3.9. The third
+// TDR step (outlier removal among a track's hits) needs per-hit times the ntuples do
+// not store. It applies to the TRKPTZ/WAVeS t0 inputs, the gate and self-tagging;
+// Athena's t0 (RecoVtx_time) comes from upstream and cannot be recomputed.
 // -----------------------------------------------------------------------------
 #pragma once
 
+#include <TTreeReader.h>
+#include <TTreeReaderValue.h>
 #include <TVector2.h>
+
+#include <memory>
 
 #include <algorithm>
 #include <array>
@@ -76,13 +88,52 @@ inline double dR(double e1, double p1, double e2, double p2) {
   return std::hypot(e1 - e2, TVector2::Phi_mpi_pi(p1 - p2));
 }
 
+// ── Track-time cleaning ───────────────────────────────────────────────────────
+struct TimeCleaning {
+  bool on = false;
+  std::unique_ptr<TTreeReaderValue<std::vector<bool>>> lastLayer;   // Track_hitInLastLayer
+};
+// --clean-times? Call before the output path is built: it tags the file name.
+inline bool wantCleaning(int argc, char** argv) {
+  for (int i = 1; i < argc; ++i)
+    if (std::string(argv[i]) == "--clean-times") {
+      SELECTION_TAG = SELECTION_TAG.empty() ? "cleantimes" : SELECTION_TAG + "_cleantimes";
+      return true;
+    }
+  return false;
+}
+// bind the branch the cleaning needs (before the first reader.Next())
+inline TimeCleaning setupCleaning(TTreeReader& reader, bool on) {
+  TimeCleaning C;
+  C.on = on;
+  if (!C.on) return C;
+  if (!hasBranch("Track_hitInLastLayer")) {
+    std::cerr << "[tdr] --clean-times needs Track_hitInLastLayer, which this input lacks"
+                 " (the skims drop it: read the raw ntuples with --ntuple-dir=)\n";
+    std::exit(1);
+  }
+  C.lastLayer = std::make_unique<TTreeReaderValue<std::vector<bool>>>(reader, "Track_hitInLastLayer");
+  return C;
+}
+// does this track carry a usable time?
+inline bool timed(BranchPointerWrapper& b, int idx, const TimeCleaning& C) {
+  if (b.trackTimeValid[idx] != 1) return false;
+  if (!C.on) return true;
+  if (!(**C.lastLayer)[idx]) return false;
+  const double ae = std::abs((double)b.trackEta[idx]);
+  return !(ae > 3.5 && ae < 3.9 && b.trackHgtdHits[idx] < 2);
+}
+
 // The event's t0s -- util/vbs_time_veto.cxx's block, verbatim, without TZP.
-inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL) {
+inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL, const TimeCleaning& C) {
   T0Set s;
   s.t[T0_HGTD]   = b.recoVtxTime[0];
   s.sig[T0_HGTD] = b.recoVtxTimeRes[0];
   s.ok[T0_HGTD]  = (b.recoVtxValid[0] == 1);
-  const std::vector<int> trk_z = getAssociatedTracks(&b, MIN_TRACK_PT, MAX_TRACK_PT, T0_ASSOC_NSIGMA);
+  std::vector<int> trk_z = getAssociatedTracks(&b, MIN_TRACK_PT, MAX_TRACK_PT, T0_ASSOC_NSIGMA);
+  if (C.on)   // the clustering drops untimed tracks itself; drop the timed ones cleaning un-times
+    trk_z.erase(std::remove_if(trk_z.begin(), trk_z.end(),
+                               [&](int i) { return b.trackTimeValid[i] == 1 && !timed(b, i, C); }), trk_z.end());
   const auto clusters = clusterTracksInTime(
       trk_z, &b, DIST_CUT_CONE,
       /*useSmearedTimes=*/false, /*checkTimeValid=*/true, IDEAL_TRACK_RES,
@@ -140,11 +191,12 @@ inline double sumPt(BranchPointerWrapper& b, const std::vector<int>& trk) {
 
 // rpt_v5's applyTimeGate
 inline std::vector<int> timeGate(BranchPointerWrapper& b, const std::vector<int>& base,
-                                 double t0, double sig0, bool ok, double infl, double gate) {
+                                 double t0, double sig0, bool ok, double infl, double gate,
+                                 const TimeCleaning& C) {
   std::vector<int> out;
   out.reserve(base.size());
   for (int idx : base) {
-    if (!ok || b.trackTimeValid[idx] != 1) { out.push_back(idx); continue; }
+    if (!ok || !timed(b, idx, C)) { out.push_back(idx); continue; }
     const double dt = b.trackTime[idx] - t0;
     const double vt = b.trackTimeRes[idx] * b.trackTimeRes[idx];
     if (std::abs(dt) / std::sqrt(infl * infl * sig0 * sig0 + vt) < gate) out.push_back(idx);
@@ -154,17 +206,18 @@ inline std::vector<int> timeGate(BranchPointerWrapper& b, const std::vector<int>
 
 // Self-tagging R_pT numerator: max over in-time clusters of the timed R_pT tracks of
 // (cluster sum pT + untimed sum pT); the full sum when fewer than 2 tracks are timed.
-inline double selfTagSumPt(BranchPointerWrapper& b, const std::vector<int>& trk, int* nTimedOut = nullptr) {
-  std::vector<int> timed;
+inline double selfTagSumPt(BranchPointerWrapper& b, const std::vector<int>& trk, const TimeCleaning& C,
+                          int* nTimedOut = nullptr) {
+  std::vector<int> tt;
   double untimed = 0.0;
   for (int i : trk) {
-    if (b.trackTimeValid[i] == 1 && b.trackTimeRes[i] > 0.0) timed.push_back(i);
+    if (timed(b, i, C) && b.trackTimeRes[i] > 0.0) tt.push_back(i);
     else untimed += b.trackPt[i];
   }
-  if (nTimedOut) *nTimedOut = (int)timed.size();
-  if (timed.size() < 2) return sumPt(b, trk);
+  if (nTimedOut) *nTimedOut = (int)tt.size();
+  if (tt.size() < 2) return sumPt(b, trk);
   static const std::unordered_map<int, double> kNone;
-  std::vector<Cluster> cl = makeSimpleClusters(timed, &b, /*useSmearedTimes=*/false, kNone, kNone,
+  std::vector<Cluster> cl = makeSimpleClusters(tt, &b, /*useSmearedTimes=*/false, kNone, kNone,
                                                /*checkTimeValid=*/true, /*usez0=*/false);
   doIterativeClustering(&cl, SELF_DIST_CUT);
   double best = 0.0;
@@ -184,7 +237,8 @@ struct JetRpt {
   double self = 0.0;                    // self-tagging
   double comb = 0.0;                    // Athena t0 where it exists, self-tagging otherwise
 };
-inline JetRpt jetRpt(BranchPointerWrapper& b, int j, const TrackLists& L, const T0Set& T, double gate) {
+inline JetRpt jetRpt(BranchPointerWrapper& b, int j, const TrackLists& L, const T0Set& T, double gate,
+                     const TimeCleaning& C) {
   JetRpt r;
   const double pt = b.topoJetPt[j];
   const bool fwd = std::abs((double)b.topoJetEta[j]) >= FWD_ETA_MIN;
@@ -192,8 +246,8 @@ inline JetRpt jetRpt(BranchPointerWrapper& b, int j, const TrackLists& L, const 
   r.ntrk = (int)trk.size();
   r.itk = sumPt(b, trk) / pt;
   for (int k = 0; k < N_T0; ++k)
-    r.t0[k] = sumPt(b, timeGate(b, trk, T.t[k], T.sig[k], T.ok[k], T.infl[k], gate)) / pt;
-  r.self = selfTagSumPt(b, trk, &r.ntimed) / pt;
+    r.t0[k] = sumPt(b, timeGate(b, trk, T.t[k], T.sig[k], T.ok[k], T.infl[k], gate, C)) / pt;
+  r.self = selfTagSumPt(b, trk, C, &r.ntimed) / pt;
   r.comb = T.ok[T0_HGTD] ? r.t0[T0_HGTD] : r.self;
   return r;
 }
