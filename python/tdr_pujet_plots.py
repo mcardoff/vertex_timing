@@ -7,8 +7,10 @@
                  ITk only, with the ratio to ITk underneath. The tree's self-tagging and combined
                  columns are not drawn (user, 2026-11-03: too many series; combined = HGTD wherever
                  Athena has a t0)
-  <out>_eta      TDR Fig 3.21: pileup jet rate relative to ITk only, against |eta|, at 85% hard-scatter
-                 efficiency (the working point set per |eta| bin), 30-50 GeV
+  <out>_eta      TDR Fig 3.21: pileup jet rate relative to ITk only, against |eta|, 30-50 GeV, each tagger
+                 at ONE 85% hard-scatter working point set over 2.4 < |eta| < 4.0 (the TDR's legend; the
+                 user's choice, 2026-11-03) and applied in every |eta| bin -- not a working point per bin,
+                 which forces the 3.6-4.0 bin to 85% right at the timed taggers' efficiency ceiling
   <out>_wp85.json  every tagger's R_pT threshold at 85% hard-scatter efficiency per pT bin (30-50,
                  > 50 GeV) and region (central |eta| < 2.4, forward 2.4-4.0): the TDR preselection's
                  "every jet passes the ITk-only R_pT tagger at 85%", and the timing taggers that
@@ -52,7 +54,8 @@ J = t["jets"].arrays(library="np")
 meta = t["meta"].arrays(library="np")
 gate = float(np.unique(meta["gate_sigma"])[0])
 clean = str(meta["time_cleaning"][0]) if "time_cleaning" in meta else "off"   # trees before 2026-11-03: uncleaned
-CLEAN_TXT = {"all": "Cleaned track times (TDR)", "t0": "Cleaned t_{0} only", "off": "Track times as in the ntuple"}
+CLEAN_TXT = {"all": None, "t0": "Cleaned t_{0} only", "off": "Track times as in the ntuple"}   # the default (all) unlabelled
+clean_line = [CLEAN_TXT[clean]] if CLEAN_TXT[clean] else []
 
 ae = np.abs(J["eta"])
 ENERGY = "#sqrt{s} = 14 TeV, HL-LHC, #LT#mu#GT = 200"
@@ -123,7 +126,7 @@ for c, (lab, lo, hi) in enumerate(SLICES):
         S.style(S.graph(EFF, rej, rerr), colour, mk, 1, 2, 1.3).Draw("P SAME")         # solid error bars
         leg.AddEntry(g, name, "LP")
     leg.Draw()
-    S.header(0.20, 0.87, [ENERGY, f"{args.label}, t_{{0}} gate {gate:g}#sigma", f"{lab}, 2.4 < |#eta| < 4.0", CLEAN_TXT[clean]], size=TS_M)
+    S.header(0.20, 0.87, [ENERGY, f"{args.label}, t_{{0}} gate {gate:g}#sigma", f"{lab}, 2.4 < |#eta| < 4.0"] + clean_line, size=TS_M)
 
     cv.cd()
     p2 = S.pad(f"ratio{c}", 0.5 * c, 0.0, 0.5 * c + 0.5, RAT, top=0.03, bottom=0.36)
@@ -138,36 +141,40 @@ S.save(cv, f"{args.out}_roc")
 
 # ── Fig 3.21 analogue ─────────────────────────────────────────────────────────
 EB = np.array([2.4, 2.8, 3.2, 3.6, 4.0])
-rel, nbin = {}, []
+rel, effhs, nbin = {}, {}, []
+mf = sel(30.0, 50.0, 2.4, 4.0)
+thr = {col: working_point(J[col][mf & (J["hs"] == 1)], J[col][mf & (J["pu"] == 1)], 0.85)[0] for col, *_ in TAGGERS}
 for col, *_ in TAGGERS:
-    v = []
+    v, e = [], []
     for b in range(len(EB) - 1):
         m = sel(30.0, 50.0, EB[b], EB[b + 1])
-        hs, pu = J[col][m & (J["hs"] == 1)], J[col][m & (J["pu"] == 1)]
-        hi, pi = J["rpt_itk"][m & (J["hs"] == 1)], J["rpt_itk"][m & (J["pu"] == 1)]
-        pe = at_eff(hs, pu, np.array([0.85]))[0][0]
-        pr = at_eff(hi, pi, np.array([0.85]))[0][0]
+        H, P = m & (J["hs"] == 1), m & (J["pu"] == 1)
+        pe = np.mean(J[col][P] >= thr[col])
+        pr = np.mean(J["rpt_itk"][P] >= thr["rpt_itk"])
         v.append(pe / pr if pr > 0 else np.nan)
-        if col == "rpt_itk": nbin.append((len(hs), len(pu)))
-    rel[col] = v
+        e.append(np.mean(J[col][H] >= thr[col]))
+        if col == "rpt_itk": nbin.append((int(H.sum()), int(P.sum())))
+    rel[col], effhs[col] = v, e
 cv = S.keep(R.TCanvas("eta", "", 800, 600))
-ymax = max(2.8, 1.15 * np.nanmax([x for v in rel.values() for x in v]))
-fr = S.keep(cv.DrawFrame(2.4, 0.0, 4.0, ymax))
+allv = [x for v in rel.values() for x in v if np.isfinite(x)]
+ylo = min(0.4, np.floor(10 * (min(allv) - 0.1)) / 10)              # fitted to the data,
+yhi = max(1.6, ylo + 1.75 * (max(allv) - ylo))                        # room above it for the labels
+fr = S.keep(cv.DrawFrame(2.4, ylo, 4.0, yhi))
 S.axes(fr, "Jet |#eta|", "Pileup jet rate relative to ITk only")
 fr.GetYaxis().ChangeLabel(1, -1, 0)
-leg = S.legend(0.18, 0.51, 0.74, 0.66, size=0.036, ncol=2)
+leg = S.legend(0.70, 0.66, 0.93, 0.92, size=0.04)
 for col, name, short, colour, mk, ls in TAGGERS:
     h = S.keep(R.TH1D(f"h_eta_{col}", "", len(EB) - 1, EB))
     for b, x in enumerate(rel[col]): h.SetBinContent(b + 1, x)
     S.style(h, colour, 0, ls, 3 if col in ("rpt_itk", "rpt_t0_truth") else 2); h.Draw("HIST SAME")
     leg.AddEntry(h, short, "L")
 leg.Draw()
-S.header(0.20, 0.87, [ENERGY + ", " + args.label, f"30 < p_{{T}} < 50 GeV, 85% hard-scatter efficiency, t_{{0}} gate {gate:g}#sigma", CLEAN_TXT[clean]])
+S.header(0.20, 0.87, ["#sqrt{s} = 14 TeV, #LT#mu#GT = 200", f"{args.label}, {gate:g}#sigma gate", "30 < p_{T} < 50 GeV, 85% HS efficiency"] + clean_line)
 cv.RedrawAxis()
 S.save(cv, f"{args.out}_eta")
-print("\nrelative pileup-jet rate at 85%, 30-50 GeV, |eta| bins " + " ".join(f"{EB[b]:.1f}-{EB[b + 1]:.1f}" for b in range(len(EB) - 1)))
+print("\nrelative pileup-jet rate, 30-50 GeV, ONE 85% working point over 2.4-4.0, |eta| bins " + " ".join(f"{EB[b]:.1f}-{EB[b + 1]:.1f}" for b in range(len(EB) - 1)) + "   (HS efficiency per bin)")
 for col, name, *_ in TAGGERS:
-    print(f"  {plain(name):40s}" + "".join(f"{x:8.2f}" for x in rel[col]))
+    print(f"  {plain(name):40s}" + "".join(f"{x:8.2f}" for x in rel[col]) + "   (" + " ".join(f"{e:.3f}" for e in effhs[col]) + ")")
 print(f"  {'(hard-scatter / pileup jets per bin)':40s}" + "".join(f"  {h}/{p}" for h, p in nbin))
 
 # ── the 85% working points, for the TDR preselection ──────────────────────────

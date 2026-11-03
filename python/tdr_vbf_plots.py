@@ -51,7 +51,8 @@ CATS = ["CC", "CF", "FF"]
 WP = json.load(open(args.wp))
 gate_wp = WP["gate_sigma"]
 clean_wp = WP.get("time_cleaning", "off")
-CLEAN_TXT = {"all": "Cleaned track times (TDR)", "t0": "Cleaned t_{0} only", "off": "Track times as in the ntuple"}
+CLEAN_TXT = {"all": None, "t0": "Cleaned t_{0} only", "off": "Track times as in the ntuple"}   # the default (all) unlabelled
+clean_line = [CLEAN_TXT[clean_wp]] if CLEAN_TXT[clean_wp] else []
 
 
 
@@ -195,7 +196,7 @@ for key, lab, E, _ in samples:
     hatch = S.keep(R_.TH1D(f"hatch_{key}", "", 1, 0, 1)); hatch.SetFillColor(R_.kGray + 1); hatch.SetFillStyle(3354); hatch.SetLineColor(R_.kGray + 1)
     leg.AddEntry(hatch, "Pileup jet at |#eta| #geq 4.0", "F")
     leg.Draw()
-    S.header(0.20, 0.87, ["#sqrt{s} = 14 TeV, #LT#mu#GT = 200", sample_line(lab), "R_{p_{T}} taggers at 85%, " + gate_txt, CLEAN_TXT[clean_wp]])
+    S.header(0.20, 0.87, ["#sqrt{s} = 14 TeV, #LT#mu#GT = 200", sample_line(lab), "R_{p_{T}} taggers at 85%, " + gate_txt] + clean_line)
     R_.gPad.RedrawAxis()
 
     # right: preselected events relative to the ITk-only tagger
@@ -213,6 +214,6 @@ for key, lab, E, _ in samples:
         g = S.style(S.graph(np.arange(3) + 0.5 + (k - 3) * 0.13, rel, rerr), colour, mk, 1, 2, 1.4)
         g.Draw("P SAME"); leg2.AddEntry(g, name, "P")
     leg2.Draw()
-    S.header(0.20, 0.87, ["#sqrt{s} = 14 TeV, #LT#mu#GT = 200", sample_line(lab), CLEAN_TXT[clean_wp]])
+    S.header(0.20, 0.87, ["#sqrt{s} = 14 TeV, #LT#mu#GT = 200", sample_line(lab)] + clean_line)
     S.text(0.20, 0.20, "No tagging: " + " / ".join(f"{v:.2f}" for v in rows[0][3]) + " (CC / CF / FF)", 0.042)
     S.save(cv, f"{args.out}_pupair_{key}")
