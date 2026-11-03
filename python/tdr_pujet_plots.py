@@ -11,6 +11,10 @@
                  at ONE 85% hard-scatter working point set over 2.4 < |eta| < 4.0 (the TDR's legend; the
                  user's choice, 2026-11-03) and applied in every |eta| bin -- not a working point per bin,
                  which forces the 3.6-4.0 bin to 85% right at the timed taggers' efficiency ceiling
+  <out>_eta_tdr  the TDR's own Fig 3.21 method as a reference point: its "combined" tagger (t0 gate where
+                 the vertex t0 exists -- here Athena's RecoVtx_time -- self-tagging otherwise), on the same
+                 single working point, with statistical errors, against the TDR's published values (read
+                 off its Fig 3.21 by eye) and ITk only
   <out>_wp85.json  every tagger's R_pT threshold at 85% hard-scatter efficiency per pT bin (30-50,
                  > 50 GeV) and region (central |eta| < 2.4, forward 2.4-4.0): the TDR preselection's
                  "every jet passes the ITk-only R_pT tagger at 85%", and the timing taggers that
@@ -171,6 +175,47 @@ S.header(0.20, 0.87, [f"#sqrt{{s}} = 14 TeV, #LT#mu#GT = 200, {args.label}{gate_
                       "2.4 < |#eta| < 4.0, 30 < p_{T} < 50 GeV, 85% HS efficiency"] + clean_line)
 cv.RedrawAxis()
 S.save(cv, f"{args.out}_eta")
+
+# ── Fig 3.21 the TDR's way: its combined tagger against its published values ──
+# ATLAS-TDR-031 Fig 3.21 (PDF p. 69), the ITk+HGTD (combined) curve, read off the figure by eye (+- 0.01)
+TDR_FIG321 = [0.87, 0.70, 0.72, 0.57]
+tC = working_point(J["rpt_comb"][mf & (J["hs"] == 1)], J["rpt_comb"][mf & (J["pu"] == 1)], 0.85)[0]
+rc, rce, nc = [], [], []
+for b in range(len(EB) - 1):
+    m = sel(30.0, 50.0, EB[b], EB[b + 1])
+    P = m & (J["pu"] == 1)
+    kc, ki = int(np.sum(J["rpt_comb"][P] >= tC)), int(np.sum(J["rpt_itk"][P] >= thr["rpt_itk"]))
+    r = kc / ki if ki else np.nan
+    rc.append(r); nc.append((kc, ki))
+    rce.append(r * np.sqrt(1.0 / max(kc, 1) + 1.0 / max(ki, 1)))   # Poisson, the two counts taken as independent: conservative
+cv = S.keep(R.TCanvas("eta_tdr", "", 800, 600))
+fr = S.keep(cv.DrawFrame(2.4, 0.0, 4.0, 1.6))
+S.axes(fr, "Jet |#eta|", "Pileup jet rate relative to ITk only")
+fr.GetYaxis().ChangeLabel(1, -1, 0)
+h_itk = S.keep(R.TH1D("h_eta_tdr_itk", "", len(EB) - 1, EB))
+for b in range(len(EB) - 1): h_itk.SetBinContent(b + 1, 1.0)
+S.style(h_itk, S.COL["itk"], 0, 2, 3); h_itk.Draw("HIST SAME")
+h_tdr = S.keep(R.TH1D("h_eta_tdr_pub", "", len(EB) - 1, EB))
+for b, x in enumerate(TDR_FIG321): h_tdr.SetBinContent(b + 1, x)
+S.style(h_tdr, "kP10Ash", 0, 1, 3); h_tdr.Draw("HIST SAME")
+h_c = S.keep(R.TH1D("h_eta_tdr_comb", "", len(EB) - 1, EB))
+for b, x in enumerate(rc): h_c.SetBinContent(b + 1, x)
+S.style(h_c, "kP10Violet", 0, 1, 3); h_c.Draw("HIST SAME")
+g_c = S.style(S.graph(0.5 * (EB[:-1] + EB[1:]), rc, rce), "kP10Violet", 20, 1, 2, 1.2); g_c.Draw("P SAME")
+leg = S.legend(0.20, 0.19, 0.93, 0.35, size=0.038)
+leg.AddEntry(h_itk, "ITk only", "L")
+leg.AddEntry(h_tdr, "ATLAS-TDR-031, Fig. 3.21 (combined)", "L")
+leg.AddEntry(g_c, "This study, TDR method: Athena t_{0}, else self-tagging", "LP")
+leg.Draw()
+# the header starts right of the first bin, whose error bar reaches ~1.3
+S.header(0.40, 0.87, [f"#sqrt{{s}} = 14 TeV, #LT#mu#GT = 200, {args.label}{gate_txt}",
+                      "2.4 < |#eta| < 4.0, 30 < p_{T} < 50 GeV", "85% HS efficiency"] + clean_line, size=0.045)
+cv.RedrawAxis()
+S.save(cv, f"{args.out}_eta_tdr")
+okH = np.mean(J["ok_hgtd"][mf])
+print(f"\nFig 3.21 the TDR's way (combined, one 85% working point over 2.4-4.0): threshold {tC:.3f}; Athena t0 exists for {100 * okH:.1f}% of these jets")
+print("  TDR published  " + "  ".join(f"{x:5.2f}" for x in TDR_FIG321))
+print("  this study     " + "  ".join(f"{x:5.2f}+-{e:4.2f}" for x, e in zip(rc, rce)) + "   (pileup jets passing, combined / ITk: " + " ".join(f"{a}/{b}" for a, b in nc) + ")")
 print("\nrelative pileup-jet rate, 30-50 GeV, ONE 85% working point over 2.4-4.0, |eta| bins " + " ".join(f"{EB[b]:.1f}-{EB[b + 1]:.1f}" for b in range(len(EB) - 1)) + "   (HS efficiency per bin)")
 for col, name, *_ in TAGGERS:
     print(f"  {plain(name):40s}" + "".join(f"{x:8.2f}" for x in rel[col]) + "   (" + " ".join(f"{e:.3f}" for e in effhs[col]) + ")")
