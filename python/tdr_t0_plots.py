@@ -5,6 +5,9 @@
                   and with the TDR's track-time cleaning (solid), Athena's HGTD t0 (grey, cannot be
                   re-cleaned) as the reference; normalised to the selected events, so a missing t0
                   lowers the area. Lower panels: cleaned / as is in 20 ps bins.
+  <out>_tdr       the TDR Fig 3.19 analogue: t0 - t_HS for the presentation's t0s -- HGTD (Athena), and
+                  TRKPTZ and WAVeS from cleaned track times (the default everywhere) -- one panel, the
+                  legend giving each one's core fraction and FIT_PEAKTAIL core width
   <out>_core_nhs  core fraction (|t0 - t_HS| < 60 ps over all events, a missing t0 a failure) against
                   the number of forward hard-scatter tracks with a time (folded at 20, as the main
                   analysis); lower panel: cleaned / as is (errors from the events that move, paired).
@@ -84,6 +87,31 @@ for c, (key, title, colour) in enumerate(T0S):
     one = S.keep(R.TLine(-400, 1, 400, 1)); one.SetLineStyle(2); one.SetLineColor(R.kGray + 2); one.Draw()
     S.text(0.20, 0.82, "20 ps bins", 0.75 * TS_R)
 S.save(cv, f"{args.out}_resid")
+
+# ── the TDR Fig 3.19 analogue: the cleaned t0s with Athena's ──────────────────
+cv = S.keep(R.TCanvas("tdr319", "", 800, 600))
+R.gPad.SetLogy()
+leg = S.legend(0.20, 0.57, 0.80, 0.78, size=0.036, margin=0.12)
+leg.SetHeader("Core fraction (|t_{0} #minus t_{HS}| < 60 ps), core width:")
+first = True
+for name, lab, col, w in [("hgtd", "HGTD (Athena) t_{0}", S.COL["hgtd"], 3), ("trkptz_clean", "TRKPTZ t_{0}", S.COL["trkptz"], 3),
+                          ("waves_clean", "WAVeS t_{0}", S.COL["waves"], 3)]:
+    h = S.keep(fits.Get(f"h_{name}").Clone(f"t319_{name}"))
+    h.GetListOfFunctions().Clear()
+    h.Scale(1.0 / N)
+    S.style(h, col, 0, 1, w)
+    if first:
+        h.SetMinimum(2e-5); h.SetMaximum(3000.0)   # headroom: the legend sits above the peak
+        S.axes(h, "t_{0} #minus t_{HS} [ps]", "Fraction of events / 4 ps")
+        h.GetXaxis().SetNdivisions(505)
+        h.Draw("HIST"); first = False
+    else:
+        h.Draw("HIST SAME")
+    leg.AddEntry(h, f"{lab}: {100 * frac[name]:.1f}%, #sigma_{{core}} {sig(name):.1f} ps", "L")
+leg.Draw()
+S.header(0.20, 0.87, [f"{ENERGY}, {args.label}"])
+R.gPad.RedrawAxis()
+S.save(cv, f"{args.out}_tdr")
 
 # ── core fraction against forward hard-scatter tracks ─────────────────────────
 x = np.minimum(E["n_hs_trk"], FOLD)
