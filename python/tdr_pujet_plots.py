@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """TDR Sec. 3.3.3 figures from util/tdr_pujet's per-jet tree, in the ATLAS style (python/tdr_root_style.py).
 
-  <out>_roc      TDR Fig 3.20: pileup jet rejection (1 / pileup efficiency, linear axis) against
-                 hard-scatter efficiency (0.80-1.0), 2.4 < |eta| < 4.0, for 30-50 GeV (left) and
-                 > 50 GeV (right) jets; every tagger against ITk only, with the ratio to ITk underneath
+  <out>_roc      TDR Fig 3.20: pileup jet rejection (1 / pileup efficiency, linear axis) at the sampled
+                 hard-scatter efficiencies 0.800-0.975, 2.4 < |eta| < 4.0, for 30-50 GeV (left) and
+                 > 50 GeV (right) jets; the t0-gated taggers (HGTD, TRKPTZ, WAVeS, truth) against
+                 ITk only, with the ratio to ITk underneath. The tree's self-tagging and combined
+                 columns are not drawn (user, 2026-11-03: too many series; combined = HGTD wherever
+                 Athena has a t0)
   <out>_eta      TDR Fig 3.21: pileup jet rate relative to ITk only, against |eta|, at 85% hard-scatter
                  efficiency (the working point set per |eta| bin), 30-50 GeV
   <out>_wp85.json  every tagger's R_pT threshold at 85% hard-scatter efficiency per pT bin (30-50,
@@ -36,13 +39,11 @@ os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
 R = S.setup()
 
 # taggers: (column, legend, short legend, colour, ROOT marker, ROOT line style); ITk first (the reference)
-TAGGERS = [("rpt_itk", "ITk only", "ITk only", "#000000", 0, 2),
-           ("rpt_self", "Self-tagging", "Self-tagging", "#2E9E4F", 22, 1),
+TAGGERS = [("rpt_itk", "ITk only", "ITk only", "#000000", 24, 2),
            ("rpt_t0_hgtd", "HGTD (Athena) t_{0}", "HGTD t_{0}", "#3B8ED0", 23, 1),
-           ("rpt_comb", "Combined (Athena t_{0}, else self)", "Combined", "#7B3294", 33, 1),
            ("rpt_t0_trkptz", "TRKPTZ t_{0}", "TRKPTZ t_{0}", "#C0392B", 21, 1),
            ("rpt_t0_waves", "WAVeS t_{0}", "WAVeS t_{0}", "#E69F00", 20, 1),
-           ("rpt_t0_truth", "Truth t_{0} (reference)", "Truth t_{0}", "#A0522D", 0, 3)]
+           ("rpt_t0_truth", "Truth t_{0} (reference)", "Truth t_{0}", "#A0522D", 25, 3)]
 EFF = np.round(np.arange(0.800, 0.9751, 0.025), 3)    # the sampled working points
 plain = lambda s: s.replace("_{0}", "0").replace("#", "")
 
@@ -91,7 +92,6 @@ cv = S.keep(R.TCanvas("roc", "", 1600, 800))
 MAIN, RAT = 0.68, 0.32                     # pad heights: text sizes are scaled to match 0.05 of 600 px
 TS_M, TS_R = 0.05 * 600 / (800 * MAIN), 0.05 * 600 / (800 * RAT)
 print(f"{args.tree}: gate {gate:g} sigma\n\nrejection at matched hard-scatter efficiency, 2.4 < |eta| < 4.0 (ratio to ITk in brackets)")
-dense = np.linspace(0.80, 1.0, 401)
 for c, (lab, lo, hi) in enumerate(SLICES):
     m = sel(lo, hi, 2.4, 4.0)
     nhs, npu = int(np.sum(m & (J["hs"] == 1))), int(np.sum(m & (J["pu"] == 1)))
@@ -100,27 +100,25 @@ for c, (lab, lo, hi) in enumerate(SLICES):
     rows, ref = [], None
     for col, name, short, colour, mk, ls in TAGGERS:
         hs, pu = J[col][m & (J["hs"] == 1)], J[col][m & (J["pu"] == 1)]
-        pd_ = at_eff(hs, pu, dense)[0]
         pe, perr = at_eff(hs, pu, EFF)
         rej = np.where(pe > 0, 1.0 / pe, np.nan)
         rerr = np.where(pe > 0, perr / pe ** 2, np.nan)
         if ref is None: ref = rej
-        rows.append((np.where(pd_ > 0, 1.0 / pd_, np.nan), rej, rerr, rej / ref))
-        print("  " + f"{plain(name):40s}" + "".join(f"{r:7.1f} ({q:4.2f})" for r, q in zip(rej, rows[-1][3])))
-    ymax = 1.7 * np.nanmax([np.nanmax(r[0]) for r in rows])
-    rmax = np.ceil(1.1 * np.nanmax([np.nanmax(r[3]) for r in rows]) / 0.5) * 0.5
+        rows.append((rej, rerr, rej / ref))
+        print("  " + f"{plain(name):40s}" + "".join(f"{r:7.1f} ({q:4.2f})" for r, q in zip(rej, rows[-1][2])))
+    ymax = 1.7 * np.nanmax([np.nanmax(r[0] + r[1]) for r in rows])
+    rmax = np.ceil(1.1 * np.nanmax([np.nanmax(r[2]) for r in rows]) / 0.5) * 0.5
 
     cv.cd()
     p1 = S.pad(f"main{c}", 0.5 * c, RAT, 0.5 * c + 0.5, 1.0, top=0.05 / MAIN * 0.6, bottom=0.02)
     fr = S.keep(p1.DrawFrame(0.80, 0.0, 1.0, ymax))
     S.axes(fr, "", "Pileup jet rejection", size=TS_M, ytoff=1.35)
     fr.GetXaxis().SetLabelSize(0); fr.GetXaxis().SetNdivisions(505)
-    leg = S.legend(0.45, 0.28, 0.94, 0.64, size=0.75 * TS_M)
-    for (col, name, short, colour, mk, ls), (rd, rej, rerr, _) in zip(TAGGERS, rows):
-        g = S.style(S.graph(dense, rd), colour, mk, ls); g.Draw("L SAME")
-        if mk:
-            S.style(S.graph(EFF, rej, rerr), colour, mk, 1, 1).Draw("P SAME")
-        leg.AddEntry(g, name, "LP" if mk else "L")
+    leg = S.legend(0.52, 0.40, 0.94, 0.64, size=0.75 * TS_M)
+    for (col, name, short, colour, mk, ls), (rej, rerr, _) in zip(TAGGERS, rows):
+        g = S.style(S.graph(EFF, rej), colour, mk, ls, 2, 1.3); g.Draw("L SAME")      # the line in its style
+        S.style(S.graph(EFF, rej, rerr), colour, mk, 1, 2, 1.3).Draw("P SAME")         # solid error bars
+        leg.AddEntry(g, name, "LP")
     leg.Draw()
     S.header(0.20, 0.87, [ENERGY, f"{args.label}, t_{{0}} gate {gate:g}#sigma", f"{lab}, 2.4 < |#eta| < 4.0"], size=TS_M)
 
@@ -131,8 +129,8 @@ for c, (lab, lo, hi) in enumerate(SLICES):
     fr2.GetXaxis().SetNdivisions(505)
     fr2.GetYaxis().ChangeLabel(1, -1, 0)          # the 0 would sit on the x axis's first label
     one = S.keep(R.TLine(0.80, 1.0, 1.0, 1.0)); one.SetLineStyle(2); one.SetLineColor(R.kGray + 2); one.Draw()
-    for (col, name, short, colour, mk, ls), (_, rej, _, ratio) in zip(TAGGERS[1:], rows[1:]):
-        S.style(S.graph(EFF, ratio), colour, mk, ls, 2, 1.1).Draw("LP SAME" if mk else "L SAME")
+    for (col, name, short, colour, mk, ls), (_, _, ratio) in zip(TAGGERS[1:], rows[1:]):
+        S.style(S.graph(EFF, ratio), colour, mk, ls, 2, 1.1).Draw("LP SAME")
 S.save(cv, f"{args.out}_roc")
 
 # ── Fig 3.21 analogue ─────────────────────────────────────────────────────────
@@ -154,7 +152,7 @@ ymax = max(2.8, 1.15 * np.nanmax([x for v in rel.values() for x in v]))
 fr = S.keep(cv.DrawFrame(2.4, 0.0, 4.0, ymax))
 S.axes(fr, "Jet |#eta|", "Pileup jet rate relative to ITk only")
 fr.GetYaxis().ChangeLabel(1, -1, 0)
-leg = S.legend(0.18, 0.47, 0.74, 0.66, size=0.036, ncol=2)
+leg = S.legend(0.18, 0.51, 0.74, 0.66, size=0.036, ncol=2)
 for col, name, short, colour, mk, ls in TAGGERS:
     h = S.keep(R.TH1D(f"h_eta_{col}", "", len(EB) - 1, EB))
     for b, x in enumerate(rel[col]): h.SetBinContent(b + 1, x)
