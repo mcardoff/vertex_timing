@@ -26,13 +26,14 @@
 //        (untimed tracks pass), and a track failing it may then join a PU vertex.
 //   R_pT the TDR taggers' values (tdr_common's jetRpt), for comparison.
 //   jet time  over the jet's ghost-associated tracks with a (cleaned) HGTD time, any
-//        vertex: t_jet = weighted mean with w = 1 / sigma_t^2 (the note: 35 ps / sqrt(N_hits);
-//        here the ntuple's Track_timeRes), var_spread = the weighted variance of the times
-//        (the note's sigma_jet^2), var_mean = 1 / sum w; and the leading-pT timed track's
-//        time and resolution. -999 / -1 when the jet has no timed track.
-//        At mu = 200 the ghost-associated tracks are mostly pileup, so the spread is large in
-//        every jet and the note's |t1 - t2| / sigma separates nothing (local VBF: < 2 sigma in
-//        100% of signal AND background events). Also stored, beyond the note: the same over the
+//        vertex: t_jet = the uncertainty-weighted mean, w = 1 / sigma_t^2 (the note: 35 ps /
+//        sqrt(N_hits); here the ntuple's Track_timeRes), var_mean = 1 / sum w its variance -- the
+//        clustering's cluster time, and the reading of the note's sigma_jet^2 that is used
+//        (the user's, 2026-11-04); var_spread = the weighted variance of the times, the other
+//        reading; and the leading-pT timed track's time and resolution. -999 / -1 when the jet
+//        has no timed track. At mu = 200 about half the ghost-associated tracks are pileup, so
+//        either reading separates weakly (local VBF, AUC alone: 0.599 mean, 0.585 spread;
+//        leading track 0.810). Also stored, beyond the note: the same over the
 //        jet's PV0-associated (z only, no t0) timed tracks -- t_hs, var_hs_spread, var_hs_mean,
 //        ntimed_hs.
 //

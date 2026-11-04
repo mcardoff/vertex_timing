@@ -8,9 +8,12 @@ row, each on its own inputs:
   t0_<s>      JVF(j1, t0), JVF(j2, t0) for s = hgtd (Athena: the note's reconstructed t0), trkptz, waves,
               truth (the note's t0^true)
   dtime       JVF(j1), JVF(j2), |t_j1 - t_j2| / sqrt(s_j1^2 + s_j2^2), |t_lead1 - t_lead2| / sqrt(...)
-              -- the note's "BDT ITk+HGTD(Delta time)", no t0: jet time = weighted mean over the jet's
-              timed tracks, s_j^2 their weighted variance; missing (NaN) when a jet has no timed track,
-              so the BDT falls back on the JVFs as the note does
+              -- the note's "BDT ITk+HGTD(Delta time)", no t0: jet time = the uncertainty-weighted mean of
+              the jet's timed tracks (w = 1 / sigma_t^2) and s_j its uncertainty, sqrt(1 / sum w) -- the
+              clustering's cluster time (refineClusterTiming), the user's reading of the note's "weighted
+              mean and variance" (2026-11-04; the spread of the times instead gave AUC 0.585 alone against
+              0.599 on local VBF); missing (NaN) when a jet has no timed track, so the BDT falls back on
+              the JVFs as the note does
   dtime_hs    beyond the note: as dtime, but the jet time over the jet's PV0-associated timed tracks
               (z only, still no t0) with the error of the mean -- at mu = 200 the all-track spread is
               pileup-dominated and the note's pull separates nothing (notes/tdr_presentation.md)
@@ -53,7 +56,7 @@ def features(E):
     for s in T0S:
         f["t0_" + s] = [E[f"j1_jvf_t0_{s}"], E[f"j2_jvf_t0_{s}"]]
     timed = (E["j1_ntimed"] > 0) & (E["j2_ntimed"] > 0)
-    p_jet = pull(E["j1_t_jet"], E["j1_var_spread"], E["j2_t_jet"], E["j2_var_spread"], timed)
+    p_jet = pull(E["j1_t_jet"], E["j1_var_mean"], E["j2_t_jet"], E["j2_var_mean"], timed)
     p_lead = pull(E["j1_t_lead"], E["j1_sig_lead"] ** 2, E["j2_t_lead"], E["j2_sig_lead"] ** 2, timed)
     timed_hs = (E["j1_ntimed_hs"] > 0) & (E["j2_ntimed_hs"] > 0)
     p_hs = pull(E["j1_t_hs"], E["j1_var_hs_mean"], E["j2_t_hs"], E["j2_var_hs_mean"], timed_hs)
