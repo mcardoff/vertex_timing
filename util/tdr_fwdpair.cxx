@@ -31,6 +31,12 @@
 //        With a t0 (per t0 source): PV0 association also needs the 2-sigma t0 gate
 //        (untimed tracks pass), and a track failing it may then join a PU vertex.
 //   R_pT the TDR taggers' values (tdr_common's jetRpt), for comparison.
+//   core jet time  the timing veto's estimator (util/vbs_time_veto.cxx jetTimeCore, ported): timed ghost
+//        tracks with the standard kinematics (passTrackKinematics: 1 < pT < 30 GeV, quality, HGTD eta)
+//        within dR < 0.2 of the axis, clustered in time at 2 sigma; the highest-sum-pT cluster's
+//        inverse-variance mean and its sigma (uncalibrated: the veto scales it offline), and its track
+//        count. Track times cleaned as everywhere here (vbs_time_veto does not clean). -999 / -1 / 0
+//        when the jet has no such track (always for a central jet).
 //   jet time  over the jet's ghost-associated tracks with a (cleaned) HGTD time, any
 //        vertex: t_jet = the uncertainty-weighted mean, w = 1 / sigma_t^2 (the note: 35 ps /
 //        sqrt(N_hits); here the ntuple's Track_timeRes), var_mean = 1 / sum w its variance -- the
@@ -80,7 +86,10 @@ struct JetOut {
   double t_jet = -999, var_spread = -1, var_mean = -1, t_lead = -999, sig_lead = -1, pt_lead = -1;
   int ntimed_hs = 0;
   double t_hs = -999, var_hs_spread = -1, var_hs_mean = -1;
+  int core_n = 0;
+  double core_t = -999, core_sig = -1;
 };
+constexpr double CORE_DR = 0.2, CORE_DIST_CUT = 2.0;   // util/vbs_time_veto.cxx's JET_TIME_DR, JET_TIME_DIST_CUT
 
 // weighted mean, weighted variance of the times, and 1 / sum w (w = 1 / sigma_t^2)
 void timeStats(const std::vector<std::pair<double, double>>& tw, double& t, double& vSpread, double& vMean) {
@@ -121,7 +130,9 @@ JetOut jetQuantities(BranchPointerWrapper& b, int j, const tdr::TrackLists& L, c
   o.pu = b.isJetPaperPU(o.eta, o.phi) ? 1 : 0;
   // the jet's ghost-associated tracks with the R_pT kinematics
   std::vector<int> trk;
+  const int nT = (int)b.trackPt.GetSize();
   for (int idx : b.topoJetGhostTrackIdx[j]) {
+    if (idx < 0 || idx >= nT) continue;
     const double pt = b.trackPt[idx];
     if (pt < MIN_TRACK_PT || pt > MAX_TRACK_PT || !b.trackQuality[idx]) continue;
     trk.push_back(idx);
@@ -163,6 +174,25 @@ JetOut jetQuantities(BranchPointerWrapper& b, int j, const tdr::TrackLists& L, c
   o.ntimed_hs = (int)twHs.size();
   timeStats(tw, o.t_jet, o.var_spread, o.var_mean);
   timeStats(twHs, o.t_hs, o.var_hs_spread, o.var_hs_mean);
+  // the timing veto's core jet time
+  std::vector<int> cand;
+  for (int idx : b.topoJetGhostTrackIdx[j]) {
+    if (idx < 0 || idx >= nT) continue;
+    if (!tdr::timed(b, idx, C, C.jets()) || !(b.trackTimeRes[idx] > 0.0)) continue;
+    if (!passTrackKinematics((size_t)idx, &b, MIN_TRACK_PT, MAX_TRACK_PT)) continue;
+    if (tdr::dR(o.eta, o.phi, b.trackEta[idx], b.trackPhi[idx]) >= CORE_DR) continue;
+    cand.push_back(idx);
+  }
+  if (!cand.empty()) {
+    static const std::unordered_map<int, double> kNone;
+    std::vector<Cluster> cl = makeSimpleClusters(cand, &b, /*useSmearedTimes=*/false, kNone, kNone,
+                                                 /*checkTimeValid=*/true, /*usez0=*/false);
+    doIterativeClustering(&cl, CORE_DIST_CUT);
+    const Cluster* best = nullptr;   // TRKPT score = sum pT
+    for (const Cluster& c : cl)
+      if (!best || c.scores.at(Score::TRKPT.id) > best->scores.at(Score::TRKPT.id)) best = &c;
+    o.core_t = best->values[0];  o.core_sig = best->sigmas[0];  o.core_n = (int)best->trackIndices.size();
+  }
   return o;
 }
 }  // namespace
@@ -265,6 +295,9 @@ int main(int argc, char** argv) {
     tree.Branch((p + "t_hs").c_str(), &o.t_hs, (p + "t_hs/D").c_str());
     tree.Branch((p + "var_hs_spread").c_str(), &o.var_hs_spread, (p + "var_hs_spread/D").c_str());
     tree.Branch((p + "var_hs_mean").c_str(), &o.var_hs_mean, (p + "var_hs_mean/D").c_str());
+    tree.Branch((p + "core_t").c_str(), &o.core_t, (p + "core_t/D").c_str());
+    tree.Branch((p + "core_sig").c_str(), &o.core_sig, (p + "core_sig/D").c_str());
+    tree.Branch((p + "core_n").c_str(), &o.core_n, (p + "core_n/I").c_str());
   }
 
   const std::regex jzRe("JZ([0-9])");
