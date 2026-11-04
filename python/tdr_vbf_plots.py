@@ -15,6 +15,8 @@ tagger replaces the ITk one at its own 85% working point, from tdr_pujet_plots.p
                   event count underneath (python/vbs_region_stack.py's logic)
   <out>_truth_mjj_stack_<sig|bkg>  the same stack by the truth identity of the VBF pair: HS + HS,
                   HS + PU, PU + PU, or a leg with neither TDR label
+  <out>_<cat|truth|reach>_mjj_stack_bdt<NN>_<sig|bkg>  (--bdt) the three stacks after a VBF vs Z+jets BDT cut
+                  at NN% signal efficiency (tdr_vbf_bdt.py)
   <out>_reach_mjj_stack_<sig|bkg>  the same stack by WHERE the pair's pileup leg is: central (ITk only),
                   inside 2.4 < |eta| < 4.0 (the tracker and HGTD: timing can act), or only beyond |eta| = 4.0
                   (no tracks: no R_pT tagger can act)
@@ -38,6 +40,7 @@ import argparse, json, os
 import numpy as np
 import uproot
 import tdr_root_style as S
+import tdr_vbf_common as C
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument("--sig", required=True, help="tdr_vbf output, VBF H->inv")
@@ -50,12 +53,13 @@ ap.add_argument("--stack-edges", default="0,1000,2000,4000",
                 help="m_jj bin edges (GeV) of the stacks, overflow folded into the last bin (user's choice 2026-11-04: 3 bins)")
 ap.add_argument("--backup-out", default="",
                 help="prefix for the backup figures (the pileup-in-pair ones); default: --out")
+ap.add_argument("--bdt", default="", help="tdr_vbf_bdt.py's .npz: also draw the three m_jj stacks after the BDT")
+ap.add_argument("--bdt-effs", default="0.8,0.5,0.2", help="the BDT cuts, as signal efficiencies (user's choice 2026-11-04)")
 ap.add_argument("--out", required=True)
 args = ap.parse_args()
 os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
 R_ = S.setup()
 
-J1, J2, DETA = 75.0, 50.0, 3.0
 # (key, legend, colour, ROOT marker) -- tdr_pujet_plots.py's colours; None = no pileup tagging at all
 TAGGERS = [(None, "No pileup jet tagging", S.COL["none"], 0),
            ("rpt_itk", "ITk only (TDR)", S.COL["itk"], 24),
@@ -66,7 +70,7 @@ TAGGERS = [(None, "No pileup jet tagging", S.COL["none"], 0),
 plain = lambda s: s.replace("_{0}", "0").replace("#", "")
 ENERGY = "#sqrt{s} = 14 TeV, HL-LHC, #LT#mu#GT = 200"
 CATS = ["CC", "CF", "FF"]
-WP = json.load(open(args.wp))
+WP = C.load_wp(args.wp)
 gate_wp = WP["gate_sigma"]
 clean_wp = WP.get("time_cleaning", "off")
 match_wp = WP.get("rpt_match", "dr02")
@@ -77,64 +81,11 @@ clean_line = [t for t in (CLEAN_TXT[clean_wp], MATCH_TXT[match_wp]) if t]   # th
 
 
 def load(path):
-    t = uproot.open(path)
-    E = t["events"].arrays(library="np")
-    meta = t["meta"].arrays(library="np")
-    g = float(np.unique(meta["gate_sigma"])[0])
-    cl = str(meta["time_cleaning"][0]) if "time_cleaning" in meta else "off"
-    mt = str(meta["rpt_match"][0]) if "rpt_match" in meta else "dr02"
-    if mt != match_wp:
-        raise SystemExit(f"{path}: R_pT matching '{mt}', but the working points were made with '{match_wp}'")
-    if abs(g - gate_wp) > 1e-9:
-        raise SystemExit(f"{path}: gate {g} sigma, but the working points were made at {gate_wp}")
-    if cl != clean_wp:
-        raise SystemExit(f"{path}: track-time cleaning '{cl}', but the working points were made with '{clean_wp}'")
-    return E
-
-
-def thresholds(col):
-    w = WP["working_points"][col]
-    return {(r, s): w[f"{r}_{s}"]["threshold"] for r in ("central", "forward") for s in ("30_50", "50_inf")}
+    return C.load(path, WP)
 
 
 def select(E, col):
-    """per event: passes, m_jj, category, pileup jet in the pair, one beyond |eta| = 4.0, and how many
-    of the pair are hard-scatter / pileup by the TDR labels -- after dropping the jets failing `col`"""
-    n = len(E["weight"])
-    ok = np.zeros(n, bool); mjj = np.zeros(n); cat = np.full(n, -1); pupair = np.zeros(n, bool); pu40 = np.zeros(n, bool)
-    nhs = np.zeros(n, int); npu = np.zeros(n, int)
-    pu_cen = np.zeros(n, int); pu_reach = np.zeros(n, int); pu_far = np.zeros(n, int)
-    th = thresholds(col) if col else None
-    for i in range(n):
-        pt, eta, phi = E["jet_pt"][i], E["jet_eta"][i], E["jet_phi"][i]
-        keep = np.ones(len(pt), bool)
-        if col:
-            r = E["jet_" + col][i]
-            ae = np.abs(eta)
-            thr = np.where(ae < 2.4, np.where(pt < 50, th["central", "30_50"], th["central", "50_inf"]),
-                           np.where(pt < 50, th["forward", "30_50"], th["forward", "50_inf"]))
-            keep = (r < 0) | (r >= thr)                       # r < 0: beyond |eta| = 4.0, no tracks
-        s = np.flatnonzero(keep)                              # the tree's jets are pT-ordered
-        if len(s) < 2: continue
-        a, b = s[0], s[1]
-        if pt[a] <= J1 or pt[b] <= J2 or abs(eta[a] - eta[b]) <= DETA: continue
-        ok[i] = True
-        v = [pt[a] * np.cosh(eta[a]), pt[b] * np.cosh(eta[b])]
-        px = pt[a] * np.cos(phi[a]) + pt[b] * np.cos(phi[b]); py = pt[a] * np.sin(phi[a]) + pt[b] * np.sin(phi[b])
-        pz = pt[a] * np.sinh(eta[a]) + pt[b] * np.sinh(eta[b])
-        mjj[i] = np.sqrt(max((v[0] + v[1]) ** 2 - px * px - py * py - pz * pz, 0.0))
-        cat[i] = int(abs(eta[a]) > 2.4) + int(abs(eta[b]) > 2.4)
-        pupair[i] = bool(E["jet_pu"][i][a] or E["jet_pu"][i][b])
-        pu40[i] = any(E["jet_pu"][i][j] and abs(eta[j]) >= 4.0 for j in (a, b))
-        nhs[i] = int(E["jet_hs"][i][a]) + int(E["jet_hs"][i][b])
-        npu[i] = int(E["jet_pu"][i][a]) + int(E["jet_pu"][i][b])
-        for j in (a, b):                                      # the pair's pileup legs, by where they are
-            if not E["jet_pu"][i][j]: continue
-            aej = abs(eta[j])
-            if aej < 2.4: pu_cen[i] += 1                      # central: ITk tracks, no HGTD
-            elif aej < 4.0: pu_reach[i] += 1                  # forward, inside the tracker and HGTD
-            else: pu_far[i] += 1                              # beyond |eta| = 4.0: no tracks at all
-    return ok, mjj, cat, pupair, pu40, nhs, npu, pu_cen, pu_reach, pu_far
+    return C.select(E, WP, col)
 
 
 samples = [("sig", args.sig_label, load(args.sig), 1)]
@@ -273,6 +224,39 @@ for key, lab, E, ls in samples:
         bands = [(npu_ == 0) & (nhs_ == 2), cen, reach, far, (npu_ == 0) & (nhs_ < 2)]
         mjj_stack(key, lab, E, ok_, mjj_, [(t, m, c) for (t, c), m in zip(REACH, bands)], name, None,
                   **({"sel": sel} if sel else {}))
+
+# ── after a VBF vs Z+jets BDT (tdr_vbf_bdt.py, Ariel's request): what background remains ──
+# The same three stacks on the preselected events (ITk-only R_pT at 85%) passing a cut on the BDT's held-out
+# score, the cut set at a fixed signal efficiency (weighted, relative to the preselection).
+if args.bdt:
+    D = np.load(args.bdt)
+    score = {"sig": D["sig_score"], "bkg": D["bkg_score"]}
+    for key, lab, E, ls in samples:
+        assert len(score[key]) == len(E["weight"]), f"{args.bdt}: {key} scores do not match the tree"
+        assert np.array_equal(np.isfinite(score[key]), R[key, "rpt_itk"][0]), f"{args.bdt}: {key} scored events != preselection"
+    okS = R["sig", "rpt_itk"][0]
+    wS = samples[0][2]["weight"].astype(float)[okS]
+    o = np.argsort(-score["sig"][okS]); cs = np.cumsum(wS[o]) / wS.sum()
+    print("\nAfter the VBF vs Z+jets BDT (held-out scores):")
+    for eff in [float(x) for x in args.bdt_effs.split(",")]:
+        thr = score["sig"][okS][o][np.searchsorted(cs, eff)]
+        tag, sel = f"_bdt{round(100 * eff)}", f"VBF preselection + BDT at #varepsilon_{{S}} = {100 * eff:.0f}%"
+        for key, lab, E, ls in samples:
+            ok, mjj, cat, _, _, nhs, npu, pu_cen, pu_reach, pu_far = R[key, "rpt_itk"]
+            okc = ok & (np.nan_to_num(score[key], nan=-1.0) >= thr)
+            w = E["weight"].astype(float)
+            print(f"  signal efficiency {eff:.0%}: {plain(lab)} kept {w[okc].sum() / w[ok].sum():.4f} ({int(okc.sum())} MC events)")
+            if okc.sum() == 0: continue
+            mjj_stack(key, lab, E, okc, mjj, [(CNAME[n], cat == c, CC[n]) for c, n in enumerate(CATS)],
+                      "cat_mjj_stack" + tag, "Forward: |#eta| > 2.4", sel=sel)
+            ident = [nhs == 2, (nhs == 1) & (npu == 1), npu == 2, (nhs + npu) < 2]
+            mjj_stack(key, lab, E, okc, mjj, [(t, m, c) for (t, c), m in zip(IDENT, ident)],
+                      "truth_mjj_stack" + tag, "VBF pair = the two leading jets", sel=sel)
+            reach = pu_reach > 0
+            far = ~reach & (pu_far > 0)
+            cen = ~reach & ~far & (pu_cen > 0)
+            bands = [(npu == 0) & (nhs == 2), cen, reach, far, (npu == 0) & (nhs < 2)]
+            mjj_stack(key, lab, E, okc, mjj, [(t, m, c) for (t, c), m in zip(REACH, bands)], "reach_mjj_stack" + tag, None, sel=sel)
 
 # ── pileup jets in the VBF pair, per category and tagger ──────────────────────
 LABELS = ["Central-central", "Central-forward", "Forward-forward"]
