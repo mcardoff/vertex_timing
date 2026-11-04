@@ -18,6 +18,11 @@
 //   the forward-forward ones (cat = 1 / 2). A central jet's JVF uses the central association (z0
 //   significance < 5, tdr_common's CENTRAL_Z_SIGNIF), as its R_pT does: the forward parameterisation is
 //   several times too tight at |eta| < 2.4. Central jets carry no HGTD time.
+// --jvt=loose|tight (tag jvtLoose_ / jvtTight_; the user's analysis baseline, 2026-11-04: section 3 of
+//   slides_tdr_timing gets "central JVT + fJVT loose"): the in-code JVT / fJVT taggers (src/jet_tagging.h,
+//   as vbs_time_veto / rpt_v5_hist --jvt) remove failing jets BEFORE the pair is formed. Needs the vertex
+//   fit's track assignment (Track_recoVtx_idx, an EXTENDED branch). Each selected jet's JVT R_pT and fJVT
+//   are stored (j*_jvt_rpt, j*_fjvt).
 // Labels (offline): signal = VBF events with both jets hard-scatter; background =
 // events with at least one pileup jet (the TDR / PUB-note truth labels, as tdr_vbf).
 //
@@ -51,6 +56,7 @@
 //
 // Usage:  tdr_fwdpair [--sample=<s>] [--ntuple-dir=<d>] [--file-shard=i/N] [--max-events=N]
 //                     [--gate-sigma=X (default 2)] [--clean-times=all|t0|off (default all)] [--pair=ff|one (default ff)]
+//                     [--jvt=none|loose|tight (default none)]
 //                     [--out=<path>]
 // Output: <prefix>tdr_fwdpair.root (TTrees "events", "meta"; merge shards with hadd -f).
 // Track-time cleaning needs Track_hitInLastLayer: read the RAW ntuples (--ntuple-dir=).
@@ -69,6 +75,7 @@
 #include <sstream>
 #include <string>
 
+#include "jet_tagging.h"
 #include "sample_config.h"
 #include "tdr_common.h"
 
@@ -88,6 +95,7 @@ struct JetOut {
   double t_hs = -999, var_hs_spread = -1, var_hs_mean = -1;
   int core_n = 0;
   double core_t = -999, core_sig = -1;
+  float jvt_rpt = -1, fjvt = -999;           // the JVT / fJVT discriminants (--jvt), -1 / -999 without
 };
 constexpr double CORE_DR = 0.2, CORE_DIST_CUT = 2.0;   // util/vbs_time_veto.cxx's JET_TIME_DR, JET_TIME_DIST_CUT
 
@@ -207,17 +215,26 @@ int main(int argc, char** argv) {
   const Long64_t maxEvents = resolveMaxEvents(argc, argv);
 
   double gate = tdr::GATE_SIGMA_TDR;
-  std::string outOverride, pairMode = "ff";
+  std::string outOverride, pairMode = "ff", jvtName = "none";
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
     if (a.rfind("--gate-sigma=", 0) == 0) gate = std::stod(a.substr(13));
     if (a.rfind("--out=", 0) == 0) outOverride = a.substr(6);
     if (a.rfind("--pair=", 0) == 0) pairMode = a.substr(7);
+    if (a.rfind("--jvt=", 0) == 0) jvtName = a.substr(6);
   }
   if (!(gate > 0.0)) { std::cerr << "[tdr_fwdpair] --gate-sigma must be > 0\n"; return 1; }
   if (pairMode != "ff" && pairMode != "one") { std::cerr << "[tdr_fwdpair] --pair must be ff or one\n"; return 1; }
   const bool oneFwd = pairMode == "one";
   if (oneFwd) SELECTION_TAG = SELECTION_TAG.empty() ? "onefwd" : SELECTION_TAG + "_onefwd";
+  const JvtWP* jwp = jvtWPByName(jvtName);
+  if (!jwp || jvtName == "looseext") { std::cerr << "[tdr_fwdpair] --jvt must be none, loose or tight\n"; return 1; }
+  const bool jvtOn = jwp->rptMin >= 0.0;
+  if (jvtOn) {
+    EXTENDED_BRANCHES = true;                     // the discriminants need Track_recoVtx_idx
+    const std::string tag = std::string(jwp->tag).substr(1);
+    SELECTION_TAG = SELECTION_TAG.empty() ? tag : SELECTION_TAG + "_" + tag;
+  }
   if (gate != tdr::GATE_SIGMA_TDR) {
     std::ostringstream os; os << "gate" << std::fixed << std::setprecision(1) << gate;
     std::string tag = os.str(); std::replace(tag.begin(), tag.end(), '.', 'p');
@@ -233,7 +250,7 @@ int main(int argc, char** argv) {
   std::printf("[tdr_fwdpair] sample=%s: two leading jets in %s|eta| < %.1f, opposite eta, > %.0f / %.0f GeV%s; gate %.1f sigma\n",
               SAMPLE_NAME.empty() ? "local" : SAMPLE_NAME.c_str(), oneFwd ? "" : "2.4 < ", ETA_MAX, J1_PT_MIN, J2_PT_MIN,
               oneFwd ? ", at least one in 2.4 < |eta| < 3.8" : "", gate);
-  std::cout << "[tdr_fwdpair] track-time cleaning: " << tdr::cleanModeName(cleanMode) << "\n";
+  std::cout << "[tdr_fwdpair] track-time cleaning: " << tdr::cleanModeName(cleanMode) << "; JVT/fJVT before pairing: " << jvtName << "\n";
   std::cout << "[tdr_fwdpair] out=" << outPath << "\n";
 
   TChain chain("ntuple");
@@ -298,10 +315,13 @@ int main(int argc, char** argv) {
     tree.Branch((p + "core_t").c_str(), &o.core_t, (p + "core_t/D").c_str());
     tree.Branch((p + "core_sig").c_str(), &o.core_sig, (p + "core_sig/D").c_str());
     tree.Branch((p + "core_n").c_str(), &o.core_n, (p + "core_n/I").c_str());
+    tree.Branch((p + "jvt_rpt").c_str(), &o.jvt_rpt, (p + "jvt_rpt/F").c_str());
+    tree.Branch((p + "fjvt").c_str(), &o.fjvt, (p + "fjvt/F").c_str());
   }
 
   const std::regex jzRe("JZ([0-9])");
-  Long64_t nRead = 0, nVtx = 0, nLep = 0, nTwo = 0, nSel = 0;
+  Long64_t nRead = 0, nVtx = 0, nLep = 0, nTwo = 0, nSel = 0, nRmJvt = 0, nRmFjvt = 0;
+  std::vector<JetDisc> D;
   double sumw = 0.0;
   while (reader.Next()) {
     if (maxEvents > 0 && nRead >= maxEvents) break;
@@ -316,9 +336,14 @@ int main(int argc, char** argv) {
     if (branch.vetoLeptonOverlap()) continue;
     ++nLep;
 
+    if (jvtOn) D = computeJetDiscriminants(branch);   // for every jet: fJVT needs the central jets' vertices
     std::vector<int> js;
     for (int j = 0; j < (int)branch.topoJetPt.GetSize(); ++j) {
       if (branch.isJetRemoved(j) || branch.topoJetPt[j] < tdr::JET_PT_MIN) continue;
+      if (jvtOn) {                                  // the tagger before pairing: a failing jet is dropped
+        if (jvtRemoves(D[j], *jwp))  { ++nRmJvt;  continue; }
+        if (fjvtRemoves(D[j], *jwp)) { ++nRmFjvt; continue; }
+      }
       const double ae = std::abs((double)branch.topoJetEta[j]);
       if (ae < ETA_MAX && (oneFwd || ae > ETA_MIN)) js.push_back(j);
     }
@@ -343,6 +368,10 @@ int main(int argc, char** argv) {
     for (int k = 0; k < tdr::N_T0; ++k) { t0[k] = T.t[k]; sig0[k] = T.sig[k]; infl[k] = T.infl[k]; ok0[k] = T.ok[k]; }
     J[0] = jetQuantities(branch, j1, L, T, gate, CLEAN);
     J[1] = jetQuantities(branch, j2, L, T, gate, CLEAN);
+    if (jvtOn) {
+      J[0].jvt_rpt = D[j1].rpt;  J[0].fjvt = D[j1].fjvt;
+      J[1].jvt_rpt = D[j2].rpt;  J[1].fjvt = D[j2].fjvt;
+    }
 
     const std::string fpath = chain.GetCurrentFile()->GetName();
     { const size_t pp = fpath.rfind('_'), d = (pp == std::string::npos) ? pp : fpath.find('.', pp);
@@ -369,6 +398,9 @@ int main(int argc, char** argv) {
   meta.Branch("n_selected", &nSel, "n_selected/L");
   meta.Branch("gate_sigma", &gate, "gate_sigma/D");
   meta.Branch("pair_mode", &pairMode);
+  meta.Branch("jvt_wp", &jvtName);
+  meta.Branch("n_rm_jvt", &nRmJvt, "n_rm_jvt/L");
+  meta.Branch("n_rm_fjvt", &nRmFjvt, "n_rm_fjvt/L");
   meta.Branch("time_cleaning", &cleanName);
   meta.Branch("sample", &sample);
   meta.Branch("ntuple_dir", &ndir);
