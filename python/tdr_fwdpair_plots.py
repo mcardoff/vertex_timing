@@ -134,6 +134,12 @@ Bg = uproot.open(args.bkg)["events"].arrays(library="np")
 _meta = uproot.open(args.sig)["meta"]
 if "pair_mode" in _meta.keys() and str(_meta.arrays(library="np")["pair_mode"][0]) == "one":
     SEL = "j_{1}, j_{2}: |#eta| < 3.8, #geq 1 in 2.4#minus3.8, opposite #eta, > 50 / 30 GeV"
+# the JVT / fJVT working point applied before pairing (tdr_fwdpair --jvt), from the trees' meta: in the selection line
+_jm = uproot.open(args.sig)["meta"]
+JVT_WP = str(_jm.arrays(library="np")["jvt_wp"][0]) if "jvt_wp" in _jm.keys() else "none"
+if JVT_WP != "none":
+    SEL = f"j_{{1}}, j_{{2}}: |#eta| < 3.8, #geq 1 in 2.4#minus3.8, JVT + fJVT {JVT_WP}"
+
 sig = (Sg["j1_hs"] == 1) & (Sg["j2_hs"] == 1)
 bkg = (Bg["j1_pu"] == 1) | (Bg["j2_pu"] == 1)
 dijet = bool(np.any(Bg["jz"] >= 0))

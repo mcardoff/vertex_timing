@@ -58,6 +58,12 @@ ONE = modes.pop() == "one"
 SEL = ("j_{1}, j_{2}: |#eta| < 3.8, #geq 1 in 2.4#minus3.8, opposite #eta, > 50 / 30 GeV" if ONE
        else "j_{1}, j_{2}: 2.4 < |#eta| < 3.8, opposite #eta, > 50 / 30 GeV")
 CATS = [("Central-forward", 1, S.COL["cf"]), ("Forward-forward", 2, S.COL["ff"])]
+# the JVT / fJVT working point applied before pairing (tdr_fwdpair --jvt), from the trees' meta: in the selection line
+_jm = uproot.open(args.sig)["meta"]
+JVT_WP = str(_jm.arrays(library="np")["jvt_wp"][0]) if "jvt_wp" in _jm.keys() else "none"
+if JVT_WP != "none":
+    SEL = f"j_{{1}}, j_{{2}}: |#eta| < 3.8, #geq 1 in 2.4#minus3.8, JVT + fJVT {JVT_WP}"
+
 REACH = [("HS + HS", "#7BCB6B"), ("PU leg at |#eta| < 2.4", "#B3231C"), ("PU leg at 2.4#minus3.8 (HGTD)", "#3F90DA"),
          ("A leg has neither label", "#C79BF5")]
 for key, lab, E, sc in samples:
@@ -246,7 +252,7 @@ if args.veto and args.summary:
         print(f"  {plain(name):24s} " + " ".join(f"{a:+6.1f} +- {e:4.1f}" for a, e in vals[v][0]) + f"   all {vals[v][1]:+.1f}")
     legm.SetHeader(f"{args.nsigma:g}#sigma timing veto (all m_{{jj}}):")
     legm.Draw()
-    S.header(0.19, 0.88, [f"{ENERGY}", "S: VBF H#rightarrowinv., B: Z+jets", "#geq 1 VBS jet in HGTD",
+    S.header(0.19, 0.88, [f"{ENERGY}", "S: VBF H#rightarrowinv., B: Z+jets", "#geq 1 VBS jet in HGTD" + (f", JVT + fJVT {JVT_WP}" if JVT_WP != "none" else ""),
                           f"BDT at #varepsilon_{{S}} = {100 * EMJ:.0f}%, then the veto"], size=0.8 * TS)   # short: clear of column 3
     R_.gPad.RedrawAxis()
     cvm.cd(); S.pad("vm_r", 0.0, 0.0, 1.0, RAT_, top=0.03, bottom=0.36)
