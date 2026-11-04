@@ -12,6 +12,12 @@
 //   eta, the leading pT > 50 GeV and the second > 30 GeV. ("At least two jets in
 //   2.4 < |eta| < 3.8 with opposite-sign eta; the leading (sub-leading) jet pT > 50
 //   (30) GeV" -- read as the two leading jets of that window.)
+// --pair=one (tag onefwd_; the user's extension, 2026-11-04): AT LEAST ONE of the two jets in HGTD.
+//   The pair is the two leading jets with |eta| < 3.8 (still inside the tracker, so every leg has tracks),
+//   > 50 / 30 GeV, opposite eta, and at least one of them in 2.4 < |eta| < 3.8: central-forward pairs join
+//   the forward-forward ones (cat = 1 / 2). A central jet's JVF uses the central association (z0
+//   significance < 5, tdr_common's CENTRAL_Z_SIGNIF), as its R_pT does: the forward parameterisation is
+//   several times too tight at |eta| < 2.4. Central jets carry no HGTD time.
 // Labels (offline): signal = VBF events with both jets hard-scatter; background =
 // events with at least one pileup jet (the TDR / PUB-note truth labels, as tdr_vbf).
 //
@@ -38,7 +44,8 @@
 //        ntimed_hs.
 //
 // Usage:  tdr_fwdpair [--sample=<s>] [--ntuple-dir=<d>] [--file-shard=i/N] [--max-events=N]
-//                     [--gate-sigma=X (default 2)] [--clean-times=all|t0|off (default all)] [--out=<path>]
+//                     [--gate-sigma=X (default 2)] [--clean-times=all|t0|off (default all)] [--pair=ff|one (default ff)]
+//                     [--out=<path>]
 // Output: <prefix>tdr_fwdpair.root (TTrees "events", "meta"; merge shards with hadd -f).
 // Track-time cleaning needs Track_hitInLastLayer: read the RAW ntuples (--ntuple-dir=).
 // -----------------------------------------------------------------------------
@@ -98,6 +105,14 @@ double jvfOf(BranchPointerWrapper& b, const std::vector<int>& trk, const std::ve
   return hs + pu > 0.0 ? hs / (hs + pu) : -1.0;
 }
 
+// PV0 / PU-vertex association: the forward parameterisation for forward jets, z0 significance centrally
+bool assocZ(BranchPointerWrapper& b, int i, double z, bool fwd) {
+  const double dz = std::abs(b.trackZ0[i] - z);
+  if (fwd) return dz <= MyUtl::getNewDzpara(b.trackEta[i], b.trackPt[i]) * tdr::DZ0_PARA_SCALE;
+  const double v = b.trackVarZ0[i];
+  return v > 0.0 && dz / std::sqrt(v) <= tdr::CENTRAL_Z_SIGNIF;
+}
+
 JetOut jetQuantities(BranchPointerWrapper& b, int j, const tdr::TrackLists& L, const tdr::T0Set& T,
                      double gate, const tdr::TimeCleaning& C) {
   JetOut o;
@@ -112,14 +127,14 @@ JetOut jetQuantities(BranchPointerWrapper& b, int j, const tdr::TrackLists& L, c
     trk.push_back(idx);
   }
   o.ntrk = (int)trk.size();
+  const bool fwd = std::abs((double)o.eta) >= ETA_MIN;
   // association: PV0 (z) and "within some PU vertex's window"
   const int nVtx = (int)b.recoVtxZ.GetSize();
   std::vector<char> hsZ(trk.size(), 0), nearPu(trk.size(), 0);
   for (size_t k = 0; k < trk.size(); ++k) {
     const int i = trk[k];
-    const double w = MyUtl::getNewDzpara(b.trackEta[i], b.trackPt[i]) * tdr::DZ0_PARA_SCALE;
-    hsZ[k] = std::abs(b.trackZ0[i] - b.recoVtxZ[0]) <= w;
-    for (int v = 1; v < nVtx && !nearPu[k]; ++v) nearPu[k] = std::abs(b.trackZ0[i] - b.recoVtxZ[v]) <= w;
+    hsZ[k] = assocZ(b, i, b.recoVtxZ[0], fwd);
+    for (int v = 1; v < nVtx && !nearPu[k]; ++v) nearPu[k] = assocZ(b, i, b.recoVtxZ[v], fwd);
   }
   o.jvf_itk = jvfOf(b, trk, hsZ, nearPu);
   for (int s = 0; s < tdr::N_T0; ++s) {
@@ -162,13 +177,17 @@ int main(int argc, char** argv) {
   const Long64_t maxEvents = resolveMaxEvents(argc, argv);
 
   double gate = tdr::GATE_SIGMA_TDR;
-  std::string outOverride;
+  std::string outOverride, pairMode = "ff";
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
     if (a.rfind("--gate-sigma=", 0) == 0) gate = std::stod(a.substr(13));
     if (a.rfind("--out=", 0) == 0) outOverride = a.substr(6);
+    if (a.rfind("--pair=", 0) == 0) pairMode = a.substr(7);
   }
   if (!(gate > 0.0)) { std::cerr << "[tdr_fwdpair] --gate-sigma must be > 0\n"; return 1; }
+  if (pairMode != "ff" && pairMode != "one") { std::cerr << "[tdr_fwdpair] --pair must be ff or one\n"; return 1; }
+  const bool oneFwd = pairMode == "one";
+  if (oneFwd) SELECTION_TAG = SELECTION_TAG.empty() ? "onefwd" : SELECTION_TAG + "_onefwd";
   if (gate != tdr::GATE_SIGMA_TDR) {
     std::ostringstream os; os << "gate" << std::fixed << std::setprecision(1) << gate;
     std::string tag = os.str(); std::replace(tag.begin(), tag.end(), '.', 'p');
@@ -181,8 +200,9 @@ int main(int argc, char** argv) {
     const auto dir = boost::filesystem::path(outPath).parent_path();
     if (!dir.empty()) boost::filesystem::create_directories(dir);
   }
-  std::printf("[tdr_fwdpair] sample=%s: two leading jets in %.1f < |eta| < %.1f, opposite eta, > %.0f / %.0f GeV; gate %.1f sigma\n",
-              SAMPLE_NAME.empty() ? "local" : SAMPLE_NAME.c_str(), ETA_MIN, ETA_MAX, J1_PT_MIN, J2_PT_MIN, gate);
+  std::printf("[tdr_fwdpair] sample=%s: two leading jets in %s|eta| < %.1f, opposite eta, > %.0f / %.0f GeV%s; gate %.1f sigma\n",
+              SAMPLE_NAME.empty() ? "local" : SAMPLE_NAME.c_str(), oneFwd ? "" : "2.4 < ", ETA_MAX, J1_PT_MIN, J2_PT_MIN,
+              oneFwd ? ", at least one in 2.4 < |eta| < 3.8" : "", gate);
   std::cout << "[tdr_fwdpair] track-time cleaning: " << tdr::cleanModeName(cleanMode) << "\n";
   std::cout << "[tdr_fwdpair] out=" << outPath << "\n";
 
@@ -200,6 +220,7 @@ int main(int argc, char** argv) {
   Long64_t entry = -1;
   float weight = 0.f;
   double mjj = 0.0, deta = 0.0;
+  int cat = 0;
   double t0[tdr::N_T0] = {}, sig0[tdr::N_T0] = {}, infl[tdr::N_T0] = {};
   bool ok0[tdr::N_T0] = {};
   JetOut J[2];
@@ -209,6 +230,7 @@ int main(int argc, char** argv) {
   tree.Branch("weight", &weight, "weight/F");
   tree.Branch("mjj", &mjj, "mjj/D");
   tree.Branch("deta", &deta, "deta/D");
+  tree.Branch("cat", &cat, "cat/I");   // forward jets in the pair: 1 = central-forward, 2 = forward-forward
   for (int k = 0; k < tdr::N_T0; ++k) {
     const std::string s = tdr::T0_NAMES[k];
     tree.Branch(("t0_" + s).c_str(), &t0[k], ("t0_" + s + "/D").c_str());
@@ -265,7 +287,7 @@ int main(int argc, char** argv) {
     for (int j = 0; j < (int)branch.topoJetPt.GetSize(); ++j) {
       if (branch.isJetRemoved(j) || branch.topoJetPt[j] < tdr::JET_PT_MIN) continue;
       const double ae = std::abs((double)branch.topoJetEta[j]);
-      if (ae > ETA_MIN && ae < ETA_MAX) js.push_back(j);
+      if (ae < ETA_MAX && (oneFwd || ae > ETA_MIN)) js.push_back(j);
     }
     if (js.size() < 2) continue;
     ++nTwo;
@@ -273,6 +295,8 @@ int main(int argc, char** argv) {
     const int j1 = js[0], j2 = js[1];
     if (branch.topoJetPt[j1] <= J1_PT_MIN || branch.topoJetPt[j2] <= J2_PT_MIN) continue;
     if ((double)branch.topoJetEta[j1] * (double)branch.topoJetEta[j2] >= 0.0) continue;
+    cat = (int)(std::abs((double)branch.topoJetEta[j1]) > ETA_MIN) + (int)(std::abs((double)branch.topoJetEta[j2]) > ETA_MIN);
+    if (cat == 0) continue;                       // --pair=one: at least one jet in HGTD (always true for ff)
     ++nSel;
 
     TLorentzVector v1, v2;
@@ -311,6 +335,7 @@ int main(int argc, char** argv) {
   meta.Branch("n_two_fwd", &nTwo, "n_two_fwd/L");
   meta.Branch("n_selected", &nSel, "n_selected/L");
   meta.Branch("gate_sigma", &gate, "gate_sigma/D");
+  meta.Branch("pair_mode", &pairMode);
   meta.Branch("time_cleaning", &cleanName);
   meta.Branch("sample", &sample);
   meta.Branch("ntuple_dir", &ndir);
