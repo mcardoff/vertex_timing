@@ -63,7 +63,7 @@ REACH = [("HS + HS", "#7BCB6B"), ("PU leg at |#eta| < 2.4", "#B3231C"), ("PU leg
 for key, lab, E, sc in samples:
     assert len(sc) == len(E["weight"]) and np.all(np.isfinite(sc)), f"{args.bdt}: {key} scores do not match the tree"
 E0, s0 = samples[0][2], samples[0][3]
-o = np.argsort(-s0); cs = np.cumsum(E0["weight"][o]) / E0["weight"].sum()
+o = np.argsort(-s0); cs = np.cumsum(E0["weight"].astype(float)[o]) / E0["weight"].astype(float).sum()   # float64: a float32 cumsum moves the cut
 cuts = [(None, None)] + [(e, s0[o][np.searchsorted(cs, e)]) for e in (float(x) for x in args.effs.split(","))]
 
 VETOES = [("jj", "jet vs jet"), ("hgtd", "jet vs HGTD t_{0}"), ("trkptz", "jet vs TRKPTZ t_{0}"),
@@ -149,7 +149,8 @@ if args.veto:
                                  [f"{ENERGY}, {lab}", SEL, line], f"{plain(lab)} reach stack{tag} + {v} veto")
 
 if args.veto and args.summary:
-    # S/sqrt(B) factor of each veto, eps_S / sqrt(eps_B) relative to the BDT cut, against that cut
+    # each veto's efficiencies relative to the BDT cut, against that cut: drawn as the S/sqrt(B) factor
+    # (eps_S / sqrt(eps_B), <out>_veto_gain) and the S/B factor (eps_S / eps_B, <out>_veto_sb)
     EFFS = np.round(np.arange(1.0, 0.249, -0.05), 2)
     Es, ss = samples[0][2], samples[0][3]; Eb, sb = samples[1][2], samples[1][3]
     ws_, wb_ = Es["weight"].astype(float), Eb["weight"].astype(float)
@@ -157,49 +158,122 @@ if args.veto and args.summary:
     ROWS = [("waves", "WAVeS t_{0}", S.COL["waves"], 20, 1), ("trkptz", "TRKPTZ t_{0}", S.COL["trkptz"], 21, 1),
             ("hgtd", "HGTD t_{0}", S.COL["hgtd"], 23, 1), ("truth", "Truth t_{0}", S.COL["truth"], 25, 3),
             ("jj", "Jet vs jet (no t_{0})", "kP10Violet", 33, 10)]
-    G, nB = {}, []
-    print("\nS/sqrt(B) factor of each veto against the BDT cut (signal efficiency): " + " ".join(f"{e:.2f}" for e in EFFS))
-    for v, name, colour, mk, ls in ROWS:
-        y, ey = [], []
-        for e in EFFS:
-            thr = -np.inf if e >= 1.0 else ss[o_][np.searchsorted(cs_, e)]
-            bS, bB = ss >= thr, sb >= thr
-            es_ = ws_[bS & K["sig"][v]].sum() / ws_[bS].sum()
-            wB = wb_[bB]; kB = K["bkg"][v][bB]
-            eb_ = wB[kB].sum() / wB.sum()
-            var = ((wB[kB] ** 2).sum() * (1 - eb_) ** 2 + (wB[~kB] ** 2).sum() * eb_ ** 2) / wB.sum() ** 2   # weighted binomial
-            fac = es_ / np.sqrt(eb_)
-            y.append(fac); ey.append(fac * 0.5 * np.sqrt(var) / eb_)
-            if v == "waves": nB.append(int(bB.sum()))
-        G[v] = (np.array(y), np.array(ey))
-        print(f"  {plain(name):24s} " + " ".join(f"{a:.3f}" for a in y))
+    thr_of = lambda e: -np.inf if e >= 1.0 else ss[o_][np.searchsorted(cs_, e)]
+
+    def veto_effs(v, bS, bB):
+        """eps_S, eps_B of veto v on the events bS / bB, and the weighted-binomial variance of eps_B"""
+        es_ = ws_[bS & K["sig"][v]].sum() / ws_[bS].sum()
+        wB = wb_[bB]; kB = K["bkg"][v][bB]
+        eb_ = wB[kB].sum() / wB.sum()
+        var = ((wB[kB] ** 2).sum() * (1 - eb_) ** 2 + (wB[~kB] ** 2).sum() * eb_ ** 2) / wB.sum() ** 2
+        return es_, eb_, var
+
+    EV, nB = {}, []
+    for v, *_ in ROWS:
+        EV[v] = [veto_effs(v, ss >= thr_of(e), sb >= thr_of(e)) for e in EFFS]
+    nB = [int(np.sum(sb >= thr_of(e))) for e in EFFS]
     MAIN_, RAT_ = 0.70, 0.30
-    cv = S.keep(R_.TCanvas("veto_gain", "", 800, 800))
-    cv.cd(); S.pad("vg_m", 0.0, RAT_, 1.0, 1.0, top=0.05 / MAIN_ * 0.6, bottom=0.02)
-    lo, hi = 0.7, 1.55
-    fr = S.keep(R_.gPad.DrawFrame(0.225, lo, 1.025, hi))
     TS = 0.05 * 600 / (800 * MAIN_)
-    S.axes(fr, "", "S/#sqrt{B} with the veto / without", size=TS, ytoff=1.35)
-    fr.GetXaxis().SetLabelSize(0)
-    one = S.keep(R_.TLine(0.225, 1.0, 1.025, 1.0)); one.SetLineStyle(2); one.SetLineColor(R_.kGray + 2); one.Draw()
-    leg = S.legend(0.19, 0.05, 0.94, 0.23, size=0.68 * TS, ncol=2, margin=0.15)   # along the bottom: empty below the curves
-    for v, name, colour, mk, ls in ROWS:
-        y, ey = G[v]
-        g = S.style(S.graph(EFFS, y, ey), colour, mk, ls, 2, 1.2); g.Draw("LP SAME")
-        leg.AddEntry(g, name, "LP")
-    leg.SetHeader(f"{args.nsigma:g}#sigma timing veto:")
-    leg.Draw()
-    S.header(0.19, 0.88, [f"{ENERGY}", "VBF H#rightarrowinv. vs Z+jets", SEL, "After a kinematic VBF vs Z+jets BDT (j_{1}, j_{2})"], size=0.8 * TS)
-    R_.gPad.RedrawAxis()
-    cv.cd(); S.pad("vg_r", 0.0, 0.0, 1.0, RAT_, top=0.03, bottom=0.36)
-    R_.gPad.SetLogy()
     TSR = 0.05 * 600 / (800 * RAT_)
-    hn = S.keep(R_.TGraph(len(EFFS)))
-    for i, (x, n_) in enumerate(zip(EFFS, nB)): hn.SetPoint(i, x, n_)
-    frn = S.keep(R_.gPad.DrawFrame(0.225, 10.0, 1.025, 3e4))
-    S.axes(frn, "Signal efficiency of the kinematic BDT cut (1 = no BDT)", "Z+jets MC", size=TSR, ytoff=1.35 * TS / TSR, xtoff=1.2)
-    S.style(hn, "#4D4D4D", 20, 1, 2, 1.0); hn.Draw("LP SAME")
-    S.save(cv, f"{args.out}_veto_gain")
+
+    def draw_gain(stem, ytitle, fac, lo, hi, what):
+        print(f"\n{what} factor of each veto against the BDT cut (signal efficiency): " + " ".join(f"{e:.2f}" for e in EFFS))
+        cv = S.keep(R_.TCanvas(stem, "", 800, 800))
+        cv.cd(); S.pad(stem + "_m", 0.0, RAT_, 1.0, 1.0, top=0.05 / MAIN_ * 0.6, bottom=0.02)
+        fr = S.keep(R_.gPad.DrawFrame(0.225, lo, 1.025, hi))
+        S.axes(fr, "", ytitle, size=TS, ytoff=1.35)
+        fr.GetXaxis().SetLabelSize(0)
+        one = S.keep(R_.TLine(0.225, 1.0, 1.025, 1.0)); one.SetLineStyle(2); one.SetLineColor(R_.kGray + 2); one.Draw()
+        leg = S.legend(0.19, 0.05, 0.94, 0.23, size=0.68 * TS, ncol=2, margin=0.15)   # along the bottom: empty below the curves
+        for v, name, colour, mk, ls in ROWS:
+            y, ey = np.array([fac(*t)[0] for t in EV[v]]), np.array([fac(*t)[1] for t in EV[v]])
+            g = S.style(S.graph(EFFS, y, ey), colour, mk, ls, 2, 1.2); g.Draw("LP SAME")
+            leg.AddEntry(g, name, "LP")
+            print(f"  {plain(name):24s} " + " ".join(f"{a:.3f}" for a in y))
+        leg.SetHeader(f"{args.nsigma:g}#sigma timing veto:")
+        leg.Draw()
+        S.header(0.19, 0.88, [f"{ENERGY}", "VBF H#rightarrowinv. vs Z+jets", SEL, "After a kinematic VBF vs Z+jets BDT (j_{1}, j_{2})"], size=0.8 * TS)
+        R_.gPad.RedrawAxis()
+        cv.cd(); S.pad(stem + "_r", 0.0, 0.0, 1.0, RAT_, top=0.03, bottom=0.36)
+        R_.gPad.SetLogy()
+        hn = S.keep(R_.TGraph(len(EFFS)))
+        for i, (x, n_) in enumerate(zip(EFFS, nB)): hn.SetPoint(i, x, n_)
+        frn = S.keep(R_.gPad.DrawFrame(0.225, 10.0, 1.025, 3e4))
+        S.axes(frn, "Signal efficiency of the kinematic BDT cut (1 = no BDT)", "Z+jets MC", size=TSR, ytoff=1.35 * TS / TSR, xtoff=1.2)
+        S.style(hn, "#4D4D4D", 20, 1, 2, 1.0); hn.Draw("LP SAME")
+        S.save(cv, f"{args.out}_{stem}")
+
+    draw_gain("veto_gain", "S/#sqrt{B} with the veto / without",
+              lambda es_, eb_, var: (es_ / np.sqrt(eb_), es_ / np.sqrt(eb_) * 0.5 * np.sqrt(var) / eb_), 0.7, 1.55, "S/sqrt(B)")
+    draw_gain("veto_sb", "S/B with the veto / without",
+              lambda es_, eb_, var: (es_ / eb_, es_ / eb_ * np.sqrt(var) / eb_), 0.0, 2.9, "S/B")   # from 0: the legend sits below every curve
+
+    # the money-plot style: the S/sqrt(B) change of each veto per m_jj column, at one BDT cut
+    EMJ = 0.8                                            # the loosest cut, as the "what the veto removes" slides
+    bS, bB = ss >= thr_of(EMJ), sb >= thr_of(EMJ)
+    xs_, xb_ = np.clip(Es["mjj"], EDGES[0], EDGES[-1] - 1e-6), np.clip(Eb["mjj"], EDGES[0], EDGES[-1] - 1e-6)
+    ncol = len(EDGES) - 1
+    cvm = S.keep(R_.TCanvas("veto_mjj", "", 800, 800))
+    cvm.cd(); S.pad("vm_m", 0.0, RAT_, 1.0, 1.0, top=0.05 / MAIN_ * 0.6, bottom=0.02)
+    vals = {}
+    for v, *_ in ROWS:
+        out = []
+        for c in range(ncol):
+            inS = bS & (xs_ >= EDGES[c]) & (xs_ < EDGES[c + 1]); inB = bB & (xb_ >= EDGES[c]) & (xb_ < EDGES[c + 1])
+            es_, eb_, var = veto_effs(v, inS, inB)
+            f_ = es_ / np.sqrt(eb_)
+            out.append((100 * (f_ - 1), 100 * f_ * 0.5 * np.sqrt(var) / eb_))
+        es_, eb_, var = veto_effs(v, bS, bB)
+        vals[v] = (out, 100 * (es_ / np.sqrt(eb_) - 1))
+    top = max(max(a + e for a, e in vals[v][0]) for v in vals)
+    bot = min(min(a - e for a, e in vals[v][0]) for v in vals)
+    # room above the first two columns for the legend; the last column (few Z+jets MC events) may be clipped
+    lo_, hi_ = min(-20.0, 10 * np.floor(bot / 10) - 10), max(100.0, min(220.0, 10 * np.ceil((top + 30) / 10)))
+    frm = S.keep(R_.gPad.DrawFrame(EDGES[0], lo_, EDGES[-1], hi_))
+    S.axes(frm, "", "S/#sqrt{B} change vs no veto [%]", size=TS, ytoff=1.35)
+    frm.GetXaxis().SetLabelSize(0)
+    zero = S.keep(R_.TLine(EDGES[0], 0.0, EDGES[-1], 0.0)); zero.SetLineStyle(2); zero.SetLineColor(R_.kGray + 2); zero.Draw()
+    for c in range(1, ncol):
+        ln = S.keep(R_.TLine(EDGES[c], lo_, EDGES[c], hi_)); ln.SetLineStyle(3); ln.SetLineColor(R_.kGray + 1); ln.Draw()
+    legm = S.legend(0.19, 0.34, 0.56, 0.62, size=0.6 * TS, margin=0.18)   # above columns 1-2, below the header
+    print(f"\nS/sqrt(B) change [%] per m_jj column at the BDT cut eps_S = {EMJ:.0%}: " +
+          ", ".join(f"[{EDGES[c]:.0f},{EDGES[c + 1]:.0f})" for c in range(ncol)) + "; all")
+    for k, (v, name, colour, mk, ls) in enumerate(ROWS):
+        xs = [EDGES[c] + (EDGES[c + 1] - EDGES[c]) * (k + 1) / (len(ROWS) + 1) for c in range(ncol)]
+        g = S.style(S.graph(np.array(xs), np.array([a for a, _ in vals[v][0]]), np.array([e for _, e in vals[v][0]])), colour, mk, 1, 2, 1.3)
+        g.Draw("P SAME")                                 # points with errors, no lines: the columns are independent
+        legm.AddEntry(g, f"{name} ({vals[v][1]:+.0f}%)", "PE")
+        print(f"  {plain(name):24s} " + " ".join(f"{a:+6.1f} +- {e:4.1f}" for a, e in vals[v][0]) + f"   all {vals[v][1]:+.1f}")
+    legm.SetHeader(f"{args.nsigma:g}#sigma timing veto (all m_{{jj}}):")
+    legm.Draw()
+    S.header(0.19, 0.88, [f"{ENERGY}", "S: VBF H#rightarrowinv., B: Z+jets", "#geq 1 VBS jet in HGTD",
+                          f"BDT at #varepsilon_{{S}} = {100 * EMJ:.0f}%, then the veto"], size=0.8 * TS)   # short: clear of column 3
+    R_.gPad.RedrawAxis()
+    cvm.cd(); S.pad("vm_r", 0.0, 0.0, 1.0, RAT_, top=0.03, bottom=0.36)
+    stk = S.keep(R_.THStack("vm_stack", ""))
+    hmax = 0.0
+    for ctxt, cat_, colour in (CATS[1], CATS[0]) if ONE else ():   # (name, cat, colour): FF stacked under CF
+        h = S.keep(R_.TH1D(f"vm_{cat_}", "", ncol, EDGES))
+        for c in range(ncol):
+            nS_ = np.sum(bS & (Es["cat"] == cat_) & (xs_ >= EDGES[c]) & (xs_ < EDGES[c + 1]))
+            nB_ = np.sum(bB & (Eb["cat"] == cat_) & (xb_ >= EDGES[c]) & (xb_ < EDGES[c + 1]))
+            h.SetBinContent(c + 1, (nS_ + nB_) / 1000.0)
+        h.SetFillColor(S.colour(colour)); h.SetLineColor(R_.kBlack); stk.Add(h)
+    tot = [(np.sum(bS & (xs_ >= EDGES[c]) & (xs_ < EDGES[c + 1])), np.sum(bB & (xb_ >= EDGES[c]) & (xb_ < EDGES[c + 1]))) for c in range(ncol)]
+    hmax = max((a + b) / 1000.0 for a, b in tot)
+    frr = S.keep(R_.gPad.DrawFrame(EDGES[0], 0.0, EDGES[-1], 1.9 * hmax))
+    S.axes(frr, "m_{jj} [GeV]   (last bin includes overflow)", "S + B MC [10^{3}]", size=TSR, ytoff=1.35 * TS / TSR, xtoff=1.2, ndiv_y=503)
+    stk.Draw("HIST SAME")
+    legr = S.legend(0.19, 0.74, 0.94, 0.90, size=0.7 * TSR, ncol=3, margin=0.2)
+    for h in reversed(list(stk.GetHists())):
+        legr.AddEntry(h, "Central-forward" if h.GetName() == "vm_1" else "Forward-forward", "F")
+    legr.AddEntry(S.keep(R_.TH1D("vm_dummy", "", 1, 0, 1)), "numbers: S / B MC", "")
+    legr.Draw()
+    tl = R_.TLatex(); tl.SetTextSize(0.6 * TSR); tl.SetTextAlign(21)
+    for c, (a, b) in enumerate(tot):
+        S.keep(tl.DrawLatex(0.5 * (EDGES[c] + EDGES[c + 1]), (a + b) / 1000.0 + 0.08 * hmax, f"{a / 1000:.1f}k / {b}"))
+    R_.gPad.RedrawAxis()
+    S.save(cvm, f"{args.out}_veto_mjj")
 
 if args.summary:
     # the kinematic BDT's held-out score distributions, unit area (weighted), with the cuts of the analysis
