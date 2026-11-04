@@ -49,7 +49,7 @@ TAGGERS = [("rpt_itk", "ITk only", "ITk only", S.COL["itk"], 24, 2),
            ("rpt_t0_hgtd", "HGTD (Athena) t_{0}", "HGTD t_{0}", S.COL["hgtd"], 23, 1),
            ("rpt_t0_trkptz", "TRKPTZ t_{0}", "TRKPTZ t_{0}", S.COL["trkptz"], 21, 1),
            ("rpt_t0_waves", "WAVeS t_{0}", "WAVeS t_{0}", S.COL["waves"], 20, 1),
-           ("rpt_t0_truth", "Truth t_{0} (reference)", "Truth t_{0}", S.COL["truth"], 25, 3)]
+           ("rpt_t0_truth", "Truth t_{0}", "Truth t_{0}", S.COL["truth"], 25, 3)]
 EFF = np.round(np.arange(0.800, 0.9751, 0.025), 3)    # the sampled working points
 plain = lambda s: s.replace("_{0}", "0").replace("#", "")
 
@@ -119,7 +119,13 @@ for c, (lab, lo, hi) in enumerate(SLICES):
         if ref is None: ref = rej
         rows.append((rej, rerr, rej / ref))
         print("  " + f"{plain(name):40s}" + "".join(f"{r:7.1f} ({q:4.2f})" for r, q in zip(rej, rows[-1][2])))
-    ymax = 1.7 * np.nanmax([np.nanmax(r[0] + r[1]) for r in rows])
+    # y range: the tallest curve just under the header (whose depth depends on its line count), a round
+    # number, never clipping an error bar
+    n_lines = 2 + len(clean_line)
+    frac = (0.87 - n_lines * 1.2 * TS_M - 0.012 - 0.02) / 0.936
+    need = np.nanmax([np.nanmax(r[0] + r[1]) for r in rows]) / frac   # error bars included: they stay under the header
+    step = 50.0 if need > 200 else 25.0 if need > 100 else 10.0
+    ymax = step * np.ceil(need / step)
     rmax = np.ceil(1.1 * np.nanmax([np.nanmax(r[2]) for r in rows]) / 0.5) * 0.5
 
     cv.cd()
@@ -127,13 +133,13 @@ for c, (lab, lo, hi) in enumerate(SLICES):
     fr = S.keep(p1.DrawFrame(0.80, 0.0, 1.0, ymax))
     S.axes(fr, "", "Pileup jet rejection", size=TS_M, ytoff=1.35)
     fr.GetXaxis().SetLabelSize(0); fr.GetXaxis().SetNdivisions(505)
-    leg = S.legend(0.52, 0.32, 0.94, 0.56, size=0.75 * TS_M)
+    leg = S.legend(0.72, 0.66, 0.94, 0.93, size=0.7 * TS_M, margin=0.25)   # top-right corner, short names
     for (col, name, short, colour, mk, ls), (rej, rerr, _) in zip(TAGGERS, rows):
         g = S.style(S.graph(EFF, rej), colour, mk, ls, 2, 1.3); g.Draw("L SAME")      # the line in its style
         S.style(S.graph(EFF, rej, rerr), colour, mk, 1, 2, 1.3).Draw("P SAME")         # solid error bars
-        leg.AddEntry(g, name, "LP")
+        leg.AddEntry(g, short, "LP")
     leg.Draw()
-    S.header(0.20, 0.87, [ENERGY, args.label + gate_txt, f"{lab}, 2.4 < |#eta| < 4.0"] + clean_line, size=TS_M)
+    S.header(0.20, 0.87, [f"#sqrt{{s}} = 14 TeV, #LT#mu#GT = 200, {args.label}{gate_txt}", f"{lab}, 2.4 < |#eta| < 4.0"] + clean_line, size=TS_M)
 
     cv.cd()
     p2 = S.pad(f"ratio{c}", 0.5 * c, 0.0, 0.5 * c + 0.5, RAT, top=0.03, bottom=0.36)
