@@ -37,6 +37,8 @@ ap.add_argument("--wp", required=True, help="tdr_pujet_plots.py's <out>_wp85.jso
 ap.add_argument("--sig-label", default="VBF H#rightarrowinv.", help="ROOT TLatex")
 ap.add_argument("--bkg-label", default="Z+jets")
 ap.add_argument("--note", default="", help="appended to the sample line, e.g. 'local sample'")
+ap.add_argument("--stack-edges", default="0,1000,2000,4000",
+                help="m_jj bin edges (GeV) of the stacks, overflow folded into the last bin (user's choice 2026-11-04: 3 bins)")
 ap.add_argument("--out", required=True)
 args = ap.parse_args()
 os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
@@ -181,7 +183,7 @@ S.save(cv, f"{args.out}_cat_mjj")
 # preselection's CC / CF / FF categories, and the truth identity of the VBF pair (the two leading
 # jets left by the ITk-only tagger) by the TDR labels -- HS within dR < 0.3 of a truth jet > 10 GeV,
 # PU beyond dR > 0.6 of every truth jet > 4 GeV, and a leg that is neither.
-EDGES = np.array([0, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500, 3000, 4000], float)
+EDGES = np.array([float(x) for x in args.stack_edges.split(",")])
 
 
 def mjj_stack(key, lab, E, ok, mjj, bands, name, title):
