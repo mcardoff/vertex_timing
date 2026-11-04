@@ -201,3 +201,32 @@ if args.veto and args.summary:
     S.style(hn, "#4D4D4D", 20, 1, 2, 1.0); hn.Draw("LP SAME")
     S.save(cv, f"{args.out}_veto_gain")
 
+if args.summary:
+    # the kinematic BDT's held-out score distributions, unit area (weighted), with the cuts of the analysis
+    nb = 40
+    cvs = S.keep(R_.TCanvas("bdt_score", "", 800, 600))
+    cvs.SetLogy()
+    hs_ = {}
+    for key, lab, E, sc in samples:
+        h = S.keep(R_.TH1D(f"score_{key}", "", nb, 0.0, 1.0))
+        for v_, w_ in zip(sc, E["weight"].astype(float)): h.Fill(min(v_, 1 - 1e-9), w_)
+        h.Scale(1.0 / h.Integral())
+        hs_[key] = h
+    ymax_ = 30.0 * max(h.GetMaximum() for h in hs_.values())
+    ymin_ = 0.3 * min(min(h.GetBinContent(b) for b in range(1, nb + 1) if h.GetBinContent(b) > 0) for h in hs_.values())
+    frs = S.keep(cvs.DrawFrame(0.0, ymin_, 1.0, ymax_))
+    S.axes(frs, "Kinematic BDT score (held out)", "Fraction of events")
+    leg = S.legend(0.20, 0.17, 0.56, 0.31, size=0.04, margin=0.2)   # lower left: empty on both curves
+    for key, colour, ls in (("sig", S.COL["hgtd"], 1), ("bkg", S.COL["trkptz"], 1)):
+        h = hs_[key]; h.SetLineColor(S.colour(colour)); h.SetLineWidth(3); h.SetLineStyle(ls); h.Draw("HIST SAME")
+        leg.AddEntry(h, dict((k_, l_) for k_, l_, _, _ in samples)[key], "L")
+    leg.Draw()
+    t_ = R_.TLatex(); t_.SetTextSize(0.032); t_.SetTextAlign(11); t_.SetTextAngle(90); t_.SetTextColor(R_.kGray + 2)
+    for eff, thr in cuts[1:]:   # the cuts of the analysis: labels vertical, left of each line, so close cuts do not collide
+        ln = S.keep(R_.TLine(thr, ymin_, thr, ymax_ / 300.0)); ln.SetLineStyle(2); ln.SetLineColor(R_.kGray + 2); ln.SetLineWidth(2); ln.Draw()
+        S.keep(t_.DrawLatex(thr - 0.006, ymin_ * 1.5, f"#varepsilon_{{S}} = {100 * eff:.0f}%"))
+    S.header(0.19, 0.87, [ENERGY, "VBF H#rightarrowinv. vs Z+jets, kinematic BDT (j_{1}, j_{2})", SEL], size=0.04)
+    cvs.RedrawAxis()
+    S.save(cvs, f"{args.out}_bdt_score")
+    print("BDT cut thresholds: " + ", ".join(f"{100 * e:.0f}% -> score > {t:.3f}" for e, t in cuts[1:]))
+
