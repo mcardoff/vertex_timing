@@ -15,7 +15,16 @@ tagger replaces the ITk one at its own 85% working point, from tdr_pujet_plots.p
                   event count underneath (python/vbs_region_stack.py's logic)
   <out>_truth_mjj_stack_<sig|bkg>  the same stack by the truth identity of the VBF pair: HS + HS,
                   HS + PU, PU + PU, or a leg with neither TDR label
-  <out>_pupair    per category and tagger: the share of preselected events whose VBF pair (the two
+  <out>_reach_mjj_stack_<sig|bkg>  the same stack by WHERE the pair's pileup leg is: central (ITk only),
+                  inside 2.4 < |eta| < 4.0 (the tracker and HGTD: timing can act), or only beyond |eta| = 4.0
+                  (no tracks: no R_pT tagger can act)
+  <out>_sb_gain   TDR Fig 3.25 (needs --bkg): the S/B gain over the ITk-only preselection against the additional
+                  pileup-jet rejection x = 1 - eps_PU(HGTD) / eps_PU(ITk), the TDR's parametrised way -- every
+                  pileup leg HGTD acts on scales its event's weight by (1 - x), hard-scatter efficiency fixed
+                  at 85%; for CF events only, FF only, and both, with the rejection applied only to legs inside
+                  2.4 < |eta| < 4.0 (what HGTD can reach), and -- dashed, the TDR's assumption -- to every
+                  forward leg; the measured x of each real t0 (> 50 GeV forward jets at 85%) marked
+  <backup-out>_pupair  per category and tagger: the share of preselected events whose VBF pair (the two
                   leading surviving jets) contains a pileup jet (TDR labels) -- hatched where that
                   jet is at |eta| >= 4.0, beyond tracking and HGTD, where no R_pT tagger can act --
                   (left) and the preselected events relative to the ITk-only tagger (right)
@@ -39,6 +48,8 @@ ap.add_argument("--bkg-label", default="Z+jets")
 ap.add_argument("--note", default="", help="appended to the sample line, e.g. 'local sample'")
 ap.add_argument("--stack-edges", default="0,1000,2000,4000",
                 help="m_jj bin edges (GeV) of the stacks, overflow folded into the last bin (user's choice 2026-11-04: 3 bins)")
+ap.add_argument("--backup-out", default="",
+                help="prefix for the backup figures (the pileup-in-pair ones); default: --out")
 ap.add_argument("--out", required=True)
 args = ap.parse_args()
 os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
@@ -92,6 +103,7 @@ def select(E, col):
     n = len(E["weight"])
     ok = np.zeros(n, bool); mjj = np.zeros(n); cat = np.full(n, -1); pupair = np.zeros(n, bool); pu40 = np.zeros(n, bool)
     nhs = np.zeros(n, int); npu = np.zeros(n, int)
+    pu_cen = np.zeros(n, int); pu_reach = np.zeros(n, int); pu_far = np.zeros(n, int)
     th = thresholds(col) if col else None
     for i in range(n):
         pt, eta, phi = E["jet_pt"][i], E["jet_eta"][i], E["jet_phi"][i]
@@ -116,7 +128,13 @@ def select(E, col):
         pu40[i] = any(E["jet_pu"][i][j] and abs(eta[j]) >= 4.0 for j in (a, b))
         nhs[i] = int(E["jet_hs"][i][a]) + int(E["jet_hs"][i][b])
         npu[i] = int(E["jet_pu"][i][a]) + int(E["jet_pu"][i][b])
-    return ok, mjj, cat, pupair, pu40, nhs, npu
+        for j in (a, b):                                      # the pair's pileup legs, by where they are
+            if not E["jet_pu"][i][j]: continue
+            aej = abs(eta[j])
+            if aej < 2.4: pu_cen[i] += 1                      # central: ITk tracks, no HGTD
+            elif aej < 4.0: pu_reach[i] += 1                  # forward, inside the tracker and HGTD
+            else: pu_far[i] += 1                              # beyond |eta| = 4.0: no tracks at all
+    return ok, mjj, cat, pupair, pu40, nhs, npu, pu_cen, pu_reach, pu_far
 
 
 samples = [("sig", args.sig_label, load(args.sig), 1)]
@@ -186,7 +204,7 @@ S.save(cv, f"{args.out}_cat_mjj")
 EDGES = np.array([float(x) for x in args.stack_edges.split(",")])
 
 
-def mjj_stack(key, lab, E, ok, mjj, bands, name, title):
+def mjj_stack(key, lab, E, ok, mjj, bands, name, title, sel="VBF preselection, ITk-only R_{p_{T}} at 85%"):
     """bands: (legend, mask, colour), bottom to top; the masks must partition the selected events"""
     w = E["weight"].astype(float)
     xm = np.clip(mjj, EDGES[0], EDGES[-1] - 1e-6)            # overflow folded into the top bin
@@ -212,7 +230,7 @@ def mjj_stack(key, lab, E, ok, mjj, bands, name, title):
     leg = S.legend(0.20, 0.525, 0.93, 0.525 + 0.055 * nrow, size=0.7 * TS_M, ncol=2, margin=0.15)
     for leg_txt, h in reversed(hs): leg.AddEntry(h, leg_txt, "F")
     leg.Draw()
-    S.header(0.20, 0.87, [ENERGY + ", " + sample_line(lab), "VBF preselection, ITk-only R_{p_{T}} at 85%", title] + clean_line, size=TS_M)
+    S.header(0.20, 0.87, [ENERGY + ", " + sample_line(lab), sel] + ([title] if title else []) + clean_line, size=TS_M)
     R_.gPad.RedrawAxis()
     cv.cd(); S.pad(f"{name}_r_{key}", 0.0, 0.0, 1.0, RAT, top=0.03, bottom=0.36)
     R_.gPad.SetLogy()
@@ -233,13 +251,28 @@ def mjj_stack(key, lab, E, ok, mjj, bands, name, title):
 
 # truth-identity colours: python/vbs_region_stack.py's
 IDENT = [("HS + HS (genuine pair)", "#7BCB6B"), ("HS + PU", "#F5A02A"), ("PU + PU", "#636363"), ("A leg carries neither label", "#C79BF5")]
+# pileup legs by reach (an event with a leg inside 2.4 < |eta| < 4.0 counts as reachable first)
+# |eta| < 2.4: ITk tracks only; 2.4-4.0: ITk and HGTD; >= 4.0: no tracks, no R_pT tagger can act
+REACH = [("HS + HS", "#7BCB6B"), ("PU leg at |#eta| < 2.4", "#B3231C"),
+         ("PU leg at 2.4#minus4.0 (HGTD)", "#3F90DA"), ("PU leg only at |#eta| #geq 4.0", "#636363"),
+         ("A leg has neither label", "#C79BF5")]
 for key, lab, E, ls in samples:
-    ok, mjj, cat, _, _, nhs, npu = R[key, "rpt_itk"]
+    ok, mjj, cat, _, _, nhs, npu, pu_cen, pu_reach, pu_far = R[key, "rpt_itk"]
     mjj_stack(key, lab, E, ok, mjj, [(CNAME[n], cat == c, CC[n]) for c, n in enumerate(CATS)],
               "cat_mjj_stack", "Forward: |#eta| > 2.4")
     ident = [nhs == 2, (nhs == 1) & (npu == 1), npu == 2, (nhs + npu) < 2]
     mjj_stack(key, lab, E, ok, mjj, [(t, m, c) for (t, c), m in zip(IDENT, ident)],
               "truth_mjj_stack", "VBF pair = the two leading jets")
+    # where the pair's pileup leg is (what timing can and cannot reach): after the ITk-only tagger, and
+    # before any tagging -- the pair of figures shows what the ITk tagger removed and what is left
+    for col, name, sel in (("rpt_itk", "reach_mjj_stack", None), (None, "reach_mjj_stack_notag", "VBF preselection, no pileup-jet tagging")):
+        ok_, mjj_, _, _, _, nhs_, npu_, pc_, pr_, pf_ = R[key, col]
+        reach = pr_ > 0
+        far = ~reach & (pf_ > 0)
+        cen = ~reach & ~far & (pc_ > 0)
+        bands = [(npu_ == 0) & (nhs_ == 2), cen, reach, far, (npu_ == 0) & (nhs_ < 2)]
+        mjj_stack(key, lab, E, ok_, mjj_, [(t, m, c) for (t, c), m in zip(REACH, bands)], name, None,
+                  **({"sel": sel} if sel else {}))
 
 # ── pileup jets in the VBF pair, per category and tagger ──────────────────────
 LABELS = ["Central-central", "Central-forward", "Forward-forward"]
@@ -312,4 +345,100 @@ for key, lab, E, _ in samples:
     leg2.Draw()
     S.header(0.20, 0.87, ["#sqrt{s} = 14 TeV, #LT#mu#GT = 200", sample_line(lab)] + clean_line)
     S.text(0.20, 0.20, "No tagging: " + " / ".join(f"{v:.2f}" for v in rows[0][3]) + " (CC / CF / FF)", 0.042)
-    S.save(cv, f"{args.out}_pupair_{key}")
+    S.save(cv, f"{args.backup_out or args.out}_pupair_{key}")
+
+# ── TDR Fig 3.25 analogue: the S/B gain against the additional pileup-jet rejection ──
+# The TDR's parametrised method (Sec. 3.4.1, PDF p. 78): with the ITk-only preselection at 85% hard-scatter
+# efficiency, events are reweighted by the pileup-jet efficiency gain relative to ITk only: every pileup leg
+# of the VBF pair that HGTD acts on scales its event's weight by (1 - x), x = 1 - eps_PU(HGTD) / eps_PU(ITk);
+# the hard-scatter efficiency is held, so the signal changes only through its own pileup legs.
+# Gain = (S(x) / S(0)) / (B(x) / B(0)). A removed leg drops the event (a different pair might pass instead:
+# ignored, as the TDR's reweighting ignores it). The x axis follows the TDR's FIGURE (S/B = 1 at x = 0); its
+# text describes the complement (S/B = 1 "when the x-axis is unity"), which the figure does not show.
+# Two scopes: legs inside 2.4 < |eta| < 4.0 (HGTD's acceptance), and every forward leg (|eta| > 2.4, up to
+# the jets' 4.5). The TDR does not say which legs it reweighted; its curves imply HGTD acting on ~half the
+# Z+jets events after the ITk tagger, which our sample reaches only with the legs beyond |eta| = 4.0.
+# ATLAS-TDR-031 Fig 3.25 (PDF p. 79), digitised from the page rendered at 200 dpi (+- 0.01):
+TDR_FIG325 = {
+    "both": ([0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95],
+             [1.0, 1.060, 1.124, 1.196, 1.274, 1.364, 1.464, 1.583, 1.711, 1.868, 1.955]),   # leaves the frame at 2
+    "cf": ([0.0, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+           [1.0, 1.062, 1.097, 1.135, 1.176, 1.221, 1.271, 1.327, 1.390, 1.458]),
+    "ff": ([0.0, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+           [1.0, 1.046, 1.065, 1.084, 1.107, 1.125, 1.142, 1.160, 1.175, 1.187])}
+if len(samples) > 1:
+    XS = np.linspace(0.0, 1.0, 101)
+    CURV = [("cf", [1], "CF only", S.COL["cf"]), ("ff", [2], "FF only", S.COL["ff"]), ("both", [1, 2], "CF and FF", "#000000")]
+    SCOPES = [("reach", "Pileup legs in 2.4 < |#eta| < 4.0 (HGTD acceptance)"),
+              ("all", "Every forward pileup leg, incl. |#eta| #geq 4.0")]
+    rng = np.random.default_rng(20261104)
+    NBOOT = 400
+
+    def leg_sums(key, scope, cats):
+        """weight sums of the selected events with 0, 1, 2 affected pileup legs"""
+        ok, mjj, cat, _, _, nhs, npu, pu_cen, pu_reach, pu_far = R[key, "rpt_itk"]
+        legs = pu_reach + (pu_far if scope == "all" else 0)
+        legs = np.where(np.isin(cat, cats), legs, 0)[ok]
+        w = dict((k_, E_) for k_, _, E_, _ in samples)[key]["weight"].astype(float)[ok]
+        return legs, w
+
+    def gain_curve(scope, cats, boot=False):
+        out = []
+        for key in ("sig", "bkg"):
+            legs, w = leg_sums(key, scope, cats)
+            if boot:
+                idx = rng.integers(0, len(w), (NBOOT, len(w)))
+                W = np.stack([np.sum(np.where(legs[idx] == k, w[idx], 0.0), axis=1) for k in (0, 1, 2)], axis=1)
+            else:
+                W = np.array([[w[legs == k].sum() for k in (0, 1, 2)]])
+            out.append((W[:, :1] + W[:, 1:2] * (1 - XS) + W[:, 2:3] * (1 - XS) ** 2) / W.sum(1, keepdims=True))
+        return out[0] / out[1]                       # (1 or NBOOT, len(XS))
+
+    pe = lambda col: WP["working_points"][col]["forward_50_inf"]["pu_eff"]
+    XT = [(col, name, colour, mk, 1.0 - pe(col) / pe("rpt_itk")) for col, name, colour, mk in TAGGERS if col not in (None, "rpt_itk")]
+    YMAX = 2.1
+    cv = S.keep(R_.TCanvas("sbgain", "", 1600, 700))
+    print("\nFig 3.25 analogue: S/B gain at x = 0.2 / 0.5 / 1.0 (+- bootstrap 68%); events with an affected leg (sig / bkg)")
+    for c, (scope, stxt) in enumerate(SCOPES):
+        cv.cd(); S.pad(f"sbg{c}", 0.5 * c, 0.0, 0.5 * c + 0.5, 1.0, top=0.05, bottom=0.14, left=0.14, right=0.04)
+        fr = S.keep(R_.gPad.DrawFrame(0.0, 0.95, 1.0, YMAX))
+        S.axes(fr, "Additional pileup-jet rejection  1 #minus #varepsilon_{PU}^{HGTD} / #varepsilon_{PU}^{ITk}",
+               "Normalised #varepsilon_{S} / #varepsilon_{B}", size=0.045, ytoff=1.35, xtoff=1.3)
+        boot = gain_curve(scope, [1, 2], boot=True)
+        lo, hi = np.percentile(boot, 16, axis=0), np.percentile(boot, 84, axis=0)
+        band = S.keep(R_.TGraph(2 * len(XS)))
+        for k, (xv, yv) in enumerate(list(zip(XS, hi)) + list(zip(XS[::-1], lo[::-1]))): band.SetPoint(k, xv, yv)
+        band.SetFillColor(S.colour("#C8C8C8")); band.SetLineWidth(0); band.Draw("F SAME")
+        for name, cats, txt, colour in CURV:
+            g = S.style(S.graph(*TDR_FIG325[name]), colour, 0, 2, 2); g.Draw("L SAME")
+        ours = {}
+        for name, cats, txt, colour in CURV:
+            ours[name] = gain_curve(scope, cats)[0]
+            g = S.style(S.graph(XS, ours[name]), colour, 0, 1, 3); g.Draw("L SAME")
+            legs_s, _ = leg_sums("sig", scope, cats); legs_b, _ = leg_sums("bkg", scope, cats)
+            if name == "both":
+                err = lambda xv: 0.5 * (np.interp(xv, XS, hi) - np.interp(xv, XS, lo))
+                vals = " / ".join(f"{np.interp(xv, XS, ours[name]):.3f} +- {err(xv):.3f}" for xv in (0.2, 0.5, 1.0))
+            else:
+                vals = " / ".join(f"{np.interp(xv, XS, ours[name]):.3f}" for xv in (0.2, 0.5, 1.0))
+            print(f"  {plain(stxt):52s} {txt:10s} {vals}   ({int((legs_s > 0).sum())} / {int((legs_b > 0).sum())})")
+        for col, name, colour, mk, xv in XT:
+            m = S.style(S.graph([xv], [float(np.interp(xv, XS, ours["both"]))]), colour, mk, 1, 1, 1.7); m.Draw("P SAME")
+        S.header(0.19, 0.88, [ENERGY, "S: VBF H#rightarrowinv., B: Z+jets, ITk-only R_{p_{T}} at 85%", stxt] + clean_line, size=0.038)
+        if c == 0:
+            leg = S.legend(0.17, 0.48, 0.58, 0.71, size=0.034, margin=0.22)
+            for name, cats, txt, colour in CURV:
+                e = S.keep(R_.TLine()); e.SetLineColor(S.colour(colour)); e.SetLineWidth(3); leg.AddEntry(e, txt, "L")
+            e1 = S.keep(R_.TGraph(1)); e1.SetLineColor(R_.kGray + 2); e1.SetLineWidth(3); e1.SetFillColor(S.colour("#C8C8C8"))
+            leg.AddEntry(e1, "This study #pm 1#sigma stat.", "LF")
+            e2 = S.keep(R_.TLine()); e2.SetLineColor(R_.kGray + 2); e2.SetLineWidth(2); e2.SetLineStyle(2); leg.AddEntry(e2, "ATLAS-TDR-031", "L")
+            leg.Draw()
+        else:
+            leg = S.legend(0.17, 0.52, 0.58, 0.71, size=0.034, margin=0.22)
+            leg.SetHeader("Measured x: forward jets > 50 GeV")
+            for col, name, colour, mk, xv in XT:
+                m = S.style(S.graph([0], [0]), colour, mk, 1, 1, 1.7); leg.AddEntry(m, f"{name}  ({xv:.2f})", "P")
+            leg.Draw()
+        R_.gPad.RedrawAxis()
+    S.save(cv, f"{args.out}_sb_gain")
+    print("  measured x, forward > 50 GeV at 85%: " + ", ".join(f"{plain(n)} {x:.2f}" for _, n, _, _, x in XT))
