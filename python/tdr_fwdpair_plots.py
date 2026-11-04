@@ -10,9 +10,12 @@ errors on the effective background count.
                         TRKPTZ / WAVeS / truth); a jet without associated tracks fails every cut, so these
                         curves end below 100% (the note: "the events where one jet does not have any
                         associated track are lost")
-  <out>_bdt[_jz<k>]     the note's Fig 3: the BDTs of its Table 1 on the scored half -- JVF only, JVF with
+  <out>_bdt[_jz<k>]     the note's Fig 3: the BDTs of its Table 1, every event scored by the fold that did not train on it -- JVF only, JVF with
                         each t0, and JVF plus the two jets' time differences (no t0). With --bdt-extra, also
                         the PV0-track jet time (beyond the note)
+--bkg = --sig: the VBF sample's own events with a pileup jet as the background (34,760 events on the grid,
+10x the Z+jets ones; the TDR's and the note's per-jet figures take their pileup jets from VBF events too).
+Points with fewer than 3 effective background events surviving are not drawn.
 Dijet (--bkg-label Dijet): one pair of figures per JZ slice -- the slices have no cross-sections, and a
 rejection within one slice needs none.
 
@@ -69,7 +72,7 @@ def roc(ds, ws, db, wb):
     last = np.r_[v[1:] != v[:-1], True]                  # one point per distinct threshold
     es, eb = np.maximum.accumulate(np.r_[0.0, cs[last]]), np.maximum.accumulate(np.r_[0.0, cb[last]])
     pe = np.interp(EFF, es, eb, right=np.nan)            # beyond the reachable efficiency: undefined
-    pe = np.where(pe * neff < 1.0, np.nan, pe)           # under one effective background event: no measurement
+    pe = np.where(pe * neff < 3.0, np.nan, pe)           # under 3 effective background events: no measurement
     return pe, np.sqrt(np.clip(pe * (1 - pe), 0, None) / neff), es[-1]
 
 
@@ -102,7 +105,8 @@ def draw(rows, title, lines, out, xlab="Efficiency for signal events (two HS jet
         S.style(S.graph(EFF[ok], rej[ok], rerr[ok]), colour, mk, 1, 2, 1.1).Draw("P SAME")
         leg.AddEntry(g, name, "LP")
     leg.Draw()
-    S.header(0.20, 0.88, [ENERGY, f"VBF H#rightarrowinv. vs {args.bkg_label}", SEL] + lines, size=0.85 * TS_M)
+    vs = (f"VBF H#rightarrowinv.: 2 HS jets vs #geq 1 PU jet" if args.bkg == args.sig else f"VBF H#rightarrowinv. vs {args.bkg_label}")
+    S.header(0.20, 0.88, [ENERGY, vs, SEL] + lines, size=0.85 * TS_M)
     cv.cd(); p2 = S.pad(out + "_r", 0.0, 0.0, 1.0, RAT, top=0.03, bottom=0.36)
     rmax = np.ceil(1.15 * np.nanmax([np.nanmax(c[6][np.isfinite(c[6])]) if np.isfinite(c[6]).any() else 1 for c in curves]) * 2) / 2
     fr2 = S.keep(p2.DrawFrame(EFF[0], 0.5, 1.0, max(rmax, 1.5)))
@@ -149,4 +153,4 @@ for z in slices:
         rows.append((f"BDT {name}", colour, mk, ls, *roc(D[f"sig_t0_{s}"], ws_, D[f"bkg_t0_{s}"][mz], wb_)))
     for key, name, colour, mk, ls in [DT] + ([DT_HS] if args.bdt_extra else []):
         rows.append((f"BDT {name}", colour, mk, ls, *roc(D[f"sig_{key}"], ws_, D[f"bkg_{key}"][mz], wb_)))
-    draw(rows, f"BDTs{tag}", ["BDT on the two jets (scored half)"] + zline, f"{args.out}_bdt{tag}")
+    draw(rows, f"BDTs{tag}", ["BDT on the two jets (two-fold, held out)"] + zline, f"{args.out}_bdt{tag}")

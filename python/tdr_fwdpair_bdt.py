@@ -17,7 +17,8 @@ row, each on its own inputs:
   dtime_hs    beyond the note: as dtime, but the jet time over the jet's PV0-associated timed tracks
               (z only, still no t0) with the error of the mean -- at mu = 200 the all-track spread is
               pileup-dominated and the note's pull separates nothing (notes/tdr_presentation.md)
-Split: events with an even (file_idx * 1000003 + entry + jz) train, odd ones are scored. Training weights:
+Two-fold: the events split by the parity of (file_idx * 1000003 + entry + jz); each half is scored by the
+BDT trained on the other, so every event gets a score from a model that never saw it. Training weights:
 |w| normalised to equal totals per class (and, for dijet, per JZ slice: the slices have no cross-sections,
 notes/tdr_presentation.md). Scores, signed weights and labels go to an .npz for tdr_fwdpair_plots.py.
 
@@ -79,35 +80,37 @@ wb = np.abs(B["weight"].astype(float))
 if is_dijet:
     for z in np.unique(B["jz"][bkg]):
         m = bkg & (B["jz"] == z)
-        wb[m] /= wb[m & ~oB].sum() or 1.0
-trS, trB = sig & ~oS, bkg & ~oB
-teS, teB = sig & oS, bkg & oB
-# equal class totals, mean weight 1 (xgboost's min_child_weight is in these units: weights summing to 1
-# per class forbid every split and leave a constant classifier, AUC 0.5)
-n_tr = trS.sum() + trB.sum()
-ws_tr = ws[trS] / ws[trS].sum() * 0.5 * n_tr
-wb_tr = wb[trB] / wb[trB].sum() * 0.5 * n_tr
-print(f"signal (both HS): {sig.sum()} of {len(sig)} events; train {trS.sum()}, score {teS.sum()}")
-print(f"background (>= 1 PU): {bkg.sum()} of {len(bkg)} events; train {trB.sum()}, score {teB.sum()}"
+        wb[m] /= wb[m].sum() or 1.0
+print(f"signal (both HS): {sig.sum()} of {len(sig)} events (halves {int((sig & ~oS).sum())} / {int((sig & oS).sum())})")
+print(f"background (>= 1 PU): {bkg.sum()} of {len(bkg)} events (halves {int((bkg & ~oB).sum())} / {int((bkg & oB).sum())})"
       + ("  per JZ slice: " + ", ".join(f"JZ{z} {int(np.sum(bkg & (B['jz'] == z)))}" for z in np.unique(B["jz"])) if is_dijet else ""))
 
-out = {"sig_weight": S["weight"][teS].astype(float), "bkg_weight": B["weight"][teB].astype(float),
-       "bkg_jz": B["jz"][teB].astype(int)}
+out = {"sig_weight": S["weight"][sig].astype(float), "bkg_weight": B["weight"][bkg].astype(float),
+       "bkg_jz": B["jz"][bkg].astype(int)}
 for name in FS:
-    X = np.vstack([FS[name][trS], FB[name][trB]])
-    y = np.concatenate([np.ones(trS.sum()), np.zeros(trB.sum())])
-    w = np.concatenate([ws_tr, wb_tr])
-    clf = xgb.XGBClassifier(n_estimators=300, max_depth=3, learning_rate=0.05, subsample=0.8,
-                            tree_method="hist", random_state=args.seed, missing=np.nan, n_jobs=4)
-    clf.fit(X, y, sample_weight=w)
-    s_te, b_te = clf.predict_proba(FS[name][teS])[:, 1], clf.predict_proba(FB[name][teB])[:, 1]
-    yt = np.concatenate([np.ones(len(s_te)), np.zeros(len(b_te))])
-    wt = np.concatenate([np.abs(out["sig_weight"]) / np.abs(out["sig_weight"]).sum(),
-                         wb[teB] / wb[teB].sum()])
-    auc_te = roc_auc_score(yt, np.concatenate([s_te, b_te]), sample_weight=wt)
-    auc_tr = roc_auc_score(y, clf.predict_proba(X)[:, 1], sample_weight=w)
-    print(f"  BDT {name:9s} AUC train {auc_tr:.4f}  scored half {auc_te:.4f}")
-    out[f"sig_{name}"] = s_te
-    out[f"bkg_{name}"] = b_te
+    s_all, b_all = np.full(len(sig), np.nan), np.full(len(bkg), np.nan)
+    aucs = []
+    for fold in (0, 1):                     # train on one half, score the other
+        trS, trB = sig & (oS == bool(fold)), bkg & (oB == bool(fold))
+        teS, teB = sig & (oS != bool(fold)), bkg & (oB != bool(fold))
+        # equal class totals, mean weight 1 (xgboost's min_child_weight is in these units: weights summing
+        # to 1 per class forbid every split and leave a constant classifier, AUC 0.5)
+        n_tr = trS.sum() + trB.sum()
+        w = np.concatenate([ws[trS] / ws[trS].sum(), wb[trB] / wb[trB].sum()]) * 0.5 * n_tr
+        X = np.vstack([FS[name][trS], FB[name][trB]])
+        y = np.concatenate([np.ones(trS.sum()), np.zeros(trB.sum())])
+        clf = xgb.XGBClassifier(n_estimators=300, max_depth=3, learning_rate=0.05, subsample=0.8,
+                                tree_method="hist", random_state=args.seed + fold, missing=np.nan, n_jobs=4)
+        clf.fit(X, y, sample_weight=w)
+        s_all[teS] = clf.predict_proba(FS[name][teS])[:, 1]
+        b_all[teB] = clf.predict_proba(FB[name][teB])[:, 1]
+        aucs.append(roc_auc_score(y, clf.predict_proba(X)[:, 1], sample_weight=w))
+    st, bt = s_all[sig], b_all[bkg]
+    yt = np.concatenate([np.ones(len(st)), np.zeros(len(bt))])
+    wt = np.concatenate([ws[sig] / ws[sig].sum(), wb[bkg] / wb[bkg].sum()])
+    auc_te = roc_auc_score(yt, np.concatenate([st, bt]), sample_weight=wt)
+    print(f"  BDT {name:9s} AUC train {np.mean(aucs):.4f}  held out (both folds) {auc_te:.4f}")
+    out[f"sig_{name}"] = st
+    out[f"bkg_{name}"] = bt
 np.savez_compressed(args.out, **out)
 print(f"wrote {args.out}")
