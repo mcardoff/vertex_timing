@@ -47,6 +47,7 @@ ap.add_argument("--bkg-label", default="Z+jets")
 ap.add_argument("--bdt-extra", action="store_true", help="also draw the PV0-track jet-time BDT")
 ap.add_argument("--min-bkg", type=int, default=200, help="dijet: skip slices with fewer background events")
 ap.add_argument("--set", default="note", choices=["note", "veto"])
+ap.add_argument("--nsigma", type=float, default=3.0, help="--set veto: the veto threshold of the cut-based curves")
 ap.add_argument("--out", required=True)
 args = ap.parse_args()
 R = S.setup()
@@ -152,14 +153,14 @@ def mincut(E, key):
 VETO_ROWS = [("jj", "jet vs jet", "kP10Violet", 33, 10)] + [(s_, n_.replace(" t_{0}", "") + " t_{0}", c_, m_, l_) for s_, n_, c_, m_, l_ in T0S]
 if args.set == "veto":
     cal = FC.calibration(Sg)
-    KS, KB = FC.vetoes(Sg, cal), FC.vetoes(Bg, cal)
+    KS, KB = FC.vetoes(Sg, cal, args.nsigma), FC.vetoes(Bg, cal, args.nsigma)
     ws, wb = Sg["weight"][sig].astype(float), Bg["weight"][bkg].astype(float)
     js, jb = mincut(Sg, "jvf_itk"), mincut(Bg, "jvf_itk")
     rows = [("ITk (JVF)", "#000000", 24, 1, *roc(js[sig], ws, jb[bkg], wb))]
     for key, name, colour, mk, ls in VETO_ROWS:
         rows.append((f"+ {name} veto", colour, mk, ls,
                      *roc(np.where(KS[key], js, np.nan)[sig], ws, np.where(KB[key], jb, np.nan)[bkg], wb)))
-    draw(rows, "JVF cut + 3-sigma vetoes", ["JVF, the same cut on both jets, + 3#sigma timing veto"], f"{args.out}_jvfveto")
+    draw(rows, f"JVF cut + {args.nsigma:g}-sigma vetoes", [f"JVF, the same cut on both jets, + {args.nsigma:g}#sigma timing veto"], f"{args.out}_jvfveto")
     if D is not None:
         rows = [("BDT ITk (JVF)", "#000000", 24, 1, *roc(D["sig_itk"], D["sig_weight"], D["bkg_itk"], D["bkg_weight"]))]
         for key, name, colour, mk, ls in VETO_ROWS:
