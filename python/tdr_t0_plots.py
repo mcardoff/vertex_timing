@@ -12,6 +12,13 @@
                   the number of forward hard-scatter tracks with a time (folded at 20, as the main
                   analysis); lower panel: cleaned / as is (errors from the events that move, paired).
 
+  <out>_waves_resid     clustering_plot's inclusive-resolution style, WAVeS only (the user's choice for the
+                        slides, 2026-11-04): t0 - t_HS with cleaned track times (filled, with its peak + tail
+                        fit) against the ntuple's times (dashed), log scale, core fraction and width in the legend
+  <out>_waves_core_nhs  clustering_plot's core-fraction style, WAVeS only: points with binomial errors and no
+                        connecting lines, cleaned (filled) vs as is (open), over the n-forward-HS-track
+                        distribution (grey, arbitrary scale); no ratio panel
+
     cd python && PYTHONNOUSERSITE=1 ~/.venv-hgtd/bin/python tdr_t0_plots.py ../figs/hists/tdr_t0.root \\
         --label "VBF H#rightarrowinv. (local sample)" --out ../figs/tdr/local_tdr_t0
 """
@@ -156,3 +163,52 @@ for k, (key, title, colour) in enumerate(T0S):
     g = S.style(S.graph(bins + (k - 0.5) * 0.25, d, de), colour, 21 if key == "trkptz" else 20, 1, 2, 1.0); g.Draw("P SAME")
     print(f"  {key:7s} " + " ".join(f"{v:6.3f}" for v in d))
 S.save(cv, f"{args.out}_core_nhs")
+
+
+# ── clustering_plot style, WAVeS only (the slides' section 1) ─────────────────
+LIGHT = R.TColor.GetColor("#FFD891")                     # a light WAVeS fill
+cvw = S.keep(R.TCanvas("waves_resid", "", 800, 720))
+cvw.SetLeftMargin(0.15); cvw.SetRightMargin(0.04); cvw.SetTopMargin(0.04); cvw.SetBottomMargin(0.13)
+cvw.SetLogy()
+hc = S.keep(fits.Get("h_waves_clean").Clone("w_clean")); hr = S.keep(fits.Get("h_waves_raw").Clone("w_raw"))
+fc = hc.GetListOfFunctions().FindObject("peaktail_fit")
+fc = S.keep(fc.Clone("w_fit")) if fc else None
+hc.GetListOfFunctions().Clear(); hr.GetListOfFunctions().Clear()
+peak = max(hc.GetMaximum(), hr.GetMaximum())
+frw = S.keep(cvw.DrawFrame(-400.0, 0.5, 400.0, 100.0 * peak))
+S.axes(frw, "t_{0} #minus t_{HS} [ps]", f"Events / {hc.GetBinWidth(1):.0f} ps", size=0.05, ytoff=1.4, xtoff=1.15)
+hc.SetFillColor(LIGHT); hc.SetLineColor(S.colour(S.COL["waves"])); hc.SetLineWidth(2); hc.Draw("HIST SAME")
+hr.SetFillStyle(0); hr.SetLineColor(R.TColor.GetColor("#4D4D4D")); hr.SetLineWidth(2); hr.SetLineStyle(2); hr.Draw("HIST SAME")
+if fc:
+    fc.SetLineColor(S.colour(S.COL["waves"])); fc.SetLineWidth(2); fc.SetNpx(800); fc.Draw("SAME")
+legw = S.legend(0.66, 0.74, 0.95, 0.90, size=0.036, margin=0.25)   # top right: clear of the narrow peak
+legw.AddEntry(hc, "Cleaned", "F")
+legw.AddEntry(hr, "As in the ntuple", "L")
+if fc: legw.AddEntry(fc, "Fit (cleaned)", "L")
+legw.Draw()
+S.header(0.18, 0.92, [f"{ENERGY}, {args.label}", "WAVeS t_{0}, track times:", "core fraction (< 60 ps), core width",
+                      f"cleaned: {100 * frac['waves_clean']:.1f}%, {sig('waves_clean'):.1f} ps",
+                      f"as in the ntuple: {100 * frac['waves_raw']:.1f}%, {sig('waves_raw'):.1f} ps"], size=0.036)
+cvw.RedrawAxis()
+S.save(cvw, f"{args.out}_waves_resid")
+
+cvn = S.keep(R.TCanvas("waves_core_nhs", "", 800, 720))
+cvn.SetLeftMargin(0.15); cvn.SetRightMargin(0.04); cvn.SetTopMargin(0.04); cvn.SetBottomMargin(0.13)
+frn = S.keep(cvn.DrawFrame(-0.5, 0.0, FOLD + 0.5, 1.75))
+S.axes(frn, f"Forward hard-scatter tracks with a time (last bin: #geq {FOLD})", "Core fraction (|t_{0} #minus t_{HS}| < 60 ps)",
+       size=0.045, ytoff=1.45, xtoff=1.25)
+counts = np.array([np.sum(x == k) for k in range(FOLD + 1)], float)
+hn = S.keep(R.TH1D("nhs_dist", "", FOLD + 1, -0.5, FOLD + 0.5))
+for k, c_ in enumerate(counts): hn.SetBinContent(k + 1, 0.5 * c_ / counts.max())   # arbitrary scale: tallest bin at 0.5
+hn.SetFillColor(R.TColor.GetColor("#BDBDC4")); hn.SetLineColor(R.TColor.GetColor("#BDBDC4")); hn.Draw("HIST SAME")
+legn = S.legend(0.42, 0.63, 0.93, 0.77, size=0.036, margin=0.2)   # above the points (<= 1), below the header
+for name, txt, mk in (("waves_clean", "WAVeS t_{0}, cleaned", 20), ("waves_raw", "WAVeS t_{0}, as in the ntuple", 24)):
+    f, e = per_bin(core[name])
+    g = S.style(S.graph(np.arange(FOLD + 1, dtype=float), np.array(f), np.array(e)), S.COL["waves"] if mk == 20 else "#4D4D4D", mk, 1, 2, 1.3)
+    g.Draw("P SAME")                                       # points and error bars only: no connecting lines
+    legn.AddEntry(g, txt, "PE")
+legn.AddEntry(hn, "Events (arb. scale)", "F")
+legn.Draw()
+S.header(0.19, 0.92, [f"{ENERGY}, {args.label}", "Core fraction over all events (no t_{0}: a failure)"], size=0.038)
+cvn.RedrawAxis()
+S.save(cvn, f"{args.out}_waves_core_nhs")
