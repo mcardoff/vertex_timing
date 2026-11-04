@@ -134,7 +134,7 @@ MAIN, RAT = 0.68, 0.32
 TS_M, TS_R = 0.05 * 600 / (800 * MAIN), 0.05 * 600 / (800 * RAT)
 cv = S.keep(R_.TCanvas("catmjj", "", 800, 800))
 cv.cd(); S.pad("catmjj_m", 0.0, RAT, 1.0, 1.0, top=0.05 / MAIN * 0.6, bottom=0.02)
-fr = S.keep(R_.gPad.DrawFrame(0.0, 0.0, 2000.0, 1.4))
+fr = S.keep(R_.gPad.DrawFrame(0.0, 0.0, 2000.0, 1.4 if len(samples) == 1 else 1.6))
 S.axes(fr, "", "Fraction of events", size=TS_M, ytoff=1.35)
 fr.GetXaxis().SetLabelSize(0); fr.GetYaxis().ChangeLabel(1, -1, 0)
 leg = S.legend(0.20, 0.555, 0.93, 0.615, size=0.75 * TS_M, ncol=3, margin=0.3)   # one row under the header
@@ -153,13 +153,13 @@ for key, lab, E, ls in samples:
         i = int(np.argmin(np.abs(X - x))); m = ok & (mjj > X[i])
         print(f"  {plain(lab)} m_jj > {X[i]:.0f}: {counts[key][i]} events;  " + "  ".join(f"{name} {100 * w[m & (cat == c)].sum() / w[m].sum():.1f}%" for c, name in enumerate(CATS)))
 leg.Draw()
-if len(samples) > 1:
-    leg2 = S.legend(0.62, 0.70, 0.93, 0.84, size=0.75 * TS_M)
+if len(samples) > 1:   # the samples: a second row under the categories
+    leg2 = S.legend(0.20, 0.49, 0.93, 0.55, size=0.75 * TS_M, ncol=2, margin=0.2)
     for key, lab, E, ls in samples:
         d = S.keep(R_.TGraph(1)); d.SetLineStyle(ls); d.SetLineWidth(3); d.SetLineColor(R_.kGray + 3)
         leg2.AddEntry(d, lab, "L")
     leg2.Draw()
-S.header(0.20, 0.87, [ENERGY + ", " + sample_line(", ".join(s[1] for s in samples)),
+S.header(0.20, 0.87, [ENERGY + (", " + sample_line(samples[0][1]) if len(samples) == 1 else ""),
                       "VBF preselection, ITk-only R_{p_{T}} at 85%", "Forward: |#eta| > 2.4"] + clean_line, size=TS_M)
 R_.gPad.RedrawAxis()
 cv.cd(); S.pad("catmjj_r", 0.0, 0.0, 1.0, RAT, top=0.03, bottom=0.36)
