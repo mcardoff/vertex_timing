@@ -19,6 +19,14 @@ Points with fewer than 3 effective background events surviving are not drawn.
 Dijet (--bkg-label Dijet): one pair of figures per JZ slice -- the slices have no cross-sections, and a
 rejection within one slice needs none.
 
+--set veto (with tdr_fwdpair_bdt.py --set veto; trees with the core jet time): our timing study's vetoes instead
+of the note's timing --
+  <out>_jvfveto  the same JVF cut on both jets, alone and with each 3-sigma veto applied on top (jet vs jet;
+                 jet vs HGTD / TRKPTZ / WAVeS / truth t0; tdr_fwdpair_common.vetoes): a vetoed event never passes,
+                 so a vetoed curve ends at the veto's signal efficiency
+  <out>_bdtveto  BDT on the two JVFs, and with the veto pulls as extra inputs
+The selection line follows the trees' pair mode (the note's, or at least one jet in HGTD).
+
 Run with ~/.venv-hgtd (ROOT):
   PYTHONNOUSERSITE=1 ~/.venv-hgtd/bin/python tdr_fwdpair_plots.py --sig <vbf>.root --bkg <zjets>.root \\
       --bdt <x>.npz --bkg-label Z+jets --out ../figs/tdr/grid/grid_fwdpair_zjets
@@ -29,6 +37,7 @@ import numpy as np
 import uproot
 
 import tdr_root_style as S
+import tdr_fwdpair_common as FC
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--sig", required=True)
@@ -37,6 +46,7 @@ ap.add_argument("--bdt", default="")
 ap.add_argument("--bkg-label", default="Z+jets")
 ap.add_argument("--bdt-extra", action="store_true", help="also draw the PV0-track jet-time BDT")
 ap.add_argument("--min-bkg", type=int, default=200, help="dijet: skip slices with fewer background events")
+ap.add_argument("--set", default="note", choices=["note", "veto"])
 ap.add_argument("--out", required=True)
 args = ap.parse_args()
 R = S.setup()
@@ -91,7 +101,7 @@ def draw(rows, title, lines, out, xlab="Efficiency for signal events (two HS jet
         curves.append((name, colour, mk, ls, rej, rerr, ratio))
         at = [int(np.argmin(np.abs(EFF - e))) for e in (0.70, 0.80, 0.90)]
         print(f"  {plain(name):34s}" + "".join(f"{rej[i]:9.1f} ({ratio[i]:4.2f})" for i in at) + f"   max eff {emax:.3f}")
-    ymax = 10 ** np.ceil(np.log10(20.0 * np.nanmax([np.nanmax(c[4] + np.nan_to_num(c[5])) for c in curves])))
+    ymax = 10 ** np.ceil(np.log10(100.0 * np.nanmax([np.nanmax(c[4] + np.nan_to_num(c[5])) for c in curves])))
     cv = S.keep(R.TCanvas(out, "", 800, 800))
     cv.cd(); p1 = S.pad(out + "_m", 0.0, RAT, 1.0, 1.0, top=0.05 / MAIN * 0.6, bottom=0.02)
     p1.SetLogy()
@@ -120,6 +130,9 @@ def draw(rows, title, lines, out, xlab="Efficiency for signal events (two HS jet
 
 Sg = uproot.open(args.sig)["events"].arrays(library="np")
 Bg = uproot.open(args.bkg)["events"].arrays(library="np")
+_meta = uproot.open(args.sig)["meta"]
+if "pair_mode" in _meta.keys() and str(_meta.arrays(library="np")["pair_mode"][0]) == "one":
+    SEL = "j_{1}, j_{2}: |#eta| < 3.8, #geq 1 in 2.4#minus3.8, opposite #eta, > 50 / 30 GeV"
 sig = (Sg["j1_hs"] == 1) & (Sg["j2_hs"] == 1)
 bkg = (Bg["j1_pu"] == 1) | (Bg["j2_pu"] == 1)
 dijet = bool(np.any(Bg["jz"] >= 0))
@@ -135,6 +148,25 @@ def mincut(E, key):
     d = np.minimum(E["j1_" + key], E["j2_" + key])
     return np.where((E["j1_" + key] >= 0) & (E["j2_" + key] >= 0), d, np.nan)
 
+
+VETO_ROWS = [("jj", "jet vs jet", "kP10Violet", 33, 10)] + [(s_, n_.replace(" t_{0}", "") + " t_{0}", c_, m_, l_) for s_, n_, c_, m_, l_ in T0S]
+if args.set == "veto":
+    cal = FC.calibration(Sg)
+    KS, KB = FC.vetoes(Sg, cal), FC.vetoes(Bg, cal)
+    ws, wb = Sg["weight"][sig].astype(float), Bg["weight"][bkg].astype(float)
+    js, jb = mincut(Sg, "jvf_itk"), mincut(Bg, "jvf_itk")
+    rows = [("ITk (JVF)", "#000000", 24, 1, *roc(js[sig], ws, jb[bkg], wb))]
+    for key, name, colour, mk, ls in VETO_ROWS:
+        rows.append((f"+ {name} veto", colour, mk, ls,
+                     *roc(np.where(KS[key], js, np.nan)[sig], ws, np.where(KB[key], jb, np.nan)[bkg], wb)))
+    draw(rows, "JVF cut + 3-sigma vetoes", ["JVF, the same cut on both jets, + 3#sigma timing veto"], f"{args.out}_jvfveto")
+    if D is not None:
+        rows = [("BDT ITk (JVF)", "#000000", 24, 1, *roc(D["sig_itk"], D["sig_weight"], D["bkg_itk"], D["bkg_weight"]))]
+        for key, name, colour, mk, ls in VETO_ROWS:
+            k = "veto_jj" if key == "jj" else f"veto_{key}"
+            rows.append((f"BDT + {name} pulls", colour, mk, ls, *roc(D[f"sig_{k}"], D["sig_weight"], D[f"bkg_{k}"], D["bkg_weight"])))
+        draw(rows, "BDTs with the veto pulls", ["BDT: JVFs + timing-veto pulls (two-fold)"], f"{args.out}_bdtveto")
+    raise SystemExit(0)
 
 for z in slices:
     mb = bkg if z is None else bkg & (Bg["jz"] == z)

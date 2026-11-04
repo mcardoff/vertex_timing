@@ -17,6 +17,11 @@ row, each on its own inputs:
   dtime_hs    beyond the note: as dtime, but the jet time over the jet's PV0-associated timed tracks
               (z only, still no t0) with the error of the mean -- at mu = 200 the all-track spread is
               pileup-dominated and the note's pull separates nothing (notes/tdr_presentation.md)
+--set veto (2026-11-04, the user's "combine these results"): instead, the timing study's veto quantities as
+inputs (tdr_fwdpair_common.pulls, calibrated on the VBF file's hard-scatter legs):
+  itk         JVF(j1), JVF(j2)
+  veto_<s>    JVF(j1), JVF(j2), and each leg's pull from the t0 s (hgtd / trkptz / waves / truth)
+  veto_jj     JVF(j1), JVF(j2), and the jet-vs-jet pull
 Two-fold: the events split by the parity of (file_idx * 1000003 + entry + jz); each half is scored by the
 BDT trained on the other, so every event gets a score from a model that never saw it. Training weights:
 |w| normalised to equal totals per class (and, for dijet, per JZ slice: the slices have no cross-sections,
@@ -32,11 +37,14 @@ import uproot
 import xgboost as xgb
 from sklearn.metrics import roc_auc_score
 
+import tdr_fwdpair_common as FC
+
 ap = argparse.ArgumentParser()
 ap.add_argument("--sig", required=True)
 ap.add_argument("--bkg", required=True)
 ap.add_argument("--out", required=True)
 ap.add_argument("--seed", type=int, default=20261104)
+ap.add_argument("--set", default="note", choices=["note", "veto"], help="the note's Table 1 BDTs, or the veto-pull BDTs")
 args = ap.parse_args()
 
 T0S = ("hgtd", "trkptz", "waves", "truth")
@@ -50,6 +58,15 @@ def pull(a, va, b, vb, ok):
     with np.errstate(invalid="ignore", divide="ignore"):
         p = np.abs(a - b) / np.sqrt(va + vb)
     return np.where(ok & np.isfinite(p), p, np.nan)
+
+
+def features_veto(E, cal):
+    P = FC.pulls(E, cal)
+    f = {"itk": [E["j1_jvf_itk"], E["j2_jvf_itk"]]}
+    for s in FC.T0_SOURCES:
+        f["veto_" + s] = [E["j1_jvf_itk"], E["j2_jvf_itk"], P[f"{s}_1"], P[f"{s}_2"]]
+    f["veto_jj"] = [E["j1_jvf_itk"], E["j2_jvf_itk"], P["jj"]]
+    return {k: np.column_stack(v).astype(np.float32) for k, v in f.items()}
 
 
 def features(E):
@@ -69,7 +86,11 @@ def features(E):
 S, B = load(args.sig), load(args.bkg)
 sig = (S["j1_hs"] == 1) & (S["j2_hs"] == 1)
 bkg = (B["j1_pu"] == 1) | (B["j2_pu"] == 1)
-FS, FB = features(S), features(B)
+if args.set == "veto":
+    cal = FC.calibration(S)
+    FS, FB = features_veto(S, cal), features_veto(B, cal)
+else:
+    FS, FB = features(S), features(B)
 odd = lambda E: ((E["file_idx"].astype(np.int64) * 1000003 + E["entry"] + E["jz"]) % 2).astype(bool)
 oS, oB = odd(S), odd(B)
 is_dijet = bool(np.any(B["jz"] >= 0))
