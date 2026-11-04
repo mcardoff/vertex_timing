@@ -8,6 +8,16 @@ jet in HGTD, the other anywhere inside |eta| < 3.8) the category stack (central-
 and the "where is the pileup leg" stack (central / inside HGTD) are drawn too. The mode is read from the
 trees' meta.
 
+Timing veto (--veto): after each BDT cut, the event vetoes of the earlier timing study (util/vbs_time_veto.cxx,
+python/vbs_time_veto_plot.py decisions(), reproduced here), on tdr_fwdpair's core jet time (needs trees with
+core_t / core_sig / core_n, commit 53d16c3 on):
+  jet vs jet  both legs timed: veto when |t_1 - t_2| / sqrt(s_1^2 + s_2^2) >= 3
+  jet vs t0   per t0 source: veto when a timed leg has |t_jet - t0| / sqrt(s_jet^2 + (infl sigma_t0)^2) >= 3
+s_jet = f(n) x sigma_jet, f(n) measured from the VBF file's hard-scatter forward legs (the MAD of
+(t_core - t_truth) / sigma per track-count bin, vbs_time_veto_common's NBINS; the global MAD below 20 legs);
+a leg is timed with >= 1 core track. Prints signal and Z+jets efficiencies of every veto at every BDT cut, and
+draws the stacks after BDT + each veto named in --veto-stacks.
+
   PYTHONNOUSERSITE=1 ~/.venv-hgtd/bin/python tdr_fwdpair_kinplots.py --sig <vbf>_tdr_fwdpair.root \\
       --bkg <zjets>_tdr_fwdpair.root --bdt <x>.npz --out ../figs/tdr/grid/fwdpair/grid_fwdpair_kin
 """
@@ -25,12 +35,16 @@ ap.add_argument("--bkg", required=True)
 ap.add_argument("--bdt", required=True)
 ap.add_argument("--effs", default="0.8,0.5,0.2")
 ap.add_argument("--stack-edges", default="0,1000,2000,4000")
+ap.add_argument("--veto", action="store_true", help="apply the timing vetoes after the BDT cuts")
+ap.add_argument("--veto-stacks", default="jj,waves", help="vetoes whose post-veto stacks are drawn")
+ap.add_argument("--nsigma", type=float, default=3.0)
 ap.add_argument("--out", required=True)
 args = ap.parse_args()
 R_ = S.setup()
 EDGES = np.array([float(x) for x in args.stack_edges.split(",")])
 ENERGY = "#sqrt{s} = 14 TeV, HL-LHC, #LT#mu#GT = 200"
 
+plain = lambda x: x.replace('#rightarrow', '->').replace('_{0}', '0').replace('#', '')
 D = np.load(args.bdt)
 samples = [("sig", "VBF H#rightarrowinv.", uproot.open(args.sig)["events"].arrays(library="np"), D["sig_score"]),
            ("bkg", "Z+jets", uproot.open(args.bkg)["events"].arrays(library="np"), D["bkg_score"])]
@@ -48,6 +62,49 @@ for key, lab, E, sc in samples:
 E0, s0 = samples[0][2], samples[0][3]
 o = np.argsort(-s0); cs = np.cumsum(E0["weight"][o]) / E0["weight"].sum()
 cuts = [(None, None)] + [(e, s0[o][np.searchsorted(cs, e)]) for e in (float(x) for x in args.effs.split(","))]
+
+NBINS = [1, 2, 3, 4, 6, 9, 10**6]                    # python/vbs_time_veto_common.py's
+VETOES = [("jj", "jet vs jet"), ("hgtd", "jet vs HGTD t_{0}"), ("trkptz", "jet vs TRKPTZ t_{0}"),
+          ("waves", "jet vs WAVeS t_{0}"), ("truth", "jet vs truth t_{0}")]
+
+
+def calibration(E):
+    """f(n): the MAD of (t_core - t_truth) / sigma over the hard-scatter forward legs, per core-track bin"""
+    p, n = [], []
+    for k in (1, 2):
+        m = (E[f"j{k}_hs"] == 1) & (E[f"j{k}_core_n"] > 0)
+        p.append((E[f"j{k}_core_t"][m] - E["t0_truth"][m]) / E[f"j{k}_core_sig"][m]); n.append(E[f"j{k}_core_n"][m])
+    p, n = np.concatenate(p), np.concatenate(n)
+    mad = lambda x: 1.4826 * float(np.median(np.abs(x)))
+    g = mad(p)
+    fac = [mad(p[(n >= lo) & (n < hi)]) if np.sum((n >= lo) & (n < hi)) >= 20 else g for lo, hi in zip(NBINS[:-1], NBINS[1:])]
+    print(f"jet-time calibration from {len(p):,} VBF hard-scatter legs: global {g:.3f}; per n bin " +
+          ", ".join(f"{lo}{'' if hi == lo + 1 else '+' if hi > 10**5 else f'-{hi - 1}'}: {f:.2f}" for (lo, hi), f in zip(zip(NBINS[:-1], NBINS[1:]), fac)))
+
+    def f(nn):
+        out = np.full(len(nn), g)
+        for (lo, hi), x in zip(zip(NBINS[:-1], NBINS[1:]), fac): out[(nn >= lo) & (nn < hi)] = x
+        return out
+    return f
+
+
+def vetoes(E, f, nsigma):
+    """kept[method] per event"""
+    t = {k: E[f"j{k}_core_t"] for k in (1, 2)}
+    sg = {k: f(E[f"j{k}_core_n"]) * E[f"j{k}_core_sig"] for k in (1, 2)}
+    h = {k: E[f"j{k}_core_n"] >= 1 for k in (1, 2)}
+    both = h[1] & h[2]
+    den = np.sqrt(np.where(both, sg[1] ** 2 + sg[2] ** 2, 1.0))
+    kept = {"jj": ~(both & (np.abs(t[1] - t[2]) / den >= nsigma))}
+    for s_ in ("hgtd", "trkptz", "waves", "truth"):
+        ok0, t0, s0 = E[f"ok_{s_}"].astype(bool), E[f"t0_{s_}"], E[f"infl_{s_}"] * E[f"sig0_{s_}"]
+        rej = np.zeros(len(t0), bool)
+        for k in (1, 2):
+            with np.errstate(invalid="ignore", divide="ignore"):
+                rej |= ok0 & h[k] & (np.abs(t[k] - t0) / np.sqrt(sg[k] ** 2 + s0 ** 2) >= nsigma)
+        kept[s_] = ~rej
+    return kept
+
 
 print(f"{'':28s} {'events':>7s} {'HS + HS':>15s} {'HS + PU':>15s} {'PU + PU':>15s} {'neither':>15s}")
 for key, lab, E, sc in samples:
@@ -79,3 +136,46 @@ for key, lab, E, sc in samples:
         ST.mjj_stack(R_, f"{args.out}_reach_mjj_stack{tag}_{key}", f"kin_reach{tag}_{key}", w, ok, E["mjj"],
                      [(t, m, c) for (t, c), m in zip(REACH, reach)], EDGES,
                      [f"{ENERGY}, {lab}", SEL, line], f"{lab.replace('#rightarrow', '->')} reach stack{tag}")
+
+if args.veto:
+    if "j1_core_n" not in samples[0][2]:
+        raise SystemExit("--veto needs trees with the core jet time (tdr_fwdpair from commit 53d16c3)")
+    f = calibration(samples[0][2])
+    K = {key: vetoes(E, f, args.nsigma) for key, lab, E, sc in samples}
+    draw = [v for v in args.veto_stacks.split(",") if v]
+    print(f"\nTiming vetoes at {args.nsigma:g} sigma after each BDT cut: efficiency relative to the cut (MC events kept / before); "
+          "S/sqrt(B) factor = eps_S / sqrt(eps_B)")
+    print(f"  {'cut':18s} {'veto':22s} {'VBF H->inv':>22s} {'Z+jets':>22s} {'S/sqrt(B)':>10s}")
+    for eff, thr in cuts:
+        base = {key: (np.ones(len(E["weight"]), bool) if thr is None else sc >= thr) for key, lab, E, sc in samples}
+        name = "selection" if eff is None else f"BDT eps_S = {eff:.0%}"
+        for v, vlab in VETOES:
+            r = {}
+            for key, lab, E, sc in samples:
+                w = E["weight"].astype(float); b = base[key]; k = b & K[key][v]
+                r[key] = (w[k].sum() / w[b].sum(), int(k.sum()), int(b.sum()))
+            fac = r["sig"][0] / np.sqrt(r["bkg"][0]) if r["bkg"][0] > 0 else np.inf
+            print(f"  {name:18s} {plain(vlab):22s} {r['sig'][0]:8.3f} ({r['sig'][1]:6d}/{r['sig'][2]:6d}) "
+                  f"{r['bkg'][0]:8.3f} ({r['bkg'][1]:5d}/{r['bkg'][2]:5d}) {fac:9.3f}")
+        tag = "" if eff is None else f"_bdt{round(100 * eff)}"
+        for v in draw:
+            vlab = dict(VETOES)[v]
+            for key, lab, E, sc in samples:
+                w = E["weight"].astype(float)
+                ok = base[key] & K[key][v]
+                if ok.sum() == 0: continue
+                nhs, npu = E["j1_hs"] + E["j2_hs"], E["j1_pu"] + E["j2_pu"]
+                groups = [nhs == 2, (nhs == 1) & (npu == 1), npu == 2, (nhs + npu) < 2]
+                line = ("before the BDT" if eff is None else f"BDT at #varepsilon_{{S}} = {100 * eff:.0f}%") + f", {vlab} veto"
+                ST.mjj_stack(R_, f"{args.out}_truth_mjj_stack{tag}_veto{v}_{key}", f"kin_truth{tag}_veto{v}_{key}", w, ok, E["mjj"],
+                             [(t_, m, c) for (t_, c), m in zip(ST.IDENT, groups)], EDGES,
+                             [f"{ENERGY}, {lab}", SEL, line], f"{plain(lab)} truth stack{tag} + {v} veto")
+                if ONE:
+                    fwd = lambda k: np.abs(E[f"j{k}_eta"]) > 2.4
+                    pu_hgtd = ((E["j1_pu"] == 1) & fwd(1)) | ((E["j2_pu"] == 1) & fwd(2))
+                    pu_cen = ~pu_hgtd & (((E["j1_pu"] == 1) & ~fwd(1)) | ((E["j2_pu"] == 1) & ~fwd(2)))
+                    reach = [(npu == 0) & (nhs == 2), pu_cen, pu_hgtd, (npu == 0) & (nhs < 2)]
+                    ST.mjj_stack(R_, f"{args.out}_reach_mjj_stack{tag}_veto{v}_{key}", f"kin_reach{tag}_veto{v}_{key}", w, ok, E["mjj"],
+                                 [(t_, m, c) for (t_, c), m in zip(REACH, reach)], EDGES,
+                                 [f"{ENERGY}, {lab}", SEL, line], f"{plain(lab)} reach stack{tag} + {v} veto")
+
