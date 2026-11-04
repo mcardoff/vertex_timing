@@ -1,4 +1,4 @@
-# The TDR-structured programs (prog = tdr_vbf | tdr_pujet | tdr_t0), one sample sharded $(nshards) ways.
+# The TDR-structured programs (prog = tdr_vbf | tdr_pujet | tdr_t0 | tdr_fwdpair), one sample sharded $(nshards) ways.
 # The TDR programs clean track times by default, which needs Track_hitInLastLayer:
 # the skims drop it, so pass the RAW ntuples through inputargs, e.g.
 #   condor_submit -a prog=tdr_vbf -a sample=zjets -a nshards=20 \

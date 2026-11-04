@@ -18,7 +18,7 @@ tagger replaces the ITk one at its own 85% working point, from tdr_pujet_plots.p
   <out>_reach_mjj_stack_<sig|bkg>  the same stack by WHERE the pair's pileup leg is: central (ITk only),
                   inside 2.4 < |eta| < 4.0 (the tracker and HGTD: timing can act), or only beyond |eta| = 4.0
                   (no tracks: no R_pT tagger can act)
-  <out>_sb_gain   TDR Fig 3.25 (needs --bkg): the S/B gain over the ITk-only preselection against the additional
+  <backup-out>_sb_gain   TDR Fig 3.25 (needs --bkg; backup: the user does not use the TDR figure, 2026-11-04): the S/B gain over the ITk-only preselection against the additional
                   pileup-jet rejection x = 1 - eps_PU(HGTD) / eps_PU(ITk), the TDR's parametrised way -- every
                   pileup leg HGTD acts on scales its event's weight by (1 - x), hard-scatter efficiency fixed
                   at 85%; for CF events only, FF only, and both, the rejection applied only to legs inside
@@ -433,5 +433,5 @@ if len(samples) > 1:
         m = S.style(S.graph([0], [0]), colour, mk, 1, 1, 1.7); leg2.AddEntry(m, f"{name}  ({xv:.2f})", "P")
     leg2.Draw()
     R_.gPad.RedrawAxis()
-    S.save(cv, f"{args.out}_sb_gain")
+    S.save(cv, f"{args.backup_out or args.out}_sb_gain")
     print("  measured x, forward > 50 GeV at 85%: " + ", ".join(f"{plain(n)} {x:.2f} (gain {np.interp(x, XS, ours['both']):.4f})" for _, n, _, _, x in XT))
