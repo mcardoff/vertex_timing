@@ -39,6 +39,8 @@ import tdr_root_style as S
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument("tree", help="tdr_pujet output")
 ap.add_argument("--label", default="VBF H#rightarrowinv.", help="sample, in ROOT TLatex")
+ap.add_argument("--roc-ymax", type=float, default=400.0,
+                help="the ROC panels' common y maximum (user's choice, 2026-11-04); 0 = the larger of the two panels' needs")
 ap.add_argument("--out", required=True)
 args = ap.parse_args()
 os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
@@ -104,6 +106,16 @@ SLICES = [("30 < p_{T} < 50 GeV", 30.0, 50.0), ("p_{T} > 50 GeV", 50.0, 1e9)]
 cv = S.keep(R.TCanvas("roc", "", 1600, 800))
 MAIN, RAT = 0.68, 0.32                     # pad heights: text sizes are scaled to match 0.05 of 600 px
 TS_M, TS_R = 0.05 * 600 / (800 * MAIN), 0.05 * 600 / (800 * RAT)
+def _need(lo, hi):
+    m = sel(lo, hi, 2.4, 4.0)
+    tops = []
+    for col, *_ in TAGGERS:
+        pe, perr = at_eff(J[col][m & (J["hs"] == 1)], J[col][m & (J["pu"] == 1)], EFF)
+        tops.append(np.nanmax(np.where(pe > 0, (1.0 + perr / pe) / pe, np.nan)))
+    frac = (0.87 - (2 + len(clean_line)) * 1.2 * TS_M - 0.012 - 0.02) / 0.936
+    return np.nanmax(tops) / frac
+_n = max(_need(lo, hi) for _, lo, hi in SLICES)
+SHARED_YMAX = (50.0 if _n > 200 else 25.0) * np.ceil(_n / (50.0 if _n > 200 else 25.0))
 print(f"{args.tree}: gate {gate:g} sigma, track-time cleaning {clean}, R_pT matching {match}\n\nrejection at matched hard-scatter efficiency, 2.4 < |eta| < 4.0 (ratio to ITk in brackets)")
 for c, (lab, lo, hi) in enumerate(SLICES):
     m = sel(lo, hi, 2.4, 4.0)
@@ -125,7 +137,7 @@ for c, (lab, lo, hi) in enumerate(SLICES):
     frac = (0.87 - n_lines * 1.2 * TS_M - 0.012 - 0.02) / 0.936
     need = np.nanmax([np.nanmax(r[0] + r[1]) for r in rows]) / frac   # error bars included: they stay under the header
     step = 50.0 if need > 200 else 25.0 if need > 100 else 10.0
-    ymax = step * np.ceil(need / step)
+    ymax = args.roc_ymax if args.roc_ymax > 0 else SHARED_YMAX
     rmax = np.ceil(1.1 * np.nanmax([np.nanmax(r[2]) for r in rows]) / 0.5) * 0.5
 
     cv.cd()
