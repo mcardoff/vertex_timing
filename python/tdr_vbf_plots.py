@@ -41,6 +41,7 @@ import numpy as np
 import uproot
 import tdr_root_style as S
 import tdr_vbf_common as C
+import tdr_stack as ST
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument("--sig", required=True, help="tdr_vbf output, VBF H->inv")
@@ -157,51 +158,12 @@ EDGES = np.array([float(x) for x in args.stack_edges.split(",")])
 
 def mjj_stack(key, lab, E, ok, mjj, bands, name, title, sel="VBF preselection, ITk-only R_{p_{T}} at 85%"):
     """bands: (legend, mask, colour), bottom to top; the masks must partition the selected events"""
-    w = E["weight"].astype(float)
-    xm = np.clip(mjj, EDGES[0], EDGES[-1] - 1e-6)            # overflow folded into the top bin
-    tot = np.histogram(xm[ok], EDGES, weights=w[ok])[0]
-    nraw = np.histogram(xm[ok], EDGES)[0]
-    assert sum(int(np.sum(ok & m)) for _, m, _ in bands) == int(ok.sum()), f"{name}: bands do not partition the events"
-    cv = S.keep(R_.TCanvas(f"{name}_{key}", "", 800, 800))
-    cv.cd(); S.pad(f"{name}_m_{key}", 0.0, RAT, 1.0, 1.0, top=0.05 / MAIN * 0.6, bottom=0.02)
-    st = S.keep(R_.THStack(f"st_{name}_{key}", ""))
-    hs = []
-    for k, (leg_txt, m, colour) in enumerate(bands):
-        h = S.keep(R_.TH1D(f"{name}_{key}_{k}", "", len(EDGES) - 1, EDGES))
-        part = np.histogram(xm[ok & m], EDGES, weights=w[ok & m])[0]
-        for b in range(len(EDGES) - 1):
-            h.SetBinContent(b + 1, part[b] / tot[b] if tot[b] > 0 else 0.0)
-        h.SetFillColor(S.colour(colour)); h.SetLineColor(R_.kBlack); h.SetLineWidth(1)
-        st.Add(h); hs.append((leg_txt, h))
-    fr = S.keep(R_.gPad.DrawFrame(EDGES[0], 0.0, EDGES[-1], 1.9))
-    S.axes(fr, "", "Fraction of events", size=TS_M, ytoff=1.35)
-    fr.GetXaxis().SetLabelSize(0); fr.GetYaxis().ChangeLabel(1, -1, 0)
-    st.Draw("HIST SAME")
-    nrow = (len(hs) + 1) // 2
-    leg = S.legend(0.20, 0.525, 0.93, 0.525 + 0.055 * nrow, size=0.7 * TS_M, ncol=2, margin=0.15)
-    for leg_txt, h in reversed(hs): leg.AddEntry(h, leg_txt, "F")
-    leg.Draw()
-    S.header(0.20, 0.87, [ENERGY + ", " + sample_line(lab), sel] + ([title] if title else []) + clean_line, size=TS_M)
-    R_.gPad.RedrawAxis()
-    cv.cd(); S.pad(f"{name}_r_{key}", 0.0, 0.0, 1.0, RAT, top=0.03, bottom=0.36)
-    R_.gPad.SetLogy()
-    hn = S.keep(R_.TH1D(f"{name}_n_{key}", "", len(EDGES) - 1, EDGES))
-    for b in range(len(EDGES) - 1): hn.SetBinContent(b + 1, nraw[b])
-    hn.SetFillColor(R_.TColor.GetColor("#DCE3EE")); hn.SetLineColor(R_.kBlack)
-    hn.SetMinimum(max(1.0, 0.3 * nraw[nraw > 0].min())); hn.SetMaximum(30.0 * nraw.max())
-    S.axes(hn, "m_{jj} [GeV]   (last bin includes overflow)", "Events", size=TS_R, ytoff=1.35 * TS_M / TS_R, xtoff=1.2)
-    hn.Draw("HIST")
-    t = R_.TLatex(); t.SetTextSize(0.55 * TS_R); t.SetTextAlign(21)
-    for b in range(len(EDGES) - 1):
-        S.keep(t.DrawLatex(0.5 * (EDGES[b] + EDGES[b + 1]), nraw[b] * 1.8, f"{nraw[b]}"))
-    print(f"  {plain(lab)} {name}, per m_jj bin (" + " / ".join(b[0].replace('#', '') for b in bands) + "): " +
-          "  ".join(f"[{EDGES[b]:.0f},{EDGES[b+1]:.0f}) " + "/".join(f"{100 * w[ok & m & (xm >= EDGES[b]) & (xm < EDGES[b + 1])].sum() / tot[b]:.0f}" for _, m, _ in bands)
-                    for b in range(len(EDGES) - 1) if tot[b] > 0))
-    S.save(cv, f"{args.out}_{name}_{key}")
+    ST.mjj_stack(R_, f"{args.out}_{name}_{key}", f"{name}_{key}", E["weight"], ok, mjj, bands, EDGES,
+                 [ENERGY + ", " + sample_line(lab), sel] + ([title] if title else []) + clean_line, f"{plain(lab)} {name}")
 
 
 # truth-identity colours: python/vbs_region_stack.py's
-IDENT = [("HS + HS (genuine pair)", "#7BCB6B"), ("HS + PU", "#F5A02A"), ("PU + PU", "#636363"), ("A leg carries neither label", "#C79BF5")]
+IDENT = ST.IDENT
 # pileup legs by reach (an event with a leg inside 2.4 < |eta| < 4.0 counts as reachable first)
 # |eta| < 2.4: ITk tracks only; 2.4-4.0: ITk and HGTD; >= 4.0: no tracks, no R_pT tagger can act
 REACH = [("HS + HS", "#7BCB6B"), ("PU leg at |#eta| < 2.4", "#B3231C"),
