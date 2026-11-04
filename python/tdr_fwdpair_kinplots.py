@@ -39,6 +39,8 @@ ap.add_argument("--stack-edges", default="0,1000,2000,4000")
 ap.add_argument("--veto", action="store_true", help="apply the timing vetoes after the BDT cuts")
 ap.add_argument("--veto-stacks", default="jj,waves", help="vetoes whose post-veto stacks are drawn")
 ap.add_argument("--nsigma", type=float, default=3.0)
+ap.add_argument("--summary", action="store_true", help="with --veto: <out>_veto_gain, the S/sqrt(B) factor of each veto "
+                "against the BDT cut (signal efficiency 1.0 = no BDT), the Z+jets MC events left below")
 ap.add_argument("--out", required=True)
 args = ap.parse_args()
 R_ = S.setup()
@@ -145,4 +147,57 @@ if args.veto:
                     ST.mjj_stack(R_, f"{args.out}_reach_mjj_stack{tag}_veto{v}_{key}", f"kin_reach{tag}_veto{v}_{key}", w, ok, E["mjj"],
                                  [(t_, m, c) for (t_, c), m in zip(REACH, reach)], EDGES,
                                  [f"{ENERGY}, {lab}", SEL, line], f"{plain(lab)} reach stack{tag} + {v} veto")
+
+if args.veto and args.summary:
+    # S/sqrt(B) factor of each veto, eps_S / sqrt(eps_B) relative to the BDT cut, against that cut
+    EFFS = np.round(np.arange(1.0, 0.249, -0.05), 2)
+    Es, ss = samples[0][2], samples[0][3]; Eb, sb = samples[1][2], samples[1][3]
+    ws_, wb_ = Es["weight"].astype(float), Eb["weight"].astype(float)
+    o_ = np.argsort(-ss); cs_ = np.cumsum(ws_[o_]) / ws_.sum()
+    ROWS = [("waves", "WAVeS t_{0}", S.COL["waves"], 20, 1), ("trkptz", "TRKPTZ t_{0}", S.COL["trkptz"], 21, 1),
+            ("hgtd", "HGTD t_{0}", S.COL["hgtd"], 23, 1), ("truth", "Truth t_{0}", S.COL["truth"], 25, 3),
+            ("jj", "Jet vs jet (no t_{0})", "kP10Violet", 33, 10)]
+    G, nB = {}, []
+    print("\nS/sqrt(B) factor of each veto against the BDT cut (signal efficiency): " + " ".join(f"{e:.2f}" for e in EFFS))
+    for v, name, colour, mk, ls in ROWS:
+        y, ey = [], []
+        for e in EFFS:
+            thr = -np.inf if e >= 1.0 else ss[o_][np.searchsorted(cs_, e)]
+            bS, bB = ss >= thr, sb >= thr
+            es_ = ws_[bS & K["sig"][v]].sum() / ws_[bS].sum()
+            wB = wb_[bB]; kB = K["bkg"][v][bB]
+            eb_ = wB[kB].sum() / wB.sum()
+            var = ((wB[kB] ** 2).sum() * (1 - eb_) ** 2 + (wB[~kB] ** 2).sum() * eb_ ** 2) / wB.sum() ** 2   # weighted binomial
+            fac = es_ / np.sqrt(eb_)
+            y.append(fac); ey.append(fac * 0.5 * np.sqrt(var) / eb_)
+            if v == "waves": nB.append(int(bB.sum()))
+        G[v] = (np.array(y), np.array(ey))
+        print(f"  {plain(name):24s} " + " ".join(f"{a:.3f}" for a in y))
+    MAIN_, RAT_ = 0.70, 0.30
+    cv = S.keep(R_.TCanvas("veto_gain", "", 800, 800))
+    cv.cd(); S.pad("vg_m", 0.0, RAT_, 1.0, 1.0, top=0.05 / MAIN_ * 0.6, bottom=0.02)
+    lo, hi = 0.7, 1.55
+    fr = S.keep(R_.gPad.DrawFrame(0.225, lo, 1.025, hi))
+    TS = 0.05 * 600 / (800 * MAIN_)
+    S.axes(fr, "", "S/#sqrt{B} with the veto / without", size=TS, ytoff=1.35)
+    fr.GetXaxis().SetLabelSize(0)
+    one = S.keep(R_.TLine(0.225, 1.0, 1.025, 1.0)); one.SetLineStyle(2); one.SetLineColor(R_.kGray + 2); one.Draw()
+    leg = S.legend(0.19, 0.05, 0.94, 0.23, size=0.68 * TS, ncol=2, margin=0.15)   # along the bottom: empty below the curves
+    for v, name, colour, mk, ls in ROWS:
+        y, ey = G[v]
+        g = S.style(S.graph(EFFS, y, ey), colour, mk, ls, 2, 1.2); g.Draw("LP SAME")
+        leg.AddEntry(g, name, "LP")
+    leg.SetHeader(f"{args.nsigma:g}#sigma timing veto:")
+    leg.Draw()
+    S.header(0.19, 0.88, [f"{ENERGY}", "VBF H#rightarrowinv. vs Z+jets", SEL, "After a kinematic VBF vs Z+jets BDT (j_{1}, j_{2})"], size=0.8 * TS)
+    R_.gPad.RedrawAxis()
+    cv.cd(); S.pad("vg_r", 0.0, 0.0, 1.0, RAT_, top=0.03, bottom=0.36)
+    R_.gPad.SetLogy()
+    TSR = 0.05 * 600 / (800 * RAT_)
+    hn = S.keep(R_.TGraph(len(EFFS)))
+    for i, (x, n_) in enumerate(zip(EFFS, nB)): hn.SetPoint(i, x, n_)
+    frn = S.keep(R_.gPad.DrawFrame(0.225, 10.0, 1.025, 3e4))
+    S.axes(frn, "Signal efficiency of the kinematic BDT cut (1 = no BDT)", "Z+jets MC", size=TSR, ytoff=1.35 * TS / TSR, xtoff=1.2)
+    S.style(hn, "#4D4D4D", 20, 1, 2, 1.0); hn.Draw("LP SAME")
+    S.save(cv, f"{args.out}_veto_gain")
 
