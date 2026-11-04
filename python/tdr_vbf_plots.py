@@ -13,6 +13,8 @@ tagger replaces the ITk one at its own 85% working point, from tdr_pujet_plots.p
                   panel: the events above each threshold
   <out>_cat_mjj_stack_<sig|bkg>  the same categories per m_jj bin, each column normalised to 1, the
                   event count underneath (python/vbs_region_stack.py's logic)
+  <out>_truth_mjj_stack_<sig|bkg>  the same stack by the truth identity of the VBF pair: HS + HS,
+                  HS + PU, PU + PU, or a leg with neither TDR label
   <out>_pupair    per category and tagger: the share of preselected events whose VBF pair (the two
                   leading surviving jets) contains a pileup jet (TDR labels) -- hatched where that
                   jet is at |eta| >= 4.0, beyond tracking and HGTD, where no R_pT tagger can act --
@@ -83,10 +85,11 @@ def thresholds(col):
 
 
 def select(E, col):
-    """per event: passes, m_jj, category, pileup jet in the pair, one beyond |eta| = 4.0 --
-    after dropping the jets failing `col`"""
+    """per event: passes, m_jj, category, pileup jet in the pair, one beyond |eta| = 4.0, and how many
+    of the pair are hard-scatter / pileup by the TDR labels -- after dropping the jets failing `col`"""
     n = len(E["weight"])
     ok = np.zeros(n, bool); mjj = np.zeros(n); cat = np.full(n, -1); pupair = np.zeros(n, bool); pu40 = np.zeros(n, bool)
+    nhs = np.zeros(n, int); npu = np.zeros(n, int)
     th = thresholds(col) if col else None
     for i in range(n):
         pt, eta, phi = E["jet_pt"][i], E["jet_eta"][i], E["jet_phi"][i]
@@ -109,7 +112,9 @@ def select(E, col):
         cat[i] = int(abs(eta[a]) > 2.4) + int(abs(eta[b]) > 2.4)
         pupair[i] = bool(E["jet_pu"][i][a] or E["jet_pu"][i][b])
         pu40[i] = any(E["jet_pu"][i][j] and abs(eta[j]) >= 4.0 for j in (a, b))
-    return ok, mjj, cat, pupair, pu40
+        nhs[i] = int(E["jet_hs"][i][a]) + int(E["jet_hs"][i][b])
+        npu[i] = int(E["jet_pu"][i][a]) + int(E["jet_pu"][i][b])
+    return ok, mjj, cat, pupair, pu40, nhs, npu
 
 
 samples = [("sig", args.sig_label, load(args.sig), 1)]
@@ -171,39 +176,45 @@ for key, lab, E, ls in samples:
     S.style(S.graph(X, counts[key].astype(float)), "#555555", 0, ls, 2).Draw("L SAME")
 S.save(cv, f"{args.out}_cat_mjj")
 
-# ── companion: the same categories per m_jj bin, each column normalised to 1 ──
-# The vbs_region_stack.py logic (a column per m_jj bin, normalised to 1, the event count underneath)
-# applied to the TDR preselection's CC / CF / FF categories.
+# ── companions: per m_jj bin, each column normalised to 1 (vbs_region_stack.py's logic) ──
+# A column per m_jj bin, normalised to 1, the event count underneath. Two band sets: the TDR
+# preselection's CC / CF / FF categories, and the truth identity of the VBF pair (the two leading
+# jets left by the ITk-only tagger) by the TDR labels -- HS within dR < 0.3 of a truth jet > 10 GeV,
+# PU beyond dR > 0.6 of every truth jet > 4 GeV, and a leg that is neither.
 EDGES = np.array([0, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500, 3000, 4000], float)
-for key, lab, E, ls in samples:
-    ok, mjj, cat, *_ = R[key, "rpt_itk"]
+
+
+def mjj_stack(key, lab, E, ok, mjj, bands, name, title):
+    """bands: (legend, mask, colour), bottom to top; the masks must partition the selected events"""
     w = E["weight"].astype(float)
     xm = np.clip(mjj, EDGES[0], EDGES[-1] - 1e-6)            # overflow folded into the top bin
     tot = np.histogram(xm[ok], EDGES, weights=w[ok])[0]
     nraw = np.histogram(xm[ok], EDGES)[0]
-    cv = S.keep(R_.TCanvas(f"catstack_{key}", "", 800, 800))
-    cv.cd(); S.pad(f"cs_m_{key}", 0.0, RAT, 1.0, 1.0, top=0.05 / MAIN * 0.6, bottom=0.02)
-    st = S.keep(R_.THStack(f"st_{key}", ""))
+    assert sum(int(np.sum(ok & m)) for _, m, _ in bands) == int(ok.sum()), f"{name}: bands do not partition the events"
+    cv = S.keep(R_.TCanvas(f"{name}_{key}", "", 800, 800))
+    cv.cd(); S.pad(f"{name}_m_{key}", 0.0, RAT, 1.0, 1.0, top=0.05 / MAIN * 0.6, bottom=0.02)
+    st = S.keep(R_.THStack(f"st_{name}_{key}", ""))
     hs = []
-    for c, name in enumerate(CATS):
-        h = S.keep(R_.TH1D(f"cs_{key}_{name}", "", len(EDGES) - 1, EDGES))
-        part = np.histogram(xm[ok & (cat == c)], EDGES, weights=w[ok & (cat == c)])[0]
+    for k, (leg_txt, m, colour) in enumerate(bands):
+        h = S.keep(R_.TH1D(f"{name}_{key}_{k}", "", len(EDGES) - 1, EDGES))
+        part = np.histogram(xm[ok & m], EDGES, weights=w[ok & m])[0]
         for b in range(len(EDGES) - 1):
             h.SetBinContent(b + 1, part[b] / tot[b] if tot[b] > 0 else 0.0)
-        h.SetFillColor(S.colour(CC[name])); h.SetLineColor(R_.kBlack); h.SetLineWidth(1)
-        st.Add(h); hs.append((name, h))
-    fr = S.keep(R_.gPad.DrawFrame(EDGES[0], 0.0, EDGES[-1], 1.6))
+        h.SetFillColor(S.colour(colour)); h.SetLineColor(R_.kBlack); h.SetLineWidth(1)
+        st.Add(h); hs.append((leg_txt, h))
+    fr = S.keep(R_.gPad.DrawFrame(EDGES[0], 0.0, EDGES[-1], 1.9))
     S.axes(fr, "", "Fraction of events", size=TS_M, ytoff=1.35)
     fr.GetXaxis().SetLabelSize(0); fr.GetYaxis().ChangeLabel(1, -1, 0)
     st.Draw("HIST SAME")
-    leg = S.legend(0.62, 0.72, 0.93, 0.90, size=0.75 * TS_M)
-    for name, h in reversed(hs): leg.AddEntry(h, CNAME[name], "F")
+    nrow = (len(hs) + 1) // 2
+    leg = S.legend(0.20, 0.525, 0.93, 0.525 + 0.055 * nrow, size=0.7 * TS_M, ncol=2, margin=0.15)
+    for leg_txt, h in reversed(hs): leg.AddEntry(h, leg_txt, "F")
     leg.Draw()
-    S.header(0.20, 0.87, [ENERGY, sample_line(lab), "VBF preselection, ITk-only R_{p_{T}} at 85%"] + clean_line, size=TS_M)
+    S.header(0.20, 0.87, [ENERGY + ", " + sample_line(lab), "VBF preselection, ITk-only R_{p_{T}} at 85%", title] + clean_line, size=TS_M)
     R_.gPad.RedrawAxis()
-    cv.cd(); S.pad(f"cs_r_{key}", 0.0, 0.0, 1.0, RAT, top=0.03, bottom=0.36)
+    cv.cd(); S.pad(f"{name}_r_{key}", 0.0, 0.0, 1.0, RAT, top=0.03, bottom=0.36)
     R_.gPad.SetLogy()
-    hn = S.keep(R_.TH1D(f"cs_n_{key}", "", len(EDGES) - 1, EDGES))
+    hn = S.keep(R_.TH1D(f"{name}_n_{key}", "", len(EDGES) - 1, EDGES))
     for b in range(len(EDGES) - 1): hn.SetBinContent(b + 1, nraw[b])
     hn.SetFillColor(R_.TColor.GetColor("#DCE3EE")); hn.SetLineColor(R_.kBlack)
     hn.SetMinimum(max(1.0, 0.3 * nraw[nraw > 0].min())); hn.SetMaximum(30.0 * nraw.max())
@@ -212,8 +223,21 @@ for key, lab, E, ls in samples:
     t = R_.TLatex(); t.SetTextSize(0.55 * TS_R); t.SetTextAlign(21)
     for b in range(len(EDGES) - 1):
         S.keep(t.DrawLatex(0.5 * (EDGES[b] + EDGES[b + 1]), nraw[b] * 1.8, f"{nraw[b]}"))
-    print(f"  {plain(lab)} per m_jj bin " + " ".join(f"[{EDGES[b]:.0f},{EDGES[b+1]:.0f}) {nraw[b]}" for b in range(len(EDGES) - 1)))
-    S.save(cv, f"{args.out}_cat_mjj_stack_{key}")
+    print(f"  {plain(lab)} {name}, per m_jj bin (" + " / ".join(b[0].replace('#', '') for b in bands) + "): " +
+          "  ".join(f"[{EDGES[b]:.0f},{EDGES[b+1]:.0f}) " + "/".join(f"{100 * w[ok & m & (xm >= EDGES[b]) & (xm < EDGES[b + 1])].sum() / tot[b]:.0f}" for _, m, _ in bands)
+                    for b in range(len(EDGES) - 1) if tot[b] > 0))
+    S.save(cv, f"{args.out}_{name}_{key}")
+
+
+# truth-identity colours: python/vbs_region_stack.py's
+IDENT = [("HS + HS (genuine pair)", "#7BCB6B"), ("HS + PU", "#F5A02A"), ("PU + PU", "#636363"), ("A leg carries neither label", "#C79BF5")]
+for key, lab, E, ls in samples:
+    ok, mjj, cat, _, _, nhs, npu = R[key, "rpt_itk"]
+    mjj_stack(key, lab, E, ok, mjj, [(CNAME[n], cat == c, CC[n]) for c, n in enumerate(CATS)],
+              "cat_mjj_stack", "Forward: |#eta| > 2.4")
+    ident = [nhs == 2, (nhs == 1) & (npu == 1), npu == 2, (nhs + npu) < 2]
+    mjj_stack(key, lab, E, ok, mjj, [(t, m, c) for (t, c), m in zip(IDENT, ident)],
+              "truth_mjj_stack", "VBF pair = the two leading jets")
 
 # ── pileup jets in the VBF pair, per category and tagger ──────────────────────
 LABELS = ["Central-central", "Central-forward", "Forward-forward"]
@@ -224,7 +248,7 @@ for key, lab, E, _ in samples:
     print(f"\n{plain(lab)}: per category -- events (weighted share with a pileup jet in the pair; of which beyond |eta| 4.0) [relative to ITk only]")
     print("  " + f"{'tagger':40s}" + "".join(f"{c:>30s}" for c in CATS))
     for col, name, colour, mk in TAGGERS:
-        ok, _, cat, pp, p40 = R[key, col]
+        ok, _, cat, pp, p40, *_ = R[key, col]
         frac, f40, err, rel, rerr, line = [], [], [], [], [], ""
         for c in range(3):
             m = ok & (cat == c)
