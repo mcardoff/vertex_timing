@@ -38,10 +38,8 @@ ap.add_argument("--effs", default="0.8,0.5,0.2")
 ap.add_argument("--stack-edges", default="0,1000,2000,4000")
 ap.add_argument("--veto", action="store_true", help="apply the timing vetoes after the BDT cuts")
 ap.add_argument("--veto-stacks", default="jj,waves", help="vetoes whose post-veto stacks are drawn")
-ap.add_argument("--mjj2-leg-sqrt", type=lambda t: tuple(float(x) for x in t.split(",")), default=(0.19, 0.42, 0.52, 0.645),
-                help="x1,y1,x2,y2 (NDC) of the compact S/sqrt(B) m_jj figures' legend")
-ap.add_argument("--mjj2-leg-sb", type=lambda t: tuple(float(x) for x in t.split(",")), default=(0.19, 0.42, 0.52, 0.645),
-                help="likewise for the compact S/B figures")
+ap.add_argument("--mjj2-leg", type=lambda t: tuple(float(x) for x in t.split(",")), default=(0.61, 0.69, 0.94, 0.935),
+                help="x1,y1,x2,y2 (NDC) of the compact m_jj figures' legend (default: the top-right corner)")
 ap.add_argument("--nsigma", type=float, default=3.0)
 ap.add_argument("--summary", action="store_true", help="with --veto: <out>_veto_gain, the S/sqrt(B) factor of each veto "
                 "against the BDT cut (signal efficiency 1.0 = no BDT), the Z+jets MC events left below")
@@ -235,8 +233,20 @@ if args.veto and args.summary:
     xs_, xb_ = np.clip(Es["mjj"], EDGES[0], EDGES[-1] - 1e-6), np.clip(Eb["mjj"], EDGES[0], EDGES[-1] - 1e-6)
     ncol = len(EDGES) - 1
 
+    def mjj_extent(fac, rows, edges, emj):
+        """the lowest and highest point (change in %, +- its error) draw_mjj would draw"""
+        E_ = np.asarray(edges, float)
+        bS_, bB_ = (np.ones(len(ss), bool), np.ones(len(sb), bool)) if emj is None else (ss >= thr_of(emj), sb >= thr_of(emj))
+        xs__, xb__ = np.clip(Es["mjj"], E_[0], E_[-1] - 1e-6), np.clip(Eb["mjj"], E_[0], E_[-1] - 1e-6)
+        pts = []
+        for v, *_ in rows:
+            for c in range(len(E_) - 1):
+                f_, ef_ = fac(*veto_effs(v, bS_ & (xs__ >= E_[c]) & (xs__ < E_[c + 1]), bB_ & (xb__ >= E_[c]) & (xb__ < E_[c + 1])))
+                pts += [100 * (f_ - 1) - 100 * ef_, 100 * (f_ - 1) + 100 * ef_]
+        return min(pts), max(pts)
+
     def draw_mjj(stem, what, ytitle, fac, cap, legpos=(0.19, 0.39, 0.50, 0.645), legsize=0.6, rows=ROWS, edges=EDGES, emj=EMJ,
-                 clear_legend=False):
+                 clear_legend=False, ylim=None):
         """fac(eps_S, eps_B, var(eps_B)) -> (factor, its error); drawn as a change in %. rows: the vetoes drawn; edges: the
         m_jj columns (the last includes overflow); emj: the BDT cut's signal efficiency, None for no BDT"""
         ROWS, EDGES, EMJ = rows, np.asarray(edges, float), emj
@@ -257,7 +267,9 @@ if args.veto and args.summary:
         bot = min(min(a - e for a, e in vals[v][0]) for v in vals)
         # room above the first two columns for the legend; the last column (few Z+jets MC events) may be clipped
         lo_, hi_ = min(-20.0, 10 * np.floor(bot / 10) - 10), max(100.0, min(cap, 10 * np.ceil((top + 30) / 10)))
-        if clear_legend:   # raise the frame until every point left of the legend's right edge sits below it
+        if ylim is not None:                             # a range shared with a companion figure
+            lo_, hi_ = ylim
+        elif clear_legend:   # raise the frame until every point left of the legend's right edge sits below it
             xpt = lambda k, c: EDGES[c] + (EDGES[c + 1] - EDGES[c]) * (k + 1) / (len(ROWS) + 1)
             x2 = EDGES[0] + (legpos[2] - 0.16) / (1 - 0.16 - 0.05) * (EDGES[-1] - EDGES[0])   # the pad's margins
             tl_ = max(vals[v][0][c][0] + vals[v][0][c][1] for k, (v, *_) in enumerate(ROWS) for c in range(ncol) if xpt(k, c) < x2)
@@ -320,14 +332,24 @@ if args.veto and args.summary:
              legpos=(0.565, 0.37, 0.93, 0.62), legsize=0.55)            # upper right: column 3's points are low or off scale
     # the compact pair (the advisor's request via the user, 2026-11-05): no BDT and the 80% cut side by side; WAVeS, the
     # truth t0, jet vs jet and the perfect veto only; m_jj < 1 TeV and > 1 TeV (the 15-event > 2 TeV column merged in)
+    # One y range per quantity, shared by the no-BDT and BDT figures so they read on the same scale (the user,
+    # 2026-11-05), with the legend in the top-right corner: the frame is tall enough that every point sits below
+    # the header and the legend (the top ~35% of the frame).
     ROWS4 = [r for r in ROWS if r[0] in ("waves", "truth", "jj", "perfect")]
-    for emj_, tag_ in ((None, "nobdt"), (EMJ, f"bdt{round(100 * EMJ)}")):
-        draw_mjj(f"veto_mjj2_{tag_}", "S/sqrt(B)", "S/#sqrt{B} change vs no veto [%]",
-                 lambda es_, eb_, var: (es_ / np.sqrt(eb_), es_ / np.sqrt(eb_) * 0.5 * np.sqrt(var) / eb_), 1000.0,
-                 legpos=args.mjj2_leg_sqrt, rows=ROWS4, edges=[0.0, 1000.0, 4000.0], emj=emj_, clear_legend=True)
-        draw_mjj(f"veto_mjj2_sb_{tag_}", "S/B", "S/B change vs no veto [%]",
-                 lambda es_, eb_, var: (es_ / eb_, es_ / eb_ * np.sqrt(var) / eb_), 1000.0,
-                 legpos=args.mjj2_leg_sb, rows=ROWS4, edges=[0.0, 1000.0, 4000.0], emj=emj_, clear_legend=True)
+    E2 = [0.0, 1000.0, 4000.0]
+    for stem_, what_, ytitle_, fac_ in (
+            ("veto_mjj2", "S/sqrt(B)", "S/#sqrt{B} change vs no veto [%]",
+             lambda es_, eb_, var: (es_ / np.sqrt(eb_), es_ / np.sqrt(eb_) * 0.5 * np.sqrt(var) / eb_)),
+            ("veto_mjj2_sb", "S/B", "S/B change vs no veto [%]",
+             lambda es_, eb_, var: (es_ / eb_, es_ / eb_ * np.sqrt(var) / eb_))):
+        ext = [mjj_extent(fac_, ROWS4, E2, e_) for e_ in (None, EMJ)]
+        lo_s = min(-20.0, 10 * np.floor(min(a for a, _ in ext) / 10) - 10)
+        top_s = max(b for _, b in ext)
+        step = 50.0 if top_s < 300 else 100.0
+        hi_s = step * np.ceil((lo_s + (top_s - lo_s) / 0.62) / step)
+        for emj_, tag_ in ((None, "nobdt"), (EMJ, f"bdt{round(100 * EMJ)}")):
+            draw_mjj(f"{stem_}_{tag_}", what_, ytitle_, fac_, 1e9, legpos=args.mjj2_leg, legsize=0.52,
+                     rows=ROWS4, edges=E2, emj=emj_, ylim=(lo_s, hi_s))
 
 if args.summary:
     # the kinematic BDT's held-out score distributions, unit area (weighted), with the cuts of the analysis
