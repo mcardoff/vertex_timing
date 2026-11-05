@@ -224,72 +224,84 @@ if args.veto and args.summary:
     draw_gain("veto_sb", "S/B with the veto / without",
               lambda es_, eb_, var: (es_ / eb_, es_ / eb_ * np.sqrt(var) / eb_), 0.0, 5.5, "S/B")   # from 0: the legend sits below every curve
 
-    # the money-plot style: the S/sqrt(B) change of each veto per m_jj column, at one BDT cut
+    # the money-plot style: the S/sqrt(B) (<out>_veto_mjj) and S/B (<out>_veto_mjj_sb, the user's request 2026-11-05:
+    # "a percent just like" the S/sqrt(B) one) change of each veto per m_jj column, at one BDT cut
     EMJ = 0.8                                            # the loosest cut, as the "what the veto removes" slides
     bS, bB = ss >= thr_of(EMJ), sb >= thr_of(EMJ)
     xs_, xb_ = np.clip(Es["mjj"], EDGES[0], EDGES[-1] - 1e-6), np.clip(Eb["mjj"], EDGES[0], EDGES[-1] - 1e-6)
     ncol = len(EDGES) - 1
-    cvm = S.keep(R_.TCanvas("veto_mjj", "", 800, 800))
-    cvm.cd(); S.pad("vm_m", 0.0, RAT_, 1.0, 1.0, top=0.05 / MAIN_ * 0.6, bottom=0.02)
-    vals = {}
-    for v, *_ in ROWS:
-        out = []
-        for c in range(ncol):
-            inS = bS & (xs_ >= EDGES[c]) & (xs_ < EDGES[c + 1]); inB = bB & (xb_ >= EDGES[c]) & (xb_ < EDGES[c + 1])
-            es_, eb_, var = veto_effs(v, inS, inB)
-            f_ = es_ / np.sqrt(eb_)
-            out.append((100 * (f_ - 1), 100 * f_ * 0.5 * np.sqrt(var) / eb_))
-        es_, eb_, var = veto_effs(v, bS, bB)
-        vals[v] = (out, 100 * (es_ / np.sqrt(eb_) - 1))
-    top = max(max(a + e for a, e in vals[v][0]) for v in vals)
-    bot = min(min(a - e for a, e in vals[v][0]) for v in vals)
-    # room above the first two columns for the legend; the last column (few Z+jets MC events) may be clipped
-    lo_, hi_ = min(-20.0, 10 * np.floor(bot / 10) - 10), max(100.0, min(260.0, 10 * np.ceil((top + 30) / 10)))
-    frm = S.keep(R_.gPad.DrawFrame(EDGES[0], lo_, EDGES[-1], hi_))
-    S.axes(frm, "", "S/#sqrt{B} change vs no veto [%]", size=TS, ytoff=1.35)
-    frm.GetXaxis().SetLabelSize(0)
-    zero = S.keep(R_.TLine(EDGES[0], 0.0, EDGES[-1], 0.0)); zero.SetLineStyle(2); zero.SetLineColor(R_.kGray + 2); zero.Draw()
-    for c in range(1, ncol):
-        ln = S.keep(R_.TLine(EDGES[c], lo_, EDGES[c], hi_)); ln.SetLineStyle(3); ln.SetLineColor(R_.kGray + 1); ln.Draw()
-    legm = S.legend(0.19, 0.39, 0.50, 0.645, size=0.6 * TS, margin=0.18)   # above column 1, below the header, left of the ceiling's column-2 point
-    print(f"\nS/sqrt(B) change [%] per m_jj column at the BDT cut eps_S = {EMJ:.0%}: " +
-          ", ".join(f"[{EDGES[c]:.0f},{EDGES[c + 1]:.0f})" for c in range(ncol)) + "; all")
-    for k, (v, name, colour, mk, ls) in enumerate(ROWS):
-        xs = [EDGES[c] + (EDGES[c + 1] - EDGES[c]) * (k + 1) / (len(ROWS) + 1) for c in range(ncol)]
-        g = S.style(S.graph(np.array(xs), np.array([a for a, _ in vals[v][0]]), np.array([e for _, e in vals[v][0]])), colour, mk, 1, 2, 1.3)
-        g.Draw("P SAME")                                 # points with errors, no lines: the columns are independent
-        legm.AddEntry(g, f"{name} ({vals[v][1]:+.0f}%)", "PE")
-        print(f"  {plain(name):24s} " + " ".join(f"{a:+6.1f} +- {e:4.1f}" for a, e in vals[v][0]) + f"   all {vals[v][1]:+.1f}")
-    legm.SetHeader(f"{args.nsigma:g}#sigma timing veto (all m_{{jj}}):")
-    legm.Draw()
-    S.header(0.19, 0.88, [f"{ENERGY}", "S: VBF H#rightarrowinv., B: Z+jets", "#geq 1 VBS jet in HGTD" + (f", JVT + fJVT {JVT_WP}" if JVT_WP != "none" else ""),
-                          f"BDT at #varepsilon_{{S}} = {100 * EMJ:.0f}%, then the veto"], size=0.8 * TS)   # short: clear of column 3
-    R_.gPad.RedrawAxis()
-    cvm.cd(); S.pad("vm_r", 0.0, 0.0, 1.0, RAT_, top=0.03, bottom=0.36)
-    stk = S.keep(R_.THStack("vm_stack", ""))
-    hmax = 0.0
-    for ctxt, cat_, colour in (CATS[1], CATS[0]) if ONE else ():   # (name, cat, colour): FF stacked under CF
-        h = S.keep(R_.TH1D(f"vm_{cat_}", "", ncol, EDGES))
-        for c in range(ncol):
-            nS_ = np.sum(bS & (Es["cat"] == cat_) & (xs_ >= EDGES[c]) & (xs_ < EDGES[c + 1]))
-            nB_ = np.sum(bB & (Eb["cat"] == cat_) & (xb_ >= EDGES[c]) & (xb_ < EDGES[c + 1]))
-            h.SetBinContent(c + 1, (nS_ + nB_) / 1000.0)
-        h.SetFillColor(S.colour(colour)); h.SetLineColor(R_.kBlack); stk.Add(h)
-    tot = [(np.sum(bS & (xs_ >= EDGES[c]) & (xs_ < EDGES[c + 1])), np.sum(bB & (xb_ >= EDGES[c]) & (xb_ < EDGES[c + 1]))) for c in range(ncol)]
-    hmax = max((a + b) / 1000.0 for a, b in tot)
-    frr = S.keep(R_.gPad.DrawFrame(EDGES[0], 0.0, EDGES[-1], 1.9 * hmax))
-    S.axes(frr, "m_{jj} [GeV]   (last bin includes overflow)", "S + B MC [10^{3}]", size=TSR, ytoff=1.35 * TS / TSR, xtoff=1.2, ndiv_y=503)
-    stk.Draw("HIST SAME")
-    legr = S.legend(0.19, 0.74, 0.94, 0.90, size=0.7 * TSR, ncol=3, margin=0.2)
-    for h in reversed(list(stk.GetHists())):
-        legr.AddEntry(h, "Central-forward" if h.GetName() == "vm_1" else "Forward-forward", "F")
-    legr.AddEntry(S.keep(R_.TH1D("vm_dummy", "", 1, 0, 1)), "numbers: S / B MC", "")
-    legr.Draw()
-    tl = R_.TLatex(); tl.SetTextSize(0.6 * TSR); tl.SetTextAlign(21)
-    for c, (a, b) in enumerate(tot):
-        S.keep(tl.DrawLatex(0.5 * (EDGES[c] + EDGES[c + 1]), (a + b) / 1000.0 + 0.08 * hmax, f"{a / 1000:.1f}k / {b}"))
-    R_.gPad.RedrawAxis()
-    S.save(cvm, f"{args.out}_veto_mjj")
+
+    def draw_mjj(stem, what, ytitle, fac, cap, legpos=(0.19, 0.39, 0.50, 0.645), legsize=0.6):
+        """fac(eps_S, eps_B, var(eps_B)) -> (factor, its error); drawn as a change in %"""
+        cvm = S.keep(R_.TCanvas(stem, "", 800, 800))
+        cvm.cd(); S.pad(stem + "_m", 0.0, RAT_, 1.0, 1.0, top=0.05 / MAIN_ * 0.6, bottom=0.02)
+        vals = {}
+        for v, *_ in ROWS:
+            out = []
+            for c in range(ncol):
+                inS = bS & (xs_ >= EDGES[c]) & (xs_ < EDGES[c + 1]); inB = bB & (xb_ >= EDGES[c]) & (xb_ < EDGES[c + 1])
+                f_, ef_ = fac(*veto_effs(v, inS, inB))
+                out.append((100 * (f_ - 1), 100 * ef_))
+            vals[v] = (out, 100 * (fac(*veto_effs(v, bS, bB))[0] - 1))
+        top = max(max(a + e for a, e in vals[v][0]) for v in vals)
+        bot = min(min(a - e for a, e in vals[v][0]) for v in vals)
+        # room above the first two columns for the legend; the last column (few Z+jets MC events) may be clipped
+        lo_, hi_ = min(-20.0, 10 * np.floor(bot / 10) - 10), max(100.0, min(cap, 10 * np.ceil((top + 30) / 10)))
+        frm = S.keep(R_.gPad.DrawFrame(EDGES[0], lo_, EDGES[-1], hi_))
+        S.axes(frm, "", ytitle, size=TS, ytoff=1.35)
+        frm.GetXaxis().SetLabelSize(0)
+        zero = S.keep(R_.TLine(EDGES[0], 0.0, EDGES[-1], 0.0)); zero.SetLineStyle(2); zero.SetLineColor(R_.kGray + 2); zero.Draw()
+        for c in range(1, ncol):
+            ln = S.keep(R_.TLine(EDGES[c], lo_, EDGES[c], hi_)); ln.SetLineStyle(3); ln.SetLineColor(R_.kGray + 1); ln.Draw()
+        legm = S.legend(*legpos, size=legsize * TS, margin=0.18)   # default: above column 1, below the header, left of the ceiling's column-2 point
+        print(f"\n{what} change [%] per m_jj column at the BDT cut eps_S = {EMJ:.0%}: " +
+              ", ".join(f"[{EDGES[c]:.0f},{EDGES[c + 1]:.0f})" for c in range(ncol)) + "; all")
+        for k, (v, name, colour, mk, ls) in enumerate(ROWS):
+            xs = [EDGES[c] + (EDGES[c + 1] - EDGES[c]) * (k + 1) / (len(ROWS) + 1) for c in range(ncol)]
+            g = S.style(S.graph(np.array(xs), np.array([a for a, _ in vals[v][0]]), np.array([e for _, e in vals[v][0]])), colour, mk, 1, 2, 1.3)
+            g.Draw("P SAME")                                 # points with errors, no lines: the columns are independent
+            legm.AddEntry(g, f"{name} ({vals[v][1]:+.0f}%)", "PE")
+            print(f"  {plain(name):24s} " + " ".join(f"{a:+6.1f} +- {e:4.1f}" for a, e in vals[v][0]) + f"   all {vals[v][1]:+.1f}")
+        legm.SetHeader(f"{args.nsigma:g}#sigma timing veto (all m_{{jj}}):")
+        legm.Draw()
+        ta = R_.TLatex(); ta.SetTextSize(0.5 * TS); ta.SetTextAlign(23); ta.SetTextColor(R_.kGray + 2)
+        for c in range(ncol):                            # say so when a column's points are above the frame
+            n_off = sum(vals[v][0][c][0] > hi_ for v, *_ in ROWS)
+            if n_off: S.keep(ta.DrawLatex(0.5 * (EDGES[c] + EDGES[c + 1]), hi_ - 0.03 * (hi_ - lo_), f"#uparrow {n_off} of {len(ROWS)} off scale"))
+        S.header(0.19, 0.88, [f"{ENERGY}", "S: VBF H#rightarrowinv., B: Z+jets", "#geq 1 VBS jet in HGTD" + (f", JVT + fJVT {JVT_WP}" if JVT_WP != "none" else ""),
+                              f"BDT at #varepsilon_{{S}} = {100 * EMJ:.0f}%, then the veto"], size=0.8 * TS)   # short: clear of column 3
+        R_.gPad.RedrawAxis()
+        cvm.cd(); S.pad(stem + "_r", 0.0, 0.0, 1.0, RAT_, top=0.03, bottom=0.36)
+        stk = S.keep(R_.THStack(stem + "_stack", ""))
+        hmax = 0.0
+        for ctxt, cat_, colour in (CATS[1], CATS[0]) if ONE else ():   # (name, cat, colour): FF stacked under CF
+            h = S.keep(R_.TH1D(f"{stem}_{cat_}", "", ncol, EDGES))
+            for c in range(ncol):
+                nS_ = np.sum(bS & (Es["cat"] == cat_) & (xs_ >= EDGES[c]) & (xs_ < EDGES[c + 1]))
+                nB_ = np.sum(bB & (Eb["cat"] == cat_) & (xb_ >= EDGES[c]) & (xb_ < EDGES[c + 1]))
+                h.SetBinContent(c + 1, (nS_ + nB_) / 1000.0)
+            h.SetFillColor(S.colour(colour)); h.SetLineColor(R_.kBlack); stk.Add(h)
+        tot = [(np.sum(bS & (xs_ >= EDGES[c]) & (xs_ < EDGES[c + 1])), np.sum(bB & (xb_ >= EDGES[c]) & (xb_ < EDGES[c + 1]))) for c in range(ncol)]
+        hmax = max((a + b) / 1000.0 for a, b in tot)
+        frr = S.keep(R_.gPad.DrawFrame(EDGES[0], 0.0, EDGES[-1], 1.9 * hmax))
+        S.axes(frr, "m_{jj} [GeV]   (last bin includes overflow)", "S + B MC [10^{3}]", size=TSR, ytoff=1.35 * TS / TSR, xtoff=1.2, ndiv_y=503)
+        stk.Draw("HIST SAME")
+        legr = S.legend(0.19, 0.74, 0.94, 0.90, size=0.7 * TSR, ncol=3, margin=0.2)
+        for h in reversed(list(stk.GetHists())):
+            legr.AddEntry(h, "Central-forward" if h.GetName() == f"{stem}_1" else "Forward-forward", "F")
+        legr.AddEntry(S.keep(R_.TH1D(stem + "_dummy", "", 1, 0, 1)), "numbers: S / B MC", "")
+        legr.Draw()
+        tl = R_.TLatex(); tl.SetTextSize(0.6 * TSR); tl.SetTextAlign(21)
+        for c, (a, b) in enumerate(tot):
+            S.keep(tl.DrawLatex(0.5 * (EDGES[c] + EDGES[c + 1]), (a + b) / 1000.0 + 0.08 * hmax, f"{a / 1000:.1f}k / {b}"))
+        R_.gPad.RedrawAxis()
+        S.save(cvm, f"{args.out}_{stem}")
+
+    draw_mjj("veto_mjj", "S/sqrt(B)", "S/#sqrt{B} change vs no veto [%]",
+             lambda es_, eb_, var: (es_ / np.sqrt(eb_), es_ / np.sqrt(eb_) * 0.5 * np.sqrt(var) / eb_), 260.0)
+    draw_mjj("veto_mjj_sb", "S/B", "S/B change vs no veto [%]",
+             lambda es_, eb_, var: (es_ / eb_, es_ / eb_ * np.sqrt(var) / eb_), 420.0,
+             legpos=(0.565, 0.37, 0.93, 0.62), legsize=0.55)            # upper right: column 3's points are low or off scale
 
 if args.summary:
     # the kinematic BDT's held-out score distributions, unit area (weighted), with the cuts of the analysis
