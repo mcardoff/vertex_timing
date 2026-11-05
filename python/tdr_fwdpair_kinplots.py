@@ -73,7 +73,13 @@ o = np.argsort(-s0); cs = np.cumsum(E0["weight"].astype(float)[o]) / E0["weight"
 cuts = [(None, None)] + [(e, s0[o][np.searchsorted(cs, e)]) for e in (float(x) for x in args.effs.split(","))]
 
 VETOES = [("jj", "jet vs jet"), ("hgtd", "jet vs HGTD t_{0}"), ("trkptz", "jet vs TRKPTZ t_{0}"),
-          ("waves", "jet vs WAVeS t_{0}"), ("truth", "jet vs truth t_{0}")]
+          ("waves", "jet vs WAVeS t_{0}"), ("truth", "jet vs truth t_{0}"), ("perfect", "perfect HGTD")]
+
+
+def pu_in_hgtd(E):
+    """a VBS jet is truth-labelled pileup and inside HGTD (2.4 < |eta|; the selection stops at 3.8)"""
+    fwd = lambda k: np.abs(E[f"j{k}_eta"]) > 2.4
+    return ((E["j1_pu"] == 1) & fwd(1)) | ((E["j2_pu"] == 1) & fwd(2))
 calibration = FC.calibration
 
 
@@ -117,6 +123,9 @@ if args.veto:
         raise SystemExit("--veto needs trees with the core jet time (tdr_fwdpair from commit 53d16c3)")
     f = calibration(samples[0][2])
     K = {key: vetoes(E, f, args.nsigma) for key, lab, E, sc in samples}
+    # the ceiling (the user's request, 2026-11-05): a veto that removes exactly the events with a pileup VBS jet
+    # HGTD can see, by the truth labels, and no other -- every pileup jet in HGTD rejected, no signal cost
+    for key, lab, E, sc in samples: K[key]["perfect"] = ~pu_in_hgtd(E)
     draw = [v for v in args.veto_stacks.split(",") if v]
     print(f"\nTiming vetoes at {args.nsigma:g} sigma after each BDT cut: efficiency relative to the cut (MC events kept / before); "
           "S/sqrt(B) factor = eps_S / sqrt(eps_B)")
@@ -163,7 +172,8 @@ if args.veto and args.summary:
     o_ = np.argsort(-ss); cs_ = np.cumsum(ws_[o_]) / ws_.sum()
     ROWS = [("waves", "WAVeS t_{0}", S.COL["waves"], 20, 1), ("trkptz", "TRKPTZ t_{0}", S.COL["trkptz"], 21, 1),
             ("hgtd", "HGTD t_{0}", S.COL["hgtd"], 23, 1), ("truth", "Truth t_{0}", S.COL["truth"], 25, 3),
-            ("jj", "Jet vs jet (no t_{0})", "kP10Violet", 33, 10)]
+            ("jj", "Jet vs jet (no t_{0})", "kP10Violet", 33, 10),
+            ("perfect", "Perfect HGTD veto (truth)", "#000000", 34, 2)]
     thr_of = lambda e: -np.inf if e >= 1.0 else ss[o_][np.searchsorted(cs_, e)]
 
     def veto_effs(v, bS, bB):
@@ -190,7 +200,7 @@ if args.veto and args.summary:
         S.axes(fr, "", ytitle, size=TS, ytoff=1.35)
         fr.GetXaxis().SetLabelSize(0)
         one = S.keep(R_.TLine(0.225, 1.0, 1.025, 1.0)); one.SetLineStyle(2); one.SetLineColor(R_.kGray + 2); one.Draw()
-        leg = S.legend(0.19, 0.05, 0.94, 0.23, size=0.68 * TS, ncol=2, margin=0.15)   # along the bottom: empty below the curves
+        leg = S.legend(0.19, 0.45, 0.75, 0.645, size=0.68 * TS, ncol=2, margin=0.15)   # under the header, left of the ceiling's rise
         for v, name, colour, mk, ls in ROWS:
             y, ey = np.array([fac(*t)[0] for t in EV[v]]), np.array([fac(*t)[1] for t in EV[v]])
             g = S.style(S.graph(EFFS, y, ey), colour, mk, ls, 2, 1.2); g.Draw("LP SAME")
@@ -210,9 +220,9 @@ if args.veto and args.summary:
         S.save(cv, f"{args.out}_{stem}")
 
     draw_gain("veto_gain", "S/#sqrt{B} with the veto / without",
-              lambda es_, eb_, var: (es_ / np.sqrt(eb_), es_ / np.sqrt(eb_) * 0.5 * np.sqrt(var) / eb_), 0.7, 1.55, "S/sqrt(B)")
+              lambda es_, eb_, var: (es_ / np.sqrt(eb_), es_ / np.sqrt(eb_) * 0.5 * np.sqrt(var) / eb_), 0.7, 2.6, "S/sqrt(B)")
     draw_gain("veto_sb", "S/B with the veto / without",
-              lambda es_, eb_, var: (es_ / eb_, es_ / eb_ * np.sqrt(var) / eb_), 0.0, 2.9, "S/B")   # from 0: the legend sits below every curve
+              lambda es_, eb_, var: (es_ / eb_, es_ / eb_ * np.sqrt(var) / eb_), 0.0, 5.5, "S/B")   # from 0: the legend sits below every curve
 
     # the money-plot style: the S/sqrt(B) change of each veto per m_jj column, at one BDT cut
     EMJ = 0.8                                            # the loosest cut, as the "what the veto removes" slides
@@ -234,14 +244,14 @@ if args.veto and args.summary:
     top = max(max(a + e for a, e in vals[v][0]) for v in vals)
     bot = min(min(a - e for a, e in vals[v][0]) for v in vals)
     # room above the first two columns for the legend; the last column (few Z+jets MC events) may be clipped
-    lo_, hi_ = min(-20.0, 10 * np.floor(bot / 10) - 10), max(100.0, min(220.0, 10 * np.ceil((top + 30) / 10)))
+    lo_, hi_ = min(-20.0, 10 * np.floor(bot / 10) - 10), max(100.0, min(260.0, 10 * np.ceil((top + 30) / 10)))
     frm = S.keep(R_.gPad.DrawFrame(EDGES[0], lo_, EDGES[-1], hi_))
     S.axes(frm, "", "S/#sqrt{B} change vs no veto [%]", size=TS, ytoff=1.35)
     frm.GetXaxis().SetLabelSize(0)
     zero = S.keep(R_.TLine(EDGES[0], 0.0, EDGES[-1], 0.0)); zero.SetLineStyle(2); zero.SetLineColor(R_.kGray + 2); zero.Draw()
     for c in range(1, ncol):
         ln = S.keep(R_.TLine(EDGES[c], lo_, EDGES[c], hi_)); ln.SetLineStyle(3); ln.SetLineColor(R_.kGray + 1); ln.Draw()
-    legm = S.legend(0.19, 0.34, 0.56, 0.62, size=0.6 * TS, margin=0.18)   # above columns 1-2, below the header
+    legm = S.legend(0.19, 0.39, 0.50, 0.645, size=0.6 * TS, margin=0.18)   # above column 1, below the header, left of the ceiling's column-2 point
     print(f"\nS/sqrt(B) change [%] per m_jj column at the BDT cut eps_S = {EMJ:.0%}: " +
           ", ".join(f"[{EDGES[c]:.0f},{EDGES[c + 1]:.0f})" for c in range(ncol)) + "; all")
     for k, (v, name, colour, mk, ls) in enumerate(ROWS):
