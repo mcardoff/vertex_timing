@@ -8,6 +8,9 @@ talk; each rule is printed with the events it found:
   t0         section 1  Z+jets: the WAVeS t0 within 15 ps of the truth t_HS, Athena's HGTD t0 150-350 ps off
   pujet      section 2  VBF: a forward pileup VBS jet (30-50 GeV) that passes the ITk-only R_pT tagger at 85% and
                         that the WAVeS t0 gate (2 sigma, the TDR's) empties; the other VBS jet hard-scatter
+  pujet_cf   section 2  VBF: a forward pileup VBS jet (30-50 GeV) the WAVeS gate flips from passing the ITk-only tagger
+                        at 85% to failing it, the partner a CENTRAL hard-scatter jet (the central-forward pairs)
+  pujet_z    section 2  the same, Z+jets, any partner
   veto_bkg   section 3  Z+jets after the BDT at 80%: a pileup VBS jet in HGTD that the 3-sigma WAVeS veto catches
   irreducible section 3 Z+jets after the BDT at 80%: two hard-scatter VBS jets, both timed, the veto keeps it
   sig_cost   section 3  VBF after the BDT at 80%: two hard-scatter VBS jets, the veto rejects it
@@ -82,6 +85,25 @@ def cmd_select(a):
     cand.sort(key=lambda x: -x[1])
     rows += [("pujet", "vbf", i) for i, _ in cand[: a.n]]
     print(f"pujet: {len(cand)} VBF events (forward PU VBS jet 30-50 GeV, ITk R_pT >= the 85% cut, gated to 0)")
+    # ---- pujet_cf / pujet_z (the user's request, 2026-11-05: "a couple more exemplary event displays from VBF and
+    # Z+jets" after the first): the same jet, in a VBF central-forward pair (79% of the events; the first is
+    # forward-forward) and in Z+jets with any partner. Exemplary rather than extreme: the gate FLIPS the tagger (ITk
+    # R_pT passes the 85% cut, the WAVeS-gated one fails it; no Z+jets candidate is gated all the way to 0), ranked
+    # by the R_pT drop
+    for case, s_, cf in (("pujet_cf", "vbf", True), ("pujet_z", "zjets", False)):
+        e, dw, a1, a2 = common(s_)
+        cand = []
+        for k, other in ((1, 2), (2, 1)):
+            ae, pt = np.abs(e[f"j{k}_eta"]), e[f"j{k}_pt"]
+            thr = np.where(pt < 50, WP85_FWD["30_50"], WP85_FWD["50_inf"])
+            m = ((e[f"j{k}_pu"] == 1) & (ae > 2.4) & (pt > 30) & (pt < 50) & (e[f"j{k}_rpt_itk"] >= thr)
+                 & (e[f"j{k}_rpt_t0_waves"] < thr) & (e["ok_waves"] == 1) & (dw < 20))
+            if cf: m &= (e[f"j{other}_hs"] == 1) & (np.abs(e[f"j{other}_eta"]) < 2.4)
+            cand += [(i, e[f"j{k}_rpt_itk"][i] - e[f"j{k}_rpt_t0_waves"][i]) for i in np.flatnonzero(m)]
+        cand.sort(key=lambda x: -x[1])
+        rows += [(case, s_, i) for i, _ in cand[: a.n]]
+        print(f"{case}: {len(cand)} {s_} events (forward PU VBS jet 30-50 GeV: ITk R_pT passes the 85% cut, gated fails it"
+              + (", partner a central HS jet)" if cf else ")"))
     # ---- veto_bkg: Z+jets after the BDT, PU jet in HGTD caught by the WAVeS veto
     e, dw, a1, a2 = common("zjets")
     bdt = sc["zjets"] >= thr80
@@ -150,9 +172,11 @@ def cmd_pick(a):
                 sys.exit(f"{s} file {fi} entry {ent}: {len(hits)} raw files hold the event ({hits})")
             found.append((hits[0], ent, fi))
         files = sorted({h for h, _, _ in found})
-        for f in files: chain.Add(f)
-        chain.GetEntries()
-        offs, fidx = chain.GetTreeOffset(), {f: i for i, f in enumerate(files)}
+        offs, n0 = [], 0
+        for f in files:                                  # each file's chain offset, counted here: TChain::GetTreeOffset
+            chain.Add(f)                                 # can come back unfilled (kMaxEntries) for later files
+            tf = ROOT.TFile.Open(f); offs.append(n0); n0 += tf.Get("ntuple").GetEntries(); tf.Close()
+        fidx = {f: i for i, f in enumerate(files)}
         fout = ROOT.TFile(f"{a.out}_{s}.root", "RECREATE")
         clone = chain.CloneTree(0)
         for new, (path, ent, fi) in enumerate(found):
@@ -221,7 +245,7 @@ def cmd_render(a):
               for k in (1, 2)]
         t0, tt = float(r["t0_waves"]), float(r["t0_truth"])
         pulls = ", ".join(f"jet {J[k - 1] + 1} pull {float(r[f'j{k}_pull_waves']):.1f}" for k in (1, 2)
-                          if np.isfinite(float(r[f"j{k}_pull_waves"])) and r["case"] not in ("t0", "pujet"))
+                          if np.isfinite(float(r[f"j{k}_pull_waves"])) and r["case"] not in ("t0", "pujet", "pujet_cf", "pujet_z"))
         cmd = [sys.executable, "event_display.py", "--file_path", pf, "--event_num", str(pe),
                "--extra_time", repr(t0), "--t0_sigma", r["sig0_waves"], "--infl", r["infl_waves"],
                "--gate_sigma", repr(GATE), "--assoc_nsigma", "2.5", "--rpt_match", "ghost", "--clean_times",
