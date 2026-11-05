@@ -38,8 +38,10 @@ ap.add_argument("--effs", default="0.8,0.5,0.2")
 ap.add_argument("--stack-edges", default="0,1000,2000,4000")
 ap.add_argument("--veto", action="store_true", help="apply the timing vetoes after the BDT cuts")
 ap.add_argument("--veto-stacks", default="jj,waves", help="vetoes whose post-veto stacks are drawn")
-ap.add_argument("--mjj2-leg", type=lambda t: tuple(float(x) for x in t.split(",")), default=(0.61, 0.69, 0.94, 0.935),
-                help="x1,y1,x2,y2 (NDC) of the compact m_jj figures' legend (default: the top-right corner)")
+ap.add_argument("--mjj2-leg", type=lambda t: tuple(float(x) for x in t.split(",")), default=(0.61, 0.665, 0.94, 0.855),
+                help="x1,y1,x2,y2 (NDC) of the compact m_jj figures' legend (default: the top-right corner, below the strip "
+                     "where off-scale points are marked)")
+ap.add_argument("--mjj2-ymax", type=float, default=150.0, help="the top of the compact S/sqrt(B) figures' y axis [%%]")
 ap.add_argument("--nsigma", type=float, default=3.0)
 ap.add_argument("--summary", action="store_true", help="with --veto: <out>_veto_gain, the S/sqrt(B) factor of each veto "
                 "against the BDT cut (signal efficiency 1.0 = no BDT), the Z+jets MC events left below")
@@ -246,7 +248,7 @@ if args.veto and args.summary:
         return min(pts), max(pts)
 
     def draw_mjj(stem, what, ytitle, fac, cap, legpos=(0.19, 0.39, 0.50, 0.645), legsize=0.6, rows=ROWS, edges=EDGES, emj=EMJ,
-                 clear_legend=False, ylim=None):
+                 clear_legend=False, ylim=None, offscale_arrows=False):
         """fac(eps_S, eps_B, var(eps_B)) -> (factor, its error); drawn as a change in %. rows: the vetoes drawn; edges: the
         m_jj columns (the last includes overflow); emj: the BDT cut's signal efficiency, None for no BDT"""
         ROWS, EDGES, EMJ = rows, np.asarray(edges, float), emj
@@ -292,10 +294,21 @@ if args.veto and args.summary:
             print(f"  {plain(name):24s} " + " ".join(f"{a:+6.1f} +- {e:4.1f}" for a, e in vals[v][0]) + f"   all {vals[v][1]:+.1f}")
         legm.SetHeader(f"{args.nsigma:g}#sigma timing veto (all m_{{jj}}):")
         legm.Draw()
-        ta = R_.TLatex(); ta.SetTextSize(0.5 * TS); ta.SetTextAlign(23); ta.SetTextColor(R_.kGray + 2)
-        for c in range(ncol):                            # say so when a column's points are above the frame
-            n_off = sum(vals[v][0][c][0] > hi_ for v, *_ in ROWS)
-            if n_off: S.keep(ta.DrawLatex(0.5 * (EDGES[c] + EDGES[c + 1]), hi_ - 0.03 * (hi_ - lo_), f"#uparrow {n_off} of {len(ROWS)} off scale"))
+        if offscale_arrows:                              # a point above the frame: an arrow at its own place, with its value
+            for k, (v, name, colour, mk, ls) in enumerate(ROWS):
+                for c in range(ncol):
+                    a_ = vals[v][0][c][0]
+                    if a_ <= hi_: continue
+                    x_ = EDGES[c] + (EDGES[c + 1] - EDGES[c]) * (k + 1) / (len(ROWS) + 1)
+                    ar = S.keep(R_.TArrow(x_, hi_ - 0.10 * (hi_ - lo_), x_, hi_ - 0.01 * (hi_ - lo_), 0.012, "|>"))
+                    ar.SetLineColor(S.colour(colour)); ar.SetFillColor(S.colour(colour)); ar.SetLineWidth(2); ar.Draw()
+                    tv = R_.TLatex(); tv.SetTextSize(0.5 * TS); tv.SetTextAlign(32); tv.SetTextColor(S.colour(colour))
+                    S.keep(tv.DrawLatex(x_ - 0.015 * (EDGES[-1] - EDGES[0]), hi_ - 0.055 * (hi_ - lo_), f"{a_:+.0f}%"))
+        else:
+            ta = R_.TLatex(); ta.SetTextSize(0.5 * TS); ta.SetTextAlign(23); ta.SetTextColor(R_.kGray + 2)
+            for c in range(ncol):                        # say so when a column's points are above the frame
+                n_off = sum(vals[v][0][c][0] > hi_ for v, *_ in ROWS)
+                if n_off: S.keep(ta.DrawLatex(0.5 * (EDGES[c] + EDGES[c + 1]), hi_ - 0.03 * (hi_ - lo_), f"#uparrow {n_off} of {len(ROWS)} off scale"))
         S.header(0.19, 0.88, [f"{ENERGY}", "S: VBF H#rightarrowinv., B: Z+jets", "#geq 1 VBS jet in HGTD" + (f", JVT + fJVT {JVT_WP}" if JVT_WP != "none" else ""),
                               "No BDT: the veto alone" if EMJ is None else f"BDT at #varepsilon_{{S}} = {100 * EMJ:.0f}%, then the veto"], size=0.8 * TS)   # short: clear of column 3
         R_.gPad.RedrawAxis()
@@ -344,12 +357,15 @@ if args.veto and args.summary:
              lambda es_, eb_, var: (es_ / eb_, es_ / eb_ * np.sqrt(var) / eb_))):
         ext = [mjj_extent(fac_, ROWS4, E2, e_) for e_ in (None, EMJ)]
         lo_s = min(-20.0, 10 * np.floor(min(a for a, _ in ext) / 10) - 10)
-        top_s = max(b for _, b in ext)
-        step = 50.0 if top_s < 300 else 100.0
-        hi_s = step * np.ceil((lo_s + (top_s - lo_s) / 0.62) / step)
+        if what_ == "S/sqrt(B)":   # a fixed top (the user, 2026-11-05: "keep the maximum to 150%, noting when a point is
+            hi_s = args.mjj2_ymax  # off scale"): off-scale points become arrows with their value, in a strip above the legend
+        else:
+            top_s = max(b for _, b in ext)
+            step = 50.0 if top_s < 300 else 100.0
+            hi_s = step * np.ceil((lo_s + (top_s - lo_s) / 0.62) / step)
         for emj_, tag_ in ((None, "nobdt"), (EMJ, f"bdt{round(100 * EMJ)}")):
-            draw_mjj(f"{stem_}_{tag_}", what_, ytitle_, fac_, 1e9, legpos=args.mjj2_leg, legsize=0.52,
-                     rows=ROWS4, edges=E2, emj=emj_, ylim=(lo_s, hi_s))
+            draw_mjj(f"{stem_}_{tag_}", what_, ytitle_, fac_, 1e9, legpos=args.mjj2_leg, legsize=0.46,
+                     rows=ROWS4, edges=E2, emj=emj_, ylim=(lo_s, hi_s), offscale_arrows=True)
 
 if args.summary:
     # the kinematic BDT's held-out score distributions, unit area (weighted), with the cuts of the analysis
