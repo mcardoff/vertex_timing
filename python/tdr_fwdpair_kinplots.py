@@ -38,6 +38,10 @@ ap.add_argument("--effs", default="0.8,0.5,0.2")
 ap.add_argument("--stack-edges", default="0,1000,2000,4000")
 ap.add_argument("--veto", action="store_true", help="apply the timing vetoes after the BDT cuts")
 ap.add_argument("--veto-stacks", default="jj,waves", help="vetoes whose post-veto stacks are drawn")
+ap.add_argument("--mjj2-leg-sqrt", type=lambda t: tuple(float(x) for x in t.split(",")), default=(0.19, 0.42, 0.52, 0.645),
+                help="x1,y1,x2,y2 (NDC) of the compact S/sqrt(B) m_jj figures' legend")
+ap.add_argument("--mjj2-leg-sb", type=lambda t: tuple(float(x) for x in t.split(",")), default=(0.19, 0.42, 0.52, 0.645),
+                help="likewise for the compact S/B figures")
 ap.add_argument("--nsigma", type=float, default=3.0)
 ap.add_argument("--summary", action="store_true", help="with --veto: <out>_veto_gain, the S/sqrt(B) factor of each veto "
                 "against the BDT cut (signal efficiency 1.0 = no BDT), the Z+jets MC events left below")
@@ -231,8 +235,14 @@ if args.veto and args.summary:
     xs_, xb_ = np.clip(Es["mjj"], EDGES[0], EDGES[-1] - 1e-6), np.clip(Eb["mjj"], EDGES[0], EDGES[-1] - 1e-6)
     ncol = len(EDGES) - 1
 
-    def draw_mjj(stem, what, ytitle, fac, cap, legpos=(0.19, 0.39, 0.50, 0.645), legsize=0.6):
-        """fac(eps_S, eps_B, var(eps_B)) -> (factor, its error); drawn as a change in %"""
+    def draw_mjj(stem, what, ytitle, fac, cap, legpos=(0.19, 0.39, 0.50, 0.645), legsize=0.6, rows=ROWS, edges=EDGES, emj=EMJ,
+                 clear_legend=False):
+        """fac(eps_S, eps_B, var(eps_B)) -> (factor, its error); drawn as a change in %. rows: the vetoes drawn; edges: the
+        m_jj columns (the last includes overflow); emj: the BDT cut's signal efficiency, None for no BDT"""
+        ROWS, EDGES, EMJ = rows, np.asarray(edges, float), emj
+        bS, bB = (np.ones(len(ss), bool), np.ones(len(sb), bool)) if emj is None else (ss >= thr_of(emj), sb >= thr_of(emj))
+        xs_, xb_ = np.clip(Es["mjj"], EDGES[0], EDGES[-1] - 1e-6), np.clip(Eb["mjj"], EDGES[0], EDGES[-1] - 1e-6)
+        ncol = len(EDGES) - 1
         cvm = S.keep(R_.TCanvas(stem, "", 800, 800))
         cvm.cd(); S.pad(stem + "_m", 0.0, RAT_, 1.0, 1.0, top=0.05 / MAIN_ * 0.6, bottom=0.02)
         vals = {}
@@ -247,6 +257,12 @@ if args.veto and args.summary:
         bot = min(min(a - e for a, e in vals[v][0]) for v in vals)
         # room above the first two columns for the legend; the last column (few Z+jets MC events) may be clipped
         lo_, hi_ = min(-20.0, 10 * np.floor(bot / 10) - 10), max(100.0, min(cap, 10 * np.ceil((top + 30) / 10)))
+        if clear_legend:   # raise the frame until every point left of the legend's right edge sits below it
+            xpt = lambda k, c: EDGES[c] + (EDGES[c + 1] - EDGES[c]) * (k + 1) / (len(ROWS) + 1)
+            x2 = EDGES[0] + (legpos[2] - 0.16) / (1 - 0.16 - 0.05) * (EDGES[-1] - EDGES[0])   # the pad's margins
+            tl_ = max(vals[v][0][c][0] + vals[v][0][c][1] for k, (v, *_) in enumerate(ROWS) for c in range(ncol) if xpt(k, c) < x2)
+            fr_ = (legpos[1] - 0.02) / (1 - 0.02 - 0.05 / MAIN_ * 0.6)                          # legend bottom, in frame units
+            hi_ = max(hi_, 10 * np.ceil((lo_ + (tl_ - lo_) / (0.92 * fr_)) / 10))
         frm = S.keep(R_.gPad.DrawFrame(EDGES[0], lo_, EDGES[-1], hi_))
         S.axes(frm, "", ytitle, size=TS, ytoff=1.35)
         frm.GetXaxis().SetLabelSize(0)
@@ -254,7 +270,7 @@ if args.veto and args.summary:
         for c in range(1, ncol):
             ln = S.keep(R_.TLine(EDGES[c], lo_, EDGES[c], hi_)); ln.SetLineStyle(3); ln.SetLineColor(R_.kGray + 1); ln.Draw()
         legm = S.legend(*legpos, size=legsize * TS, margin=0.18)   # default: above column 1, below the header, left of the ceiling's column-2 point
-        print(f"\n{what} change [%] per m_jj column at the BDT cut eps_S = {EMJ:.0%}: " +
+        print(f"\n{what} change [%] per m_jj column " + ("with no BDT" if EMJ is None else f"at the BDT cut eps_S = {EMJ:.0%}") + f" ({stem}): " +
               ", ".join(f"[{EDGES[c]:.0f},{EDGES[c + 1]:.0f})" for c in range(ncol)) + "; all")
         for k, (v, name, colour, mk, ls) in enumerate(ROWS):
             xs = [EDGES[c] + (EDGES[c + 1] - EDGES[c]) * (k + 1) / (len(ROWS) + 1) for c in range(ncol)]
@@ -269,7 +285,7 @@ if args.veto and args.summary:
             n_off = sum(vals[v][0][c][0] > hi_ for v, *_ in ROWS)
             if n_off: S.keep(ta.DrawLatex(0.5 * (EDGES[c] + EDGES[c + 1]), hi_ - 0.03 * (hi_ - lo_), f"#uparrow {n_off} of {len(ROWS)} off scale"))
         S.header(0.19, 0.88, [f"{ENERGY}", "S: VBF H#rightarrowinv., B: Z+jets", "#geq 1 VBS jet in HGTD" + (f", JVT + fJVT {JVT_WP}" if JVT_WP != "none" else ""),
-                              f"BDT at #varepsilon_{{S}} = {100 * EMJ:.0f}%, then the veto"], size=0.8 * TS)   # short: clear of column 3
+                              "No BDT: the veto alone" if EMJ is None else f"BDT at #varepsilon_{{S}} = {100 * EMJ:.0f}%, then the veto"], size=0.8 * TS)   # short: clear of column 3
         R_.gPad.RedrawAxis()
         cvm.cd(); S.pad(stem + "_r", 0.0, 0.0, 1.0, RAT_, top=0.03, bottom=0.36)
         stk = S.keep(R_.THStack(stem + "_stack", ""))
@@ -302,6 +318,16 @@ if args.veto and args.summary:
     draw_mjj("veto_mjj_sb", "S/B", "S/B change vs no veto [%]",
              lambda es_, eb_, var: (es_ / eb_, es_ / eb_ * np.sqrt(var) / eb_), 420.0,
              legpos=(0.565, 0.37, 0.93, 0.62), legsize=0.55)            # upper right: column 3's points are low or off scale
+    # the compact pair (the advisor's request via the user, 2026-11-05): no BDT and the 80% cut side by side; WAVeS, the
+    # truth t0, jet vs jet and the perfect veto only; m_jj < 1 TeV and > 1 TeV (the 15-event > 2 TeV column merged in)
+    ROWS4 = [r for r in ROWS if r[0] in ("waves", "truth", "jj", "perfect")]
+    for emj_, tag_ in ((None, "nobdt"), (EMJ, f"bdt{round(100 * EMJ)}")):
+        draw_mjj(f"veto_mjj2_{tag_}", "S/sqrt(B)", "S/#sqrt{B} change vs no veto [%]",
+                 lambda es_, eb_, var: (es_ / np.sqrt(eb_), es_ / np.sqrt(eb_) * 0.5 * np.sqrt(var) / eb_), 1000.0,
+                 legpos=args.mjj2_leg_sqrt, rows=ROWS4, edges=[0.0, 1000.0, 4000.0], emj=emj_, clear_legend=True)
+        draw_mjj(f"veto_mjj2_sb_{tag_}", "S/B", "S/B change vs no veto [%]",
+                 lambda es_, eb_, var: (es_ / eb_, es_ / eb_ * np.sqrt(var) / eb_), 1000.0,
+                 legpos=args.mjj2_leg_sb, rows=ROWS4, edges=[0.0, 1000.0, 4000.0], emj=emj_, clear_legend=True)
 
 if args.summary:
     # the kinematic BDT's held-out score distributions, unit area (weighted), with the cuts of the analysis
