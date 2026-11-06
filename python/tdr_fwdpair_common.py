@@ -12,6 +12,19 @@ A pull is NaN where it cannot be formed (an untimed leg, a missing t0).
 """
 import numpy as np
 
+def jvt_label(wp):
+    """the pileup-tagging baseline in a figure's header, from the trees' meta jvt_wp (tdr_fwdpair --jvt)"""
+    return {"loose": "JVT + fJVT loose", "tight": "JVT + fJVT tight",
+            "jvt4pt60": "JVT to |#eta| < 4.0, no fJVT",            # JVT's own p_T < 60 GeV range: on the slides, not in
+            "jvt4pt120": "JVT to |#eta| < 4.0 (p_{T} < 120), no fJVT"}.get(wp, f"JVT + fJVT {wp}")   # the figures (too long)
+
+
+def jvt_short(wp):
+    """a legend-length form of jvt_label"""
+    return {"loose": "JVT + fJVT loose", "tight": "JVT + fJVT tight", "jvt4pt60": "JVT to |#eta| < 4.0",
+            "jvt4pt120": "JVT to |#eta| < 4.0 (p_{T} < 120)"}.get(wp, f"JVT + fJVT {wp}")
+
+
 NBINS = [1, 2, 3, 4, 6, 9, 10**6]                    # python/vbs_time_veto_common.py's
 T0_SOURCES = ("hgtd", "trkptz", "waves", "truth")
 

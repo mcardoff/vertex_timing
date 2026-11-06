@@ -288,7 +288,7 @@ def cmd_render(a):
                                + (f"   |   jet vs jet pull {float(r['pull_jj']):.1f}" if r["case"].startswith("jj_") else ""),
                "--t0_label", "WAVeS t0",
                "--source_label", f"{'VBF H->inv.' if r['sample'] == 'vbf' else 'Z(->ll)+jets'}   "
-                                 f"{os.path.basename(orig)} #{r['entry']}   |   JVT + fJVT loose",
+                                 f"{os.path.basename(orig)} #{r['entry']}   |   {a.label}",
                "--output_dir", os.path.abspath(a.out_dir), "--output_name", name]
         res = subprocess.run(cmd, capture_output=True, text=True, cwd=os.path.dirname(os.path.abspath(__file__)))
         with open(os.path.join(a.out_dir, name + ".log"), "w") as f:
@@ -401,6 +401,7 @@ p.add_argument("--bdt", required=True); p.add_argument("--out", required=True); 
 p = sub.add_parser("pick"); p.add_argument("--csv", required=True); p.add_argument("--out", required=True)
 p = sub.add_parser("render"); p.add_argument("--csv", required=True); p.add_argument("--picked", required=True)
 p.add_argument("--out-dir", required=True); p.add_argument("--only", help="comma list of names (case_rank) or cases")
+p.add_argument("--label", default="JVT + fJVT loose", help="the pileup-tagging baseline, in each display's source line")
 p = sub.add_parser("times"); p.add_argument("--csv", required=True); p.add_argument("--sig", required=True)
 p.add_argument("--bkg", required=True); p.add_argument("--logs", required=True, help="the render logs (for the jet numbering)")
 p.add_argument("--out-dir", required=True); p.add_argument("--only", required=True, help="comma list of names (case_rank)")

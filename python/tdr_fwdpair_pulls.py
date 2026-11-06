@@ -32,6 +32,8 @@ args = ap.parse_args()
 R = S.setup()
 E = {"vbf": uproot.open(args.sig)["events"].arrays(library="np"), "zjets": uproot.open(args.bkg)["events"].arrays(library="np")}
 f = FC.calibration(E["vbf"], verbose=False)
+_m = uproot.open(args.sig)["meta"]
+JVT_WP = str(_m.arrays(library="np")["jvt_wp"][0]) if "jvt_wp" in _m.keys() else "none"
 sel = {s: (e["cat"] == 2) & (e["j1_core_n"] >= 1) & (e["j2_core_n"] >= 1) for s, e in E.items()}
 cutline = "No BDT"
 if args.bdt_eff:
@@ -68,7 +70,7 @@ for side, (key, xtitle) in enumerate((("jj", "Jet vs jet pull  |t_{1} #minus t_{
         leg.AddEntry(h, f"{name}: {100 * frac:.0f}% vetoed", "L")
         print(f"  {name.replace('#rightarrow', '->'):30s} {m.sum():7d} MC events, vetoed at {args.nsigma:g} sigma: {frac:.1%}")
     leg.Draw()
-    lines = ["#sqrt{s} = 14 TeV, HL-LHC, #LT#mu#GT = 200", "Forward-forward pairs, both jets timed", f"JVT + fJVT loose, {cutline}"] if side == 0 else \
+    lines = ["#sqrt{s} = 14 TeV, HL-LHC, #LT#mu#GT = 200", "Forward-forward pairs, both jets timed", f"{FC.jvt_label(JVT_WP)}, {cutline}"] if side == 0 else \
             [f"{args.nsigma:g}#sigma veto: right of the dashed line", "Last bin: overflow"]
     S.header(0.17, 0.88, lines, size=0.045)
     R.gPad.RedrawAxis()

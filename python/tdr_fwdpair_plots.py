@@ -138,7 +138,7 @@ if "pair_mode" in _meta.keys() and str(_meta.arrays(library="np")["pair_mode"][0
 _jm = uproot.open(args.sig)["meta"]
 JVT_WP = str(_jm.arrays(library="np")["jvt_wp"][0]) if "jvt_wp" in _jm.keys() else "none"
 if JVT_WP != "none":
-    SEL = f"j_{{1}}, j_{{2}}: |#eta| < 3.8, #geq 1 in 2.4#minus3.8, JVT + fJVT {JVT_WP}"
+    SEL = f"j_{{1}}, j_{{2}}: |#eta| < 3.8, #geq 1 in 2.4#minus3.8, {FC.jvt_label(JVT_WP)}"
 
 sig = (Sg["j1_hs"] == 1) & (Sg["j2_hs"] == 1)
 bkg = (Bg["j1_pu"] == 1) | (Bg["j2_pu"] == 1)

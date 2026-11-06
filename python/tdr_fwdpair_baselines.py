@@ -56,7 +56,9 @@ def itk_pass(E, wp):
 
 
 N = load(args.sig, args.bkg, args.bdt)                   # no JVT: the reference and the ITk strategy
-J = load(args.sig_jvt, args.bkg_jvt, args.bdt_jvt)       # JVT + fJVT loose
+J = load(args.sig_jvt, args.bkg_jvt, args.bdt_jvt)       # the analysis baseline (JVT + fJVT loose, or JVT to |eta| < 4.0)
+_m = uproot.open(args.sig_jvt)["meta"]
+BASE = FC.jvt_short(str(_m.arrays(library="np")["jvt_wp"][0]) if "jvt_wp" in _m.keys() else "loose")
 WP = json.load(open(args.wp))["working_points"]["rpt_itk"]
 pS, pB = itk_pass(N["Es"], WP), itk_pass(N["Eb"], WP)
 
@@ -72,8 +74,8 @@ def yields(T, bs, bb, veto, e):
 
 allS, allB = np.ones(len(N["ws"]), bool), np.ones(len(N["wb"]), bool)
 jS, jB = np.ones(len(J["ws"]), bool), np.ones(len(J["wb"]), bool)
-STRATS = [("JVT + fJVT loose", J, jS, jB, False, "#000000", 20, 1),
-          ("JVT + fJVT loose + WAVeS veto", J, jS, jB, True, S.COL["waves"], 20, 1),
+STRATS = [(BASE, J, jS, jB, False, "#000000", 20, 1),
+          (BASE + " + WAVeS veto", J, jS, jB, True, S.COL["waves"], 20, 1),
           ("ITk R_{p_{T}} (85%)", N, pS, pB, False, "#000000", 24, 2),
           ("ITk R_{p_{T}} (85%) + WAVeS veto", N, pS, pB, True, S.COL["waves"], 24, 2)]
 ref = [yields(N, allS, allB, False, e) for e in EFFS]
@@ -88,7 +90,7 @@ for name, T, bs, bb, veto, colour, mk, ls in STRATS:
     rows.append((name, colour, mk, ls, np.array(y), np.array(ey)))
     print(f"  {name.replace('#', '').replace('_{p_{T}}', 'pT'):34s} " + " ".join(f"{a:.2f}" for a in y))
 gain = {}
-for base, (a, b) in (("JVT + fJVT loose", (0, 1)), ("ITk R_{p_{T}} (85%)", (2, 3))):
+for base, (a, b) in ((BASE, (0, 1)), ("ITk R_{p_{T}} (85%)", (2, 3))):
     gain[base] = rows[b][4] / rows[a][4]
 print("the WAVeS veto's own gain:")
 for k, v in gain.items(): print(f"  on {k.replace('#', '').replace('_{p_{T}}', 'pT'):24s} " + " ".join(f"{a:.3f}" for a in v))

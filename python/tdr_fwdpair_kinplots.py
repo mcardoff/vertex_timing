@@ -66,7 +66,7 @@ CATS = [("Central-forward", 1, S.COL["cf"]), ("Forward-forward", 2, S.COL["ff"])
 _jm = uproot.open(args.sig)["meta"]
 JVT_WP = str(_jm.arrays(library="np")["jvt_wp"][0]) if "jvt_wp" in _jm.keys() else "none"
 if JVT_WP != "none":
-    SEL = f"j_{{1}}, j_{{2}}: |#eta| < 3.8, #geq 1 in 2.4#minus3.8, JVT + fJVT {JVT_WP}"
+    SEL = f"j_{{1}}, j_{{2}}: |#eta| < 3.8, #geq 1 in 2.4#minus3.8, {FC.jvt_label(JVT_WP)}"
 
 REACH = [("HS + HS", "#7BCB6B"), ("PU leg at |#eta| < 2.4", "#B3231C"), ("PU leg at 2.4#minus3.8 (HGTD)", "#3F90DA"),
          ("A leg has neither label", "#C79BF5")]
@@ -347,7 +347,7 @@ if args.veto and args.summary:
                 if n_off: S.keep(ta.DrawLatex(0.5 * (EDGES[c] + EDGES[c + 1]), hi_ - 0.03 * (hi_ - lo_), f"#uparrow {n_off} of {len(ROWS)} off scale"))
         S.header(0.19, 0.955 if header_above else 0.88, [f"{ENERGY}", "S: VBF H#rightarrowinv., B: Z+jets",
                               ("Forward-forward pairs" if cat == 2 else "Central-forward pairs" if cat == 1 else "#geq 1 VBS jet in HGTD")
-                              + (f", JVT + fJVT {JVT_WP}" if JVT_WP != "none" else ""),
+                              + (f", {FC.jvt_short(JVT_WP)}" if JVT_WP != "none" else ""),   # short: the legend sits beside this line
                               "No BDT: the veto alone" if EMJ is None else f"BDT at #varepsilon_{{S}} = {100 * EMJ:.0f}%, then the veto"], size=0.8 * TS)   # short: clear of column 3
         R_.gPad.RedrawAxis()
         mc_panel(cvm, stem, bS, bB, xs_, xb_, EDGES, ncol)
