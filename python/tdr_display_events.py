@@ -11,6 +11,9 @@ talk; each rule is printed with the events it found:
   pujet_cf   section 2  VBF: a forward pileup VBS jet (30-50 GeV) the WAVeS gate flips from passing the ITk-only tagger
                         at 85% to failing it, the partner a CENTRAL hard-scatter jet (the central-forward pairs)
   pujet_z    section 2  the same, Z+jets, any partner
+  jj_miss    section 3  Z+jets forward-forward, no BDT: two pileup jets that agree in time (jet-vs-jet pull < 2) while both
+                        are >= 3 sigma from the WAVeS t0 -- the t0 veto fires, jet vs jet does not
+  jj_catch   section 3  Z+jets forward-forward, no BDT: HS + PU, the jets >= 3 sigma apart, the HS jet on the t0
   veto_bkg   section 3  Z+jets after the BDT at 80%: a pileup VBS jet in HGTD that the 3-sigma WAVeS veto catches
   irreducible section 3 Z+jets after the BDT at 80%: two hard-scatter VBS jets, both timed, the veto keeps it
   sig_cost   section 3  VBF after the BDT at 80%: two hard-scatter VBS jets, the veto rejects it
@@ -45,7 +48,7 @@ WP85_FWD = {"30_50": 0.1871491444419373, "50_inf": 0.16511387904857375}   # figs
 GATE = 2.0                                                                # tdr::GATE_SIGMA_TDR
 FIELDS = ["case", "rank", "sample", "file_idx", "entry", "mjj", "bdt", "t0_waves", "sig0_waves", "infl_waves",
           "ok_hgtd", "t0_hgtd", "t0_truth"] + [f"j{k}_{v}" for k in (1, 2) for v in
-          ("pt", "eta", "phi", "hs", "pu", "core_t", "core_sig", "core_n", "rpt_itk", "rpt_t0_waves", "pull_waves")]
+          ("pt", "eta", "phi", "hs", "pu", "core_t", "core_sig", "core_n", "rpt_itk", "rpt_t0_waves", "pull_waves")] + ["pull_jj"]
 
 
 def cmd_select(a):
@@ -129,6 +132,25 @@ def cmd_select(a):
     rows += [("sig_cost", "vbf", i) for i in order[: a.n]]
     print(f"sig_cost: {m.sum()} VBF events after the BDT at 80% (HS + HS, correct t0, vetoed)")
 
+    # ---- jj_miss / jj_catch (the user, 2026-11-06: "a couple examples of the jet-v-jet cases"): Z+jets forward-forward
+    # pairs, both jets timed by >= 2 core tracks, a correct WAVeS t0, no BDT (as the pull figure)
+    e, dw, a1, a2 = common("zjets")
+    Pz = P["zjets"]; jj = np.nan_to_num(Pz["jj"], nan=-1.0)
+    p1, p2 = np.nan_to_num(Pz["waves_1"], nan=0.0), np.nan_to_num(Pz["waves_2"], nan=0.0)
+    base = (e["cat"] == 2) & (e["j1_core_n"] >= 2) & (e["j2_core_n"] >= 2) & (e["ok_waves"] == 1) & (dw < 20)
+    # jet vs jet misses: two pileup jets that agree with each other (pull < 2), both >= 3 sigma from t0 (the t0 veto fires)
+    m = base & (e["j1_pu"] == 1) & (e["j2_pu"] == 1) & (jj >= 0) & (jj < 2) & (p1 >= 3) & (p2 >= 3)
+    sc_ = np.fmin(p1, p2) - jj                           # together, and far from t0; off-scale times last
+    sc_ = np.where(np.fmax(p1, p2) > 25, sc_ - 100, sc_)
+    rows += [("jj_miss", "zjets", i) for i in np.flatnonzero(m)[np.argsort(-sc_[m])][: a.n]]
+    print(f"jj_miss: {m.sum()} Z+jets FF events (PU + PU, jet-vs-jet pull < 2, both >= 3 sigma from the WAVeS t0)")
+    # jet vs jet catches: HS + PU, the jets >= 3 sigma apart, the HS jet on t0 (< 2) and the PU jet off it (>= 3)
+    hs1 = (e["j1_hs"] == 1) & (e["j2_pu"] == 1); hs2 = (e["j2_hs"] == 1) & (e["j1_pu"] == 1)
+    m = base & (jj >= 3) & ((hs1 & (p1 < 2) & (p2 >= 3)) | (hs2 & (p2 < 2) & (p1 >= 3)))
+    sc_ = e["j1_core_n"] + e["j2_core_n"] - 100 * (jj > 20)
+    rows += [("jj_catch", "zjets", i) for i in np.flatnonzero(m)[np.argsort(-sc_[m])][: a.n]]
+    print(f"jj_catch: {m.sum()} Z+jets FF events (HS + PU, jet-vs-jet pull >= 3, HS jet on t0, PU jet off it)")
+
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     rank = {}
     with open(a.out, "w", newline="") as f:
@@ -143,6 +165,7 @@ def cmd_select(a):
                 for v in ("pt", "eta", "phi", "hs", "pu", "core_t", "core_sig", "core_n", "rpt_itk", "rpt_t0_waves"):
                     r[f"j{k}_{v}"] = repr(float(e[f"j{k}_{v}"][i]))
                 r[f"j{k}_pull_waves"] = repr(float(P[s][f"waves_{k}"][i]))
+            r["pull_jj"] = repr(float(P[s]["jj"][i]))
             w.writerow(r)
     print(f"wrote {a.out}: {len(rows)} candidates")
 
@@ -252,7 +275,8 @@ def cmd_render(a):
                "--legs", f"{J[0]},{J[1]}", "--leg_labels", ",".join(lab),
                "--expect_rpt", ",".join(r[f"j{k}_{v}"] for k in (1, 2) for v in ("rpt_itk", "rpt_t0_waves")),
                "--jet_time_tracks", ";".join(jt),
-               "--case_label", f"WAVeS t0 = {t0:.1f} ps   (truth t_HS = {tt:.1f} ps)" + (f"   |   {pulls}" if pulls else ""),
+               "--case_label", f"WAVeS t0 = {t0:.1f} ps   (truth t_HS = {tt:.1f} ps)" + (f"   |   {pulls}" if pulls else "")
+                               + (f"   |   jet vs jet pull {float(r['pull_jj']):.1f}" if r["case"].startswith("jj_") else ""),
                "--t0_label", "WAVeS t0",
                "--source_label", f"{'VBF H->inv.' if r['sample'] == 'vbf' else 'Z(->ll)+jets'}   "
                                  f"{os.path.basename(orig)} #{r['entry']}   |   JVT + fJVT loose",
