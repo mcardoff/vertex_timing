@@ -292,6 +292,99 @@ def cmd_render(a):
         f.write("\n".join(summary) + "\n")
 
 
+def cmd_times(a):
+    """the time panel beside a display, as slides_time_veto_money's (python/vbs_veto_event_cards.py draw_times): one row
+    per t0 (truth t_HS, WAVeS, Athena's HGTD) and one per VBS jet, each with the +-2 / +-3 sigma the test uses
+    (t0: quoted x inflation; jet: core sigma x f(n), the veto's calibration), each t0's verdict with the two jets' pulls,
+    and jet vs jet. Read from the trees, the event found by (file_idx, entry) and checked by the leading jet's pT;
+    the jets named as event_display.py numbers them (the render log's --legs)."""
+    import re
+    import uproot
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    plt.rcParams.update({"font.size": 13})
+    import tdr_fwdpair_common as FC
+    E = {"vbf": uproot.open(a.sig)["events"].arrays(library="np"), "zjets": uproot.open(a.bkg)["events"].arrays(library="np")}
+    cal = FC.calibration(E["vbf"], verbose=False)
+    P = {s_: FC.pulls(e, cal) for s_, e in E.items()}
+    K = {s_: FC.vetoes(e, cal, a.nsigma) for s_, e in E.items()}
+    rows = {f"{r['case']}_{r['rank']}": r for r in read_csv(a.csv)}
+    SRC = [("waves", "WAVeS $t_0$", "#E69F00"), ("hgtd", "HGTD $t_0$ (Athena)", "#3F90DA")]
+    for name in a.only.split(","):
+        r = rows[name]; s_ = r["sample"]; e = E[s_]
+        i = np.flatnonzero((e["file_idx"] == int(r["file_idx"])) & (e["entry"] == int(r["entry"])) & (np.abs(e["j1_pt"] - float(r["j1_pt"])) < 1e-3))
+        assert len(i) == 1, (name, i)
+        i = int(i[0])
+        legs = re.search(r"--legs (\d+),(\d+)", open(os.path.join(a.logs, name + ".log")).read())
+        names = [f"Jet {int(legs.group(k)) + 1}" for k in (1, 2)]
+        tt = e["t0_truth"][i]
+        t0rows = [("truth $t_{\\rm HS}$", tt, 0.0, "#5B3A29", "truth")]
+        for src, lab, col in SRC:
+            ok = e[f"ok_{src}"][i] == 1
+            t0rows.append((lab + ("" if ok else "\n(no time)"), e[f"t0_{src}"][i] if ok else np.nan,
+                           e[f"infl_{src}"][i] * e[f"sig0_{src}"][i] if ok else np.nan, col, src))
+        jets = []
+        for k, nm in zip((1, 2), names):
+            role = "HS" if e[f"j{k}_hs"][i] == 1 else "PU" if e[f"j{k}_pu"][i] == 1 else "neither label"
+            n = int(e[f"j{k}_core_n"][i])
+            txt = f"{nm}: {role}, $\\eta$ = {e[f'j{k}_eta'][i]:+.2f}, {e[f'j{k}_pt'][i]:.0f} GeV"
+            if n >= 1:
+                jets.append((txt + f"\njet time: {n} track{'s' if n > 1 else ''}", e[f"j{k}_core_t"][i],
+                             cal(np.array([n]))[0] * e[f"j{k}_core_sig"][i], "#2E9E4F" if role == "HS" else "#555555", f"j{k}"))
+            else:
+                jets.append((txt + ("\nno jet time (central)" if abs(e[f"j{k}_eta"][i]) < 2.4 else "\nno jet time"),
+                             np.nan, np.nan, "#999999", f"j{k}"))
+        allrows = t0rows + jets
+        ys = np.array([1.6 * len(jets) - 0.3 + (len(t0rows) - 1 - k) for k in range(len(t0rows))]
+                      + [1.6 * (len(jets) - 1 - k) for k in range(len(jets))])
+        fin = [(v, x) for _, v, x, _, _ in allrows if np.isfinite(v)]
+        lo = min([v - 3 * x for v, x in fin if np.isfinite(x)] + [min(v for v, _ in fin) - 40])
+        hi = max([v + 3 * x for v, x in fin if np.isfinite(x)] + [max(v for v, _ in fin) + 40])
+        pad = 0.08 * (hi - lo)
+        fig = plt.figure(figsize=(8.6, 4.6))
+        at = fig.add_axes([0.35, 0.16, 0.40, 0.70])
+        for y, (lab, v, sg, col, tag) in zip(ys, allrows):
+            if np.isfinite(v):
+                if sg > 0:   # thick: +-2 sigma; thin, capped: out to +-3 sigma (the veto's threshold)
+                    at.plot([v - 3 * sg, v + 3 * sg], [y, y], color=col, lw=1.2, alpha=0.8, solid_capstyle="butt")
+                    for xx in (v - 3 * sg, v + 3 * sg): at.plot([xx] * 2, [y - 0.13, y + 0.13], color=col, lw=1.2, alpha=0.8)
+                    at.plot([v - 2 * sg, v + 2 * sg], [y, y], color=col, lw=5, solid_capstyle="butt")
+                at.plot([v], [y], "s" if tag in ("waves", "hgtd") else "o", color=col, ms=8, markeredgecolor="white",
+                        markeredgewidth=0.8, zorder=5)
+            if tag in ("truth", "waves", "hgtd"):
+                if e[f"ok_{tag}"][i] != 1:
+                    verdict, vcol = "no $t_0$: kept", "#777777"
+                else:
+                    pp = [P[s_][f"{tag}_{k}"][i] for k in (1, 2)]
+                    ps = ", ".join("\u2013" if not np.isfinite(x) else f"{x:.1f}$\\sigma$" for x in pp)
+                    vet = not K[s_][tag][i]
+                    verdict, vcol = ("VETOED" if vet else "kept") + f"  ({ps})", ("#B03A2E" if vet else "#2E7D32")
+                at.text(1.015, y, verdict, transform=at.get_yaxis_transform(), ha="left", va="center", fontsize=12,
+                        color=vcol, fontweight="bold")
+        at.set_yticks(ys); at.set_yticklabels([x[0] for x in allrows], fontsize=12)
+        for tl, x in zip(at.get_yticklabels(), allrows): tl.set_color(x[3])
+        at.axhline(1.6 * (len(jets) - 1) + 0.85, color="#BBBBBB", lw=0.8)
+        pj = P[s_]["jj"][i]
+        if np.isfinite(pj):
+            vet = not K[s_]["jj"][i]
+            jtxt, jcol = ("VETOED" if vet else "kept") + f"  ({pj:.1f}$\\sigma$)", ("#B03A2E" if vet else "#2E7D32")
+        else:
+            jtxt, jcol = "n/a: one jet timed", "#777777"
+        at.text(1.015, 0.8, "jet vs jet:\n" + jtxt, transform=at.get_yaxis_transform(), ha="left", va="center",
+                fontsize=12, color=jcol, fontweight="bold")
+        at.axvline(tt, color="#5B3A29", lw=0.8, ls=":")
+        at.set_xlim(lo - pad, hi + pad); at.set_ylim(-0.9, ys.max() + 0.6)
+        at.set_xlabel("time [ps]   (thick: $\\pm 2\\sigma$, thin: $\\pm 3\\sigma$; $\\sigma$ as used by the veto)")
+        at.text(1.015, ys.max() + 0.75, f"jet vs $t_0$ at {a.nsigma:g}$\\sigma$\n({names[0]}, {names[1]} pulls)",
+                transform=at.get_yaxis_transform(), ha="left", va="bottom", fontsize=11, color="#555555")
+        out = os.path.join(a.out_dir, f"times_{name}")
+        fig.savefig(out + ".png", dpi=170, bbox_inches="tight", pad_inches=0.08)
+        fig.savefig(out + ".pdf", bbox_inches="tight", pad_inches=0.08)
+        plt.close(fig)
+        print(f"wrote {out}.png / .pdf")
+
+
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 sub = ap.add_subparsers(dest="cmd", required=True)
 p = sub.add_parser("select"); p.add_argument("--sig", required=True); p.add_argument("--bkg", required=True)
@@ -299,5 +392,9 @@ p.add_argument("--bdt", required=True); p.add_argument("--out", required=True); 
 p = sub.add_parser("pick"); p.add_argument("--csv", required=True); p.add_argument("--out", required=True)
 p = sub.add_parser("render"); p.add_argument("--csv", required=True); p.add_argument("--picked", required=True)
 p.add_argument("--out-dir", required=True); p.add_argument("--only", help="comma list of names (case_rank) or cases")
+p = sub.add_parser("times"); p.add_argument("--csv", required=True); p.add_argument("--sig", required=True)
+p.add_argument("--bkg", required=True); p.add_argument("--logs", required=True, help="the render logs (for the jet numbering)")
+p.add_argument("--out-dir", required=True); p.add_argument("--only", required=True, help="comma list of names (case_rank)")
+p.add_argument("--nsigma", type=float, default=3.0)
 a = ap.parse_args()
-{"select": cmd_select, "pick": cmd_pick, "render": cmd_render}[a.cmd](a)
+{"select": cmd_select, "pick": cmd_pick, "render": cmd_render, "times": cmd_times}[a.cmd](a)
