@@ -14,6 +14,8 @@ talk; each rule is printed with the events it found:
   jj_miss    section 3  Z+jets forward-forward, no BDT: two pileup jets that agree in time (jet-vs-jet pull < 2) while both
                         are >= 3 sigma from the WAVeS t0 -- the t0 veto fires, jet vs jet does not
   jj_catch   section 3  Z+jets forward-forward, no BDT: HS + PU, the jets >= 3 sigma apart, the HS jet on the t0
+  jj_only    section 3  Z+jets forward-forward, no BDT: a pileup jet in the pair, the jets >= 3 sigma apart but both within
+                        3 sigma of the WAVeS t0 -- jet vs jet vetoes, the t0 test does not
   veto_bkg   section 3  Z+jets after the BDT at 80%: a pileup VBS jet in HGTD that the 3-sigma WAVeS veto catches
   irreducible section 3 Z+jets after the BDT at 80%: two hard-scatter VBS jets, both timed, the veto keeps it
   sig_cost   section 3  VBF after the BDT at 80%: two hard-scatter VBS jets, the veto rejects it
@@ -150,6 +152,13 @@ def cmd_select(a):
     sc_ = e["j1_core_n"] + e["j2_core_n"] - 100 * (jj > 20)
     rows += [("jj_catch", "zjets", i) for i in np.flatnonzero(m)[np.argsort(-sc_[m])][: a.n]]
     print(f"jj_catch: {m.sum()} Z+jets FF events (HS + PU, jet-vs-jet pull >= 3, HS jet on t0, PU jet off it)")
+    # jet vs jet vetoes, the t0 test keeps (the user, 2026-11-06: "one more example of the jet v jet where it vetos when
+    # t0 doesn't"): >= 3 sigma apart, both within 3 sigma of the WAVeS t0; a pileup jet in the pair; jets timed by >= 1 track
+    base1 = (e["cat"] == 2) & (e["j1_core_n"] >= 1) & (e["j2_core_n"] >= 1) & (e["ok_waves"] == 1)
+    m = base1 & (jj >= 3) & (p1 < 3) & (p2 < 3) & ((e["j1_pu"] == 1) | (e["j2_pu"] == 1))
+    sc_ = -(dw >= 20).astype(float) * 100.0 + e["j1_core_n"] + e["j2_core_n"]   # a correct t0 first, then more core tracks
+    rows += [("jj_only", "zjets", i) for i in np.flatnonzero(m)[np.argsort(-sc_[m])][: a.n]]
+    print(f"jj_only: {m.sum()} Z+jets FF events (a PU jet in the pair, jet-vs-jet pull >= 3, both < 3 sigma from the WAVeS t0)")
 
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     rank = {}
