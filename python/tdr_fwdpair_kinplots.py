@@ -235,10 +235,11 @@ if args.veto and args.summary:
     xs_, xb_ = np.clip(Es["mjj"], EDGES[0], EDGES[-1] - 1e-6), np.clip(Eb["mjj"], EDGES[0], EDGES[-1] - 1e-6)
     ncol = len(EDGES) - 1
 
-    def mjj_extent(fac, rows, edges, emj):
+    def mjj_extent(fac, rows, edges, emj, cat=None):
         """the lowest and highest point (change in %, +- its error) draw_mjj would draw"""
         E_ = np.asarray(edges, float)
         bS_, bB_ = (np.ones(len(ss), bool), np.ones(len(sb), bool)) if emj is None else (ss >= thr_of(emj), sb >= thr_of(emj))
+        if cat is not None: bS_, bB_ = bS_ & (Es["cat"] == cat), bB_ & (Eb["cat"] == cat)
         xs__, xb__ = np.clip(Es["mjj"], E_[0], E_[-1] - 1e-6), np.clip(Eb["mjj"], E_[0], E_[-1] - 1e-6)
         pts = []
         for v, *_ in rows:
@@ -248,15 +249,19 @@ if args.veto and args.summary:
         return min(pts), max(pts)
 
     def draw_mjj(stem, what, ytitle, fac, cap, legpos=(0.19, 0.39, 0.50, 0.645), legsize=0.6, rows=ROWS, edges=EDGES, emj=EMJ,
-                 clear_legend=False, ylim=None, offscale_arrows=False):
+                 clear_legend=False, ylim=None, offscale_arrows=False, cat=None, header_above=False):
         """fac(eps_S, eps_B, var(eps_B)) -> (factor, its error); drawn as a change in %. rows: the vetoes drawn; edges: the
         m_jj columns (the last includes overflow); emj: the BDT cut's signal efficiency, None for no BDT"""
         ROWS, EDGES, EMJ = rows, np.asarray(edges, float), emj
         bS, bB = (np.ones(len(ss), bool), np.ones(len(sb), bool)) if emj is None else (ss >= thr_of(emj), sb >= thr_of(emj))
+        if cat is not None: bS, bB = bS & (Es["cat"] == cat), bB & (Eb["cat"] == cat)   # one pair type (1 CF, 2 FF)
         xs_, xb_ = np.clip(Es["mjj"], EDGES[0], EDGES[-1] - 1e-6), np.clip(Eb["mjj"], EDGES[0], EDGES[-1] - 1e-6)
         ncol = len(EDGES) - 1
         cvm = S.keep(R_.TCanvas(stem, "", 800, 800))
-        cvm.cd(); S.pad(stem + "_m", 0.0, RAT_, 1.0, 1.0, top=0.05 / MAIN_ * 0.6, bottom=0.02)
+        # header_above: the header (top left) and the legend (top right) in a band above the frame, so the whole frame
+        # is free for the points and the off-scale arrows (the user's 150% cap put them under an in-frame header)
+        TOPM = 0.30 if header_above else 0.05 / MAIN_ * 0.6
+        cvm.cd(); S.pad(stem + "_m", 0.0, RAT_, 1.0, 1.0, top=TOPM, bottom=0.02)
         vals = {}
         for v, *_ in ROWS:
             out = []
@@ -309,7 +314,9 @@ if args.veto and args.summary:
             for c in range(ncol):                        # say so when a column's points are above the frame
                 n_off = sum(vals[v][0][c][0] > hi_ for v, *_ in ROWS)
                 if n_off: S.keep(ta.DrawLatex(0.5 * (EDGES[c] + EDGES[c + 1]), hi_ - 0.03 * (hi_ - lo_), f"#uparrow {n_off} of {len(ROWS)} off scale"))
-        S.header(0.19, 0.88, [f"{ENERGY}", "S: VBF H#rightarrowinv., B: Z+jets", "#geq 1 VBS jet in HGTD" + (f", JVT + fJVT {JVT_WP}" if JVT_WP != "none" else ""),
+        S.header(0.19, 0.955 if header_above else 0.88, [f"{ENERGY}", "S: VBF H#rightarrowinv., B: Z+jets",
+                              ("Forward-forward pairs" if cat == 2 else "Central-forward pairs" if cat == 1 else "#geq 1 VBS jet in HGTD")
+                              + (f", JVT + fJVT {JVT_WP}" if JVT_WP != "none" else ""),
                               "No BDT: the veto alone" if EMJ is None else f"BDT at #varepsilon_{{S}} = {100 * EMJ:.0f}%, then the veto"], size=0.8 * TS)   # short: clear of column 3
         R_.gPad.RedrawAxis()
         cvm.cd(); S.pad(stem + "_r", 0.0, 0.0, 1.0, RAT_, top=0.03, bottom=0.36)
@@ -329,6 +336,7 @@ if args.veto and args.summary:
         stk.Draw("HIST SAME")
         legr = S.legend(0.19, 0.74, 0.94, 0.90, size=0.7 * TSR, ncol=3, margin=0.2)
         for h in reversed(list(stk.GetHists())):
+            if h.Integral() <= 0: continue                       # e.g. no central-forward pairs in a forward-forward figure
             legr.AddEntry(h, "Central-forward" if h.GetName() == f"{stem}_1" else "Forward-forward", "F")
         legr.AddEntry(S.keep(R_.TH1D(stem + "_dummy", "", 1, 0, 1)), "numbers: S / B MC", "")
         legr.Draw()
@@ -363,9 +371,15 @@ if args.veto and args.summary:
             top_s = max(b for _, b in ext)
             step = 50.0 if top_s < 300 else 100.0
             hi_s = step * np.ceil((lo_s + (top_s - lo_s) / 0.62) / step)
+        LEG_ABOVE = (0.61, 0.715, 0.94, 0.975)               # the band above the frame (header_above), right of the header
+        above = what_ == "S/sqrt(B)"
         for emj_, tag_ in ((None, "nobdt"), (EMJ, f"bdt{round(100 * EMJ)}")):
-            draw_mjj(f"{stem_}_{tag_}", what_, ytitle_, fac_, 1e9, legpos=args.mjj2_leg, legsize=0.46,
-                     rows=ROWS4, edges=E2, emj=emj_, ylim=(lo_s, hi_s), offscale_arrows=True)
+            draw_mjj(f"{stem_}_{tag_}", what_, ytitle_, fac_, 1e9, legpos=LEG_ABOVE if above else args.mjj2_leg,
+                     legsize=0.5 if above else 0.46, rows=ROWS4, edges=E2, emj=emj_, ylim=(lo_s, hi_s), offscale_arrows=True,
+                     header_above=above)
+            if what_ == "S/sqrt(B)" and ONE:   # the forward-forward pairs alone (the user, 2026-11-06), where jet vs jet can act
+                draw_mjj(f"{stem_}_ff_{tag_}", what_, ytitle_, fac_, 1e9, legpos=LEG_ABOVE, legsize=0.5,
+                         rows=ROWS4, edges=E2, emj=emj_, ylim=(lo_s, hi_s), offscale_arrows=True, cat=2, header_above=True)
 
 if args.summary:
     # the kinematic BDT's held-out score distributions, unit area (weighted), with the cuts of the analysis
