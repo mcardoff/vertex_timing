@@ -66,6 +66,7 @@ namespace MyUtl {
     double      rptMin;   // JVT proxy: keep a JVT-window jet iff R_pT >= this
     double      fjvtMax;  // keep an fJVT-window jet iff fJVT <= this
     bool        rptFwd = false;  // also cut R_pT on forward jets (RPT_FWD_ETA_MAX)
+    double      fwdPtMax = FJVT_PT_MAX;   // ... below this pT (rptFwd only)
   };
   // R_pT thresholds: calibrated on local-VBF paper-HS jets in the JVT window
   // (|eta| < 2.5, 30 < pT < 60 GeV) to the published JVT working-point HS
@@ -80,6 +81,11 @@ namespace MyUtl {
     // recalibrated forward). Appended last: the indices above are stored as
     // meta_vbs_jvt_wp / jvt_wp in existing outputs.
     {"looseext", "_jvtLooseExt", 0.0167, 0.5, true},
+    // JVT alone, its R_pT cut extended to |eta| < 4.0 and NO fJVT (fjvtMax 1e9 never removes): the analysis baseline
+    // the user was given on 2026-11-06 ("remove fJVT and extend JVT to |eta| < 4.0", "no fJVT at all"). Forward pT
+    // range: JVT's own (< 60 GeV) or fJVT's (< 120 GeV), the definition not being fixed yet. Appended last, as above.
+    {"jvt4pt60",  "_jvt4pt60",  0.0167, 1e9, true, 60.0},
+    {"jvt4pt120", "_jvt4pt120", 0.0167, 1e9, true, 120.0},
   };
 
   // The working point called `name`, or nullptr if there is none.
@@ -96,13 +102,14 @@ namespace MyUtl {
     int   nGhost = 0, nGhostPV = 0;
     bool  jvtWin = false, fjvtWin = false;
     bool  rptFwdWin = false;   // 2.5 <= |eta| < RPT_FWD_ETA_MAX, pT < FJVT_PT_MAX
+    float pt = 0.f;            // for the working point's own forward pT cap (JvtWP::fwdPtMax)
   };
 
   // The removal rule, in one place. The JVT and fJVT windows are disjoint in
   // |eta|; with wp.rptFwd a forward jet can fail both (callers test jvtRemoves
   // first, so it is counted as a JVT removal).
   inline bool jvtRemoves (const JetDisc& d, const JvtWP& wp) {
-    return (d.jvtWin || (wp.rptFwd && d.rptFwdWin)) && d.rpt < wp.rptMin;
+    return (d.jvtWin || (wp.rptFwd && d.rptFwdWin && d.pt < wp.fwdPtMax)) && d.rpt < wp.rptMin;
   }
   inline bool fjvtRemoves(const JetDisc& d, const JvtWP& wp) { return d.fjvtWin && d.fjvt > wp.fjvtMax; }
 
@@ -151,6 +158,7 @@ namespace MyUtl {
       d.jvtWin  = aeta < JVT_ETA_MAX && pt < JVT_PT_MAX;
       d.fjvtWin = aeta >= FJVT_ETA_MIN && aeta < FJVT_ETA_MAX && pt < FJVT_PT_MAX;
       d.rptFwdWin = aeta >= FJVT_ETA_MIN && aeta < RPT_FWD_ETA_MAX && pt < FJVT_PT_MAX;
+      d.pt = (float)pt;
       if (aeta < FJVT_TRK_ETA_MAX && pt > FJVT_CEN_JET_PT_MIN && !b.isJetRemoved(j)) {
         int vBest = -1; double best = 0.0;
         for (int v = 0; v < nV; ++v) if (perV[v] > best) { best = perV[v]; vBest = v; }

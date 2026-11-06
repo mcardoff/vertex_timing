@@ -56,7 +56,7 @@
 //
 // Usage:  tdr_fwdpair [--sample=<s>] [--ntuple-dir=<d>] [--file-shard=i/N] [--max-events=N]
 //                     [--gate-sigma=X (default 2)] [--clean-times=all|t0|off (default all)] [--pair=ff|one (default ff)]
-//                     [--jvt=none|loose|tight (default none)]
+//                     [--jvt=none|loose|tight|jvt4pt60|jvt4pt120 (default none)]
 //                     [--out=<path>]
 // Output: <prefix>tdr_fwdpair.root (TTrees "events", "meta"; merge shards with hadd -f).
 // Track-time cleaning needs Track_hitInLastLayer: read the RAW ntuples (--ntuple-dir=).
@@ -228,7 +228,7 @@ int main(int argc, char** argv) {
   const bool oneFwd = pairMode == "one";
   if (oneFwd) SELECTION_TAG = SELECTION_TAG.empty() ? "onefwd" : SELECTION_TAG + "_onefwd";
   const JvtWP* jwp = jvtWPByName(jvtName);
-  if (!jwp || jvtName == "looseext") { std::cerr << "[tdr_fwdpair] --jvt must be none, loose or tight\n"; return 1; }
+  if (!jwp || jvtName == "looseext") { std::cerr << "[tdr_fwdpair] --jvt must be none, loose, tight, jvt4pt60 or jvt4pt120\n"; return 1; }
   const bool jvtOn = jwp->rptMin >= 0.0;
   if (jvtOn) {
     EXTENDED_BRANCHES = true;                     // the discriminants need Track_recoVtx_idx
