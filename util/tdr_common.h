@@ -155,6 +155,10 @@ struct T0Extra {
   int nClusters = 0;
   double bestDt = std::numeric_limits<double>::quiet_NaN();
   double wavesFullDt = std::numeric_limits<double>::quiet_NaN();
+  // the hard scatter's cluster, by its tracks' truth origin: the one holding the most hard-scatter pT. bestDt alone
+  // overstates "a good cluster existed": a pileup cluster lands within 60 ps of t_HS by chance (~21% per cluster)
+  double hsDt = std::numeric_limits<double>::quiet_NaN();
+  double hsPurity = 0.0;   // its pT fraction from the hard scatter (0: no cluster has a hard-scatter track)
 };
 
 // The event's t0s -- util/vbs_time_veto.cxx's block, verbatim, without TZP.
@@ -184,10 +188,14 @@ inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL, const Ti
   if (x) {
     x->nClusters = (int)clusters.size();
     double best = std::numeric_limits<double>::infinity();
+    double hsMax = 0.0;
     for (const auto& c0 : clusters) {
       auto c = c0;
       const double d = c.calculateTime(Score::TRKPTZ, &b) - b.truthVtxTime[0];
       if (std::abs(d) < best) { best = std::abs(d); x->bestDt = d; }
+      double sum = 0.0;
+      for (int t : c.trackIndices) sum += b.trackPt[t];
+      if (c.purity * sum > hsMax) { hsMax = c.purity * sum; x->hsDt = d; x->hsPurity = c.purity; }
     }
   }
   s.t[T0_TRUTH] = b.truthVtxTime[0];  s.sig[T0_TRUTH] = 0.0;  s.ok[T0_TRUTH] = true;
