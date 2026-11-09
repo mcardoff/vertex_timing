@@ -293,4 +293,24 @@ inline JetRpt jetRpt(BranchPointerWrapper& b, int j, const TrackLists& L, const 
   return r;
 }
 
+// JVT's R_pT (src/jet_tagging.h's: the pT of the jet's ghost tracks the vertex fit gave PV0, over the jet pT), plain
+// and with the t0 gate on those same tracks, per t0 source: a timed PV0 track counts only within `gate` sigma of the
+// t0; untimed tracks, and every track of an event without that t0, count (timeGate's rule). The time-gated JVT of
+// the 2026-11-09 mini deck: at <mu> = 200 a forward pileup jet usually passes JVT on ONE PV0 track, often from another
+// collision at the same z, which the gate can see. Needs EXTENDED_BRANCHES (Track_recoVtx_idx).
+struct JvtRpt {
+  double plain = 0.0;
+  std::array<double, N_T0> t0{};
+};
+inline JvtRpt jvtRpt(BranchPointerWrapper& b, int j, const T0Set& T, double gate, const TimeCleaning& C) {
+  std::vector<int> pv;
+  for (int idx : b.topoJetGhostTrackIdx[j]) if (b.recoVtxOf(idx) == 0) pv.push_back(idx);
+  JvtRpt r;
+  const double pt = b.topoJetPt[j];
+  r.plain = sumPt(b, pv) / pt;
+  for (int k = 0; k < N_T0; ++k)
+    r.t0[k] = sumPt(b, timeGate(b, pv, T.t[k], T.sig[k], T.ok[k], T.infl[k], gate, C)) / pt;
+  return r;
+}
+
 }  // namespace tdr

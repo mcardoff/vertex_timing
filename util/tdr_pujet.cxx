@@ -71,6 +71,7 @@ int main(int argc, char** argv) {
   std::cout << "[tdr_pujet] track-time cleaning: " << tdr::cleanModeName(cleanMode) << "; R_pT matching: " << tdr::rptMatchName(rptMatch) << "\n";
   std::cout << "[tdr_pujet] out=" << outPath << "\n";
 
+  EXTENDED_BRANCHES = true;                      // JVT's R_pT needs the vertex fit's Track_recoVtx_idx
   TChain chain("ntuple");
   setupChain(chain, cfg.ntupleDir.c_str(), FILE_SHARD);
   recordAvailableBranches(chain);
@@ -87,6 +88,7 @@ int main(int argc, char** argv) {
   bool okHgtd = false;
   double rItk = 0.0, rSelf = 0.0, rComb = 0.0;
   double rT0[tdr::N_T0] = {};
+  double rJvt = 0.0, rJvtT0[tdr::N_T0] = {};   // JVT's R_pT (vertex-fit PV0 tracks), plain and t0-gated
   jets.Branch("file_idx", &file_idx, "file_idx/I");
   jets.Branch("entry", &entry, "entry/L");
   jets.Branch("weight", &weight, "weight/F");
@@ -105,6 +107,11 @@ int main(int argc, char** argv) {
   }
   jets.Branch("rpt_self", &rSelf, "rpt_self/D");
   jets.Branch("rpt_comb", &rComb, "rpt_comb/D");
+  jets.Branch("jvt_rpt", &rJvt, "jvt_rpt/D");
+  for (int k = 0; k < tdr::N_T0; ++k) {
+    const std::string n = std::string("jvt_rpt_t0_") + tdr::T0_NAMES[k];
+    jets.Branch(n.c_str(), &rJvtT0[k], (n + "/D").c_str());
+  }
 
   Long64_t nRead = 0, nVtx = 0, nLep = 0, nJetRows = 0;
   while (reader.Next()) {
@@ -145,6 +152,9 @@ int main(int argc, char** argv) {
       ntrk = r.ntrk;  ntimed = r.ntimed;
       rItk = r.itk;  rSelf = r.self;  rComb = r.comb;
       for (int k = 0; k < tdr::N_T0; ++k) rT0[k] = r.t0[k];
+      const tdr::JvtRpt jr = tdr::jvtRpt(branch, j, T, gate, CLEAN);
+      rJvt = jr.plain;
+      for (int k = 0; k < tdr::N_T0; ++k) rJvtT0[k] = jr.t0[k];
       jets.Fill();
       ++nJetRows;
     }
