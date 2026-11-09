@@ -21,6 +21,8 @@ import tdr_root_style as S
 ap = argparse.ArgumentParser()
 ap.add_argument("--trees", nargs=2, required=True, metavar=("VBF", "ZJETS"))
 ap.add_argument("--out", required=True)
+ap.add_argument("--x", choices=["nhs", "injet"], default="nhs", help="against the forward HS tracks, or the share of the hard "
+                "scatter's timed track pT inside forward jets (trees from commit 5e7571b)")
 args = ap.parse_args()
 FOLD, PASS = 15, 60.0
 R = S.setup()
@@ -29,22 +31,35 @@ for c, (path, lab) in enumerate(zip(args.trees, ("VBF H#rightarrowinv.", "Z+jets
     E = uproot.open(path)["events"].arrays(library="np")
     w = E["weight"].astype(float); W = w.sum()
     T, F, V = (np.abs(E[k]) < PASS for k in ("dt_trkptz_clean", "dt_waves_full_clean", "dt_waves_clean"))
-    n = np.minimum(E["n_hs_trk"], FOLD)
+    if args.x == "nhs":
+        n = np.minimum(E["n_hs_trk"], FOLD); xs = np.arange(FOLD + 1); xlab = f"Forward hard-scatter tracks with a time (last bin: #geq {FOLD})"
+    else:
+        tim = E["hs_pt_timed_clean"]
+        frac = np.where(tim > 0, E["hs_pt_injet_clean"] / np.where(tim > 0, tim, 1), -1)
+        n = np.where(frac < 0, -1, np.minimum((frac * 10).astype(int), 9)); xs = np.arange(10)
+        xlab = "Share of the hard scatter's timed p_{T} inside forward jets"
+        print(f"  {lab}: in-jet share, p_T-weighted mean over events with timed HS tracks: {np.average(frac[frac >= 0], weights=w[frac >= 0]):.2f}")
     pc = lambda m: 100 * w[m].sum() / W
     sel_g, sel_l = pc(F & ~T), pc(T & ~F)
     ret_g, ret_l = pc(V & ~F), pc(F & ~V)
     print(f"{lab.replace('#rightarrow', '->')}: total {pc(V) - pc(T):+.2f} = selection {sel_g - sel_l:+.2f} (+{sel_g:.2f} / -{sel_l:.2f}) "
           f"+ re-timing {ret_g - ret_l:+.2f} (+{ret_g:.2f} / -{ret_l:.2f})")
-    xs = np.arange(FOLD + 1)
     d = lambda a, b: np.array([100 * (w[(n == k) & a].sum() - w[(n == k) & b].sum()) / max(w[n == k].sum(), 1e-12) for k in xs])
     curves = [("total: WAVeS #minus TRKPTZ", d(V, T), "#000000", 20, 1),
               ("selection: the jet-weighted choice", d(F, T), "kP10Blue", 21, 1),
               ("re-timing: the in-jet time", d(V, F), "kP10Yellow", 22, 1)]
     cv.cd(); S.pad(f"wv_{c}", 0.5 * c, 0.0, 0.5 * c + 0.5, 1.0, top=0.06, bottom=0.13, left=0.14, right=0.04)
     lo = min(-8.0, min(np.min(y) for _, y, *_ in curves) - 1); hi = max(8.0, max(np.max(y) for _, y, *_ in curves) + 1)
-    fr = S.keep(R.gPad.DrawFrame(-0.5, lo, FOLD + 0.5, hi + 0.9 * (hi - lo)))
-    S.axes(fr, f"Forward hard-scatter tracks with a time (last bin: #geq {FOLD})", "Core fraction difference [points]", size=0.042, ytoff=1.4, xtoff=1.2)
-    zero = S.keep(R.TLine(-0.5, 0, FOLD + 0.5, 0)); zero.SetLineStyle(2); zero.SetLineColor(R.kGray + 2); zero.Draw()
+    xlo, xhi = (-0.5, FOLD + 0.5) if args.x == "nhs" else (-0.5, 9.5)
+    fr = S.keep(R.gPad.DrawFrame(xlo, lo, xhi, hi + 0.9 * (hi - lo)))
+    S.axes(fr, xlab, "Core fraction difference [points]", size=0.042, ytoff=1.4, xtoff=1.2)
+    if args.x == "injet":
+        fr.GetXaxis().SetNdivisions(10, False)
+        for i in range(10): fr.GetXaxis().ChangeLabel(i + 1, -1, -1, -1, -1, -1, f"{i / 10:.1f}")
+    zero = S.keep(R.TLine(xlo, 0, xhi, 0)); zero.SetLineStyle(2); zero.SetLineColor(R.kGray + 2); zero.Draw()
+    dist = np.array([w[n == k].sum() for k in xs]); dist = dist / dist.max() * 0.35 * (hi - lo) + lo
+    hd = S.keep(R.TGraph(len(xs))); [hd.SetPoint(i, x, y) for i, (x, y) in enumerate(zip(xs, dist))]
+    hd.SetLineStyle(2); hd.SetLineColor(R.kGray + 1); hd.SetLineWidth(2); hd.Draw("L SAME")
     leg = S.legend(0.18, 0.58, 0.62, 0.72, size=0.033)
     for name, y, col, mk, ls in curves:
         g = S.style(S.graph(xs, y), col, mk, ls, 2, 1.1); g.Draw("LP SAME")

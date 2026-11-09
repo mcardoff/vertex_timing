@@ -4,6 +4,8 @@ put in one class, against the number of forward hard-scatter tracks with a time.
 
   core              |t0 - t_HS| < 60 ps
   re-timing         (WAVeS) the chosen cluster is within 60 ps, its in-jet recomputed time is not
+  HS times wrong    (with --mistimed) most of the hard scatter's timed track pT (> 50%) is >= 3 sigma from t_HS: the
+                    tracks' times are wrong, whatever the clustering does (the old ladder's "timing misassignment")
   selection         the hard scatter's cluster -- the one holding the most hard-scatter pT, > 50% hard scatter -- is
                     within 60 ps of t_HS (its full-cluster time), and the score chose another
   HS cluster off    the hard scatter's cluster exists but is > 60 ps off: mistimed tracks, or merged with pileup
@@ -28,10 +30,12 @@ import tdr_root_style as S
 ap = argparse.ArgumentParser()
 ap.add_argument("--trees", nargs=2, required=True, metavar=("VBF", "ZJETS"))
 ap.add_argument("--out", required=True)
+ap.add_argument("--mistimed", action="store_true", help="add the 'HS times wrong' class (trees from commit 5e7571b)")
 args = ap.parse_args()
 PASS, FOLD = 60.0, 20
 CLASSES = [("core", "within 60 ps of t_{HS}", "#7BCB6B"),
            ("retime", "re-timing: right cluster, in-jet time off", "#E69F00"),
+           ("mistimed", "HS track times wrong (> 50% of p_{T} #geq 3#sigma off)", "#5A3E2B"),
            ("selection", "selection: the HS cluster was right, not chosen", "#3F90DA"),
            ("hsoff", "the HS cluster is > 60 ps off", "#B3231C"),
            ("nohs", "no HS cluster: too few HS tracks, or merged", "#8E5DB5"),
@@ -45,8 +49,10 @@ def classes(E, t0):
     retime = (has & ~core & (np.abs(E["dt_waves_full_clean"]) < PASS)) if t0 == "waves" else np.zeros(len(dt), bool)
     hsc = has & (E["hs_purity_clean"] > 0.5)
     hs_ok = hsc & (np.abs(E["dt_hs_clean"]) < PASS)
-    rest = has & ~core & ~retime
-    return {"core": core, "retime": retime, "selection": rest & hs_ok, "hsoff": rest & hsc & ~hs_ok,
+    mist = (has & ~core & ~retime & (E["hs_pt_mistimed_clean"] > 0.5 * E["hs_pt_timed_clean"])
+            & (E["hs_pt_timed_clean"] > 0)) if args.mistimed else np.zeros(len(dt), bool)
+    rest = has & ~core & ~retime & ~mist
+    return {"core": core, "retime": retime, "mistimed": mist, "selection": rest & hs_ok, "hsoff": rest & hsc & ~hs_ok,
             "nohs": rest & ~hsc, "not0": ~has}
 
 
@@ -71,10 +77,10 @@ for c, (path, lab) in enumerate(zip(args.trees, ("VBF H#rightarrowinv.", "Z+jets
     C = classes(E, "waves")
     cv.cd(); S.pad(f"f_{c}", 0.5 * c, 0.0, 0.5 * c + 0.5, 1.0, top=0.06, bottom=0.13, left=0.13, right=0.04)
     st = S.keep(R.THStack(f"st_{c}", ""))
-    leg = S.legend(0.17, 0.585, 0.80, 0.785, size=0.032, margin=0.12)
+    leg = S.legend(0.17, 0.56, 0.80, 0.785, size=0.030, margin=0.12)
     hs = []
     den = np.histogram(n, np.arange(-0.5, FOLD + 1.5), weights=w)[0]
-    for key, name, col in CLASSES:
+    for key, name, col in [x for x in CLASSES if args.mistimed or x[0] != "mistimed"]:
         h = S.keep(R.TH1D(f"h_{c}_{key}", "", FOLD + 1, -0.5, FOLD + 0.5))
         num = np.histogram(n[C[key]], np.arange(-0.5, FOLD + 1.5), weights=w[C[key]])[0]
         for i, v in enumerate(num / np.maximum(den, 1e-12)): h.SetBinContent(i + 1, v)
