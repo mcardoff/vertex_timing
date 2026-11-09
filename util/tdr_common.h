@@ -159,6 +159,13 @@ struct T0Extra {
   // overstates "a good cluster existed": a pileup cluster lands within 60 ps of t_HS by chance (~21% per cluster)
   double hsDt = std::numeric_limits<double>::quiet_NaN();
   double hsPurity = 0.0;   // its pT fraction from the hard scatter (0: no cluster has a hard-scatter track)
+  // the hard scatter's own timed tracks in the t0 input (truth vertex 0, a cleaned time), for "are its track times
+  // wrong?" and "where is its timing weight?" (the user, 2026-11-09):
+  int nHsTimed = 0, nHsMistimed = 0;
+  double hsPtTimed = 0.0;
+  double hsPtMistimed = 0.0;    // |t - t_HS| >= 3 sigma_trk: the time is wrong
+  double hsPtMisassigned = 0.0; // the TDR's definition: <= 50% of its HGTD hits from its own particle
+  double hsPtInJet = 0.0;       // within dR < 0.4 of a forward jet (pT > 30, 2.38 < |eta| < 4.0): what WAVeS up-weights
 };
 
 // The event's t0s -- util/vbs_time_veto.cxx's block, verbatim, without TZP.
@@ -186,6 +193,21 @@ inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL, const Ti
     s.sig[T0_WAVES] = bW.sigmas[0];  s.ok[T0_WAVES] = true;
   }
   if (x) {
+    for (int idx : trk_z) {
+      if (b.trackToTruthvtx[idx] != 0 || b.trackTimeValid[idx] != 1) continue;   // cleaned-away times already dropped
+      const double pt = b.trackPt[idx];
+      ++x->nHsTimed;  x->hsPtTimed += pt;
+      if (b.trackTimeRes[idx] > 0 && std::abs(b.trackTime[idx] - b.truthVtxTime[0]) / b.trackTimeRes[idx] >= 3.0) {
+        ++x->nHsMistimed;  x->hsPtMistimed += pt;
+      }
+      if (b.trackPrimHits[idx] * 2 <= b.trackHgtdHits[idx]) x->hsPtMisassigned += pt;
+      for (int j = 0; j < (int)b.topoJetPt.GetSize(); ++j) {
+        if (b.isJetRemoved(j) || b.topoJetPt[j] < MIN_JET_PT) continue;
+        const double ae = std::abs((double)b.topoJetEta[j]);
+        if (ae < MIN_ABS_ETA_JET || ae > MAX_ABS_ETA_JET) continue;
+        if (dR(b.trackEta[idx], b.trackPhi[idx], b.topoJetEta[j], b.topoJetPhi[j]) < 0.4) { x->hsPtInJet += pt; break; }
+      }
+    }
     x->nClusters = (int)clusters.size();
     double best = std::numeric_limits<double>::infinity();
     double hsMax = 0.0;

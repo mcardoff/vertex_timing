@@ -130,6 +130,14 @@ int main(int argc, char** argv) {
   double dtHs = 0.0, hsPur = 0.0;
   tree.Branch("dt_hs_clean", &dtHs, "dt_hs_clean/D");
   tree.Branch("hs_purity_clean", &hsPur, "hs_purity_clean/D");
+  int nHsT = 0, nHsMis = 0;
+  double hsPtT = 0.0, hsPtMis = 0.0, hsPtMisHit = 0.0, hsPtJet = 0.0;
+  tree.Branch("n_hs_timed_clean", &nHsT, "n_hs_timed_clean/I");
+  tree.Branch("n_hs_mistimed_clean", &nHsMis, "n_hs_mistimed_clean/I");
+  tree.Branch("hs_pt_timed_clean", &hsPtT, "hs_pt_timed_clean/D");
+  tree.Branch("hs_pt_mistimed_clean", &hsPtMis, "hs_pt_mistimed_clean/D");
+  tree.Branch("hs_pt_misassigned_clean", &hsPtMisHit, "hs_pt_misassigned_clean/D");
+  tree.Branch("hs_pt_injet_clean", &hsPtJet, "hs_pt_injet_clean/D");
   const double NaN = std::numeric_limits<double>::quiet_NaN();
 
   Long64_t nRead = 0, nSel = 0;
@@ -149,6 +157,8 @@ int main(int argc, char** argv) {
     tdr::T0Extra ex;
     const tdr::T0Set cln = tdr::computeT0s(branch, INFL, CLEAN, &ex);
     nClus = ex.nClusters;  dtBest = ex.bestDt;  dtWavesFull = ex.wavesFullDt;  dtHs = ex.hsDt;  hsPur = ex.hsPurity;
+    nHsT = ex.nHsTimed;  nHsMis = ex.nHsMistimed;  hsPtT = ex.hsPtTimed;  hsPtMis = ex.hsPtMistimed;
+    hsPtMisHit = ex.hsPtMisassigned;  hsPtJet = ex.hsPtInJet;
     const double tHS = branch.truthVtxTime[0];
     auto put = [&](int k, const tdr::T0Set& s, int idx) { dt[k] = s.ok[idx] ? s.t[idx] - tHS : NaN; };
     put(0, raw, tdr::T0_HGTD);
