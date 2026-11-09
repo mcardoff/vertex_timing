@@ -32,11 +32,12 @@ for c, (path, lab) in enumerate(zip(args.trees, ("VBF H#rightarrowinv.", "Z+jets
     w = E["weight"].astype(float); W = w.sum()
     T, F, V = (np.abs(E[k]) < PASS for k in ("dt_trkptz_clean", "dt_waves_full_clean", "dt_waves_clean"))
     if args.x == "nhs":
-        n = np.minimum(E["n_hs_trk"], FOLD); xs = np.arange(FOLD + 1); xlab = f"Forward hard-scatter tracks with a time (last bin: #geq {FOLD})"
+        n = np.minimum(E["n_hs_trk"], FOLD); xs = np.arange(FOLD + 1); xplot = xs; xlab = f"Forward hard-scatter tracks with a time (last bin: #geq {FOLD})"
     else:
         tim = E["hs_pt_timed_clean"]
         frac = np.where(tim > 0, E["hs_pt_injet_clean"] / np.where(tim > 0, tim, 1), -1)
         n = np.where(frac < 0, -1, np.minimum((frac * 10).astype(int), 9)); xs = np.arange(10)
+        xplot = (xs + 0.5) / 10
         xlab = "Share of the hard scatter's timed p_{T} inside forward jets"
         print(f"  {lab}: in-jet share, p_T-weighted mean over events with timed HS tracks: {np.average(frac[frac >= 0], weights=w[frac >= 0]):.2f}")
     pc = lambda m: 100 * w[m].sum() / W
@@ -50,22 +51,19 @@ for c, (path, lab) in enumerate(zip(args.trees, ("VBF H#rightarrowinv.", "Z+jets
               ("re-timing: the in-jet time", d(V, F), "kP10Yellow", 22, 1)]
     cv.cd(); S.pad(f"wv_{c}", 0.5 * c, 0.0, 0.5 * c + 0.5, 1.0, top=0.06, bottom=0.13, left=0.14, right=0.04)
     lo = min(-8.0, min(np.min(y) for _, y, *_ in curves) - 1); hi = max(8.0, max(np.max(y) for _, y, *_ in curves) + 1)
-    xlo, xhi = (-0.5, FOLD + 0.5) if args.x == "nhs" else (-0.5, 9.5)
+    xlo, xhi = (-0.5, FOLD + 0.5) if args.x == "nhs" else (0.0, 1.0)
     fr = S.keep(R.gPad.DrawFrame(xlo, lo, xhi, hi + 0.9 * (hi - lo)))
     S.axes(fr, xlab, "Core fraction difference [points]", size=0.042, ytoff=1.4, xtoff=1.2)
-    if args.x == "injet":
-        fr.GetXaxis().SetNdivisions(10, False)
-        for i in range(10): fr.GetXaxis().ChangeLabel(i + 1, -1, -1, -1, -1, -1, f"{i / 10:.1f}")
     zero = S.keep(R.TLine(xlo, 0, xhi, 0)); zero.SetLineStyle(2); zero.SetLineColor(R.kGray + 2); zero.Draw()
     dist = np.array([w[n == k].sum() for k in xs]); dist = dist / dist.max() * 0.35 * (hi - lo) + lo
-    hd = S.keep(R.TGraph(len(xs))); [hd.SetPoint(i, x, y) for i, (x, y) in enumerate(zip(xs, dist))]
+    hd = S.keep(R.TGraph(len(xs))); [hd.SetPoint(i, x, y) for i, (x, y) in enumerate(zip(xplot, dist))]
     hd.SetLineStyle(2); hd.SetLineColor(R.kGray + 1); hd.SetLineWidth(2); hd.Draw("L SAME")
     leg = S.legend(0.18, 0.58, 0.62, 0.72, size=0.033)
     for name, y, col, mk, ls in curves:
-        g = S.style(S.graph(xs, y), col, mk, ls, 2, 1.1); g.Draw("LP SAME")
+        g = S.style(S.graph(xplot, y), col, mk, ls, 2, 1.1); g.Draw("LP SAME")
         leg.AddEntry(g, name, "LP")
     leg.Draw()
-    S.header(0.18, 0.88, ["#sqrt{s} = 14 TeV, #LT#mu#GT = 200",
+    S.header(0.18, 0.88, ["#sqrt{s} = 14 TeV, #LT#mu#GT = 200;  grey dashed: events (a.u.)",
                           f"{lab}: all events {pc(V) - pc(T):+.1f} = selection {sel_g - sel_l:+.1f} + re-timing {ret_g - ret_l:+.1f}",
                           f"selection: +{sel_g:.1f} / #minus{sel_l:.1f};  re-timing: +{ret_g:.1f} / #minus{ret_l:.1f}  (fixed / broken)"], size=0.033)
     R.gPad.RedrawAxis()
