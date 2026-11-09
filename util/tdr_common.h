@@ -56,6 +56,7 @@
 
 #include <algorithm>
 #include <array>
+#include <limits>
 #include <cmath>
 #include <string>
 #include <unordered_map>
@@ -147,8 +148,17 @@ inline bool timed(BranchPointerWrapper& b, int idx, const TimeCleaning& C, bool 
   return !(ae > 3.5 && ae < 3.9 && b.trackHgtdHits[idx] < 2);
 }
 
+// What the clustering offered, for the failure breakdown (util/tdr_t0, 2026-11-09 Global Performance talk): the
+// number of time clusters, the cluster time (full cluster, TRKPTZ's) closest to t_HS, and the full-cluster time of
+// the cluster WAVeS chose (before its in-jet re-timing). NaN without clusters.
+struct T0Extra {
+  int nClusters = 0;
+  double bestDt = std::numeric_limits<double>::quiet_NaN();
+  double wavesFullDt = std::numeric_limits<double>::quiet_NaN();
+};
+
 // The event's t0s -- util/vbs_time_veto.cxx's block, verbatim, without TZP.
-inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL, const TimeCleaning& C) {
+inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL, const TimeCleaning& C, T0Extra* x = nullptr) {
   T0Set s;
   s.t[T0_HGTD]   = b.recoVtxTime[0];
   s.sig[T0_HGTD] = b.recoVtxTimeRes[0];
@@ -167,8 +177,18 @@ inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL, const Ti
     s.t[T0_TRKPTZ] = bT.calculateTime(Score::TRKPTZ, &b);
     s.sig[T0_TRKPTZ] = bT.sigmas[0];  s.ok[T0_TRKPTZ] = true;
     auto bW = chooseCluster(clusters, Score::WAVES);
+    if (x) { auto full = bW; x->wavesFullDt = full.calculateTime(Score::TRKPTZ, &b) - b.truthVtxTime[0]; }
     s.t[T0_WAVES] = bW.calculateTime(Score::WAVES, &b);       // in-jet refined
     s.sig[T0_WAVES] = bW.sigmas[0];  s.ok[T0_WAVES] = true;
+  }
+  if (x) {
+    x->nClusters = (int)clusters.size();
+    double best = std::numeric_limits<double>::infinity();
+    for (const auto& c0 : clusters) {
+      auto c = c0;
+      const double d = c.calculateTime(Score::TRKPTZ, &b) - b.truthVtxTime[0];
+      if (std::abs(d) < best) { best = std::abs(d); x->bestDt = d; }
+    }
   }
   s.t[T0_TRUTH] = b.truthVtxTime[0];  s.sig[T0_TRUTH] = 0.0;  s.ok[T0_TRUTH] = true;
   s.infl = {INFL.hgtd, INFL.trkptz, INFL.waves, 1.0};

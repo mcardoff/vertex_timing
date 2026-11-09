@@ -122,6 +122,11 @@ int main(int argc, char** argv) {
   tree.Branch("n_hs_trk", &nHsTrk, "n_hs_trk/I");
   tree.Branch("n_fwd_jet", &nFwdJet, "n_fwd_jet/I");
   for (int k = 0; k < N; ++k) tree.Branch(("dt_" + NAMES[k]).c_str(), &dt[k], ("dt_" + NAMES[k] + "/D").c_str());
+  // the failure breakdown (cleaned times): what the clustering offered (tdr::T0Extra)
+  int nClus = 0; double dtBest = 0.0, dtWavesFull = 0.0;
+  tree.Branch("n_clusters_clean", &nClus, "n_clusters_clean/I");
+  tree.Branch("dt_best_clean", &dtBest, "dt_best_clean/D");
+  tree.Branch("dt_waves_full_clean", &dtWavesFull, "dt_waves_full_clean/D");
   const double NaN = std::numeric_limits<double>::quiet_NaN();
 
   Long64_t nRead = 0, nSel = 0;
@@ -138,7 +143,9 @@ int main(int argc, char** argv) {
     nHsTrk = counts.nForwardTrackHS;
     nFwdJet = counts.nForwardJet;
     const tdr::T0Set raw = tdr::computeT0s(branch, INFL, RAW);
-    const tdr::T0Set cln = tdr::computeT0s(branch, INFL, CLEAN);
+    tdr::T0Extra ex;
+    const tdr::T0Set cln = tdr::computeT0s(branch, INFL, CLEAN, &ex);
+    nClus = ex.nClusters;  dtBest = ex.bestDt;  dtWavesFull = ex.wavesFullDt;
     const double tHS = branch.truthVtxTime[0];
     auto put = [&](int k, const tdr::T0Set& s, int idx) { dt[k] = s.ok[idx] ? s.t[idx] - tHS : NaN; };
     put(0, raw, tdr::T0_HGTD);
