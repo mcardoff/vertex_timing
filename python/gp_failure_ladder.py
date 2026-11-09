@@ -28,6 +28,11 @@ import tdr_root_style as S
 ap = argparse.ArgumentParser()
 ap.add_argument("--trees", nargs=2, required=True, metavar=("VBF", "ZJETS"))
 ap.add_argument("--out", required=True)
+ap.add_argument("--no-ideal", action="store_true", help="drop the ideal-time oracles (timing route (a), track efficiency): on the "
+                "grid samples pileup tracks have no truth link (vertex or particle), so the ideal world draws each one an "
+                "independent random time, dissolving the pileup clusters -- the oracle passes ~16 points more often than on "
+                "the local sample, where it is valid. What remains is 'no usable HS cluster'.")
+ap.add_argument("--labels", nargs=2, default=("VBF H#rightarrowinv.", "Z+jets"))
 args = ap.parse_args()
 FOLD = 20
 TALK = [("core", "within 60 ps of t_{HS}", "#7BCB6B"),
@@ -38,6 +43,7 @@ TALK = [("core", "within 60 ps of t_{HS}", "#7BCB6B"),
         ("miscl", "misclustering: pileup pulls the HS cluster off", "#B3231C"),
         ("teff", "track efficiency: untimed HS tracks", "#8E5DB5"),
         ("irred", "irreducible", "#9C9C9C")]
+TALK_NOIDEAL = [x for x in TALK if x[0] not in ("resol", "teff", "irred")] + [("nousable", "no usable HS cluster (too few / off HS tracks)", "#8E5DB5")]
 
 
 def ladder(E, s, talk):
@@ -50,8 +56,12 @@ def ladder(E, s, talk):
     if talk:
         take("retime", E["retime_waves"] if s == "waves" else np.zeros(len(fail), bool))
         take("badtime", E["badtime"])
-        take("resol", E[f"ideal_{s}"])
+        if not args.no_ideal: take("resol", E[f"ideal_{s}"])
         take("selection", E[f"sel_hs_{s}"])
+        if args.no_ideal:
+            take("miscl", E["miscl"])
+            out["nousable"] = left.copy()
+            return out
     else:
         take("timing", E["badtime"] | E[f"ideal_{s}"])
         take("selection", E[f"sel_any_{s}"])
@@ -63,7 +73,7 @@ def ladder(E, s, talk):
 
 R = S.setup()
 cv = S.keep(R.TCanvas("ladder", "", 1400, 760))
-for c, (path, lab) in enumerate(zip(args.trees, ("VBF H#rightarrowinv.", "Z+jets"))):
+for c, (path, lab) in enumerate(zip(args.trees, args.labels)):
     E = uproot.open(path)["events"].arrays(library="np")
     w = E["weight"].astype(float)
     n = np.minimum(E["n_hs_trk"], FOLD)
@@ -83,7 +93,7 @@ for c, (path, lab) in enumerate(zip(args.trees, ("VBF H#rightarrowinv.", "Z+jets
     st = S.keep(R.THStack(f"lst_{c}", ""))
     den = np.histogram(n, np.arange(-0.5, FOLD + 1.5), weights=w)[0]
     leg = S.legend(0.17, 0.525, 0.80, 0.785, size=0.028, margin=0.12)
-    for key, name, col in TALK:
+    for key, name, col in (TALK_NOIDEAL if args.no_ideal else TALK):
         h = S.keep(R.TH1D(f"lh_{c}_{key}", "", FOLD + 1, -0.5, FOLD + 0.5))
         num = np.histogram(n[C[key]], np.arange(-0.5, FOLD + 1.5), weights=w[C[key]])[0]
         for i, v in enumerate(num / np.maximum(den, 1e-12)): h.SetBinContent(i + 1, v)
