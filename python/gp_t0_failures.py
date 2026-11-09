@@ -7,7 +7,7 @@ put in one class, against the number of forward hard-scatter tracks with a time.
   selection         the hard scatter's cluster -- the one holding the most hard-scatter pT, > 50% hard scatter -- is
                     within 60 ps of t_HS (its full-cluster time), and the score chose another
   HS cluster off    the hard scatter's cluster exists but is > 60 ps off: mistimed tracks, or merged with pileup
-  no HS cluster     no cluster is > 50% hard scatter: too few timed hard-scatter tracks
+  no HS cluster     no cluster is > 50% hard scatter: too few timed hard-scatter tracks, or merged into pileup clusters
   no t0             no cluster at all: no timed forward track compatible with the vertex
 The hard scatter's cluster is identified by truth origin, not by time: "some cluster within 60 ps" (dt_best_clean) is a
 best-of-N oracle, and a pileup cluster lands within 60 ps of t_HS by chance -- 60% of the events with NO timed
@@ -15,8 +15,8 @@ hard-scatter track have one (~21% per cluster).
 Inputs: util/tdr_t0 trees with the T0Extra columns (commit c413fbc): dt_<t0>_clean, n_clusters_clean,
 dt_waves_full_clean, dt_hs_clean, hs_purity_clean. Cleaned track times, generator weights, the t0 selection.
 
-  PYTHONNOUSERSITE=1 ~/.venv-hgtd/bin/python gp_t0_failures.py --trees ../condor/vbf/vbf_tdr_t0_v2.root \\
-      ../condor/zjets/zjets_tdr_t0_v2.root --out ../figs/tdr/gp/gp_t0_failures
+  PYTHONNOUSERSITE=1 ~/.venv-hgtd/bin/python gp_t0_failures.py --trees ../condor/vbf/vbf_tdr_t0_v3.root \\
+      ../condor/zjets/zjets_tdr_t0_v3.root --out ../figs/tdr/gp/gp_t0_failures
 """
 import argparse
 
@@ -34,7 +34,7 @@ CLASSES = [("core", "within 60 ps of t_{HS}", "#7BCB6B"),
            ("retime", "re-timing: right cluster, in-jet time off", "#E69F00"),
            ("selection", "selection: the HS cluster was right, not chosen", "#3F90DA"),
            ("hsoff", "the HS cluster is > 60 ps off", "#B3231C"),
-           ("nohs", "no HS cluster: too few timed HS tracks", "#8E5DB5"),
+           ("nohs", "no HS cluster: too few HS tracks, or merged", "#8E5DB5"),
            ("not0", "no t_{0}: no timed forward track", "#9C9C9C")]
 
 
