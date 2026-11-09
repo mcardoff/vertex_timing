@@ -44,11 +44,12 @@ for c, (path, lab) in enumerate(zip(args.jets, ("VBF H#rightarrowinv.", "Z+jets"
     sel = (ae >= 2.5) & (ae < 4.0) & (J["pt"] >= LO) & (J["pt"] < HI)
     hs, pu = sel & (J["hs"] == 1), sel & (J["pu"] == 1)
     print(f"\n{lab.replace('#rightarrow', '->')}: forward jets {LO:.0f}-{HI:.0f} GeV: {hs.sum():,} HS, {pu.sum():,} PU")
-    cv.cd(); S.pad(f"roc_{c}", 0.5 * c, 0.0, 0.5 * c + 0.5, 1.0, top=0.06, bottom=0.13, left=0.15, right=0.04)
+    cv.cd(); S.pad(f"roc_{c}", 0.5 * c, 0.34, 0.5 * c + 0.5, 1.0, top=0.06, bottom=0.02, left=0.15, right=0.04)
     R.gPad.SetLogy()
     fr = S.keep(R.gPad.DrawFrame(0.55, 3e-3, 1.0, 1.0))
-    S.axes(fr, "Hard-scatter jet efficiency", "Pileup jet efficiency", size=0.045, ytoff=1.5, xtoff=1.25)
-    leg = S.legend(0.19, 0.50, 0.62, 0.66, size=0.034)
+    S.axes(fr, "", "Pileup jet efficiency", size=0.055, ytoff=1.25)
+    fr.GetXaxis().SetLabelSize(0)
+    leg = S.legend(0.50, 0.06, 0.95, 0.36, size=0.042)   # lower right: the curves are above 0.03 there
     curves = {}
     for v, name, col, ls in VARS:
         eh, ep = eff(J[v][hs], w[hs], THR), eff(J[v][pu], w[pu], THR)
@@ -74,6 +75,20 @@ for c, (path, lab) in enumerate(zip(args.jets, ("VBF H#rightarrowinv.", "Z+jets"
     leg.AddEntry(d2, "plain R_{pT} #geq 0.03, 0.05, 0.10", "P")
     leg.Draw()
     S.header(0.19, 0.88, ["#sqrt{s} = 14 TeV, HL-LHC, #LT#mu#GT = 200",
-                          f"{lab}, jets 2.5 #leq |#eta| < 4.0, {LO:.0f} #leq p_{{T}} < {HI:.0f} GeV"], size=0.036)
+                          f"{lab}, jets 2.5 #leq |#eta| < 4.0, {LO:.0f} #leq p_{{T}} < {HI:.0f} GeV"], size=0.044)
+    R.gPad.RedrawAxis()
+    # lower panel: each variant's pileup efficiency over plain JVT's at the same hard-scatter efficiency
+    cv.cd(); S.pad(f"rat_{c}", 0.5 * c, 0.0, 0.5 * c + 0.5, 0.34, top=0.03, bottom=0.32, left=0.15, right=0.04)
+    fr2 = S.keep(R.gPad.DrawFrame(0.55, 0.3, 1.0, 1.5))
+    S.axes(fr2, "Hard-scatter jet efficiency", "PU eff. / plain JVT's", size=0.105, ytoff=0.62, xtoff=1.05, ndiv_y=504)
+    one = S.keep(R.TLine(0.55, 1.0, 1.0, 1.0)); one.SetLineStyle(2); one.SetLineColor(R.kGray + 2); one.Draw()
+    eh0, ep0 = curves["jvt_rpt"]
+    o0 = np.argsort(eh0)
+    xs = np.linspace(0.56, eff(J["jvt_rpt"][hs], w[hs], 0.0167), 120)   # up to the loose point: below 0.0167 the
+                                                                        # plain curve has almost no working points
+    base = np.interp(xs, eh0[o0], ep0[o0])
+    for v, name, col, ls in VARS[1:]:
+        eh, ep = curves[v]; o = np.argsort(eh)
+        g = S.style(S.graph(xs, np.interp(xs, eh[o], ep[o]) / base), col, 0, ls, 3); g.Draw("L SAME")
     R.gPad.RedrawAxis()
 S.save(cv, args.out)

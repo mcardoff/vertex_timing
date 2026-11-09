@@ -3,12 +3,17 @@
 put in one class, against the number of forward hard-scatter tracks with a time.
 
   core              |t0 - t_HS| < 60 ps
-  selection         a time cluster within 60 ps of t_HS existed (its full-cluster time), the score chose another
   re-timing         (WAVeS) the chosen cluster is within 60 ps, its in-jet recomputed time is not
-  no good cluster   no cluster within 60 ps: the hard scatter's tracks are mistimed, too few, or merged with pileup
+  selection         the hard scatter's cluster -- the one holding the most hard-scatter pT, > 50% hard scatter -- is
+                    within 60 ps of t_HS (its full-cluster time), and the score chose another
+  HS cluster off    the hard scatter's cluster exists but is > 60 ps off: mistimed tracks, or merged with pileup
+  no HS cluster     no cluster is > 50% hard scatter: too few timed hard-scatter tracks
   no t0             no cluster at all: no timed forward track compatible with the vertex
-Inputs: util/tdr_t0 trees with the T0Extra columns (commit 57b5438): dt_<t0>_clean, n_clusters_clean, dt_best_clean,
-dt_waves_full_clean. Cleaned track times, generator weights, the t0 selection of the talk.
+The hard scatter's cluster is identified by truth origin, not by time: "some cluster within 60 ps" (dt_best_clean) is a
+best-of-N oracle, and a pileup cluster lands within 60 ps of t_HS by chance -- 60% of the events with NO timed
+hard-scatter track have one (~21% per cluster).
+Inputs: util/tdr_t0 trees with the T0Extra columns (commit c413fbc): dt_<t0>_clean, n_clusters_clean,
+dt_waves_full_clean, dt_hs_clean, hs_purity_clean. Cleaned track times, generator weights, the t0 selection.
 
   PYTHONNOUSERSITE=1 ~/.venv-hgtd/bin/python gp_t0_failures.py --trees ../condor/vbf/vbf_tdr_t0_v2.root \\
       ../condor/zjets/zjets_tdr_t0_v2.root --out ../figs/tdr/gp/gp_t0_failures
@@ -26,9 +31,10 @@ ap.add_argument("--out", required=True)
 args = ap.parse_args()
 PASS, FOLD = 60.0, 20
 CLASSES = [("core", "within 60 ps of t_{HS}", "#7BCB6B"),
-           ("selection", "selection: a good cluster, another chosen", "#3F90DA"),
            ("retime", "re-timing: right cluster, in-jet time off", "#E69F00"),
-           ("nogood", "no cluster within 60 ps of t_{HS}", "#B3231C"),
+           ("selection", "selection: the HS cluster was right, not chosen", "#3F90DA"),
+           ("hsoff", "the HS cluster is > 60 ps off", "#B3231C"),
+           ("nohs", "no HS cluster: too few timed HS tracks", "#8E5DB5"),
            ("not0", "no t_{0}: no timed forward track", "#9C9C9C")]
 
 
@@ -36,12 +42,12 @@ def classes(E, t0):
     dt = E[f"dt_{t0}_clean"]
     has = E["n_clusters_clean"] > 0
     core = has & (np.abs(dt) < PASS)
-    good = has & (np.abs(E["dt_best_clean"]) < PASS)
-    chosen_ok = np.abs(E["dt_waves_full_clean"]) < PASS if t0 == "waves" else np.abs(dt) < PASS
-    retime = has & ~core & chosen_ok if t0 == "waves" else np.zeros(len(dt), bool)
-    sel = has & ~core & ~retime & good
-    nogood = has & ~core & ~good
-    return {"core": core, "selection": sel, "retime": retime, "nogood": nogood, "not0": ~has}
+    retime = (has & ~core & (np.abs(E["dt_waves_full_clean"]) < PASS)) if t0 == "waves" else np.zeros(len(dt), bool)
+    hsc = has & (E["hs_purity_clean"] > 0.5)
+    hs_ok = hsc & (np.abs(E["dt_hs_clean"]) < PASS)
+    rest = has & ~core & ~retime
+    return {"core": core, "retime": retime, "selection": rest & hs_ok, "hsoff": rest & hsc & ~hs_ok,
+            "nohs": rest & ~hsc, "not0": ~has}
 
 
 R = S.setup()
