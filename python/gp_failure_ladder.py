@@ -92,21 +92,21 @@ for c, (path, lab) in enumerate(zip(args.trees, args.labels)):
     cv.cd(); S.pad(f"ld_{c}", 0.5 * c, 0.0, 0.5 * c + 0.5, 1.0, top=0.06, bottom=0.12, left=0.13, right=0.04)
     st = S.keep(R.THStack(f"lst_{c}", ""))
     den = np.histogram(n, np.arange(-0.5, FOLD + 1.5), weights=w)[0]
-    leg = S.legend(0.17, 0.525, 0.80, 0.785, size=0.028, margin=0.12)
+    leg = S.legend(0.17, 0.52, 0.80, 0.755, size=0.027, margin=0.12)
     for key, name, col in (TALK_NOIDEAL if args.no_ideal else TALK):
         h = S.keep(R.TH1D(f"lh_{c}_{key}", "", FOLD + 1, -0.5, FOLD + 0.5))
         num = np.histogram(n[C[key]], np.arange(-0.5, FOLD + 1.5), weights=w[C[key]])[0]
         for i, v in enumerate(num / np.maximum(den, 1e-12)): h.SetBinContent(i + 1, v)
         h.SetFillColor(S.colour(col)); h.SetLineColor(R.kBlack); h.SetLineWidth(1)
         st.Add(h); leg.AddEntry(h, name, "F")
-    fr = S.keep(R.gPad.DrawFrame(-0.5, 0.0, FOLD + 0.5, 1.95))
+    fr = S.keep(R.gPad.DrawFrame(-0.5, 0.0, FOLD + 0.5, 2.25))   # headroom: header + legend above the stack
     S.axes(fr, "Forward hard-scatter tracks with a time (last bin: #geq 20)", "Fraction of events (WAVeS t_{0})", size=0.042, ytoff=1.3, xtoff=1.15)
     st.Draw("HIST SAME")
     leg.Draw()
     dist = S.keep(R.TH1D(f"ld_{c}", "", FOLD + 1, -0.5, FOLD + 0.5))
     for i, v in enumerate(den / den.max() * 0.25): dist.SetBinContent(i + 1, v)
     dist.SetLineColor(R.kBlack); dist.SetLineStyle(2); dist.SetLineWidth(2); dist.Draw("HIST SAME")
-    S.header(0.17, 0.88, ["#sqrt{s} = 14 TeV, #LT#mu#GT = 200",
-                          f"{lab}; failure_decomposition's ladder, first match; dashed: events (a.u.)"], size=0.032)
+    S.header(0.17, 0.88, ["#sqrt{s} = 14 TeV, #LT#mu#GT = 200", lab,
+                          "failure_decomposition's ladder, first match; dashed: events (a.u.)"], size=0.030)
     R.gPad.RedrawAxis()
 S.save(cv, args.out)
