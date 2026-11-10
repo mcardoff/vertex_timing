@@ -515,7 +515,8 @@ auto main(int argc, char** argv) -> int {
   Long64_t o_entry = -1;
   float o_w = 0.f, o_badfrac = -1.f;
   bool o_passT = false, o_passW = false, o_retimeW = false, o_selT = false, o_selW = false, o_selHsT = false, o_selHsW = false,
-       o_miscl = false, o_misclPt = false, o_badtime = false, o_idealT = false, o_idealW = false, o_teffT = false, o_teffW = false;
+       o_miscl = false, o_misclPt = false, o_badtime = false, o_idealT = false, o_idealW = false, o_teffT = false, o_teffW = false,
+       o_fixmisT = false, o_fixmisW = false;
   tout.Branch("file_idx", &o_fidx, "file_idx/I");     tout.Branch("entry", &o_entry, "entry/L");
   tout.Branch("weight", &o_w, "weight/F");            tout.Branch("n_hs_trk", &o_nhs, "n_hs_trk/I");
   tout.Branch("pass_trkptz", &o_passT, "pass_trkptz/O"); tout.Branch("pass_waves", &o_passW, "pass_waves/O");
@@ -526,6 +527,10 @@ auto main(int argc, char** argv) -> int {
   tout.Branch("badtime", &o_badtime, "badtime/O");    tout.Branch("hs_pt_bad_frac", &o_badfrac, "hs_pt_bad_frac/F");
   tout.Branch("ideal_trkptz", &o_idealT, "ideal_trkptz/O"); tout.Branch("ideal_waves", &o_idealW, "ideal_waves/O");
   tout.Branch("teff_trkptz", &o_teffT, "teff_trkptz/O");    tout.Branch("teff_waves", &o_teffW, "teff_waves/O");
+  // the counterfactual for "misassigned HS track times caused it" (2026-11-10): drop the HS tracks >= 3 sigma
+  // from the truth vertex time, re-cluster and re-choose; does the score pass now? (false when none is mistimed)
+  tout.Branch("fix_mistimed_trkptz", &o_fixmisT, "fix_mistimed_trkptz/O");
+  tout.Branch("fix_mistimed_waves", &o_fixmisW, "fix_mistimed_waves/O");
   Long64_t nRead = 0;
 
   std::vector<BinData> bins(NBINS);    // TRKPTZ path (console only)
@@ -592,6 +597,7 @@ auto main(int argc, char** argv) -> int {
     const bool retime_W = !pass_W && passW_full;   // the right cluster, moved off by the in-jet time
     o_passT = pass_T; o_passW = pass_W; o_retimeW = retime_W;
     o_selT = o_selW = o_selHsT = o_selHsW = o_miscl = o_misclPt = o_badtime = o_idealT = o_idealW = o_teffT = o_teffW = false;
+    o_fixmisT = o_fixmisW = false;
     o_badfrac = -1.f; o_nhs = nHSTrack; o_w = (float)*branch.weight; o_entry = chain.GetTree()->GetReadEntry();
     { const std::string fp = chain.GetCurrentFile()->GetName();
       const size_t pp = fp.rfind('_'), dd = (pp == std::string::npos) ? pp : fp.find('.', pp);
@@ -675,6 +681,24 @@ auto main(int argc, char** argv) -> int {
     const bool cat_badtime =
       hs_pt_tot > 0. && (hs_pt_bad / hs_pt_tot) > BAD_HS_TIME_FRAC;
     o_miscl = cat_miscl; o_misclPt = miscl_ptcut; o_badtime = cat_badtime;
+    if (hs_pt_bad > 0.) {   // the counterfactual: the same event without its mistimed HS tracks
+      std::vector<int> keep;
+      for (int idx : tracks) {
+        const bool hsBad = branch.trackToTruthvtx[idx] == 0 && branch.trackTimeValid[idx] == 1 &&
+                           std::abs(branch.trackTime[idx] - branch.truthVtxTime[0]) / branch.trackTimeRes[idx] >= TRUTH_PULL_CUT;
+        if (!hsBad) keep.push_back(idx);
+      }
+      const auto qualFix = filterClusters(clusterTracksInTime(
+        keep, &branch, DIST_CUT_CONE, /*useSmearedTimes=*/false, /*checkTimeValid=*/true, /*smearRes=*/-1.0,
+        ClusteringMethod::ITERATIVE, /*useZ0=*/false, /*sortTracks=*/false, /*calcPurityFlag=*/false));
+      const Cluster* fT = chooseBest(qualFix, Score::TRKPTZ.id);
+      const Cluster* fW = chooseBest(qualFix, Score::WAVES.id);
+      o_fixmisT = fT && fT->passEfficiency(&branch);
+      if (fW) {
+        if (wavesInJet) { Cluster cw = *fW; o_fixmisW = std::abs(cw.calculateTime(Score::WAVES, &branch) - branch.truthVtxTime[0]) < PASS_SIGMA; }
+        else o_fixmisW = fW->passEfficiency(&branch);
+      }
+    }
     o_badfrac = hs_pt_tot > 0. ? (float)(hs_pt_bad / hs_pt_tot) : -1.f;
 
     auto idealRaw = clusterTracksInTime(

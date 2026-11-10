@@ -37,7 +37,7 @@ args = ap.parse_args()
 FOLD = 20
 TALK = [("core", "within 60 ps of t_{HS}", "#7BCB6B"),
         ("retime", "re-timing: right cluster, in-jet time off", "#E69F00"),
-        ("badtime", "HS track times wrong (> 50% of p_{T} #geq 3#sigma off)", "#5A3E2B"),
+        ("badtime", "misassigned HS track times (removing them fixes it)", "#5A3E2B"),
         ("resol", "timing resolution (ideal times recover it)", "#C98B5E"),
         ("selection", "selection: the HS cluster was right, not chosen", "#3F90DA"),
         ("miscl", "misclustering: pileup pulls the HS cluster off", "#B3231C"),
@@ -55,7 +55,9 @@ def ladder(E, s, talk):
         left[:] = left & ~m
     if talk:
         take("retime", E["retime_waves"] if s == "waves" else np.zeros(len(fail), bool))
-        take("badtime", E["badtime"])
+        # misassigned HS times caused it: most of the HS pT mistimed, OR removing the mistimed HS tracks fixes it
+        # (fix_mistimed_*, trees from 2026-11-10 on; older trees have only the majority rung)
+        take("badtime", E["badtime"] | (E[f"fix_mistimed_{s}"] if f"fix_mistimed_{s}" in E else False))
         if not args.no_ideal: take("resol", E[f"ideal_{s}"])
         take("selection", E[f"sel_hs_{s}"])
         if args.no_ideal:
