@@ -47,29 +47,22 @@ print(f"{f.split('/')[-1]} entry {best}: {len(z)} truth interactions, {len(rz)} 
       + ", ".join(f"{abs(v):.0f}" for v in (t[near] - t[hs])) + " ps")
 
 R = S.setup()
-cv = S.keep(R.TCanvas("zt", "", 1000, 760))
-S.pad("p", 0, 0, 1, 1, top=0.20, bottom=0.12, left=0.11, right=0.03)
-fr = S.keep(R.gPad.DrawFrame(-100, -400, 100, 400))
-S.axes(fr, "Vertex z [mm]", "Vertex t [ps]", size=0.045, ytoff=1.1, xtoff=1.15)
-fr.GetYaxis().SetNdivisions(508)
+# the original's layout (user, 2026-11-11): no legend or header, only the ATLAS label, top right inside the frame; the
+# axis runs to 500 ps with the lines stopping at 400, which leaves the label clear of the interactions
+cv = S.keep(R.TCanvas("zt", "", 1000, 720))
+S.pad("p", 0, 0, 1, 1, top=0.04, bottom=0.13, left=0.12, right=0.03)
+fr = S.keep(R.gPad.DrawFrame(-100, -400, 100, 500))
+S.axes(fr, "Vertex z [mm]", "Vertex t [ps]", size=0.05, ytoff=1.1, xtoff=1.1)
+fr.GetYaxis().SetNdivisions(509)
 for zz in rz:                                       # reconstructed vertices: z only
     if -100 < zz < 100:
-        l = S.keep(R.TLine(zz, -400, zz, 400)); l.SetLineStyle(2); l.SetLineColor(R.kGray + 2); l.SetLineWidth(1); l.Draw()
+        l = S.keep(R.TLine(zz, -400, zz, 400)); l.SetLineStyle(2); l.SetLineColor(R.kBlack); l.SetLineWidth(1); l.Draw()
 PU_FILL, PU_LINE, HS_COL = R.TColor.GetColor("#7C93D9"), R.TColor.GetColor("#1F3A93"), R.TColor.GetColor("#D62728")
 lh = S.keep(R.TLine(z[hs], -400, z[hs], 400)); lh.SetLineColor(HS_COL); lh.SetLineWidth(2); lh.Draw()   # under the ellipses
 for i in range(len(z)):
     if i == hs or not (-100 < z[i] < 100 and -400 < t[i] < 400): continue
     e = S.keep(R.TEllipse(z[i], t[i], args.sigz, args.sigt)); e.SetFillColor(PU_FILL); e.SetLineColor(PU_LINE); e.SetLineWidth(1); e.Draw()
 eh = S.keep(R.TEllipse(z[hs], t[hs], args.sigz, args.sigt)); eh.SetFillColor(HS_COL); eh.SetLineColor(R.kBlack); eh.SetLineWidth(2); eh.Draw()
+S.header(0.55, 0.895, [], size=0.05)
 R.gPad.RedrawAxis()
-# legend and header above the frame, clear of the interactions
-leg = S.legend(0.62, 0.81, 0.97, 0.985, size=0.032, margin=0.18)
-ep = S.keep(R.TH1D("lp", "", 1, 0, 1)); ep.SetFillColor(PU_FILL); ep.SetLineColor(PU_LINE)
-eh2 = S.keep(R.TH1D("lh", "", 1, 0, 1)); eh2.SetFillColor(HS_COL); eh2.SetLineColor(R.kBlack)
-ld = S.keep(R.TLine()); ld.SetLineStyle(2); ld.SetLineColor(R.kGray + 2)
-leg.AddEntry(eh2, "hard-scatter interaction", "F"); leg.AddEntry(ep, "pileup interactions", "F")
-leg.AddEntry(ld, "reconstructed vertices (z only)", "L"); leg.Draw()
-S.header(0.11, 0.955, ["#sqrt{s} = 14 TeV, #LT#mu#GT = 200, one VBF H#rightarrowinv. event",
-                       f"ellipse: #pm{args.sigz:g} mm in z (#sigma_{{z_{{0}}}}, 1 GeV, |#eta| #approx 2.5),",
-                       f"#pm{args.sigt:g} ps in t (one HGTD track time)"], size=0.030)
 S.save(cv, args.out)
