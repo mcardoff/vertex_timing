@@ -376,8 +376,10 @@ namespace MyUtl {
   //             subset is the less pure of the two (HS pT fraction)
   //   MISTIMED  drop the HS tracks >= TRUTH_PULL_CUT sigma from t_HS (a
   //             misassigned HGTD hit), re-cluster, re-choose
-  //   SELECT    choose the hard scatter's own cluster (most HS pT, > 50% HS pT;
-  //             with MISCL, most HS pT) when one exists, by provenance
+  //   SELECT    choose the hard scatter's cluster when a selector could
+  //             realistically find it (user, 2026-11-11): >= 1 HS track and
+  //             >= FIX_SELECT_MIN_PT_SHARE of the pT of all the tracks the
+  //             clustering saw; of those, the most HS pT
   //   Every choice is by provenance, never by the time (see failure_fixes.h).
   //   MISCL     time the chosen cluster from its HS tracks only
   //   TEFF      give every untimed (or cleaned) HS track in HGTD a time,
@@ -390,6 +392,8 @@ namespace MyUtl {
     constexpr int RETIME = 1, MISTIMED = 2, SELECT = 4, MISCL = 8, TEFF = 16, RESOL = 32;
   }
   const double FIX_TEFF_RES = 30.0;  // ps: the time an untimed HS track is given (the reference's flat scenario)
+  // SELECT's "significant share" of the clustered pT (runtime: clustering_hist --fix-select-share=X)
+  inline double FIX_SELECT_MIN_PT_SHARE = 0.2;
 
   // ---------------------------------------------------------------------------
   // 3b. Clustering method selector
@@ -688,7 +692,7 @@ namespace MyUtl {
     static const Score TRKPTZ_TZQ;
     // failure-mode fixes on WAVeS: each alone, then cumulative (src/failure_fixes.h)
     static const Score WFIX_RETIME, WFIX_MISTIMED, WFIX_SELECT, WFIX_MISCL, WFIX_TEFF;
-    static const Score WFIX_C2, WFIX_C3, WFIX_C4, WFIX_C5, WFIX_C6;
+    static const Score WFIX_C3, WFIX_C4, WFIX_C5, WFIX_C6;
   };
 
   inline const std::string STR_TRKPTZ = "#Sigma p_{T}e^{-|#Delta z|}";
@@ -950,17 +954,17 @@ namespace MyUtl {
   inline const Score Score::WFIX_SELECT   = makeFixScore(42, "WAVeS + fix [selection]",        "WFIX_SELECT",   Fix::SELECT);
   inline const Score Score::WFIX_MISCL    = makeFixScore(43, "WAVeS + fix [misclustering]",    "WFIX_MISCL",    Fix::MISCL);
   inline const Score Score::WFIX_TEFF     = makeFixScore(44, "WAVeS + fix [HS track efficiency]", "WFIX_TEFF",  Fix::TEFF);
-  // cumulative, in the ladder's order; C1 is WFIX_RETIME
-  inline const Score Score::WFIX_C2 = makeFixScore(45, "WAVeS fixed [re-timing, HS times]", "WFIX_C2",
-                                                   Fix::RETIME | Fix::MISTIMED);
-  inline const Score Score::WFIX_C3 = makeFixScore(46, "WAVeS fixed [+ selection]", "WFIX_C3",
-                                                   Fix::RETIME | Fix::MISTIMED | Fix::SELECT);
-  inline const Score Score::WFIX_C4 = makeFixScore(47, "WAVeS fixed [+ misclustering]", "WFIX_C4",
-                                                   Fix::RETIME | Fix::MISTIMED | Fix::SELECT | Fix::MISCL);
-  inline const Score Score::WFIX_C5 = makeFixScore(48, "WAVeS fixed [+ HS track efficiency]", "WFIX_C5",
-                                                   Fix::RETIME | Fix::MISTIMED | Fix::SELECT | Fix::MISCL | Fix::TEFF);
-  inline const Score Score::WFIX_C6 = makeFixScore(49, "WAVeS fixed [+ HS time resolution]", "WFIX_C6",
-                                                   Fix::RETIME | Fix::MISTIMED | Fix::SELECT | Fix::MISCL | Fix::TEFF | Fix::RESOL);
+  // Cumulative, in the user's order (2026-11-11): WAVeS -> misassigned HS
+  // times (WFIX_MISTIMED) -> selection -> misclustering -> HS track efficiency
+  // (-> HS time resolution). Re-timing is not in the chain, only alone.
+  inline const Score Score::WFIX_C3 = makeFixScore(46, "WAVeS fixed [HS times + selection]", "WFIX_C3",
+                                                   Fix::MISTIMED | Fix::SELECT);
+  inline const Score Score::WFIX_C4 = makeFixScore(47, "WAVeS fixed [... + misclustering]", "WFIX_C4",
+                                                   Fix::MISTIMED | Fix::SELECT | Fix::MISCL);
+  inline const Score Score::WFIX_C5 = makeFixScore(48, "WAVeS fixed [... + HS track efficiency]", "WFIX_C5",
+                                                   Fix::MISTIMED | Fix::SELECT | Fix::MISCL | Fix::TEFF);
+  inline const Score Score::WFIX_C6 = makeFixScore(49, "WAVeS fixed [... + HS time resolution]", "WFIX_C6",
+                                                   Fix::MISTIMED | Fix::SELECT | Fix::MISCL | Fix::TEFF | Fix::RESOL);
 
   // Scores with a dedicated collection (distCut ≥ 0 → buildsCollection() = true)
   inline const Score Score::CONE       = {  7, "Cone"                       , "CONE",     true , false, -1.f, DIST_CUT_CONE, ClusteringMethod::CONE };
@@ -976,7 +980,7 @@ namespace MyUtl {
     Score::TRKPTZ_PV, Score::TRKPTZ_PU, Score::TRKPTZ_PUW, Score::TRKPTZ_TZ,
     Score::TRKPTZ_TZ_IJ, Score::TRKPTZ_TZ_OJ, Score::TRKPTZ_TZ_GIJ, Score::WAVES_GIJ, Score::TRKPTZ_TZJ, Score::TRKPTZ_TZQ,
     Score::WFIX_RETIME, Score::WFIX_MISTIMED, Score::WFIX_SELECT, Score::WFIX_MISCL, Score::WFIX_TEFF,
-    Score::WFIX_C2, Score::WFIX_C3, Score::WFIX_C4, Score::WFIX_C5, Score::WFIX_C6,
+    Score::WFIX_C3, Score::WFIX_C4, Score::WFIX_C5, Score::WFIX_C6,
   };
 
   // ---------------------------------------------------------------------------

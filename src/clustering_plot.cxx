@@ -166,7 +166,7 @@ auto main(int argc, char** argv) -> int {
     std::printf("\n%-14s %-40s %9s %9s %11s %11s\n", "row", "", "core [%]", "+-", "sigPeak[ps]", "sigCore[ps]");
     bool first = true;
     for (const Score* sc : {&Score::HGTD, &Score::TRKPTZ, &Score::WAVES, &Score::WFIX_RETIME, &Score::WFIX_MISTIMED,
-                            &Score::WFIX_SELECT, &Score::WFIX_MISCL, &Score::WFIX_TEFF, &Score::WFIX_C2,
+                            &Score::WFIX_SELECT, &Score::WFIX_MISCL, &Score::WFIX_TEFF,
                             &Score::WFIX_C3, &Score::WFIX_C4, &Score::WFIX_C5, &Score::WFIX_C6}) {
       AnalysisObj& a = mapHGTD.at(*sc);
       PlotObj* po = a.dataObjects.at("hs_track").get();

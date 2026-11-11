@@ -11,11 +11,11 @@
 //                   timed HS track at Gaus(t_HS, IDEAL_TRACK_RES). Any of the
 //                   three re-clusters (iterative, DIST_CUT_CONE, as the main
 //                   collection); otherwise the main collection is used as is.
-//     2. selection  SELECT takes the hard scatter's own cluster (most HS pT,
-//                   > 50% of its pT from the HS) when one exists, else WAVeS's
-//                   choice. With MISCL as well the 50% falls away: once the
-//                   pileup is stripped every cluster holding HS tracks is pure,
-//                   so the one with the most HS pT is the HS cluster.
+//     2. selection  SELECT takes the hard scatter's cluster when a selector
+//                   could realistically find it (user, 2026-11-11): >= 1 HS
+//                   track and >= FIX_SELECT_MIN_PT_SHARE of the pT of all the
+//                   tracks the clustering saw; of those, the most HS pT. Else
+//                   WAVeS's choice. (Was: most HS pT and > 50% HS-pure.)
 //     3. time       MISCL times the chosen cluster from its HS tracks alone;
 //                   otherwise WAVeS's in-jet time, or with RETIME the full-
 //                   cluster time when the in-jet subset is the less pure of
@@ -165,14 +165,17 @@ namespace MyUtl {
     if (qual.empty()) return std::nullopt;
 
     const Cluster* ch = nullptr;
-    if (mask & Fix::SELECT) {   // as util/failure_decomposition's sel_hs
+    if (mask & Fix::SELECT) {
+      double ptAll = 0.0;                    // every track the clustering saw
+      for (const auto& c : *col) for (int t : c.trackIndices) ptAll += b->trackPt[t];
       double best = 0.0; const Cluster* h = nullptr;
       for (const Cluster* c : qual) {
-        double sum = 0.0;
-        for (int t : c->trackIndices) sum += b->trackPt[t];
-        if (c->purity * sum > best) { best = c->purity * sum; h = c; }
+        double pt = 0.0, ptHS = 0.0;
+        for (int t : c->trackIndices) { pt += b->trackPt[t]; if (b->trackToTruthvtx[t] == 0) ptHS += b->trackPt[t]; }
+        if (ptHS <= 0.0 || pt < FIX_SELECT_MIN_PT_SHARE * ptAll) continue;   // no HS track, or not selectable
+        if (ptHS > best) { best = ptHS; h = c; }
       }
-      if (h && (h->purity > 0.5 || (mask & Fix::MISCL))) ch = h;
+      ch = h;
     }
     if (!ch) {                  // WAVeS's choice (chooseCluster: the first maximum)
       ch = qual[0];
