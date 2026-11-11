@@ -1,3 +1,4 @@
+#include <fstream>
 #include "clustering_constants.h"
 #include "clustering_dt_common.h"
 #include "sample_config.h"
@@ -23,10 +24,11 @@ auto main(int argc, char** argv) -> int {
   // --- Sample selection (--sample=vbf|zjets|dijet; default: local VBF ntuple) ---
   auto sample = MyUtl::resolveSample(argc, argv);
   MyUtl::resolveSelection(argc, argv);  // --vbs-deta=<x>; sets SELECTION_TAG
+  MyUtl::resolveTimingInputs(argc, argv);  // --clean-times / --assoc-nsigma: the file's tag
   MyUtl::ENERGY_LABEL = sample.energyLabel;
   MyUtl::OUTPUT_DIR   = sample.outputDir;
   MyUtl::SAMPLE_NAME  = sample.sampleName;
-  for (const char* sub : {"comparisons", "inclusive", "fullplots", "diagnostics"})
+  for (const char* sub : {"comparisons", "inclusive", "fullplots", "diagnostics", "fixes"})
     boost::filesystem::create_directories(MyUtl::OUTPUT_DIR + "/" + sub);
 
   gErrorIgnoreLevel = kFatal;
@@ -144,6 +146,48 @@ auto main(int argc, char** argv) -> int {
   shapeComparisonPlotPair(
     MyUtl::plotFilePath("inclusive", "shape_comparison.pdf").c_str(),
     -200, 200, -400, 400, canvas, SHAPE_SET, resoGetter, nullptr, diffLabel);
+
+  // --- Failure-mode fixes: inclusive core fraction and resolution per row ---
+  // The numbers the talk's summary figure reads (python/gp_failure_fixes.py):
+  // core fraction = |t0 - t_HS| < 60 ps over all selected events (no t0 = a
+  // failure), resolution = FIT_PEAKTAIL on the inclusive t0 - t_HS.
+  if (mapHGTD.count(Score::WFIX_RETIME)) {
+    const std::string jpath = MyUtl::plotFilePath("fixes", "failure_fixes.json");
+    std::ofstream js(jpath);
+    js << "{\n  \"sample\": \"" << (MyUtl::SAMPLE_NAME.empty() ? "local" : MyUtl::SAMPLE_NAME)
+       << "\",\n  \"tag\": \"" << MyUtl::SELECTION_TAG << "\",\n  \"rows\": [\n";
+    std::printf("\n%-14s %-40s %9s %9s %11s %11s\n", "row", "", "core [%]", "+-", "sigPeak[ps]", "sigCore[ps]");
+    bool first = true;
+    for (const Score* sc : {&Score::HGTD, &Score::TRKPTZ, &Score::WAVES, &Score::WFIX_RETIME, &Score::WFIX_MISTIMED,
+                            &Score::WFIX_SELECT, &Score::WFIX_MISCL, &Score::WFIX_TEFF, &Score::WFIX_C2,
+                            &Score::WFIX_C3, &Score::WFIX_C4, &Score::WFIX_C5, &Score::WFIX_C6}) {
+      AnalysisObj& a = mapHGTD.at(*sc);
+      PlotObj* po = a.dataObjects.at("hs_track").get();
+      const int nb = po->effTotal->GetNbinsX();
+      const double tot = po->effTotal->Integral(0, nb + 1), pas = po->effPass->Integral(0, nb + 1);
+      const double eff = tot > 0 ? pas / tot : 0.0, err = tot > 0 ? std::sqrt(eff * (1 - eff) / tot) : 0.0;
+      std::unique_ptr<TH1D> h((TH1D*)a.inclusiveResoSig->Clone(TString::Format("fixsum_%d", sc->id)));
+      h->Add(a.inclusiveResoMix.get()); h->Add(a.inclusiveResoBkg.get());
+      double sp = -1, spe = -1, scr = -1, fsh = -1, ntail = 0;
+      if (h->GetEntries() > 50) {
+        TF1* f = makePeakTailFit(h.get(), false);
+        sp = f->GetParameter("SigmaPeak"); spe = f->GetParError(f->GetParNumber("SigmaPeak"));
+        fsh = f->GetParameter("FracSh");
+        scr = sp / std::sqrt(1.0 - fsh + fsh * std::pow(f->GetParameter("RatioSh"), 2));
+        ntail = f->GetParameter("NormTail") * f->GetParameter("SigmaTail") * std::sqrt(2 * M_PI) / h->GetBinWidth(1);
+        delete f;
+      }
+      std::printf("%-14s %-40s %9.2f %9.2f %11.2f %11.2f\n", sc->toStringShort(), sc->toString(), 100 * eff, 100 * err, sp, scr);
+      js << (first ? "" : ",\n") << "    {\"short\": \"" << sc->toStringShort() << "\", \"name\": \"" << sc->toString()
+         << "\", \"fixes\": " << sc->fixes << ", \"n\": " << tot << ", \"pass\": " << pas
+         << ", \"core\": " << eff << ", \"core_err\": " << err << ", \"sigma_peak\": " << sp
+         << ", \"sigma_peak_err\": " << spe << ", \"sigma_core\": " << scr << ", \"frac_shoulder\": " << fsh
+         << ", \"n_tail_fit\": " << ntail << ", \"n_reso\": " << h->GetEntries() << "}";
+      first = false;
+    }
+    js << "\n  ]\n}\n";
+    std::cout << "wrote " << jpath << '\n';
+  }
 
   std::cout << "FINISHED PLOT PRINTING\n";
 

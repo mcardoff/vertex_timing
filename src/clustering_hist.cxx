@@ -100,6 +100,16 @@ auto main(int argc, char** argv) -> int {
   // --- Sample selection (--sample=vbf|zjets|dijet; default: local VBF ntuple) ---
   auto sample = MyUtl::resolveSample(argc, argv);
   MyUtl::resolveSelection(argc, argv);  // --vbs-deta=<x>; sets SELECTION_TAG
+  // --clean-times / --assoc-nsigma=X: the talk's t0 inputs (tags the output)
+  const double assocNsigma = MyUtl::resolveTimingInputs(argc, argv);
+  std::unique_ptr<MyUtl::AssocRule> assocRule;
+  if (assocNsigma > 0.0) {
+    assocRule = std::make_unique<MyUtl::AssocRule>();
+    assocRule->kind  = MyUtl::AssocRule::Kind::SIGNIFICANCE;
+    assocRule->cut   = assocNsigma;
+    assocRule->tag   = "signif";
+    assocRule->label = "z_{0} signif.";
+  }
   MyUtl::ENERGY_LABEL = sample.energyLabel;
   MyUtl::OUTPUT_DIR   = sample.outputDir;
   MyUtl::SAMPLE_NAME  = sample.sampleName;
@@ -237,7 +247,7 @@ auto main(int argc, char** argv) -> int {
       }
 
       // HGTD timing scenario (the only scenario currently active)
-      auto resHGTD = processEventData(&branch, false, true, *tlMap);
+      auto resHGTD = processEventData(&branch, false, true, *tlMap, assocRule.get());
 
       // Tally rejection cause (see EventResult::code in event_processing.h).
       switch (resHGTD.code) {

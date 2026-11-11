@@ -67,6 +67,12 @@ inline auto buildAnalysisMap(
   m.emplace(Score::WAVES_GIJ,   AnalysisObj(label, Score::WAVES_GIJ));
   m.emplace(Score::TRKPTZ_TZJ,  AnalysisObj(label, Score::TRKPTZ_TZJ));
   m.emplace(Score::TRKPTZ_TZQ,  AnalysisObj(label, Score::TRKPTZ_TZQ));
+  // Failure-mode fixes on WAVeS (src/failure_fixes.h): each alone, then the
+  // cumulative chain in the failure ladder's order.
+  for (const Score* s : {&Score::WFIX_RETIME, &Score::WFIX_MISTIMED, &Score::WFIX_SELECT,
+                         &Score::WFIX_MISCL, &Score::WFIX_TEFF, &Score::WFIX_C2, &Score::WFIX_C3,
+                         &Score::WFIX_C4, &Score::WFIX_C5, &Score::WFIX_C6})
+    m.emplace(*s, AnalysisObj(label, *s));
 
   // Scores active only in the real-HGTD scenario
   if (scenario == Scenario::HGTD) {
@@ -89,6 +95,23 @@ inline void makeComparisonPlots(
   TCanvas* canvas,
   std::map<Score, AnalysisObj>& mapHGTD
 ) {
+  // Failure-mode fixes (src/failure_fixes.h). One file per failure mode: TRKPTZ
+  // and WAVeS, then WAVeS with that one mode fixed -- the gap to WAVeS is what
+  // the mode costs. Then the cumulative chain, in the failure ladder's order.
+  const std::vector<std::pair<const char*, const Score*>> FIXES = {
+    {"retime", &Score::WFIX_RETIME}, {"mistimed", &Score::WFIX_MISTIMED}, {"selection", &Score::WFIX_SELECT},
+    {"miscl", &Score::WFIX_MISCL}, {"teff", &Score::WFIX_TEFF}};
+  if (mapHGTD.count(Score::WFIX_RETIME)) {
+    for (const auto& [name, sc] : FIXES)
+      moneyPlot(MyUtl::plotFilePath("fixes", TString::Format("fix_%s_%s.pdf", name, key).Data()).c_str(), key, canvas,
+                {&mapHGTD.at(Score::TRKPTZ), &mapHGTD.at(Score::WAVES), &mapHGTD.at(*sc)}, {C02, C03, C05});
+    moneyPlot(MyUtl::plotFilePath("fixes", TString::Format("fix_chain_%s.pdf", key).Data()).c_str(), key, canvas,
+              {&mapHGTD.at(Score::WAVES), &mapHGTD.at(Score::WFIX_RETIME), &mapHGTD.at(Score::WFIX_C2),
+               &mapHGTD.at(Score::WFIX_C3), &mapHGTD.at(Score::WFIX_C4), &mapHGTD.at(Score::WFIX_C5),
+               &mapHGTD.at(Score::WFIX_C6)},
+              {C03, C04, C05, C06, C07, C08, C09});
+  }
+
   moneyPlot(MyUtl::plotFilePath("comparisons", TString::Format("theplot_%s.pdf", key).Data()).c_str(), key, canvas,
 	    {
 	      &mapHGTD.at(Score::HGTD),

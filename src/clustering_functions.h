@@ -474,7 +474,12 @@ namespace MyUtl {
      ClusteringMethod method,      // Clustering algorithm to use
      bool usez0 = false,           // Use z info in clustering as well
      bool sortTracks = false,      // Before clustering, sort tracks by pT
-     bool calcPurityFlag = false   // only compute purity when a purity-gated score is active
+     bool calcPurityFlag = false,  // only compute purity when a purity-gated score is active
+     // Per-track (time, resolution) replacing the ntuple's: a track in the map
+     // is clustered with that time whether or not it has one of its own; the
+     // others keep theirs (or are skipped if untimed). The failure-mode fixes'
+     // hook (src/failure_fixes.h); ignored when useSmearedTimes is set.
+     const std::unordered_map<int, std::pair<double,double>>* timeOverride = nullptr
   ) -> std::vector<Cluster> {
     if (trackIndices.empty() && DEBUG)
       std::cout << "EMPTY!!!!\n";
@@ -506,9 +511,26 @@ namespace MyUtl {
       }
     }
 
+    std::vector<int> overridden;   // the tracks that carry a time once the overrides apply
+    if (timeOverride && !useSmearedTimes) {
+      for (auto idx : indices) {
+        auto it = timeOverride->find(idx);
+        if (it != timeOverride->end()) {
+          smearedTimesMap.emplace(idx, it->second.first);
+          smearedTimeResMap.emplace(idx, it->second.second);
+        } else if (!checkTimeValid || branch->trackTimeValid[idx] == 1) {
+          smearedTimesMap.emplace(idx, branch->trackTime[idx]);
+          smearedTimeResMap.emplace(idx, branch->trackTimeRes[idx]);
+        } else continue;
+        overridden.push_back(idx);
+      }
+    }
     std::vector<Cluster> collection =
-      makeSimpleClusters(indices, branch, useSmearedTimes,
-			 smearedTimesMap, smearedTimeResMap, checkTimeValid, usez0);
+      (timeOverride && !useSmearedTimes)
+        ? makeSimpleClusters(overridden, branch, /*useSmearedTimes=*/true,
+                             smearedTimesMap, smearedTimeResMap, /*checkTimeValid=*/false, usez0)
+        : makeSimpleClusters(indices, branch, useSmearedTimes,
+                             smearedTimesMap, smearedTimeResMap, checkTimeValid, usez0);
     
     switch (method) {
       case ClusteringMethod::SIMULTANEOUS:

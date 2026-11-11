@@ -348,6 +348,39 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
+  // resolveTimingInputs -- the Global Performance talk's t0 inputs for the
+  //   clustering programs (2026-11-11): --clean-times (the TDR's track-time
+  //   cleaning, MyUtl::CLEAN_TIMES; needs the raw ntuples) and
+  //   --assoc-nsigma=X (the clustering list's z0 significance cut; the talk
+  //   uses 2.5). Call after resolveSelection: each appends to SELECTION_TAG
+  //   ("cleant0", "assoc2p5") so a run cannot overwrite the default output, and
+  //   the plot stage, given the same flags, finds the same file. Returns the
+  //   association cut, or a negative value when not given.
+  // ---------------------------------------------------------------------------
+  inline double resolveTimingInputs(int argc, char** argv) {
+    double assocNsigma = -1.0;
+    for (int i = 1; i < argc; ++i) {
+      const std::string a = argv[i];
+      if (a == "--clean-times") CLEAN_TIMES = true;
+      if (a.rfind("--assoc-nsigma=", 0) == 0) assocNsigma = std::stod(a.substr(15));
+    }
+    auto add = [](const std::string& t) { SELECTION_TAG = SELECTION_TAG.empty() ? t : SELECTION_TAG + "_" + t; };
+    if (CLEAN_TIMES) add("cleant0");
+    if (assocNsigma > 0.0) {
+      std::ostringstream os;
+      os << "assoc" << std::fixed << std::setprecision(1) << assocNsigma;
+      std::string t = os.str();
+      std::replace(t.begin(), t.end(), '.', 'p');
+      add(t);
+    }
+    if (CLEAN_TIMES || assocNsigma > 0.0)
+      std::cout << "[timing inputs] track-time cleaning " << (CLEAN_TIMES ? "on" : "off")
+                << ", clustering association z0 signif. < "
+                << (assocNsigma > 0.0 ? assocNsigma : MAX_NSIGMA) << "  (tag: " << SELECTION_TAG << ")\n";
+    return assocNsigma;
+  }
+
+  // ---------------------------------------------------------------------------
   // resolveThreads
   //   Thread count for TTreeProcessorMT via a --threads=<N> CLI flag. Default
   //   is capped (not raw hardware_concurrency()) so it doesn't silently drift

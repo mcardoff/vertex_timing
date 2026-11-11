@@ -353,6 +353,44 @@ namespace MyUtl {
   // better detector.  Contrast with real HGTD: ~30 ps/hit → 30/√nHits ≈ 15–21 ps/track.
   const double IDEAL_TRACK_RES   = 1.0;  // ps, flat per-track
 
+  // The TDR's track-time cleaning (--clean-times on clustering_hist; the Global
+  // Performance talk's t0s, util/tdr_common.h): a track's time is kept only if
+  // its last ITk hit is on the last layer (Track_hitInLastLayer) and, at
+  // 3.5 < |eta| < 3.9, it has >= 2 HGTD hits. Runtime flag, set in main()
+  // before any worker starts; it binds Track_hitInLastLayer, which the skims
+  // drop, so a cleaned run reads the RAW ntuples (--ntuple-dir=).
+  inline bool CLEAN_TIMES = false;
+  inline bool tdrTimeSurvivesCleaning(bool hitInLastLayer, double eta, int hgtdHits) {
+    if (!hitInLastLayer) return false;
+    const double ae = std::abs(eta);
+    return !(ae > 3.5 && ae < 3.9 && hgtdHits < 2);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Failure-mode fixes (2026-11-11): truth-informed repairs of ONE step of the
+  // WAVeS t0 each, on the same events (no denominator gate), so a row's gain
+  // over WAVES is what fixing that failure mode is worth. Bits combine; the
+  // cumulative chain adds them in the order of python/gp_failure_ladder.py's
+  // ladder. Implemented in src/failure_fixes.h.
+  //   RETIME    the full-cluster time instead of the in-jet one when the in-jet
+  //             subset is the less pure of the two (HS pT fraction)
+  //   MISTIMED  drop the HS tracks >= TRUTH_PULL_CUT sigma from t_HS (a
+  //             misassigned HGTD hit), re-cluster, re-choose
+  //   SELECT    choose the hard scatter's own cluster (most HS pT, > 50% HS pT;
+  //             with MISCL, most HS pT) when one exists, by provenance
+  //   Every choice is by provenance, never by the time (see failure_fixes.h).
+  //   MISCL     time the chosen cluster from its HS tracks only
+  //   TEFF      give every untimed (or cleaned) HS track in HGTD a time,
+  //             Gaus(t_HS, FIX_TEFF_RES), re-cluster, re-choose
+  //   RESOL     every timed HS track at Gaus(t_HS, IDEAL_TRACK_RES)
+  // Only HS truth is used (the HS vertex time, the track's HS link), so every
+  // fix is valid on the grid samples, whose pileup tracks carry no truth link.
+  // ---------------------------------------------------------------------------
+  namespace Fix {
+    constexpr int RETIME = 1, MISTIMED = 2, SELECT = 4, MISCL = 8, TEFF = 16, RESOL = 32;
+  }
+  const double FIX_TEFF_RES = 30.0;  // ps: the time an untimed HS track is given (the reference's flat scenario)
+
   // ---------------------------------------------------------------------------
   // 3b. Clustering method selector
   //   Passed as a single parameter to clusterTracksInTime, replacing the old
@@ -589,6 +627,10 @@ namespace MyUtl {
     // 9% of Z+jets ones purely because Z+jets clusters rarely hold 3 in-jet
     // tracks, giving +0.50 on VBF and +0.02 on Z+jets with ONE threshold.
     int              minSubsetTracks   = 0;
+    // Failure-mode fixes applied to this row (MyUtl::Fix bits; 0 = none). A
+    // fix row is its own collection (usesOwnCollection, no distCut): its
+    // cluster and time come from applyFixes (src/failure_fixes.h).
+    int              fixes             = 0;
 
     Score() = default;
     Score(int id_, std::string ln, const char* sn,
@@ -640,6 +682,9 @@ namespace MyUtl {
     static const Score WAVES_GIJ;
     static const Score TRKPTZ_TZJ;
     static const Score TRKPTZ_TZQ;
+    // failure-mode fixes on WAVeS: each alone, then cumulative (src/failure_fixes.h)
+    static const Score WFIX_RETIME, WFIX_MISTIMED, WFIX_SELECT, WFIX_MISCL, WFIX_TEFF;
+    static const Score WFIX_C2, WFIX_C3, WFIX_C4, WFIX_C5, WFIX_C6;
   };
 
   inline const std::string STR_TRKPTZ = "#Sigma p_{T}e^{-|#Delta z|}";
@@ -888,6 +933,31 @@ namespace MyUtl {
                                            TrackFilterType::ALL, VbsRegion::NONE,
                                            TimeSource::IN_JET, MIN_INJET_TRACKS_FOR_TIME };
 
+  // Failure-mode fixes on WAVeS (MyUtl::Fix). Own collection without a distCut:
+  // selectClusters skips them, processEventData fills them from applyFixes. The
+  // reported time is the one applyFixes stores, hence TimeSource::FULL.
+  inline Score makeFixScore(int id, const char* longName, const char* shortName, int fixes) {
+    Score s{id, longName, shortName, true, false, -1.f};
+    s.fixes = fixes;
+    return s;
+  }
+  inline const Score Score::WFIX_RETIME   = makeFixScore(40, "WAVeS + fix [re-timing]",        "WFIX_RETIME",   Fix::RETIME);
+  inline const Score Score::WFIX_MISTIMED = makeFixScore(41, "WAVeS + fix [misassigned HS times]", "WFIX_MISTIMED", Fix::MISTIMED);
+  inline const Score Score::WFIX_SELECT   = makeFixScore(42, "WAVeS + fix [selection]",        "WFIX_SELECT",   Fix::SELECT);
+  inline const Score Score::WFIX_MISCL    = makeFixScore(43, "WAVeS + fix [misclustering]",    "WFIX_MISCL",    Fix::MISCL);
+  inline const Score Score::WFIX_TEFF     = makeFixScore(44, "WAVeS + fix [HS track efficiency]", "WFIX_TEFF",  Fix::TEFF);
+  // cumulative, in the ladder's order; C1 is WFIX_RETIME
+  inline const Score Score::WFIX_C2 = makeFixScore(45, "WAVeS fixed [re-timing, HS times]", "WFIX_C2",
+                                                   Fix::RETIME | Fix::MISTIMED);
+  inline const Score Score::WFIX_C3 = makeFixScore(46, "WAVeS fixed [+ selection]", "WFIX_C3",
+                                                   Fix::RETIME | Fix::MISTIMED | Fix::SELECT);
+  inline const Score Score::WFIX_C4 = makeFixScore(47, "WAVeS fixed [+ misclustering]", "WFIX_C4",
+                                                   Fix::RETIME | Fix::MISTIMED | Fix::SELECT | Fix::MISCL);
+  inline const Score Score::WFIX_C5 = makeFixScore(48, "WAVeS fixed [+ HS track efficiency]", "WFIX_C5",
+                                                   Fix::RETIME | Fix::MISTIMED | Fix::SELECT | Fix::MISCL | Fix::TEFF);
+  inline const Score Score::WFIX_C6 = makeFixScore(49, "WAVeS fixed [+ HS time resolution]", "WFIX_C6",
+                                                   Fix::RETIME | Fix::MISTIMED | Fix::SELECT | Fix::MISCL | Fix::TEFF | Fix::RESOL);
+
   // Scores with a dedicated collection (distCut ≥ 0 → buildsCollection() = true)
   inline const Score Score::CONE       = {  7, "Cone"                       , "CONE",     true , false, -1.f, DIST_CUT_CONE, ClusteringMethod::CONE };
   inline const Score Score::FILTJET    = {  9, "Filter Tracks in Jets"      , "FILTJET",  true , false, -1.f, DIST_CUT_CONE, ClusteringMethod::CONE, false, TrackFilterType::JET };
@@ -901,6 +971,8 @@ namespace MyUtl {
     Score::VBF_R1,   Score::VBF_R2,
     Score::TRKPTZ_PV, Score::TRKPTZ_PU, Score::TRKPTZ_PUW, Score::TRKPTZ_TZ,
     Score::TRKPTZ_TZ_IJ, Score::TRKPTZ_TZ_OJ, Score::TRKPTZ_TZ_GIJ, Score::WAVES_GIJ, Score::TRKPTZ_TZJ, Score::TRKPTZ_TZQ,
+    Score::WFIX_RETIME, Score::WFIX_MISTIMED, Score::WFIX_SELECT, Score::WFIX_MISCL, Score::WFIX_TEFF,
+    Score::WFIX_C2, Score::WFIX_C3, Score::WFIX_C4, Score::WFIX_C5, Score::WFIX_C6,
   };
 
   // ---------------------------------------------------------------------------

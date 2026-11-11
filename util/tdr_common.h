@@ -143,9 +143,7 @@ inline TimeCleaning setupCleaning(TTreeReader& reader, CleanMode m) {
 inline bool timed(BranchPointerWrapper& b, int idx, const TimeCleaning& C, bool clean) {
   if (b.trackTimeValid[idx] != 1) return false;
   if (!clean) return true;
-  if (!(**C.lastLayer)[idx]) return false;
-  const double ae = std::abs((double)b.trackEta[idx]);
-  return !(ae > 3.5 && ae < 3.9 && b.trackHgtdHits[idx] < 2);
+  return MyUtl::tdrTimeSurvivesCleaning((**C.lastLayer)[idx], b.trackEta[idx], b.trackHgtdHits[idx]);   // shared with clustering_hist
 }
 
 // What the clustering offered, for the failure breakdown (util/tdr_t0, 2026-11-09 Global Performance talk): the
