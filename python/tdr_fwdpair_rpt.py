@@ -32,12 +32,16 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--sig", required=True)
 ap.add_argument("--bkg", required=True)
 ap.add_argument("--out", required=True)
+ap.add_argument("--t0s", default=None, help="comma list of the t0s to draw (hgtd, trkptz, waves, truth); default all. "
+                "The Global Performance talk shows WAVeS against Athena only (user, 2026-11-11): --t0s hgtd,waves,truth")
 args = ap.parse_args()
 R = S.setup()
 
 CASES = [("rpt_itk", "ITk only", S.COL["itk"], 1), ("rpt_t0_hgtd", "HGTD t_{0}", S.COL["hgtd"], 1),
          ("rpt_t0_trkptz", "TRKPTZ t_{0}", S.COL["trkptz"], 1), ("rpt_t0_waves", "WAVeS t_{0}", S.COL["waves"], 1),
          ("rpt_t0_truth", "Truth t_{0}", S.COL["truth"], 3)]
+if args.t0s:   # ITk (the reference) always stays
+    CASES = [c for c in CASES if c[0] == "rpt_itk" or c[0].replace("rpt_t0_", "") in args.t0s.split(",")]
 CONF = [(1, "Central-forward pairs: the forward jet"), (2, "Forward-forward pairs: both jets")]
 SAMPLES = [("VBF H#rightarrowinv.", args.sig), ("Z+jets", args.bkg)]
 EDGES = np.linspace(0.0, 1.2, 61)

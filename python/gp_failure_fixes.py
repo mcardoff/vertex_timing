@@ -11,7 +11,7 @@ another with truth, in the failure ladder's order (src/failure_fixes.h, MyUtl::F
   HS time res.    every HS track at t_HS (1 ps): what is left has no forward HS track at all
 Upper panel: core fraction (|t0 - t_HS| < 60 ps, all events), a waterfall of the cumulative chain; each step is labelled
 with its gain in the chain and, in brackets, the gain of that fix alone on WAVeS. Lower panel: the resolution
-(FIT_PEAKTAIL's peak width) along the chain; dashed: TRKPTZ and Athena.
+(FIT_PEAKTAIL's peak width) along the chain; dotted: Athena.
 
   PYTHONNOUSERSITE=1 ~/.venv-hgtd/bin/python gp_failure_fixes.py --json ../condor/vbf/fixes/vbf_cleant0_assoc2p5_failure_fixes.json \\
       ../condor/zjets/fixes/zjets_cleant0_assoc2p5_failure_fixes.json --out ../figs/tdr/gp/gp_failure_fixes
@@ -70,7 +70,7 @@ for c, (path, lab) in enumerate(zip(args.json, LABELS)):
         name = plain(name)
         print(f"   + {name:15s} {y1:6.2f} ({y1 - y0:+.2f} in the chain" + (f", {core(alone) - levels[0]:+.2f} alone)" if alone else ")"))
     tw = S.keep(R.TLatex(0, levels[0] + 0.02 * (100 - lo), f"{levels[0]:.1f}")); tw.SetTextAlign(21); tw.SetTextSize(0.040); tw.Draw()
-    for k, nm, style in (("TRKPTZ", "TRKPTZ", 2), ("HGTD", "Athena", 3)):
+    for k, nm, style in (("HGTD", "Athena", 3),):   # WAVeS against Athena only (user, 2026-11-11)
         l = S.keep(R.TLine(-0.5, core(k), len(xs) - 0.5, core(k))); l.SetLineStyle(style); l.SetLineColor(R.kGray + 2); l.Draw()
         tt = S.keep(R.TLatex(len(xs) - 0.55, core(k) - 0.045 * (100 - lo), f"{nm} {core(k):.1f}"))
         tt.SetTextAlign(31); tt.SetTextSize(0.036); tt.SetTextColor(R.kGray + 2); tt.Draw()
@@ -83,7 +83,7 @@ for c, (path, lab) in enumerate(zip(args.json, LABELS)):
     cv.cd(); S.pad(f"dn_{c}", c / ncol, 0.0, (c + 1) / ncol, 0.38, top=0.03, bottom=0.30, left=0.13, right=0.04)
     sig = [rows["WAVES"]["sigma_peak"]] + [rows[s[0]]["sigma_peak"] for s in STEPS]
     err = [rows["WAVES"]["sigma_peak_err"]] + [rows[s[0]]["sigma_peak_err"] for s in STEPS]
-    ref = [rows[k]["sigma_peak"] for k in ("TRKPTZ", "HGTD")]
+    ref = [rows[k]["sigma_peak"] for k in ("HGTD",)]
     fd = S.keep(R.TH1D(f"fd_{c}", "", len(xs), -0.5, len(xs) - 0.5))
     fd.SetMinimum(0.0); fd.SetMaximum(1.25 * max(sig + ref))
     fd.GetXaxis().SetLabelSize(0); fd.GetXaxis().SetNdivisions(0)
@@ -94,13 +94,13 @@ for c, (path, lab) in enumerate(zip(args.json, LABELS)):
     g = S.keep(R.TGraphErrors(len(xs)))
     for i, (s_, e_) in enumerate(zip(sig, err)): g.SetPoint(i, i, s_); g.SetPointError(i, 0, max(e_, 0))
     g.SetMarkerStyle(20); g.SetMarkerSize(1.3); g.SetLineWidth(2); g.Draw("LP SAME")
-    for k, style in (("TRKPTZ", 2), ("HGTD", 3)):
+    for k, style in (("HGTD", 3),):
         l = S.keep(R.TLine(-0.5, rows[k]["sigma_peak"], len(xs) - 0.5, rows[k]["sigma_peak"])); l.SetLineStyle(style); l.SetLineColor(R.kGray + 2); l.Draw()
-        nm = {"TRKPTZ": "TRKPTZ", "HGTD": "Athena"}[k]
+        nm = "Athena"
         tt = S.keep(R.TLatex(-0.4, rows[k]["sigma_peak"] + 0.03 * fd.GetMaximum(), nm)); tt.SetTextAlign(11); tt.SetTextSize(0.062); tt.SetTextColor(R.kGray + 2); tt.Draw()
     if sig[-1] <= FLOOR_PS + 0.01:
         t = S.keep(R.TLatex(len(xs) - 1.15, sig[-1], "fit floor")); t.SetTextAlign(32); t.SetTextSize(0.062); t.Draw()
     print("   sigma_peak: " + "  ".join(f"{plain(n)} {s_:.1f}" for n, s_ in zip(names, sig))
-          + f" | TRKPTZ {ref[0]:.1f} Athena {ref[1]:.1f}")
+          + f" | Athena {ref[0]:.1f}")
     R.gPad.RedrawAxis()
 S.save(cv, args.out)

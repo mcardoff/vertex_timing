@@ -144,9 +144,8 @@ auto main(int argc, char** argv) -> int {
   shapeComparisonPlot(
     MyUtl::plotFilePath("inclusive", "shape_comparison_logscale.pdf").c_str(),
     true, -400, 400, canvas, SHAPE_SET, resoGetter, nullptr, diffLabel);
-  // The talk's t0s overlaid (slides 8/9): Athena, TRKPTZ, WAVeS only.
-  const std::vector<AnalysisObj*> TALK_SET = {
-    &mapHGTD.at(Score::HGTD), &mapHGTD.at(Score::TRKPTZ), &mapHGTD.at(Score::WAVES)};
+  // The talk's t0s overlaid (slides 8/9): WAVeS against Athena (user, 2026-11-11).
+  const std::vector<AnalysisObj*> TALK_SET = {&mapHGTD.at(Score::HGTD), &mapHGTD.at(Score::WAVES)};
   shapeComparisonPlot(MyUtl::plotFilePath("talk", "talk_t0_shape_logscale.pdf").c_str(),
     true, -400, 400, canvas, TALK_SET, resoGetter, nullptr, diffLabel);
   shapeComparisonPlot(MyUtl::plotFilePath("talk", "talk_t0_shape_linscale.pdf").c_str(),

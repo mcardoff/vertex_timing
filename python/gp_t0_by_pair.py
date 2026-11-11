@@ -19,8 +19,10 @@ import tdr_root_style as S
 ap = argparse.ArgumentParser()
 ap.add_argument("--trees", nargs=2, required=True, metavar=("VBF", "ZJETS"))
 ap.add_argument("--out", required=True)
+ap.add_argument("--t0s", default="hgtd,waves", help="the t0s drawn: WAVeS against Athena (user, 2026-11-11); add trkptz for the old version")
 args = ap.parse_args()
 T0S = [("hgtd", "HGTD (Athena) t_{0}", S.COL["hgtd"]), ("trkptz", "TRKPTZ t_{0}", S.COL["trkptz"]), ("waves", "WAVeS t_{0}", S.COL["waves"])]
+T0S = [t for t in T0S if t[0] in args.t0s.split(",")]
 LABELS = ["both HS", "fwd HS, cen PU", "fwd PU, cen HS", "both PU"]
 
 R = S.setup()
@@ -42,7 +44,7 @@ for c, (path, lab) in enumerate(zip(args.trees, ("VBF H#rightarrowinv.", "Z+jets
     fr.GetXaxis().SetLabelSize(0.044); fr.GetXaxis().LabelsOption("h"); fr.GetYaxis().SetTitle("Core fraction (|t_{0} #minus t_{HS}| < 60 ps)")
     fr.GetYaxis().SetTitleSize(0.045); fr.GetYaxis().SetLabelSize(0.04); fr.GetYaxis().SetTitleOffset(1.3)
     fr.Draw("AXIS")
-    leg = S.legend(0.17, 0.665, 0.93, 0.715, size=0.034, ncol=3, margin=0.25)
+    leg = S.legend(0.17, 0.665, 0.93, 0.715, size=0.034, ncol=len(T0S), margin=0.25)
     print(f"{lab.replace('#rightarrow', '->')}:")
     for k, (t0, name, col) in enumerate(T0S):
         h = S.keep(R.TH1D(f"h_{c}_{t0}", "", len(masks), 0, len(masks)))
@@ -50,7 +52,7 @@ for c, (path, lab) in enumerate(zip(args.trees, ("VBF H#rightarrowinv.", "Z+jets
         for i, m in enumerate(masks):
             f = w[m & ok].sum() / w[m].sum()
             h.SetBinContent(i + 1, f)
-        h.SetFillColor(S.colour(col)); h.SetLineColor(S.colour(col)); h.SetMarkerSize(0); h.SetBarWidth(0.26); h.SetBarOffset(0.11 + 0.26 * k)
+        h.SetFillColor(S.colour(col)); h.SetLineColor(S.colour(col)); h.SetMarkerSize(0); h.SetBarWidth(0.78 / len(T0S)); h.SetBarOffset(0.11 + 0.78 / len(T0S) * k)
         h.Draw("BAR SAME")
         leg.AddEntry(h, name, "F")
         print(f"  {t0:7s} " + "  ".join(f"{LABELS[i]} {100 * h.GetBinContent(i + 1):.1f}" for i in range(len(masks))))

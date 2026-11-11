@@ -42,6 +42,8 @@ ap.add_argument("--label", default="VBF H#rightarrowinv.", help="sample, in ROOT
 ap.add_argument("--roc-ymax", type=float, default=400.0,
                 help="the ROC panels' common y maximum (user's choice, 2026-11-04); 0 = the larger of the two panels' needs")
 ap.add_argument("--out", required=True)
+ap.add_argument("--t0s", default=None, help="comma list of the t0s to draw (hgtd, trkptz, waves, truth); default all. "
+                "The Global Performance talk shows WAVeS against Athena only (user, 2026-11-11): --t0s hgtd,waves,truth")
 args = ap.parse_args()
 os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
 R = S.setup()
@@ -52,6 +54,8 @@ TAGGERS = [("rpt_itk", "ITk only", "ITk only", S.COL["itk"], 24, 2),
            ("rpt_t0_trkptz", "TRKPTZ t_{0}", "TRKPTZ t_{0}", S.COL["trkptz"], 21, 1),
            ("rpt_t0_waves", "WAVeS t_{0}", "WAVeS t_{0}", S.COL["waves"], 20, 1),
            ("rpt_t0_truth", "Truth t_{0}", "Truth t_{0}", S.COL["truth"], 25, 3)]
+if args.t0s:   # ITk (the reference) always stays
+    TAGGERS = [t for t in TAGGERS if t[0] == "rpt_itk" or t[0].replace("rpt_t0_", "") in args.t0s.split(",")]
 EFF = np.round(np.arange(0.800, 0.9751, 0.025), 3)    # the sampled working points
 plain = lambda s: s.replace("_{0}", "0").replace("#", "")
 
