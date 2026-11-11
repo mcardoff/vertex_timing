@@ -49,10 +49,10 @@ print(f"{f.split('/')[-1]} entry {best}: {len(z)} truth interactions, {len(rz)} 
 R = S.setup()
 # the original's layout (user, 2026-11-11): no legend or header, only the ATLAS label, top right inside the frame; the
 # axis runs to 500 ps with the lines stopping at 400, which leaves the label clear of the interactions
-cv = S.keep(R.TCanvas("zt", "", 1000, 720))
-S.pad("p", 0, 0, 1, 1, top=0.04, bottom=0.13, left=0.12, right=0.03)
+cv = S.keep(R.TCanvas("zt", "", 1000, 580))   # wide: stacked under TDR Fig. 2.6 on slide 3, height is the limit
+S.pad("p", 0, 0, 1, 1, top=0.05, bottom=0.16, left=0.10, right=0.03)
 fr = S.keep(R.gPad.DrawFrame(-100, -400, 100, 500))
-S.axes(fr, "Vertex z [mm]", "Vertex t [ps]", size=0.05, ytoff=1.1, xtoff=1.1)
+S.axes(fr, "Vertex z [mm]", "Vertex t [ps]", size=0.058, ytoff=0.8, xtoff=1.1)
 fr.GetYaxis().SetNdivisions(509)
 for zz in rz:                                       # reconstructed vertices: z only
     if -100 < zz < 100:
@@ -63,6 +63,6 @@ for i in range(len(z)):
     if i == hs or not (-100 < z[i] < 100 and -400 < t[i] < 400): continue
     e = S.keep(R.TEllipse(z[i], t[i], args.sigz, args.sigt)); e.SetFillColor(PU_FILL); e.SetLineColor(PU_LINE); e.SetLineWidth(1); e.Draw()
 eh = S.keep(R.TEllipse(z[hs], t[hs], args.sigz, args.sigt)); eh.SetFillColor(HS_COL); eh.SetLineColor(R.kBlack); eh.SetLineWidth(2); eh.Draw()
-S.header(0.55, 0.895, [], size=0.05)
+S.header(0.585, 0.875, [], size=0.058)
 R.gPad.RedrawAxis()
 S.save(cv, args.out)
