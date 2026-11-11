@@ -36,12 +36,10 @@ ROWS = {"alone": [BASE,
                   ("WFIX_MISCL", "+ misclustering fixed", "#B3231C", 33),
                   ("WFIX_TEFF", "+ HS track efficiency fixed", "#8E5DB5", 34)],
         "chain": [BASE,
-                  ("WFIX_RETIME", "re-timing", "#E69F00", 21),
-                  ("WFIX_C2", "+ misassigned HS times", "#5A3E2B", 22),
+                  ("WFIX_MISTIMED", "misassigned HS times", "#5A3E2B", 22),
                   ("WFIX_C3", "+ selection", "#3F90DA", 23),
                   ("WFIX_C4", "+ misclustering", "#B3231C", 33),
-                  ("WFIX_C5", "+ HS track efficiency", "#8E5DB5", 34),
-                  ("WFIX_C6", "+ HS time resolution", "#C98B5E", 29)]}[args.mode]
+                  ("WFIX_C5", "+ HS track efficiency", "#8E5DB5", 34)]}[args.mode]   # no resolution step: see gp_failure_fixes.py
 TITLE = {"alone": "each failure mode fixed alone, with truth", "chain": "failure modes fixed in turn, with truth"}[args.mode]
 
 R = S.setup()

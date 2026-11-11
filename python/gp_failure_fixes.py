@@ -2,10 +2,9 @@
 """What fixing each t0 failure mode is worth, for the Global Performance talk (slides/slides_gp_timing.tex).
 
 Reads clustering_plot's failure_fixes.json (one per sample): the WAVeS t0 with its failure modes repaired one after
-another with truth, in the failure ladder's order (src/failure_fixes.h, MyUtl::Fix):
-  re-timing       the full-cluster time when the in-jet subset is the less pure
+another with truth, in the user's order (2026-11-11; src/failure_fixes.h, MyUtl::Fix):
   HS track times  the hard-scatter tracks >= 3 sigma from t_HS (misassigned HGTD hits) dropped, re-clustered
-  selection       the hard scatter's own cluster chosen (most HS pT)
+  selection       the hard scatter's cluster chosen: >= 1 HS track, >= 20% of the clustered pT, the most HS pT
   misclustering   that cluster timed from its HS tracks alone
   HS track eff.   every untimed HS track in HGTD given a time, Gaus(t_HS, 30 ps)
   HS time res.    every HS track at t_HS (1 ps): what is left has no forward HS track at all
@@ -29,12 +28,12 @@ args = ap.parse_args()
 LABELS = args.labels or [{"vbf": "VBF H#rightarrowinv.", "zjets": "Z+jets", "local": "VBF H#rightarrowinv. (local)"}
                          .get(json.load(open(p))["sample"], json.load(open(p))["sample"]) for p in args.json]
 # the chain: (short name of the cumulative row, label, colour (the ladder's), short name of the fix alone)
-STEPS = [("WFIX_RETIME", "#splitline{re-}{timing}", "#E69F00", "WFIX_RETIME"),
-         ("WFIX_C2", "#splitline{HS track}{times}", "#5A3E2B", "WFIX_MISTIMED"),
+STEPS = [("WFIX_MISTIMED", "#splitline{HS track}{times}", "#5A3E2B", "WFIX_MISTIMED"),
          ("WFIX_C3", "selection", "#3F90DA", "WFIX_SELECT"),
          ("WFIX_C4", "#splitline{mis-}{clustering}", "#B3231C", "WFIX_MISCL"),
-         ("WFIX_C5", "#splitline{HS track}{efficiency}", "#8E5DB5", "WFIX_TEFF"),
-         ("WFIX_C6", "#splitline{HS time}{resolution}", "#C98B5E", None)]
+         ("WFIX_C5", "#splitline{HS track}{efficiency}", "#8E5DB5", "WFIX_TEFF")]
+# the resolution step (WFIX_C6) is left out: with every HS time at t_HS the HS cluster stops absorbing the pileup next
+# to it, often falls under the selection fix's 20% pT share and is no longer chosen (98.94 -> 98.63 on local VBF)
 plain = lambda n: n.replace("#splitline{", "").replace("}{", " ").replace("}", "").replace("_{0", "0").replace("#", "")
 FLOOR_PS = 3.0   # FIT_PEAKTAIL's lower limit on the peak width
 
