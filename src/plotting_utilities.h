@@ -1659,14 +1659,29 @@ namespace MyUtl {
     TCanvas* canvas,
     const std::vector<AnalysisObj*>& plts,
     const std::vector<Color_t>& colorOverride = {},
-    double effYMin = EFF_YMIN,  // the core-fraction page's floor (Z+jets falls below 0.7 at low multiplicity)
-    double effYMax = EFF_YMAX   // and its ceiling: room for the label above 1
+    double effYMin = EFF_YMIN,  // the core-fraction page's floor (Z+jets falls below 0.7 at low multiplicity);
+                                // < 0: 0.05 below the lowest point drawn
+    double effYMax = EFF_YMAX,  // and its ceiling: room for the label above 1; < 0: 1 + 0.45 x (1 - floor)
+    double xMinOverride = -1e9  // > -1e9: draw from here (e.g. 2.5, the June talk's n_HS >= 3), binning unchanged
   ) {
     // std::cout << fname << "\n";
     if (plts.empty()) return;
 
     double xMin = plts[0]->get(key)->xMin;
     double xMax = plts[0]->get(key)->foldMax;
+    if (xMinOverride > -1e9) xMin = xMinOverride;
+    if (effYMin < 0.0) {
+      double lo = 1.0;
+      for (const auto& ana : plts) {
+        TEfficiency* e = ana->get(key)->efficiency.get();
+        if (!e) continue;
+        for (int b = 1; b <= e->GetTotalHistogram()->GetNbinsX(); ++b)
+          if (e->GetTotalHistogram()->GetBinContent(b) > 0 && e->GetTotalHistogram()->GetBinCenter(b) > xMin)
+            lo = std::min(lo, e->GetEfficiency(b) - e->GetEfficiencyErrorLow(b));
+      }
+      effYMin = std::max(0.0, std::floor((lo - 0.05) * 20.0) / 20.0);
+    }
+    if (effYMax < 0.0) effYMax = 1.0 + 0.45 * (1.0 - effYMin);
 
     auto plotWithLegend = [&](
         auto getter, const char* title,
