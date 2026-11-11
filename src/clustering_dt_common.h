@@ -112,6 +112,12 @@ inline void makeComparisonPlots(
     // The talk's version (slide 13, user 2026-11-11): the differential gain of
     // each fix, WAVeS then the chain through HS track efficiency, core
     // fraction from 0. The gap between two curves is that mode's contribution.
+    // Slide 14 (user, 2026-11-11): each fix ALONE on WAVeS, to see which are
+    // worth fixing at reco level first; n_HS >= 3 as the June talk.
+    moneyPlot(MyUtl::plotFilePath("talk", TString::Format("talk_fix_alone_%s.pdf", key).Data()).c_str(), key, canvas,
+              {&mapHGTD.at(Score::WAVES), &mapHGTD.at(Score::WFIX_MISTIMED), &mapHGTD.at(Score::WFIX_SELECT),
+               &mapHGTD.at(Score::WFIX_MISCL), &mapHGTD.at(Score::WFIX_TEFF)},
+              {C03, C06, C01, C02, C04}, -1.0, -1.0, 2.5);
     moneyPlot(MyUtl::plotFilePath("talk", TString::Format("talk_fix_chain_%s.pdf", key).Data()).c_str(), key, canvas,
               {&mapHGTD.at(Score::WAVES), &mapHGTD.at(Score::WFIX_MISTIMED), &mapHGTD.at(Score::WFIX_C3),
                &mapHGTD.at(Score::WFIX_C4), &mapHGTD.at(Score::WFIX_C5)},
