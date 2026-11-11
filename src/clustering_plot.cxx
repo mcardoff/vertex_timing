@@ -1,4 +1,5 @@
 #include <fstream>
+#include <sstream>
 #include "clustering_constants.h"
 #include "clustering_dt_common.h"
 #include "sample_config.h"
@@ -182,7 +183,30 @@ auto main(int argc, char** argv) -> int {
          << "\", \"fixes\": " << sc->fixes << ", \"n\": " << tot << ", \"pass\": " << pas
          << ", \"core\": " << eff << ", \"core_err\": " << err << ", \"sigma_peak\": " << sp
          << ", \"sigma_peak_err\": " << spe << ", \"sigma_core\": " << scr << ", \"frac_shoulder\": " << fsh
-         << ", \"n_tail_fit\": " << ntail << ", \"n_reso\": " << h->GetEntries() << "}";
+         << ", \"n_tail_fit\": " << ntail << ", \"n_reso\": " << h->GetEntries();
+      // Per bin of forward HS tracks with a time, the underflow (n <= 2, below
+      // HS_TRACK_MIN, where most failures are) included as the first bin; the
+      // last bin is the fold (>= FOLD_HS_TRACK). sigma_peak: FIT_PEAKTAIL on the
+      // bin's t0 - t_HS, as the main program's slices (-1 below 100 entries).
+      js << ", \"nhs\": {\"x\": [";
+      const int nx = po->hist->GetNbinsX();
+      std::ostringstream xs, ps, ts, ss, es;
+      for (int ib = 0; ib <= nx; ++ib) {
+        const char* sep = ib ? ", " : "";
+        xs << sep << (ib == 0 ? -1.0 : po->hist->GetXaxis()->GetBinCenter(ib));
+        ps << sep << po->effPass->GetBinContent(ib);
+        ts << sep << po->effTotal->GetBinContent(ib);
+        std::unique_ptr<TH1D> sl(po->hist->ProjectionY(TString::Format("fixsl_%d_%d", sc->id, ib), ib, ib));
+        double v = -1, e = -1;
+        if (sl->GetEntries() >= 100) {
+          TF1* f = makePeakTailFit(sl.get(), false);
+          v = f->GetParameter("SigmaPeak"); e = f->GetParError(f->GetParNumber("SigmaPeak"));
+          delete f;
+        }
+        ss << sep << v; es << sep << e;
+      }
+      js << xs.str() << "], \"pass\": [" << ps.str() << "], \"total\": [" << ts.str()
+         << "], \"sigma_peak\": [" << ss.str() << "], \"sigma_peak_err\": [" << es.str() << "]}}";
       first = false;
     }
     js << "\n  ]\n}\n";
