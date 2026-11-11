@@ -536,7 +536,11 @@ namespace MyUtl {
   const double PU_TRACK_MIN = 2.5, PU_TRACK_MAX = 100.5, FOLD_HS_TRACK = 20;  
   const double PU_TRACK_WIDTH = 1.0;
 
-  const double HS_TRACK_MIN = 2.5, HS_TRACK_MAX = 100.5, FOLD_PU_TRACK = 20;
+  // From 0 (2026-11-11; was 2.5): events with 0-2 forward HS tracks with a
+  // time are where the t0 fails, and at 2.5 they fell in the underflow, which
+  // no plot draws. Changes this axis's binning, so a hist file written before
+  // it fails HistReader's binning check (loudly) in a newer plot stage.
+  const double HS_TRACK_MIN = -0.5, HS_TRACK_MAX = 100.5, FOLD_PU_TRACK = 20;
   const double HS_TRACK_WIDTH = 1.0;
 
   const double PU_FRAC_WIDTH = 0.1;

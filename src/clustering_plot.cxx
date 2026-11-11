@@ -29,7 +29,7 @@ auto main(int argc, char** argv) -> int {
   MyUtl::ENERGY_LABEL = sample.energyLabel;
   MyUtl::OUTPUT_DIR   = sample.outputDir;
   MyUtl::SAMPLE_NAME  = sample.sampleName;
-  for (const char* sub : {"comparisons", "inclusive", "fullplots", "diagnostics", "fixes"})
+  for (const char* sub : {"comparisons", "inclusive", "fullplots", "diagnostics", "fixes", "talk"})
     boost::filesystem::create_directories(MyUtl::OUTPUT_DIR + "/" + sub);
 
   gErrorIgnoreLevel = kFatal;
@@ -144,6 +144,13 @@ auto main(int argc, char** argv) -> int {
   shapeComparisonPlot(
     MyUtl::plotFilePath("inclusive", "shape_comparison_logscale.pdf").c_str(),
     true, -400, 400, canvas, SHAPE_SET, resoGetter, nullptr, diffLabel);
+  // The talk's t0s overlaid (slides 8/9): Athena, TRKPTZ, WAVeS only.
+  const std::vector<AnalysisObj*> TALK_SET = {
+    &mapHGTD.at(Score::HGTD), &mapHGTD.at(Score::TRKPTZ), &mapHGTD.at(Score::WAVES)};
+  shapeComparisonPlot(MyUtl::plotFilePath("talk", "talk_t0_shape_logscale.pdf").c_str(),
+    true, -400, 400, canvas, TALK_SET, resoGetter, nullptr, diffLabel);
+  shapeComparisonPlot(MyUtl::plotFilePath("talk", "talk_t0_shape_linscale.pdf").c_str(),
+    false, -200, 200, canvas, TALK_SET, resoGetter, nullptr, diffLabel);
   shapeComparisonPlotPair(
     MyUtl::plotFilePath("inclusive", "shape_comparison.pdf").c_str(),
     -200, 200, -400, 400, canvas, SHAPE_SET, resoGetter, nullptr, diffLabel);

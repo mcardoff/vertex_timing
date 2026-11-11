@@ -1658,7 +1658,8 @@ namespace MyUtl {
     const std::string& key,
     TCanvas* canvas,
     const std::vector<AnalysisObj*>& plts,
-    const std::vector<Color_t>& colorOverride = {}
+    const std::vector<Color_t>& colorOverride = {},
+    double effYMin = EFF_YMIN   // the core-fraction page's floor (Z+jets falls below 0.7 at low multiplicity)
   ) {
     // std::cout << fname << "\n";
     if (plts.empty()) return;
@@ -1806,7 +1807,7 @@ namespace MyUtl {
     // Plot Efficiency — linear scale
     plotWithLegend(
         [](auto& plt) { return plt->efficiency.get(); },
-	"Core Fraction", EFF_YMIN, EFF_YMAX,
+	"Core Fraction", effYMin, EFF_YMAX,
 	0.99, "99% Core Fraction", false,                     // logY
 	0.60, 0.30, 0.80, 0.60);
     canvas->Print(fname);
@@ -2077,7 +2078,9 @@ namespace MyUtl {
       //   TRKPTZ=red, TEST_MISAS=violet; fallback to COLORS cycle.
       Color_t col;
       switch (plt->score.id) {
+        case 0:  col = C01; break;  // HGTD       → blue
         case 2:  col = C02; break;  // TRKPTZ     → red
+        case 18: col = C03; break;  // WAVES      → yellow (was COLORS' cycle: red, beside TRKPTZ)
         case 13: col = C04; break;  // TEST_MISAS → violet
         default: col = COLORS[colorCounter % COLORS.size()]; break;
       }
