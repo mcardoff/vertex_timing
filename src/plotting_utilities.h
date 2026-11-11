@@ -1659,7 +1659,8 @@ namespace MyUtl {
     TCanvas* canvas,
     const std::vector<AnalysisObj*>& plts,
     const std::vector<Color_t>& colorOverride = {},
-    double effYMin = EFF_YMIN   // the core-fraction page's floor (Z+jets falls below 0.7 at low multiplicity)
+    double effYMin = EFF_YMIN,  // the core-fraction page's floor (Z+jets falls below 0.7 at low multiplicity)
+    double effYMax = EFF_YMAX   // and its ceiling: room for the label above 1
   ) {
     // std::cout << fname << "\n";
     if (plts.empty()) return;
@@ -1807,7 +1808,7 @@ namespace MyUtl {
     // Plot Efficiency — linear scale
     plotWithLegend(
         [](auto& plt) { return plt->efficiency.get(); },
-	"Core Fraction", effYMin, EFF_YMAX,
+	"Core Fraction", effYMin, effYMax,
 	0.99, "99% Core Fraction", false,                     // logY
 	0.60, 0.30, 0.80, 0.60);
     canvas->Print(fname);

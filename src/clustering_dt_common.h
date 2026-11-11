@@ -137,7 +137,7 @@ inline void makeComparisonPlots(
   // 0.2-0.7 below 5 HS tracks, under the default floor.
   moneyPlot(MyUtl::plotFilePath("talk", TString::Format("talk_t0_%s.pdf", key).Data()).c_str(), key, canvas,
 	    {&mapHGTD.at(Score::HGTD), &mapHGTD.at(Score::TRKPTZ), &mapHGTD.at(Score::WAVES)},
-	    {C01, C02, C03}, 0.0);
+	    {C01, C02, C03}, 0.0, 1.3);
 
   // Simple three-way comparison: HGTD vs TRKPTZ vs WAVeS (no oracles).
   moneyPlot(MyUtl::plotFilePath("comparisons", TString::Format("hgtd_trkptz_waves_%s.pdf", key).Data()).c_str(), key, canvas,

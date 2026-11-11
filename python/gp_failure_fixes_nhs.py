@@ -50,19 +50,27 @@ cv = S.keep(R.TCanvas("fixnhs", "", 800 * ncol, 900))
 for c, (path, lab) in enumerate(zip(args.json, LABELS)):
     rows = {r["short"]: r for r in json.load(open(path))["rows"]}
     nb = rows["WAVES"]["nhs"]
-    x = np.array(nb["x"], float); x[0] = 2.0          # the underflow (n <= 2) drawn at 2
-    tot0 = np.array(nb["total"], float)
+    x = np.array(nb["x"], float)
+    # the first entry is the underflow: n <= 2 in files written while HS_TRACK_MIN was 2.5 (drawn at 2, "<= 2"),
+    # empty since the axis starts at 0 (2026-11-11; dropped)
+    keep = np.ones(len(x), bool)
+    if nb["total"][0] > 0: x[0] = 2.0
+    else: keep[0] = False
+    LUMPED = nb["total"][0] > 0
+    x = x[keep]
+    sel = lambda a: np.asarray(a, float)[keep]
+    tot0 = sel(nb["total"])
     w_core = 100 * rows["WAVES"]["core"]
     off = np.linspace(-0.24, 0.24, len(ROWS))
     # --- upper: core fraction
     cv.cd(); S.pad(f"u_{c}", c / ncol, 0.40, (c + 1) / ncol, 1.0, top=0.05, bottom=0.02, left=0.14, right=0.04)
-    allc = [np.array(rows[k]["nhs"]["pass"]) / np.maximum(np.array(rows[k]["nhs"]["total"]), 1) for k, *_ in ROWS]
+    allc = [sel(rows[k]["nhs"]["pass"]) / np.maximum(sel(rows[k]["nhs"]["total"]), 1) for k, *_ in ROWS]
     lo = max(0.0, np.floor(10 * min(np.min(a[tot0 > 0]) for a in allc)) / 10 - 0.1)
     hi = 1.0 + 0.42 * (1.0 - lo)
-    fr = S.keep(R.gPad.DrawFrame(1.4, lo, x[-1] + 0.6, hi))
+    fr = S.keep(R.gPad.DrawFrame(x[0] - 0.6, lo, x[-1] + 0.6, hi))
     S.axes(fr, "", "Core fraction (|t_{0} #minus t_{HS}| < 60 ps)", size=0.048, ytoff=1.35)
     fr.GetXaxis().SetLabelSize(0)
-    one = S.keep(R.TLine(1.4, 1.0, x[-1] + 0.6, 1.0)); one.SetLineColor(R.kGray); one.Draw()
+    one = S.keep(R.TLine(x[0] - 0.6, 1.0, x[-1] + 0.6, 1.0)); one.SetLineColor(R.kGray); one.Draw()
     dist = S.keep(R.TGraph(len(x)))
     for i, (xi, t) in enumerate(zip(x, tot0)): dist.SetPoint(i, xi, lo + 0.16 * (1.0 - lo) * t / tot0.max())
     dist.SetLineStyle(2); dist.SetLineColor(R.kGray + 1); dist.SetLineWidth(2); dist.Draw("L")
@@ -71,7 +79,7 @@ for c, (path, lab) in enumerate(zip(args.json, LABELS)):
     leg.SetHeader("in brackets: gain over all events [points]")
     print(f"{lab.replace('#rightarrow', '->')} ({args.mode}): events per bin " + " ".join(f"{int(t)}" for t in tot0))
     for j, (k, name, col, mk) in enumerate(ROWS):
-        r = rows[k]["nhs"]; p, t = np.array(r["pass"], float), np.array(r["total"], float)
+        r = rows[k]["nhs"]; p, t = sel(r["pass"]), sel(r["total"])
         m = t > 0
         eff = np.where(m, p / np.maximum(t, 1), np.nan); err = np.where(m, np.sqrt(eff * (1 - eff) / np.maximum(t, 1)), np.nan)
         g = S.style(S.graph(x + off[j], eff, err), col, mk, 1, 2, 1.1); g.Draw("PL")
@@ -87,17 +95,17 @@ for c, (path, lab) in enumerate(zip(args.json, LABELS)):
     # a failed or unconstrained slice fit (error > half its value) is not drawn; the HS-time-resolution row sits at
     # the fit's 3 ps floor in every bin and is left out
     def good(k):
-        s_, e_ = np.array(rows[k]["nhs"]["sigma_peak"], float), np.array(rows[k]["nhs"]["sigma_peak_err"], float)
+        s_, e_ = sel(rows[k]["nhs"]["sigma_peak"]), sel(rows[k]["nhs"]["sigma_peak_err"])
         ok = (s_ > 0) & (e_ > 0) & (e_ < 0.5 * s_)
         return np.where(ok, s_, np.nan), np.where(ok, e_, 0.0)
     SROWS = [r for r in ROWS if r[0] != "WFIX_C6"]
     sig = [good(k)[0] for k, *_ in SROWS]
     smax = max(np.nanmax(s) for s in sig if np.any(np.isfinite(s)))
-    fd = S.keep(R.gPad.DrawFrame(1.4, 0.0, x[-1] + 0.6, 1.15 * smax))
+    fd = S.keep(R.gPad.DrawFrame(x[0] - 0.6, 0.0, x[-1] + 0.6, 1.15 * smax))
     S.axes(fd, "Forward hard-scatter tracks with a time", "#sigma_{peak} [ps]", size=0.072, ytoff=0.85, xtoff=1.05, ndiv_y=505)
     fd.GetXaxis().SetLabelSize(0)
-    for xi in range(2, int(x[-1]) + 1, 2):
-        t = S.keep(R.TLatex(xi, -0.05 * 1.15 * smax, "#leq 2" if xi == 2 else ("#geq 20" if xi == int(x[-1]) else str(xi))))
+    for xi in range(int(x[0]), int(x[-1]) + 1, 2):
+        t = S.keep(R.TLatex(xi, -0.05 * 1.15 * smax, "#leq 2" if (xi == 2 and LUMPED) else ("#geq 20" if xi == int(x[-1]) else str(xi))))
         t.SetTextAlign(23); t.SetTextSize(0.068); t.Draw()
     for j, (k, name, col, mk) in enumerate(ROWS):
         if k == "WFIX_C6": continue
