@@ -244,6 +244,7 @@ int main(int argc, char** argv) {
     SELECTION_TAG = SELECTION_TAG.empty() ? tag : SELECTION_TAG + "_" + tag;
   }
   const tdr::CleanMode cleanMode = tdr::cleaningMode(argc, argv);   // before the output path: it tags the file
+  tdr::rptTrkPtMaxMode(argc, argv);                                  // likewise
   const Inflation INFL = inflationFor(SAMPLE_NAME);
   const std::string outPath = outOverride.empty() ? histFilePath("tdr_fwdpair.root") : outOverride;
   {
@@ -415,6 +416,8 @@ int main(int argc, char** argv) {
   meta.Branch("n_two_fwd", &nTwo, "n_two_fwd/L");
   meta.Branch("n_selected", &nSel, "n_selected/L");
   meta.Branch("gate_sigma", &gate, "gate_sigma/D");
+  double rptPtMax = tdr::RPT_TRK_PT_MAX;
+  meta.Branch("rpt_trk_ptmax", &rptPtMax, "rpt_trk_ptmax/D");
   meta.Branch("pair_mode", &pairMode);
   meta.Branch("jvt_wp", &jvtName);
   meta.Branch("n_rm_jvt", &nRmJvt, "n_rm_jvt/L");

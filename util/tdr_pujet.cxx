@@ -16,7 +16,7 @@
 // 3 sigma; this program follows the TDR); the ingredients are copied from it.
 //
 // Usage:  tdr_pujet [--sample=<s>] [--ntuple-dir=<d>] [--file-shard=i/N]
-//                   [--max-events=N] [--gate-sigma=X (default 2)] [--clean-times=all|t0|off (default all)] [--rpt-match=ghost|dr02 (default ghost)] [--out=<path>]
+//                   [--max-events=N] [--gate-sigma=X (default 2)] [--clean-times=all|t0|off (default all)] [--rpt-match=ghost|dr02 (default ghost)] [--rpt-trk-ptmax=X|none (default 30)] [--out=<path>]
 // Output: <prefix>tdr_pujet.root (TTrees "jets", "meta"; merge shards with hadd -f).
 // -----------------------------------------------------------------------------
 #include <TChain.h>
@@ -60,6 +60,7 @@ int main(int argc, char** argv) {
   }
   const tdr::CleanMode cleanMode = tdr::cleaningMode(argc, argv);   // before the output path: it tags the file
   const tdr::RptMatch rptMatch = tdr::rptMatchMode(argc, argv);     // likewise
+  tdr::rptTrkPtMaxMode(argc, argv);                                  // likewise
   const Inflation INFL = inflationFor(SAMPLE_NAME);
   const std::string outPath = outOverride.empty() ? histFilePath("tdr_pujet.root") : outOverride;
   {
@@ -177,6 +178,8 @@ int main(int argc, char** argv) {
   meta.Branch("time_cleaning", &cleanName);
   std::string matchName = tdr::rptMatchName(rptMatch);
   meta.Branch("rpt_match", &matchName);
+  double rptPtMax = tdr::RPT_TRK_PT_MAX;
+  meta.Branch("rpt_trk_ptmax", &rptPtMax, "rpt_trk_ptmax/D");
   meta.Branch("jet_pt_min", &ptMin, "jet_pt_min/D");
   meta.Branch("fwd_eta_min", &fwdMin, "fwd_eta_min/D");
   meta.Branch("fwd_eta_max", &fwdMax, "fwd_eta_max/D");

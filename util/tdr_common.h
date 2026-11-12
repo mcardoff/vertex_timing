@@ -228,12 +228,33 @@ inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL, const Ti
 struct TrackLists {
   std::unordered_set<int> fwd, cen;
 };
+// The R_pT tracks' upper pT limit. It defaults to the time clustering's MAX_TRACK_PT (30 GeV), which rpt_v5 copied
+// and this header copied from it -- never chosen for R_pT (the PUB note's macro, util/myJet_ana_fr.C, uses 45). The user,
+// 2026-11-12: "why are we restricting track pT to be between 1 and 30 GeV???". --rpt-trk-ptmax=X|none moves it for
+// the R_pT tracks ONLY (the t0 clustering input keeps MAX_TRACK_PT) and tags the file (rptptmaxnone / rptptmax45p0).
+inline double RPT_TRK_PT_MAX = MAX_TRACK_PT;
+inline void rptTrkPtMaxMode(int argc, char** argv) {
+  for (int i = 1; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a.rfind("--rpt-trk-ptmax=", 0) != 0) continue;
+    const std::string v = a.substr(16);
+    RPT_TRK_PT_MAX = (v == "none") ? std::numeric_limits<double>::infinity() : std::stod(v);
+    if (!(RPT_TRK_PT_MAX > MIN_TRACK_PT)) { std::cerr << "[tdr] --rpt-trk-ptmax=" << v << ": must exceed " << MIN_TRACK_PT << "\n"; std::exit(1); }
+  }
+  if (RPT_TRK_PT_MAX == MAX_TRACK_PT) return;   // the default: untagged
+  std::string tag = "rptptmaxnone";
+  if (std::isfinite(RPT_TRK_PT_MAX)) {
+    char buf[32]; std::snprintf(buf, sizeof buf, "rptptmax%.1f", RPT_TRK_PT_MAX); tag = buf;
+    std::replace(tag.begin(), tag.end(), '.', 'p');
+  }
+  SELECTION_TAG = SELECTION_TAG.empty() ? tag : SELECTION_TAG + "_" + tag;
+}
 inline TrackLists rptTrackLists(BranchPointerWrapper& b) {
   TrackLists L;
   const double vtxZ = b.recoVtxZ[0];
   for (size_t trk = 0; trk < b.trackZ0.GetSize(); ++trk) {
     const double pt = b.trackPt[trk];
-    if (pt < MIN_TRACK_PT || pt > MAX_TRACK_PT || !b.trackQuality[trk]) continue;
+    if (pt < MIN_TRACK_PT || pt > RPT_TRK_PT_MAX || !b.trackQuality[trk]) continue;
     const double dz = std::abs(b.trackZ0[trk] - vtxZ);
     if (dz / MyUtl::getNewDzpara(b.trackEta[trk], pt) <= DZ0_PARA_SCALE) L.fwd.insert((int)trk);
     const double vz = b.trackVarZ0[trk];
