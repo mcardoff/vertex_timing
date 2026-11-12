@@ -7,8 +7,8 @@ python/clustering_dump.cxx (talk inputs: TDR-cleaned times, 2.5 sigma z associat
 reproduces the C++ clusters track for track before drawing. Four strips on one time axis, track pT on the y axis:
   1  the seed: the highest-pT track not yet in a cluster, and its 3 sigma window (drawn for the median track sigma;
      the real test is |t_c - t_i| / sqrt(sigma_c^2 + sigma_i^2) < 3 per track)
-  2  the first cluster grown: the closest track within 3 sigma absorbed one at a time, the mean updated each time;
-     the centroid after each absorption is marked along the top
+  2  the first absorption: the seed plus the closest track within 3 sigma, the mean updated from the two, its new
+     3 sigma window, and the next track to be absorbed ringed (tracks are absorbed one at a time)
   3  the next seed, until every track is in a cluster: all clusters, each with its t +- sigma
 truth t_HS is the dashed line on every strip.
   4  the choice: each cluster's WAVeS score, the chosen one outlined
@@ -76,10 +76,10 @@ med_res = float(np.median([tr["res"] for tr in T.values()]))
 cv = S.keep(R.TCanvas("steps", "", 1500, 1300))
 EDGES = [1.0, 0.655, 0.355, 0.0]
 c0 = clusters[0]; sd = T[c0["seed"]]
-K = min(4, len(c0["members"]) - 2)            # the snapshot: after K absorptions, the next one ringed
+K = 1                                         # the snapshot: after the FIRST absorption (one track at a time), the next one ringed
 nxt = c0["members"][K + 1]; tK, sK = history[0][K]
 TAGS = ["1  Seed: the highest-p_{T} track; its 3#sigma window",
-        f"2  Absorb the closest track within 3#sigma; update the mean; repeat",
+        "2  Absorb the closest track within 3#sigma, one at a time; update the mean",
         "3  Next seed, until every track is in a cluster"]
 
 def strip(i):
@@ -129,10 +129,12 @@ absorbed = set(c0["members"][:K + 1])
 tracks(lambda i: (col[0], True) if i in absorbed else (GREY, False))
 st2 = S.keep(R.TMarker(sd["t"], sd["pt"], 29)); st2.SetMarkerSize(3.6); st2.SetMarkerColor(col[0]); st2.Draw()
 ring = S.keep(R.TMarker(T[nxt]["t"], T[nxt]["pt"], 24)); ring.SetMarkerSize(3.8); ring.SetMarkerColor(R.kBlack); ring.SetMarkerStyle(24); ring.Draw()
-ar = S.keep(R.TLatex(T[nxt]["t"] + T[nxt]["res"] + 8, T[nxt]["pt"] * 1.25, "next"))
-ar.SetTextSize(0.85 * sz); ar.SetTextAlign(11); ar.Draw()
-note = S.keep(R.TLatex(0.965, 0.09, f"after {K} absorptions: mean {tK:.0f} #pm {sK:.0f} ps (dark), its 3#sigma window (light)"))
-note.SetNDC(); note.SetTextAlign(31); note.SetTextSize(0.8 * sz); note.SetTextColor(R.kGray + 2); note.Draw()
+ar = S.keep(R.TLatex(T[nxt]["t"] - T[nxt]["res"] - 10, T[nxt]["pt"] / 1.22, "next"))   # below left of the ring
+ar.SetTextSize(0.85 * sz); ar.SetTextAlign(33); ar.Draw()
+note = S.keep(R.TLatex(0.95, 1 - R.gPad.GetTopMargin() - 0.06, f"seed + 1 track: mean {tK:.0f} #pm {sK:.0f} ps"))
+note.SetNDC(); note.SetTextAlign(33); note.SetTextSize(0.8 * sz); note.SetTextColor(R.kGray + 2); note.Draw()
+note2 = S.keep(R.TLatex(0.95, 1 - R.gPad.GetTopMargin() - 0.06 - 1.15 * 0.8 * sz, "dark: mean #pm #sigma;  light: its 3#sigma window"))
+note2.SetNDC(); note2.SetTextAlign(33); note2.SetTextSize(0.8 * sz); note2.SetTextColor(R.kGray + 2); note2.Draw()
 R.gPad.RedrawAxis()
 # 3: all clusters
 sz = strip(2)
