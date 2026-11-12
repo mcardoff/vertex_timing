@@ -26,14 +26,16 @@ import uproot
 import tdr_root_style as S
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--trees", nargs=2, required=True, metavar=("VBF", "ZJETS"))
+ap.add_argument("--trees", nargs="+", required=True, help="one panel per tree (the talk: VBF, or VBF and Z+jets)")
 ap.add_argument("--out", required=True)
 ap.add_argument("--no-ideal", action="store_true", help="drop the ideal-time oracles (timing route (a), track efficiency): on the "
                 "grid samples pileup tracks have no truth link (vertex or particle), so the ideal world draws each one an "
                 "independent random time, dissolving the pileup clusters -- the oracle passes ~16 points more often than on "
                 "the local sample, where it is valid. What remains is 'no usable HS cluster'.")
-ap.add_argument("--labels", nargs=2, default=("VBF H#rightarrowinv.", "Z+jets"))
+ap.add_argument("--labels", nargs="+", default=("VBF H#rightarrowinv.", "Z+jets"))
 args = ap.parse_args()
+NP = len(args.trees)
+if len(args.labels) < NP: raise SystemExit("one --labels entry per tree")
 FOLD = 20
 TALK = [("core", "within 60 ps of t_{HS}", "#7BCB6B"),
         ("retime", "re-timing: right cluster, in-jet time off", "#E69F00"),
@@ -74,7 +76,7 @@ def ladder(E, s, talk):
 
 
 R = S.setup()
-cv = S.keep(R.TCanvas("ladder", "", 1400, 760))
+cv = S.keep(R.TCanvas("ladder", "", 700 * NP, 760))
 for c, (path, lab) in enumerate(zip(args.trees, args.labels)):
     E = uproot.open(path)["events"].arrays(library="np")
     w = E["weight"].astype(float)
@@ -91,7 +93,7 @@ for c, (path, lab) in enumerate(zip(args.trees, args.labels)):
           f"'another cluster passes' {100 * w[fw & E['sel_any_waves']].sum() / w[fw].sum():.1f}% vs the HS cluster passes "
           f"{100 * w[fw & E['sel_hs_waves']].sum() / w[fw].sum():.1f}%")
     C = ladder(E, "waves", True)
-    cv.cd(); S.pad(f"ld_{c}", 0.5 * c, 0.0, 0.5 * c + 0.5, 1.0, top=0.06, bottom=0.12, left=0.13, right=0.04)
+    cv.cd(); S.pad(f"ld_{c}", c / NP, 0.0, (c + 1) / NP, 1.0, top=0.06, bottom=0.12, left=0.13, right=0.04)
     st = S.keep(R.THStack(f"lst_{c}", ""))
     den = np.histogram(n, np.arange(-0.5, FOLD + 1.5), weights=w)[0]
     leg = S.legend(0.17, 0.52, 0.80, 0.755, size=0.027, margin=0.12)
