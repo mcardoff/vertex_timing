@@ -123,6 +123,15 @@ inline void makeComparisonPlots(
               {C03, kBlack, C06, C01, C02, C04}, -1.0, -1.0, 2.5,
               {"WAVeS", "Perfect (all four fixed with truth)", "Perfect + real HS track times",
                "Perfect + real cluster choice", "Perfect + real clustering", "Perfect + real HS track-time efficiency"});
+    // ... and the same as the gap itself (user, 2026-11-12): each failure's cost,
+    // read straight off the plot; WAVeS's whole gap in grey.
+    gapPlot(MyUtl::plotFilePath("talk", TString::Format("talk_fix_cost_%s.pdf", key).Data()).c_str(), key, canvas,
+            &mapHGTD.at(Score::WLOO_ALL),
+            {&mapHGTD.at(Score::WLOO_MISTIMED), &mapHGTD.at(Score::WLOO_SELECT), &mapHGTD.at(Score::WLOO_MISCL),
+             &mapHGTD.at(Score::WLOO_TEFF)},
+            {C06, C01, C02, C04},
+            {"misassigned HS track times", "the wrong cluster chosen", "pileup in the cluster", "untimed HS tracks"},
+            &mapHGTD.at(Score::WAVES), "WAVeS: all of them, as now", 2.5);
     // Slide 14 before (user, 2026-11-11): each fix ALONE on WAVeS, to see which are
     // worth fixing at reco level first; n_HS >= 3 as the June talk.
     moneyPlot(MyUtl::plotFilePath("talk", TString::Format("talk_fix_alone_%s.pdf", key).Data()).c_str(), key, canvas,

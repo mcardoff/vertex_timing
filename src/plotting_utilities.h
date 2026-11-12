@@ -1854,6 +1854,98 @@ namespace MyUtl {
 
 
   // ---------------------------------------------------------------------------
+  // gapPlot (2026-11-12, the Global Performance talk)
+  //   The cost of each failure mode drawn directly as its gap to a reference
+  //   row ("perfect"), per bin of `key`, so the viewer reads each curve as that
+  //   failure's contribution instead of subtracting curves by eye. Two pages:
+  //     1. core fraction lost   = 100 (eff_ref - eff_x)          [points]
+  //     2. core width added     = sigma_x - sigma_ref             [ps]
+  //   `total` (e.g. WAVeS as it is) is drawn in grey as the whole gap, for scale.
+  //   Errors: the two rows' errors in quadrature. They are the same events, so
+  //   this overstates the error of the difference. Must run after
+  //   postProcessing (it reads the fitted sigmaDist).
+  // ---------------------------------------------------------------------------
+  inline void gapPlot(const char* fname, const std::string& key, TCanvas* canvas,
+                      AnalysisObj* ref, const std::vector<AnalysisObj*>& plts,
+                      const std::vector<Color_t>& colors, const std::vector<std::string>& labels,
+                      AnalysisObj* total, const char* totalLabel, double xMinOverride = -1e9) {
+    PlotObj* R0 = ref->get(key).get();
+    double xMin = (xMinOverride > -1e9) ? xMinOverride : R0->xMin;
+    double xMax = R0->foldMax;
+    const int nb = R0->efficiency->GetTotalHistogram()->GetNbinsX();
+    auto center = [&](int b) { return R0->efficiency->GetTotalHistogram()->GetBinCenter(b); };
+    std::vector<AnalysisObj*> all = plts; all.push_back(total);
+    canvas->Print(TString::Format("%s[", fname));
+    for (int page = 0; page < 2; ++page) {
+      canvas->Clear(); canvas->cd(); gPad->SetLogy(0);
+      std::vector<TGraphErrors*> graphs;
+      double lo = 0.0, hi = 0.0;
+      for (size_t k = 0; k < all.size(); ++k) {
+        PlotObj* P = all[k]->get(key).get();
+        auto* g = new TGraphErrors();
+        const double off = (k + 1 == all.size()) ? 0.0 : 0.09 * (k - 0.5 * (plts.size() - 1));
+        for (int b = 1; b <= nb; ++b) {
+          const double x = center(b);
+          if (x < xMin || x > xMax) continue;
+          double v, e;
+          if (page == 0) {
+            if (R0->efficiency->GetTotalHistogram()->GetBinContent(b) <= 0 ||
+                P->efficiency->GetTotalHistogram()->GetBinContent(b) <= 0) continue;
+            v = 100.0 * (R0->efficiency->GetEfficiency(b) - P->efficiency->GetEfficiency(b));
+            const double e1 = 0.5 * (R0->efficiency->GetEfficiencyErrorLow(b) + R0->efficiency->GetEfficiencyErrorUp(b));
+            const double e2 = 0.5 * (P->efficiency->GetEfficiencyErrorLow(b) + P->efficiency->GetEfficiencyErrorUp(b));
+            e = 100.0 * std::hypot(e1, e2);
+          } else {
+            const double s0 = R0->params->sigmaDist->GetBinContent(b), s1 = P->params->sigmaDist->GetBinContent(b);
+            if (s0 <= 0 || s1 <= 0) continue;
+            v = s1 - s0;
+            e = std::hypot(R0->params->sigmaDist->GetBinError(b), P->params->sigmaDist->GetBinError(b));
+          }
+          const int n = g->GetN();
+          g->SetPoint(n, x + off, v); g->SetPointError(n, 0.0, e);
+          lo = std::min(lo, v - e); hi = std::max(hi, v + e);
+        }
+        graphs.push_back(g);
+      }
+      const double span = std::max(hi - lo, 1e-3);
+      const double ylo = lo - 0.05 * span, yhi = hi + 1.05 * span;     // headroom: label and legend above the data
+      TH1F* fr = gPad->DrawFrame(xMin, ylo, xMax, yhi);
+      fr->GetXaxis()->SetTitle(R0->xtitle);
+      fr->GetYaxis()->SetTitle(page == 0 ? "Core fraction lost [points]" : "Core width added [ps]");
+      // the event distribution, grey, along the bottom
+      TH1D* dist = R0->effTotal.get();
+      double dmax = 0.0;
+      for (int b = 1; b <= dist->GetNbinsX(); ++b)
+        if (dist->GetBinCenter(b) >= xMin && dist->GetBinCenter(b) <= xMax) dmax = std::max(dmax, dist->GetBinContent(b));
+      for (int b = 1; b <= dist->GetNbinsX() && dmax > 0; ++b) {
+        if (dist->GetBinCenter(b) < xMin || dist->GetBinCenter(b) > xMax) continue;
+        auto* box = new TBox(std::max(xMin, dist->GetBinLowEdge(b)), ylo, std::min(xMax, dist->GetBinLowEdge(b + 1)),
+                             ylo + 0.22 * (yhi - ylo) * dist->GetBinContent(b) / dmax);
+        box->SetFillColor(kGray); box->SetLineWidth(0); box->Draw();
+      }
+      auto* zero = new TLine(xMin, 0.0, xMax, 0.0); zero->SetLineStyle(2); zero->SetLineColor(kGray + 2); zero->Draw();
+      auto* leg = new TLegend(0.52, 0.50, 0.92, 0.79);   // below the ATLAS label
+      StyleLegend(leg, 0.03);
+      leg->SetHeader(page == 0 ? "Lost to each failure alone:" : "Width added by each failure alone:");
+      for (size_t k = 0; k < graphs.size(); ++k) {
+        auto* g = graphs[k];
+        const bool isTotal = (k + 1 == graphs.size());
+        const Color_t c = isTotal ? (Color_t)(kGray + 2) : colors[k % colors.size()];
+        g->SetMarkerColor(c); g->SetLineColor(c); g->SetLineWidth(2);
+        g->SetMarkerStyle(isTotal ? 24 : 20); g->SetMarkerSize(isTotal ? 1.3 : 1.1);
+        g->Draw("P SAME");
+        leg->AddEntry(g, isTotal ? totalLabel : labels[k].c_str(), "lep");
+      }
+      leg->Draw();
+      ATLASLabel(0.18, 0.88, "Simulation Internal");
+      ATLASEnergyLabel(0.18, 0.82, MyUtl::ENERGY_LABEL.c_str());
+      gPad->RedrawAxis();
+      canvas->Print(fname);
+    }
+    canvas->Print(TString::Format("%s]", fname));
+  }
+
+  // ---------------------------------------------------------------------------
   // inclusivePlot
   //   Plots a stacked inclusive timing residual histogram for each AnalysisObj
   //   in plts, decomposed by cluster purity into three layers:
