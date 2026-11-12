@@ -103,14 +103,17 @@ for c, (path, lab) in enumerate(zip(args.trees, args.labels)):
     if args.failures_only:
         nf = np.histogram(n[fsel], np.arange(-0.5, FOLD + 1.5))[0]
         print("  failures per bin (unweighted): " + " ".join(f"{i}:{v}" for i, v in enumerate(nf)))
-    leg = S.legend(0.17, 0.52, 0.80, 0.755, size=0.027, margin=0.12)
+    leg = S.legend(0.17, 0.52, 0.93 if args.failures_only else 0.80, 0.755, size=0.027, margin=0.10 if args.failures_only else 0.12)
+    wf = w[~E["pass_waves"]].sum()
     for key, name, col in (TALK_NOIDEAL if args.no_ideal else TALK):
         if args.failures_only and key == "core": continue
         h = S.keep(R.TH1D(f"lh_{c}_{key}", "", FOLD + 1, -0.5, FOLD + 0.5))
         num = np.histogram(n[C[key]], np.arange(-0.5, FOLD + 1.5), weights=w[C[key]])[0]
         for i, v in enumerate(num / np.maximum(den, 1e-12)): h.SetBinContent(i + 1, v)
         h.SetFillColor(S.colour(col)); h.SetLineColor(R.kBlack); h.SetLineWidth(1)
-        st.Add(h); leg.AddEntry(h, name, "F")
+        # failures only: each cause's share of the WAVeS failures (weighted) and its event count, in the legend
+        lab_ = f"{100 * w[C[key]].sum() / wf:.1f}% ({C[key].sum() / 1e3:.1f}k)  {name}" if args.failures_only else name
+        st.Add(h); leg.AddEntry(h, lab_, "F")
     fr = S.keep(R.gPad.DrawFrame(-0.5, 0.0, FOLD + 0.5, 2.25))   # headroom: header + legend above the stack
     S.axes(fr, f"Forward hard-scatter tracks with a time (last bin: #geq {FOLD})",
            "Fraction of WAVeS t_{0} failures" if args.failures_only else "Fraction of events (WAVeS t_{0})",
