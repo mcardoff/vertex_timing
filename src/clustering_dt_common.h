@@ -131,7 +131,7 @@ inline void makeComparisonPlots(
              &mapHGTD.at(Score::WLOO_TEFF)},
             {C06, C01, C02, C04},
             {"misassigned HS track times", "the wrong cluster chosen", "pileup in the cluster", "untimed HS tracks"},
-            &mapHGTD.at(Score::WAVES), "WAVeS: all of them, as now", 2.5);
+            &mapHGTD.at(Score::WAVES), "WAVeS: all of them, as now", 2.5, /*zoomCoreFraction=*/true);
     // Slide 14 before (user, 2026-11-11): each fix ALONE on WAVeS, to see which are
     // worth fixing at reco level first; n_HS >= 3 as the June talk.
     moneyPlot(MyUtl::plotFilePath("talk", TString::Format("talk_fix_alone_%s.pdf", key).Data()).c_str(), key, canvas,

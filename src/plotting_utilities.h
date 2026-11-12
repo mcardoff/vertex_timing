@@ -1868,7 +1868,9 @@ namespace MyUtl {
   inline void gapPlot(const char* fname, const std::string& key, TCanvas* canvas,
                       AnalysisObj* ref, const std::vector<AnalysisObj*>& plts,
                       const std::vector<Color_t>& colors, const std::vector<std::string>& labels,
-                      AnalysisObj* total, const char* totalLabel, double xMinOverride = -1e9) {
+                      AnalysisObj* total, const char* totalLabel, double xMinOverride = -1e9,
+                      bool zoomCoreFraction = false) {   // page 1's y range from the failures alone; the total's
+                                                         // points above it drawn as up-triangles at the top edge
     PlotObj* R0 = ref->get(key).get();
     double xMin = (xMinOverride > -1e9) ? xMinOverride : R0->xMin;
     double xMax = R0->foldMax;
@@ -1879,7 +1881,7 @@ namespace MyUtl {
     for (int page = 0; page < 2; ++page) {
       canvas->Clear(); canvas->cd(); gPad->SetLogy(0);
       std::vector<TGraphErrors*> graphs;
-      double lo = 0.0, hi = 0.0;
+      double lo = 0.0, hi = 0.0, hiParts = 0.0;
       for (size_t k = 0; k < all.size(); ++k) {
         PlotObj* P = all[k]->get(key).get();
         auto* g = new TGraphErrors();
@@ -1904,9 +1906,12 @@ namespace MyUtl {
           const int n = g->GetN();
           g->SetPoint(n, x + off, v); g->SetPointError(n, 0.0, e);
           lo = std::min(lo, v - e); hi = std::max(hi, v + e);
+          if (k + 1 < all.size()) hiParts = std::max(hiParts, v + e);
         }
         graphs.push_back(g);
       }
+      const bool zoom = zoomCoreFraction && page == 0;
+      if (zoom) hi = hiParts;
       const double span = std::max(hi - lo, 1e-3);
       const double ylo = lo - 0.05 * span, yhi = hi + 1.05 * span;     // headroom: label and legend above the data
       TH1F* fr = gPad->DrawFrame(xMin, ylo, xMax, yhi);
@@ -1930,15 +1935,24 @@ namespace MyUtl {
       for (size_t k = 0; k < graphs.size(); ++k) {
         auto* g = graphs[k];
         const bool isTotal = (k + 1 == graphs.size());
+        if (isTotal && zoom) {   // off-scale points: an up-triangle at the top edge instead
+          auto* over = new TGraph();
+          for (int n = g->GetN() - 1; n >= 0; --n)
+            if (g->GetPointY(n) > yhi) { over->SetPoint(over->GetN(), g->GetPointX(n), yhi - 0.03 * (yhi - ylo)); g->RemovePoint(n); }
+          over->SetMarkerStyle(22); over->SetMarkerSize(1.4); over->SetMarkerColor(kGray + 2);
+          if (over->GetN() > 0) over->Draw("P SAME");
+        }
         const Color_t c = isTotal ? (Color_t)(kGray + 2) : colors[k % colors.size()];
         g->SetMarkerColor(c); g->SetLineColor(c); g->SetLineWidth(2);
         g->SetMarkerStyle(isTotal ? 24 : 20); g->SetMarkerSize(isTotal ? 1.3 : 1.1);
         g->Draw("P SAME");
-        leg->AddEntry(g, isTotal ? totalLabel : labels[k].c_str(), "lep");
+        leg->AddEntry(g, isTotal ? (zoom ? TString::Format("%s (#uparrow off scale)", totalLabel).Data() : totalLabel)
+                                 : labels[k].c_str(), "lep");
       }
       leg->Draw();
-      ATLASLabel(0.18, 0.88, "Simulation Internal");
-      ATLASEnergyLabel(0.18, 0.82, MyUtl::ENERGY_LABEL.c_str());
+      // top right, above the legend: the top-left corner is where the low-n points (and off-scale marks) are
+      ATLASLabel(0.52, 0.88, "Simulation Internal");
+      ATLASEnergyLabel(0.52, 0.82, MyUtl::ENERGY_LABEL.c_str());
       gPad->RedrawAxis();
       canvas->Print(fname);
     }
