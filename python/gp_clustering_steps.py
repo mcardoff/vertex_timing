@@ -10,6 +10,7 @@ reproduces the C++ clusters track for track before drawing. Four strips on one t
   2  the first cluster grown: the closest track within 3 sigma absorbed one at a time, the mean updated each time;
      the centroid after each absorption is marked along the top
   3  the next seed, until every track is in a cluster: all clusters, each with its t +- sigma
+truth t_HS is the dashed line on every strip.
   4  the choice: each cluster's WAVeS score, the chosen one outlined
 
   PYTHONNOUSERSITE=1 ~/.venv-hgtd/bin/python gp_clustering_steps.py --json ../figs/tdr/gp/gp_clustering_event.json \\
@@ -103,12 +104,18 @@ def tracks(colour_of):
         g = S.keep(R.TGraphErrors(1)); g.SetPoint(0, tr["t"], tr["pt"]); g.SetPointError(0, tr["res"], 0)
         g.SetMarkerStyle(20 if filled else 24); g.SetMarkerSize(1.6); g.SetMarkerColor(c); g.SetLineColor(c); g.SetLineWidth(2); g.Draw("P SAME")
 
+def truth_line(label=False):   # truth t_HS: above the bands, under the tracks
+    l = S.keep(R.TLine(E["t_hs"], y0, E["t_hs"], y1)); l.SetLineStyle(2); l.SetLineWidth(3); l.SetLineColor(R.kBlack); l.Draw()
+    if label:
+        t = S.keep(R.TLatex(E["t_hs"] + 6, y1 / 1.5, "truth t_{HS}")); t.SetTextAlign(13); t.SetTextSize(0.85 * sz); t.Draw()
+
 def band(t, s, colour):
     b = S.keep(R.TBox(max(x0, t - s), y0, min(x1, t + s), y1)); b.SetFillColor(colour); b.SetLineWidth(0); b.Draw()
 
 # 1: the seed and its 3 sigma window
 sz = strip(0)
 band(sd["t"], 3 * np.hypot(sd["res"], med_res), pale(0, 0.20))
+truth_line(label=True)
 tracks(lambda i: (col[0], True) if i == c0["seed"] else (GREY, False))
 st = S.keep(R.TMarker(sd["t"], sd["pt"], 29)); st.SetMarkerSize(3.6); st.SetMarkerColor(col[0]); st.Draw()
 S.header(0.10, 0.90, [f"#sqrt{{s}} = 14 TeV, #LT#mu#GT = 200, {args.label}: forward tracks with a time"], size=0.85 * sz, step=1.15 * sz)
@@ -117,6 +124,7 @@ R.gPad.RedrawAxis()
 sz = strip(1)
 band(tK, 3 * np.hypot(sK, T[nxt]["res"]), pale(0, 0.14))
 band(tK, sK, pale(0, 0.55))
+truth_line()
 absorbed = set(c0["members"][:K + 1])
 tracks(lambda i: (col[0], True) if i in absorbed else (GREY, False))
 st2 = S.keep(R.TMarker(sd["t"], sd["pt"], 29)); st2.SetMarkerSize(3.6); st2.SetMarkerColor(col[0]); st2.Draw()
@@ -130,6 +138,7 @@ R.gPad.RedrawAxis()
 sz = strip(2)
 member_of = {i: k for k, cl in enumerate(clusters) for i in cl["members"]}
 for k, cl in enumerate(clusters): band(cl["t"], cl["s"], pale(k, 0.35))
+truth_line()
 tracks(lambda i: (col[member_of[i]], True))
 R.gPad.RedrawAxis()
 S.save(cv, args.out)
