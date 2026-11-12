@@ -152,6 +152,11 @@ inline void makeComparisonPlots(
 	    },
 	    {C01, C02, C03, C04});
 
+  // Athena's t0 alone (the talk's "vertex time today" slide, user 2026-11-12): core
+  // width and core fraction against the forward HS tracks, n_HS >= 3.
+  moneyPlot(MyUtl::plotFilePath("talk", TString::Format("talk_athena_%s.pdf", key).Data()).c_str(), key, canvas,
+	    {&mapHGTD.at(Score::HGTD)}, {C01}, -1.0, -1.0, 2.5);
+
   // The talk's t0s (the Global Performance talk, slides 8/9): WAVeS against
   // HGTD (Athena) -- WAVeS is the one algorithm presented (user, 2026-11-11) --
   // with the core-fraction page down to 0 -- Z+jets sits at
