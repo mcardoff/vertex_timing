@@ -42,6 +42,9 @@ ap.add_argument("--mjj2-leg", type=lambda t: tuple(float(x) for x in t.split(","
                 help="x1,y1,x2,y2 (NDC) of the compact m_jj figures' legend (default: the top-right corner, below the strip "
                      "where off-scale points are marked)")
 ap.add_argument("--mjj2-ymax", type=float, default=150.0, help="the top of the compact S/sqrt(B) figures' y axis [%%]")
+ap.add_argument("--mjj2-inframe", action="store_true", help="the compact S/sqrt(B) figures (veto_mjj2_{nobdt,bdt<x>}) with the "
+                "ATLAS label and legend INSIDE the frame, the y axis raised until every point sits below them (the Global "
+                "Performance talk, 2026-11-12); default: both in a band above the frame, the top fixed at --mjj2-ymax")
 ap.add_argument("--nsigma", type=float, default=3.0)
 ap.add_argument("--summary", action="store_true", help="with --veto: <out>_veto_gain, the S/sqrt(B) factor of each veto "
                 "against the BDT cut (signal efficiency 1.0 = no BDT), the Z+jets MC events left below")
@@ -373,17 +376,22 @@ if args.veto and args.summary:
              lambda es_, eb_, var, var_s=0.0: (es_ / eb_, es_ / eb_ * np.sqrt(var) / eb_))):
         ext = [mjj_extent(fac_, ROWS4, E2, e_) for e_ in (None, EMJ)]
         lo_s = min(-20.0, 10 * np.floor(min(a for a, _ in ext) / 10) - 10)
-        if what_ == "S/sqrt(B)":   # a fixed top (the user, 2026-11-05: "keep the maximum to 150%, noting when a point is
+        if what_ == "S/sqrt(B)" and args.mjj2_inframe:   # label and legend in the frame's top ~40%: every point below
+            top_s = max(b for _, b in ext)
+            hi_s = 10.0 * np.ceil((lo_s + (top_s - lo_s) / 0.58) / 10.0)
+        elif what_ == "S/sqrt(B)":   # a fixed top (the user, 2026-11-05: "keep the maximum to 150%, noting when a point is
             hi_s = args.mjj2_ymax  # off scale"): off-scale points become arrows with their value, in a strip above the legend
         else:
             top_s = max(b for _, b in ext)
             step = 50.0 if top_s < 300 else 100.0
             hi_s = step * np.ceil((lo_s + (top_s - lo_s) / 0.62) / step)
         LEG_ABOVE = (0.61, 0.715, 0.94, 0.975)               # the band above the frame (header_above), right of the header
-        above = what_ == "S/sqrt(B)"
+        above = what_ == "S/sqrt(B)" and not args.mjj2_inframe
+        inframe = what_ == "S/sqrt(B)" and args.mjj2_inframe
         for emj_, tag_ in ((None, "nobdt"), (EMJ, f"bdt{round(100 * EMJ)}")):
-            draw_mjj(f"{stem_}_{tag_}", what_, ytitle_, fac_, 1e9, legpos=LEG_ABOVE if above else args.mjj2_leg,
-                     legsize=0.5 if above else 0.46, rows=ROWS4, edges=E2, emj=emj_, ylim=(lo_s, hi_s), offscale_arrows=True,
+            draw_mjj(f"{stem_}_{tag_}", what_, ytitle_, fac_, 1e9,
+                     legpos=LEG_ABOVE if above else (0.62, 0.625, 0.94, 0.895) if inframe else args.mjj2_leg,
+                     legsize=0.5 if (above or inframe) else 0.46, rows=ROWS4, edges=E2, emj=emj_, ylim=(lo_s, hi_s), offscale_arrows=True,
                      header_above=above)
             if what_ == "S/sqrt(B)":           # the efficiencies behind it (the user, 2026-11-06), one figure per sample
                 for cat_, ctag in ((None, ""), (2, "_ff")) if ONE else ((None, ""),):
