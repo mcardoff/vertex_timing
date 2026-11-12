@@ -694,6 +694,7 @@ namespace MyUtl {
     static const Score WFIX_RETIME, WFIX_MISTIMED, WFIX_SELECT, WFIX_MISCL, WFIX_TEFF;
     static const Score WFIX_C3, WFIX_C4, WFIX_C5, WFIX_C6;
     static const Score WSEL_OK, WSEL_OK_MISCL;
+    static const Score WLOO_ALL, WLOO_MISTIMED, WLOO_SELECT, WLOO_MISCL, WLOO_TEFF;
   };
 
   inline const std::string STR_TRKPTZ = "#Sigma p_{T}e^{-|#Delta z|}";
@@ -987,6 +988,17 @@ namespace MyUtl {
   inline const Score Score::WSEL_OK_MISCL = makeGatedFix(60, "WAVeS [Events where it chose the HS cluster, misclustering fixed]",
                                                          "WSEL_OK_MISCL", Fix::MISCL);
 
+  // P(good time | everything fixed but x) (user, 2026-11-12): all four repairs
+  // (misassigned HS times, selection, misclustering, HS track efficiency) on
+  // every event except x. The gap to WLOO_ALL is what x alone costs once the
+  // rest is perfect -- the complement of the "each fix alone" rows.
+  constexpr int FIX_ALL4 = Fix::MISTIMED | Fix::SELECT | Fix::MISCL | Fix::TEFF;
+  inline const Score Score::WLOO_ALL      = makeFixScore(61, "WAVeS, all four fixed", "WLOO_ALL", FIX_ALL4);
+  inline const Score Score::WLOO_MISTIMED = makeFixScore(62, "WAVeS, all fixed but misassigned HS times", "WLOO_MISTIMED", FIX_ALL4 & ~Fix::MISTIMED);
+  inline const Score Score::WLOO_SELECT   = makeFixScore(63, "WAVeS, all fixed but selection", "WLOO_SELECT", FIX_ALL4 & ~Fix::SELECT);
+  inline const Score Score::WLOO_MISCL    = makeFixScore(64, "WAVeS, all fixed but misclustering", "WLOO_MISCL", FIX_ALL4 & ~Fix::MISCL);
+  inline const Score Score::WLOO_TEFF     = makeFixScore(65, "WAVeS, all fixed but HS track efficiency", "WLOO_TEFF", FIX_ALL4 & ~Fix::TEFF);
+
   // Scores with a dedicated collection (distCut ≥ 0 → buildsCollection() = true)
   inline const Score Score::CONE       = {  7, "Cone"                       , "CONE",     true , false, -1.f, DIST_CUT_CONE, ClusteringMethod::CONE };
   inline const Score Score::FILTJET    = {  9, "Filter Tracks in Jets"      , "FILTJET",  true , false, -1.f, DIST_CUT_CONE, ClusteringMethod::CONE, false, TrackFilterType::JET };
@@ -1002,6 +1014,7 @@ namespace MyUtl {
     Score::TRKPTZ_TZ_IJ, Score::TRKPTZ_TZ_OJ, Score::TRKPTZ_TZ_GIJ, Score::WAVES_GIJ, Score::TRKPTZ_TZJ, Score::TRKPTZ_TZQ,
     Score::WFIX_RETIME, Score::WFIX_MISTIMED, Score::WFIX_SELECT, Score::WFIX_MISCL, Score::WFIX_TEFF,
     Score::WFIX_C3, Score::WFIX_C4, Score::WFIX_C5, Score::WFIX_C6, Score::WSEL_OK, Score::WSEL_OK_MISCL,
+    Score::WLOO_ALL, Score::WLOO_MISTIMED, Score::WLOO_SELECT, Score::WLOO_MISCL, Score::WLOO_TEFF,
   };
 
   // ---------------------------------------------------------------------------

@@ -72,7 +72,8 @@ inline auto buildAnalysisMap(
   for (const Score* s : {&Score::WFIX_RETIME, &Score::WFIX_MISTIMED, &Score::WFIX_SELECT,
                          &Score::WFIX_MISCL, &Score::WFIX_TEFF, &Score::WFIX_C3,
                          &Score::WFIX_C4, &Score::WFIX_C5, &Score::WFIX_C6,
-                         &Score::WSEL_OK, &Score::WSEL_OK_MISCL})
+                         &Score::WSEL_OK, &Score::WSEL_OK_MISCL,
+                         &Score::WLOO_ALL, &Score::WLOO_MISTIMED, &Score::WLOO_SELECT, &Score::WLOO_MISCL, &Score::WLOO_TEFF})
     m.emplace(*s, AnalysisObj(label, *s));
 
   // Scores active only in the real-HGTD scenario
@@ -113,7 +114,13 @@ inline void makeComparisonPlots(
     // The talk's version (slide 13, user 2026-11-11): the differential gain of
     // each fix, WAVeS then the chain through HS track efficiency, core
     // fraction from 0. The gap between two curves is that mode's contribution.
-    // Slide 14 (user, 2026-11-11): each fix ALONE on WAVeS, to see which are
+    // Slide 14 (user, 2026-11-12): P(good time | everything fixed but x), all
+    // four fixed as the reference; n_HS >= 3, both pages (core width, fraction).
+    moneyPlot(MyUtl::plotFilePath("talk", TString::Format("talk_fix_allbut_%s.pdf", key).Data()).c_str(), key, canvas,
+              {&mapHGTD.at(Score::WLOO_ALL), &mapHGTD.at(Score::WLOO_MISTIMED), &mapHGTD.at(Score::WLOO_SELECT),
+               &mapHGTD.at(Score::WLOO_MISCL), &mapHGTD.at(Score::WLOO_TEFF)},
+              {kBlack, C06, C01, C02, C04}, -1.0, -1.0, 2.5);
+    // Slide 14 before (user, 2026-11-11): each fix ALONE on WAVeS, to see which are
     // worth fixing at reco level first; n_HS >= 3 as the June talk.
     moneyPlot(MyUtl::plotFilePath("talk", TString::Format("talk_fix_alone_%s.pdf", key).Data()).c_str(), key, canvas,
               {&mapHGTD.at(Score::WAVES), &mapHGTD.at(Score::WFIX_MISTIMED), &mapHGTD.at(Score::WFIX_SELECT),
