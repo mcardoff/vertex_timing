@@ -1662,7 +1662,9 @@ namespace MyUtl {
     double effYMin = EFF_YMIN,  // the core-fraction page's floor (Z+jets falls below 0.7 at low multiplicity);
                                 // < 0: 0.05 below the lowest point drawn
     double effYMax = EFF_YMAX,  // and its ceiling: room for the label above 1; < 0: 1 + 0.45 x (1 - floor)
-    double xMinOverride = -1e9  // > -1e9: draw from here (e.g. 2.5, the June talk's n_HS >= 3), binning unchanged
+    double xMinOverride = -1e9, // > -1e9: draw from here (e.g. 2.5, the June talk's n_HS >= 3), binning unchanged
+    const std::vector<std::string>& labelOverride = {}   // legend text per plt (default: the score's long name);
+                                                         // plot-only, unlike renaming a score, which renames its histograms
   ) {
     // std::cout << fname << "\n";
     if (plts.empty()) return;
@@ -1727,7 +1729,8 @@ namespace MyUtl {
 	  gr->SetMarkerSize(obj->GetMarkerSize());
 	  gr->SetLineWidth(obj->GetLineWidth());
 	  // legend->AddEntry(gr, TString::Format("%s (%s)", plt->scoreToUse.toString(), plt->times), "lep");
-	  legend->AddEntry(gr, TString::Format("%s", plt->scoreToUse.toString()), "lep");
+	  legend->AddEntry(gr, colorIdx < (int)labelOverride.size() ? labelOverride[colorIdx].c_str()
+	                                                            : plt->scoreToUse.toString(), "lep");
 	  if (first) {
 	    gr->SetTitle(TString::Format("%s vs %s", title, plt->xtitle));
 	    gr->Draw("AP");
@@ -1743,8 +1746,8 @@ namespace MyUtl {
 	} else {
 	  obj->SetLineColor(plotCol);
 	  obj->SetMarkerColor(plotCol);
-	  // legend->AddEntry(obj, TString::Format("%s (%s)", plt->scoreToUse.toString(), plt->times), "lep");
-	  legend->AddEntry(obj, TString::Format("%s", plt->scoreToUse.toString()), "lep");
+	  legend->AddEntry(obj, colorIdx < (int)labelOverride.size() ? labelOverride[colorIdx].c_str()
+	                                                             : plt->scoreToUse.toString(), "lep");
 	  if (first) {
 	    obj->SetTitle(TString::Format("%s vs %s", title, plt->xtitle));
 	    obj->Draw("E1");

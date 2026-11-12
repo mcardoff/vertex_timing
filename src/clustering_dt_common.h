@@ -116,10 +116,13 @@ inline void makeComparisonPlots(
     // fraction from 0. The gap between two curves is that mode's contribution.
     // Slide 14 (user, 2026-11-12): P(good time | everything fixed but x), all
     // four fixed as the reference; n_HS >= 3, both pages (core width, fraction).
+    // Named from "perfect" (user, 2026-11-12): each row is perfect with ONE failure mode left real; WAVeS as is.
     moneyPlot(MyUtl::plotFilePath("talk", TString::Format("talk_fix_allbut_%s.pdf", key).Data()).c_str(), key, canvas,
-              {&mapHGTD.at(Score::WLOO_ALL), &mapHGTD.at(Score::WLOO_MISTIMED), &mapHGTD.at(Score::WLOO_SELECT),
-               &mapHGTD.at(Score::WLOO_MISCL), &mapHGTD.at(Score::WLOO_TEFF)},
-              {kBlack, C06, C01, C02, C04}, -1.0, -1.0, 2.5);
+              {&mapHGTD.at(Score::WAVES), &mapHGTD.at(Score::WLOO_ALL), &mapHGTD.at(Score::WLOO_MISTIMED),
+               &mapHGTD.at(Score::WLOO_SELECT), &mapHGTD.at(Score::WLOO_MISCL), &mapHGTD.at(Score::WLOO_TEFF)},
+              {C03, kBlack, C06, C01, C02, C04}, -1.0, -1.0, 2.5,
+              {"WAVeS", "Perfect (all four fixed with truth)", "Perfect + real HS track times",
+               "Perfect + real cluster choice", "Perfect + real clustering", "Perfect + real HS track-time efficiency"});
     // Slide 14 before (user, 2026-11-11): each fix ALONE on WAVeS, to see which are
     // worth fixing at reco level first; n_HS >= 3 as the June talk.
     moneyPlot(MyUtl::plotFilePath("talk", TString::Format("talk_fix_alone_%s.pdf", key).Data()).c_str(), key, canvas,
