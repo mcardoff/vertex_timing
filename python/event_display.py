@@ -91,6 +91,16 @@ parser.add_argument('--drop_tagged', action='store_true',
 parser.add_argument('--rpt_match', choices=['dr02', 'ghost'], default='dr02',
                     help='R_pT track matching: ghost tracks within dR < 0.2 of the axis (rpt_v5, the default) '
                          'or every ghost-associated track (the TDR programs, util/tdr_common.h RptMatch::GHOST)')
+parser.add_argument('--show_trkptz', action='store_true',
+                    help='list each cluster\'s TRKPTZ score beside its WAVeS score in the "Cluster Weights" legend '
+                         '(the default before 2026-11-12; since then WAVeS alone)')
+parser.add_argument('--highlight_tracks', type=str, default=None,
+                    help='"label=i,i;label=i,i": any tracks to point out, drawn like --jet_time_tracks on page 2 '
+                         '(thick in the R-Z view, marked at their time in the time histogram when they have one), '
+                         'each set with its own legend label (the failure-mode displays, 2026-11-12)')
+parser.add_argument('--clean_clusters', action='store_true',
+                    help="the TDR's track-time cleaning on the CLUSTERING input too (runHGTD_Clustering.cxx cleanTimes): "
+                         'the clusters the talk\'s t0s (cleaned) are built from. Needs Track_hitInLastLayer')
 parser.add_argument('--clean_times', action='store_true',
                     help="the TDR's track-time cleaning in the R_pT gate (util/tdr_common.h timed()): a timed "
                          'track counts as untimed unless its last ITk hit is on the last layer and, at '
@@ -384,7 +394,8 @@ track_clusters, track_times = [], []
 cluster_trkptz_scores, cluster_waves_scores = [], []
 try:
     MACRO_CALL = (f'runHGTD_Clustering.cxx("{file_path}",{event_num},'
-                  f'{args.assoc_nsigma},{"true" if args.ideal_times else "false"})')
+                  f'{args.assoc_nsigma},{"true" if args.ideal_times else "false"},'
+                  f'{"true" if args.clean_clusters else "false"})')
     print(MACRO_CALL)
     result = subprocess.run(['root', '-l', '-q', '-b', MACRO_CALL],
                             check=True, capture_output=True, text=True)
@@ -864,7 +875,9 @@ for i_cluster, weights in enumerate(pt_wghts):
     suffix  = '  [ΔT closest]' if i_cluster == truth_closest_idx and truth_closest_idx not in ranked_indices[:4] else ''
     trkptz_s = cluster_trkptz_scores[i_cluster] if i_cluster < len(cluster_trkptz_scores) else None
     waves_s  = cluster_waves_scores[i_cluster]  if i_cluster < len(cluster_waves_scores)  else None
-    if trkptz_s is not None and waves_s is not None:
+    if waves_s is not None and not args.show_trkptz:   # WAVeS is the talks' one score (user, 2026-11-12)
+        score_label = f'WAVeS = {waves_s:.3g}'
+    elif trkptz_s is not None and waves_s is not None:
         score_label = f'TRKPTZ = {trkptz_s:.3g}  |  WAVeS = {waves_s:.3g}'
     elif trkptz_s is not None:
         score_label = f'TRKPTZ = {trkptz_s:.3g}'
@@ -953,7 +966,26 @@ with PdfPages(filename) as pdf:
             j, idxs = tok.split(':')
             idxs = [int(i) for i in idxs.split(',') if i != '']
             if idxs: jet_time_sets.append((int(j), idxs, JT_COLORS[k % len(JT_COLORS)]))
+    HL_COLORS = ['#F4511E', '#8E24AA', '#00897B', '#D81B60']
+    highlight_sets = []
+    if args.highlight_tracks:
+        for k, tok in enumerate(args.highlight_tracks.split(';')):
+            if '=' not in tok: continue
+            lab, idxs = tok.rsplit('=', 1)
+            idxs = [int(i) for i in idxs.split(',') if i != '']
+            if idxs: highlight_sets.append((lab, idxs, HL_COLORS[k % len(HL_COLORS)]))
     jt_handles = []
+    for lab, idxs, col in highlight_sets:
+        for i in idxs:
+            pt, eta, phi = branch.Track_pt[i], branch.Track_eta[i], branch.Track_phi[i]
+            pz = pt * np.sinh(eta)
+            sx = np.sign(eta) if eta != 0 else 1
+            sy = np.sign(np.sin(phi)) if np.sin(phi) != 0 else 1
+            th = np.arctan(pt / abs(pz))
+            x, y = (pt / 2) * np.cos(th) * sx, (pt / 2) * np.sin(th) * sy
+            event_display2.plot([branch.Track_z0[i], branch.Track_z0[i] + x], [0, y], color=col, lw=3.2,
+                                solid_capstyle='round', zorder=8)
+        jt_handles.append(mlines.Line2D([], [], color=col, lw=3.2, label=f'{lab} ({len(idxs)})'))
     for j, idxs, col in jet_time_sets:
         for i in idxs:
             pt, eta, phi = branch.Track_pt[i], branch.Track_eta[i], branch.Track_phi[i]
@@ -1021,7 +1053,8 @@ with PdfPages(filename) as pdf:
     if jt_handles:
         _main_leg = event_display2.get_legend()          # keep the tracks-and-jets legend
         event_display2.legend(handles=jt_handles, loc='lower right', fontsize='small',
-                              title="Tagging-jet time tracks", title_fontsize='small')
+                              title="Highlighted tracks" if highlight_sets else "Tagging-jet time tracks",
+                              title_fontsize='small')
         if _main_leg is not None:
             event_display2.add_artist(_main_leg)
 
@@ -1072,6 +1105,18 @@ with PdfPages(filename) as pdf:
         yv = (0.30 + 0.08 * k) * max_val
         time_histo2.errorbar(ts, [yv] * len(ts), xerr=rs, fmt='D', color=col, ms=9, mec='black', capsize=3,
                              lw=1.8, zorder=6, label=f'Jet {j + 1} time tracks')
+        extended_min_time = min(extended_min_time, min(ts) - 40)
+        extended_max_time = max(extended_max_time, max(ts) + 40)
+
+    # --highlight_tracks: the timed ones at their HGTD time, as the jet time tracks
+    for k, (lab, idxs, col) in enumerate(highlight_sets):
+        tm = [i for i in idxs if branch.Track_hasValidTime[i] == 1]
+        if not tm: continue
+        ts = [_trk_time(i) for i in tm]
+        rs = [branch.Track_timeRes[i] for i in tm]
+        yv = (0.30 + 0.08 * (k + len(jet_time_sets))) * max_val
+        time_histo2.errorbar(ts, [yv] * len(ts), xerr=rs, fmt='D', color=col, ms=9, mec='black', capsize=3,
+                             lw=1.8, zorder=6, label=lab)
         extended_min_time = min(extended_min_time, min(ts) - 40)
         extended_max_time = max(extended_max_time, max(ts) + 40)
 
