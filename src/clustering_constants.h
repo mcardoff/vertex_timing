@@ -693,6 +693,7 @@ namespace MyUtl {
     // failure-mode fixes on WAVeS: each alone, then cumulative (src/failure_fixes.h)
     static const Score WFIX_RETIME, WFIX_MISTIMED, WFIX_SELECT, WFIX_MISCL, WFIX_TEFF;
     static const Score WFIX_C3, WFIX_C4, WFIX_C5, WFIX_C6;
+    static const Score WSEL_OK, WSEL_OK_MISCL;
   };
 
   inline const std::string STR_TRKPTZ = "#Sigma p_{T}e^{-|#Delta z|}";
@@ -966,6 +967,26 @@ namespace MyUtl {
   inline const Score Score::WFIX_C6 = makeFixScore(49, "WAVeS fixed [... + HS time resolution]", "WFIX_C6",
                                                    Fix::MISTIMED | Fix::SELECT | Fix::MISCL | Fix::TEFF | Fix::RESOL);
 
+  // Conditional on the selection being right (user, 2026-11-12: "P(Good Time |
+  // Selection was right)"): the denominator is the events where WAVeS chose the
+  // hard scatter's cluster -- the selection fix's own identification
+  // (src/failure_fixes.h: >= 1 HS track, >= FIX_SELECT_MIN_PT_SHARE of the
+  // clustered pT, the most HS pT), with NO purity requirement, so misclustered
+  // HS clusters stay in. WSEL_OK: WAVeS's own time there; WSEL_OK_MISCL: the same
+  // events, timed from the cluster's HS tracks alone. Their gap is misclustering
+  // given a right selection. (WAVES_MISCL's "pure clusters" gate instead
+  // conditions on purity > 0.75, which excludes the misclustered events.)
+  inline const Score Score::WSEL_OK = { 59, "WAVeS [Events where it chose the HS cluster]", "WSEL_OK",
+                                        true, true, -1.f, -1.0, ClusteringMethod::ITERATIVE, false,
+                                        TrackFilterType::ALL, VbsRegion::NONE, TimeSource::IN_JET };
+  inline Score makeGatedFix(int id, const char* ln, const char* sn, int fixes) {
+    Score s{id, ln, sn, true, true, -1.f};
+    s.fixes = fixes;
+    return s;
+  }
+  inline const Score Score::WSEL_OK_MISCL = makeGatedFix(60, "WAVeS [Events where it chose the HS cluster, misclustering fixed]",
+                                                         "WSEL_OK_MISCL", Fix::MISCL);
+
   // Scores with a dedicated collection (distCut ≥ 0 → buildsCollection() = true)
   inline const Score Score::CONE       = {  7, "Cone"                       , "CONE",     true , false, -1.f, DIST_CUT_CONE, ClusteringMethod::CONE };
   inline const Score Score::FILTJET    = {  9, "Filter Tracks in Jets"      , "FILTJET",  true , false, -1.f, DIST_CUT_CONE, ClusteringMethod::CONE, false, TrackFilterType::JET };
@@ -980,7 +1001,7 @@ namespace MyUtl {
     Score::TRKPTZ_PV, Score::TRKPTZ_PU, Score::TRKPTZ_PUW, Score::TRKPTZ_TZ,
     Score::TRKPTZ_TZ_IJ, Score::TRKPTZ_TZ_OJ, Score::TRKPTZ_TZ_GIJ, Score::WAVES_GIJ, Score::TRKPTZ_TZJ, Score::TRKPTZ_TZQ,
     Score::WFIX_RETIME, Score::WFIX_MISTIMED, Score::WFIX_SELECT, Score::WFIX_MISCL, Score::WFIX_TEFF,
-    Score::WFIX_C3, Score::WFIX_C4, Score::WFIX_C5, Score::WFIX_C6,
+    Score::WFIX_C3, Score::WFIX_C4, Score::WFIX_C5, Score::WFIX_C6, Score::WSEL_OK, Score::WSEL_OK_MISCL,
   };
 
   // ---------------------------------------------------------------------------

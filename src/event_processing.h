@@ -797,6 +797,13 @@ namespace MyUtl {
     }
 
     // ── G½. HS timing purity for TEST_MISAS gate ────────────────────────────
+    // ── G⅓. Did WAVeS choose the hard scatter's cluster? (WSEL_OK gate) ────
+    bool waveChoseHS = false;
+    if (analyses.count(Score::WSEL_OK) && chosen.count(Score::WAVES.id)) {
+      const Cluster* hs = hsClusterOf(clusters, branch);
+      if (hs) waveChoseHS = (chosen.at(Score::WAVES.id).trackIndices == hs->trackIndices);
+      chosen[Score::WSEL_OK.id] = chosen.at(Score::WAVES.id);
+    }
     float hsTimingPurity = 1.0f;
     if (analyses.count(Score::TEST_MISAS) || analyses.count(Score::WAVES_MISAS))
       hsTimingPurity = calcHSTimingPurity(tracks, branch);
@@ -909,6 +916,8 @@ namespace MyUtl {
           // pure event-topology restriction, so the row reads as "the same
           // WAVeS algorithm, measured only in these events".
           passesGate = (eventRegion == score.regionGate);
+        } else if (score == Score::WSEL_OK || score == Score::WSEL_OK_MISCL) {
+          passesGate = waveChoseHS;
         } else if (score == Score::TEST_MISAS || score == Score::WAVES_MISAS) {
           // Gate on event-level HS timing purity: 100% of HS pT must have |pull|<3σ
           passesGate = (hsTimingPurity >= 0.95f);

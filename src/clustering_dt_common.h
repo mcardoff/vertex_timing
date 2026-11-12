@@ -71,7 +71,8 @@ inline auto buildAnalysisMap(
   // cumulative chain in the failure ladder's order.
   for (const Score* s : {&Score::WFIX_RETIME, &Score::WFIX_MISTIMED, &Score::WFIX_SELECT,
                          &Score::WFIX_MISCL, &Score::WFIX_TEFF, &Score::WFIX_C3,
-                         &Score::WFIX_C4, &Score::WFIX_C5, &Score::WFIX_C6})
+                         &Score::WFIX_C4, &Score::WFIX_C5, &Score::WFIX_C6,
+                         &Score::WSEL_OK, &Score::WSEL_OK_MISCL})
     m.emplace(*s, AnalysisObj(label, *s));
 
   // Scores active only in the real-HGTD scenario

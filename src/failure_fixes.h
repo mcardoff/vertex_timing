@@ -110,6 +110,23 @@ namespace MyUtl {
     return cache.emplace(inputBits, std::move(out)).first->second;
   }
 
+  // The hard scatter's cluster as the selection fix identifies it: among the
+  // qualifying clusters with >= 1 HS track and >= FIX_SELECT_MIN_PT_SHARE of the
+  // pT of every clustered track, the one with the most HS pT. nullptr if none.
+  inline const Cluster* hsClusterOf(const std::vector<Cluster>& col, BranchPointerWrapper* b) {
+    double ptAll = 0.0;
+    for (const auto& c : col) for (int t : c.trackIndices) ptAll += b->trackPt[t];
+    double best = 0.0; const Cluster* h = nullptr;
+    for (const auto& c : col) {
+      if (c.nConstituents < MIN_CLUSTER_TRACKS) continue;
+      double pt = 0.0, ptHS = 0.0;
+      for (int t : c.trackIndices) { pt += b->trackPt[t]; if (b->trackToTruthvtx[t] == 0) ptHS += b->trackPt[t]; }
+      if (ptHS <= 0.0 || pt < FIX_SELECT_MIN_PT_SHARE * ptAll) continue;
+      if (ptHS > best) { best = ptHS; h = &c; }
+    }
+    return h;
+  }
+
   // WAVeS's in-jet time (Cluster::calculateTime, TimeSource::IN_JET with no
   // minimum subset) with the resolutions of any overridden tracks.
   // With purityOut, also the in-jet subset's HS pT fraction (the full cluster's
@@ -165,17 +182,9 @@ namespace MyUtl {
     if (qual.empty()) return std::nullopt;
 
     const Cluster* ch = nullptr;
-    if (mask & Fix::SELECT) {
-      double ptAll = 0.0;                    // every track the clustering saw
-      for (const auto& c : *col) for (int t : c.trackIndices) ptAll += b->trackPt[t];
-      double best = 0.0; const Cluster* h = nullptr;
-      for (const Cluster* c : qual) {
-        double pt = 0.0, ptHS = 0.0;
-        for (int t : c->trackIndices) { pt += b->trackPt[t]; if (b->trackToTruthvtx[t] == 0) ptHS += b->trackPt[t]; }
-        if (ptHS <= 0.0 || pt < FIX_SELECT_MIN_PT_SHARE * ptAll) continue;   // no HS track, or not selectable
-        if (ptHS > best) { best = ptHS; h = c; }
-      }
-      ch = h;
+    if (mask & Fix::SELECT) {   // the same identification as the WSEL_OK gate
+      const Cluster* h = hsClusterOf(*col, b);
+      if (h) ch = h;
     }
     if (!ch) {                  // WAVeS's choice (chooseCluster: the first maximum)
       ch = qual[0];
