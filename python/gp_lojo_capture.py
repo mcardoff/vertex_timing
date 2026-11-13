@@ -21,9 +21,11 @@ ap = argparse.ArgumentParser()
 ap.add_argument("tree")
 ap.add_argument("--label", default="VBF H#rightarrowinv.")
 ap.add_argument("--out", required=True)
+ap.add_argument("--bars", action="store_true", help="one stacked bar per t0 instead of the distribution: the share of these jets the "
+                "gate keeps whole (>= 90%% of R_pT; the capture), trims, removes (< 10%%), or cannot act on (no timed R_pT track)")
 args = ap.parse_args()
 R = S.setup()
-J = uproot.open(args.tree)["jets"].arrays(["pt", "eta", "hs", "pu", "rpt_itk", "rpt_t0_waves", "rpt_t0_waves_lojet",
+J = uproot.open(args.tree)["jets"].arrays(["pt", "eta", "hs", "pu", "ntimed", "rpt_itk", "rpt_t0_waves", "rpt_t0_waves_lojet",
                                            "rpt_t0_waves_lojo", "ninjet_lojo", "rpt_t0_truth"], library="np")
 J["guarded"] = np.where(J["ninjet_lojo"] >= 2, J["rpt_t0_waves_lojo"], J["rpt_t0_waves"])
 SRC = [("rpt_t0_waves", "WAVeS t_{0}", S.COL["waves"], 1), ("rpt_t0_waves_lojet", "Jet left out", "kP10Green", 1),
@@ -38,6 +40,52 @@ def itk_cut(hs, pu, eff=0.85):
 
 
 ae = np.abs(J["eta"])
+if args.bars:
+    # categories, left to right: the capture against the axis, so it compares directly between the t0s
+    CATS = [("Kept whole (#geq 90%)", "kP10Red", R.kWhite), ("Trimmed", "#9CC3E6", R.kBlack),
+            ("Removed (< 10%)", "kP10Blue", R.kWhite), ("No timed track", S.COL["none"], R.kBlack)]
+    ROWS = [("rpt_t0_waves", "WAVeS t_{0}"), ("rpt_t0_waves_lojet", "Jet left out"), ("guarded", "Guarded"),
+            ("rpt_t0_truth", "Truth t_{0}")]
+    def dtext(x, y, txt, size, align, colour=R.kBlack):   # in the frame's coordinates (S.text is NDC)
+        t = R.TLatex(); t.SetTextFont(42); t.SetTextSize(size); t.SetTextAlign(align); t.SetTextColor(colour)
+        return S.keep(t.DrawLatex(x, y, txt))
+    cv = S.keep(R.TCanvas("capb", "", 1600, 680))
+    for p, (lab, lo, hi) in enumerate((("30 < p_{T} < 50 GeV", 30, 50), ("p_{T} > 50 GeV", 50, 1e9))):
+        m = (J["pt"] > lo) & (J["pt"] < hi) & (ae >= 2.4) & (ae < 4.0)
+        hs, pu = m & (J["hs"] == 1), m & (J["pu"] == 1)
+        sel = pu & (J["rpt_itk"] >= itk_cut(J["rpt_itk"][hs], J["rpt_itk"][pu]))
+        cv.cd(); S.pad(f"b{p}", 0.5 * p, 0.0, 0.5 * p + 0.5, 1.0, top=0.40, bottom=0.14, left=0.21, right=0.04)
+        fr = S.keep(R.gPad.DrawFrame(0.0, 0.0, 1.0, len(ROWS)))
+        S.axes(fr, "Fraction of these pileup jets", "", size=0.05, xtoff=1.2)
+        fr.GetYaxis().SetLabelSize(0); fr.GetYaxis().SetTickLength(0); fr.GetXaxis().SetNdivisions(505)
+        untimed = J["ntimed"][sel] == 0
+        print(f"{lab.replace('_{T}', 'T')}: {sel.sum()} pileup jets pass the ITk-only cut; no timed R_pT track {100 * untimed.mean():.1f}%")
+        for i, (col, name) in enumerate(ROWS):
+            f = J[col][sel] / J["rpt_itk"][sel]
+            share = [np.mean(~untimed & (f >= 0.9)), np.mean(~untimed & (f >= 0.1) & (f < 0.9)),
+                     np.mean(~untimed & (f < 0.1)), np.mean(untimed)]
+            y = len(ROWS) - 1 - i
+            x = 0.0
+            for (cname, ccol, tcol), w in zip(CATS, share):
+                b = S.keep(R.TBox(x, y + 0.18, x + w, y + 0.82)); b.SetFillColor(S.colour(ccol)); b.SetLineWidth(0); b.Draw()
+                gap = S.keep(R.TLine(x + w, y + 0.18, x + w, y + 0.82)); gap.SetLineColor(R.kWhite); gap.SetLineWidth(3); gap.Draw()
+                if w >= 0.07:
+                    dtext(x + w / 2, y + 0.5, f"{100 * w:.0f}%", 0.042, 22, tcol)
+                x += w
+            dtext(-0.02, y + 0.5, name, 0.045, 32)
+            print(f"  {name.replace('_{0}', '0'):12s} " + " | ".join(f"{c[0].split(' (')[0]} {100 * w:.1f}%" for c, w in zip(CATS, share)))
+        leg = S.legend(0.21, 0.615, 0.96, 0.715, size=0.040, ncol=2, margin=0.12)
+        for cname, ccol, tcol in CATS:
+            bx = S.keep(R.TBox()); bx.SetFillColor(S.colour(ccol)); bx.SetLineWidth(0)
+            leg.AddEntry(bx, cname, "F")
+        leg.Draw()
+        S.header(0.21, 0.94, [f"#sqrt{{s}} = 14 TeV, #LT#mu#GT = 200, {args.label}",
+                              f"{lab}, 2.4 < |#eta| < 4.0: the {sel.sum():,} pileup jets",
+                              "passing the ITk-only cut at 85% HS efficiency"], size=0.042)
+        R.gPad.RedrawAxis()
+        S.end_pad()
+    S.save(cv, args.out)
+    raise SystemExit
 cv = S.keep(R.TCanvas("cap", "", 1600, 700))
 for p, (lab, lo, hi) in enumerate((("30 < p_{T} < 50 GeV", 30, 50), ("p_{T} > 50 GeV", 50, 1e9))):
     m = (J["pt"] > lo) & (J["pt"] < hi) & (ae >= 2.4) & (ae < 4.0)
