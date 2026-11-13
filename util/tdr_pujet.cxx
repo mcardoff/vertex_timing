@@ -16,6 +16,7 @@
 // 3 sigma; this program follows the TDR); the ingredients are copied from it.
 //
 // Usage:  tdr_pujet [--sample=<s>] [--ntuple-dir=<d>] [--file-shard=i/N]
+//                   [--lojo]   (+ the WAVeS t0 with the tested jet left out, todo vt-9zl; tags the output "lojo")
 //                   [--max-events=N] [--gate-sigma=X (default 2)] [--clean-times=all|t0|off (default all)] [--rpt-match=ghost|dr02 (default ghost)] [--rpt-trk-ptmax=X|none (default 30)] [--out=<path>]
 // Output: <prefix>tdr_pujet.root (TTrees "jets", "meta"; merge shards with hadd -f).
 // -----------------------------------------------------------------------------
@@ -28,6 +29,7 @@
 #include <cstdio>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <string>
 
@@ -47,10 +49,12 @@ int main(int argc, char** argv) {
 
   double gate = tdr::GATE_SIGMA_TDR;
   std::string outOverride;
+  bool lojo = false;
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
     if (a.rfind("--gate-sigma=", 0) == 0) gate = std::stod(a.substr(13));
     if (a.rfind("--out=", 0) == 0) outOverride = a.substr(6);
+    if (a == "--lojo") lojo = true;
   }
   if (!(gate > 0.0)) { std::cerr << "[tdr_pujet] --gate-sigma must be > 0\n"; return 1; }
   if (gate != tdr::GATE_SIGMA_TDR) {   // a different gate is a different tagger: tagged
@@ -58,6 +62,7 @@ int main(int argc, char** argv) {
     std::string tag = os.str(); std::replace(tag.begin(), tag.end(), '.', 'p');
     SELECTION_TAG = SELECTION_TAG.empty() ? tag : SELECTION_TAG + "_" + tag;
   }
+  if (lojo) SELECTION_TAG = SELECTION_TAG.empty() ? "lojo" : SELECTION_TAG + "_lojo";
   const tdr::CleanMode cleanMode = tdr::cleaningMode(argc, argv);   // before the output path: it tags the file
   const tdr::RptMatch rptMatch = tdr::rptMatchMode(argc, argv);     // likewise
   tdr::rptTrkPtMaxMode(argc, argv);                                  // likewise
@@ -114,6 +119,23 @@ int main(int argc, char** argv) {
     jets.Branch(n.c_str(), &rJvtT0[k], (n + "/D").c_str());
   }
 
+  // --lojo: the WAVeS t0 with the tested jet left out (util/tdr_common.h's wavesT0LeaveOut), forward jets only --
+  // a central jet is outside WAVeS's jet list and its tracks outside the t0 input, so for it these copy the WAVeS
+  // columns. dt = t0 - t_HS (NaN without a t0).
+  double rLojo = 0.0, rLojet = 0.0, rJvtLojo = 0.0;
+  double dtW = 0.0, dtLojo = 0.0, dtLojet = 0.0;
+  int nInLojo = 0, nInLojet = 0;   // the leave-out cluster's tracks inside another forward jet (-1: central jet)
+  if (lojo) {
+    jets.Branch("rpt_t0_waves_lojo", &rLojo, "rpt_t0_waves_lojo/D");     // jet and its tracks left out
+    jets.Branch("rpt_t0_waves_lojet", &rLojet, "rpt_t0_waves_lojet/D");  // jet left out of WAVeS's jet list only
+    jets.Branch("jvt_rpt_t0_waves_lojo", &rJvtLojo, "jvt_rpt_t0_waves_lojo/D");
+    jets.Branch("dt_waves", &dtW, "dt_waves/D");
+    jets.Branch("dt_waves_lojo", &dtLojo, "dt_waves_lojo/D");
+    jets.Branch("dt_waves_lojet", &dtLojet, "dt_waves_lojet/D");
+    jets.Branch("ninjet_lojo", &nInLojo, "ninjet_lojo/I");
+    jets.Branch("ninjet_lojet", &nInLojet, "ninjet_lojet/I");
+  }
+
   Long64_t nRead = 0, nVtx = 0, nLep = 0, nJetRows = 0;
   while (reader.Next()) {
     if (maxEvents > 0 && nRead >= maxEvents) break;
@@ -156,6 +178,29 @@ int main(int argc, char** argv) {
       const tdr::JvtRpt jr = tdr::jvtRpt(branch, j, T, gate, CLEAN);
       rJvt = jr.plain;
       for (int k = 0; k < tdr::N_T0; ++k) rJvtT0[k] = jr.t0[k];
+      if (lojo) {
+        const double nan = std::numeric_limits<double>::quiet_NaN();
+        const double tHS = branch.truthVtxTime[0];
+        dtW = T.ok[tdr::T0_WAVES] ? T.t[tdr::T0_WAVES] - tHS : nan;
+        rLojo = rLojet = rT0[tdr::T0_WAVES];  rJvtLojo = rJvtT0[tdr::T0_WAVES];  dtLojo = dtLojet = dtW;
+        nInLojo = nInLojet = -1;
+        const bool fwd = std::abs((double)eta) >= tdr::FWD_ETA_MIN;
+        if (fwd) {
+          const std::vector<int> trk = tdr::jetRptTracks(branch, j, L.fwd, rptMatch);
+          std::vector<int> pv;
+          for (int idx : branch.topoJetGhostTrackIdx[j]) if (branch.recoVtxOf(idx) == 0) pv.push_back(idx);
+          const double iw = T.infl[tdr::T0_WAVES];
+          const tdr::WavesT0 a = tdr::wavesT0LeaveOut(branch, j, tdr::LeaveOut::JET_AND_TRACKS, CLEAN);
+          rLojo = tdr::sumPt(branch, tdr::timeGate(branch, trk, a.t, a.sig, a.ok, iw, gate, CLEAN)) / pt;
+          rJvtLojo = tdr::sumPt(branch, tdr::timeGate(branch, pv, a.t, a.sig, a.ok, iw, gate, CLEAN)) / pt;
+          dtLojo = a.ok ? a.t - tHS : nan;
+          nInLojo = a.nInJet;
+          const tdr::WavesT0 c = tdr::wavesT0LeaveOut(branch, j, tdr::LeaveOut::JET, CLEAN);
+          rLojet = tdr::sumPt(branch, tdr::timeGate(branch, trk, c.t, c.sig, c.ok, iw, gate, CLEAN)) / pt;
+          dtLojet = c.ok ? c.t - tHS : nan;
+          nInLojet = c.nInJet;
+        }
+      }
       jets.Fill();
       ++nJetRows;
     }

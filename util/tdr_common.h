@@ -223,6 +223,51 @@ inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL, const Ti
   return s;
 }
 
+// The WAVeS t0 with one jet left out (todo vt-9zl, 2026-11-13). Above 50 GeV a forward pileup jet whose collision
+// sits close in z to the PV pulls the event's WAVeS t0 onto its own collision, so the gate keeps it (notes/gp_talk.md,
+// "Why the timing gain drops above 50 GeV"). Testing a jet against a t0 it did not help make removes that:
+//   LeaveOut::JET_AND_TRACKS  the jet is absent from WAVeS's jet list (score, in-jet time) AND the tracks within
+//                             dR < 0.4 of it leave the t0 input, which is re-clustered: the t0 as if the jet were not there
+//   LeaveOut::JET             the jet is absent from WAVeS's jet list only; its tracks stay in the clustering
+// computeT0s's WAVeS block otherwise (same input, clustering, choice, in-jet time and sigma). ok = false when nothing
+// is left to cluster: the gate then keeps every track, as for any event without a t0. nInJet: the chosen cluster's
+// tracks within dR < 0.4 of ANOTHER qualifying forward jet (WAVeS's jet definition), i.e. whether the t0 still has
+// a jet behind it -- for a guard that falls back to the event t0 when it does not.
+enum class LeaveOut { JET_AND_TRACKS, JET };
+struct WavesT0 { double t = 0.0, sig = 0.0; bool ok = false; int nInJet = 0; };
+inline WavesT0 wavesT0LeaveOut(BranchPointerWrapper& b, int j, LeaveOut mode, const TimeCleaning& C) {
+  std::vector<int> trk_z = getAssociatedTracks(&b, MIN_TRACK_PT, MAX_TRACK_PT, T0_ASSOC_NSIGMA);
+  if (C.t0())
+    trk_z.erase(std::remove_if(trk_z.begin(), trk_z.end(),
+                               [&](int i) { return b.trackTimeValid[i] == 1 && !timed(b, i, C, true); }), trk_z.end());
+  if (mode == LeaveOut::JET_AND_TRACKS) {
+    const double je = b.topoJetEta[j], jp = b.topoJetPhi[j];
+    trk_z.erase(std::remove_if(trk_z.begin(), trk_z.end(),
+                               [&](int i) { return dR(b.trackEta[i], b.trackPhi[i], je, jp) < 0.4; }), trk_z.end());
+  }
+  b.leaveOutJet = j;   // WAVeS's score and in-jet time skip it; reset before returning
+  WavesT0 w;
+  const auto clusters = clusterTracksInTime(
+      trk_z, &b, DIST_CUT_CONE,
+      /*useSmearedTimes=*/false, /*checkTimeValid=*/true, IDEAL_TRACK_RES,
+      ClusteringMethod::ITERATIVE, /*useZ0=*/false,
+      /*sortTracks=*/false, /*calcPurityFlag=*/true);
+  if (!clusters.empty()) {
+    auto bW = chooseCluster(clusters, Score::WAVES);
+    w.t = bW.calculateTime(Score::WAVES, &b);
+    w.sig = bW.sigmas[0];  w.ok = true;
+    for (int idx : bW.trackIndices)
+      for (int k = 0; k < (int)b.topoJetPt.GetSize(); ++k) {
+        if (b.isJetRemoved(k) || b.topoJetPt[k] < MIN_JET_PT) continue;   // skips j too
+        const double ak = std::abs((double)b.topoJetEta[k]);
+        if (ak < MIN_ABS_ETA_JET || ak > MAX_ABS_ETA_JET) continue;
+        if (dR(b.trackEta[idx], b.trackPhi[idx], b.topoJetEta[k], b.topoJetPhi[k]) < 0.4) { ++w.nInJet; break; }
+      }
+  }
+  b.leaveOutJet = -1;
+  return w;
+}
+
 // PV0-associated track lists: forward (rpt_v5's dz parameterisation) and central
 // (z0 significance) -- the same split rpt_v5 makes, chosen per jet by its |eta|.
 struct TrackLists {
