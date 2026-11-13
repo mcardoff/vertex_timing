@@ -105,6 +105,10 @@ int main(int argc, char** argv) {
   jets.Branch("pu", &pu, "pu/I");
   jets.Branch("ntrk", &ntrk, "ntrk/I");
   jets.Branch("ntimed", &ntimed, "ntimed/I");
+  // the jet's R_pT tracks that are hard-scatter with a misassigned time (>= TRUTH_PULL_CUT sigma from t_HS, the
+  // wfix_time fix's definition): the fix drops them from the t0 input, but the gate still sees them on the jet
+  int nMisHs = 0;
+  jets.Branch("nmistimed_hs", &nMisHs, "nmistimed_hs/I");
   jets.Branch("ok_hgtd", &okHgtd, "ok_hgtd/O");
   jets.Branch("rpt_itk", &rItk, "rpt_itk/D");
   for (int k = 0; k < tdr::N_T0; ++k) {
@@ -173,6 +177,10 @@ int main(int argc, char** argv) {
       pu = branch.isJetPaperPU(eta, phi) ? 1 : 0;
       const tdr::JetRpt r = tdr::jetRpt(branch, j, L, T, gate, CLEAN, rptMatch);
       ntrk = r.ntrk;  ntimed = r.ntimed;
+      nMisHs = 0;
+      for (int idx : tdr::jetRptTracks(branch, j, std::abs((double)eta) >= tdr::FWD_ETA_MIN ? L.fwd : L.cen, rptMatch))
+        if (branch.trackToTruthvtx[idx] == 0 && tdr::timed(branch, idx, CLEAN, CLEAN.jets()) &&
+            std::abs(branch.trackTime[idx] - branch.truthVtxTime[0]) / branch.trackTimeRes[idx] >= TRUTH_PULL_CUT) ++nMisHs;
       rItk = r.itk;  rSelf = r.self;  rComb = r.comb;
       for (int k = 0; k < tdr::N_T0; ++k) rT0[k] = r.t0[k];
       const tdr::JvtRpt jr = tdr::jvtRpt(branch, j, T, gate, CLEAN);

@@ -69,8 +69,12 @@ def pulls(E, f):
         out = {"jj": np.where(both, np.abs(t[1] - t[2]) / np.sqrt(np.where(both, sg[1] ** 2 + sg[2] ** 2, 1.0)), np.nan)}
         for s in sources(E):
             ok0, t0, s0 = E[f"ok_{s}"].astype(bool), E[f"t0_{s}"], E[f"infl_{s}"] * E[f"sig0_{s}"]
+            # the perfect-timing sources compare against the jet time without the misassigned HS tracks
+            fx = "_fix" if s in ("wfix_time", "wfix_both") and "j1_core_t_fix" in E else ""
             for k in (1, 2):
-                out[f"{s}_{k}"] = np.where(ok0 & h[k], np.abs(t[k] - t0) / np.sqrt(sg[k] ** 2 + s0 ** 2), np.nan)
+                tk, hk = E[f"j{k}_core_t{fx}"], E[f"j{k}_core_n{fx}"] >= 1
+                sk = f(E[f"j{k}_core_n{fx}"]) * E[f"j{k}_core_sig{fx}"]
+                out[f"{s}_{k}"] = np.where(ok0 & hk, np.abs(tk - t0) / np.sqrt(np.where(hk, sk ** 2 + s0 ** 2, 1.0)), np.nan)
     return out
 
 

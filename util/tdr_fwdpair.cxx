@@ -97,6 +97,10 @@ struct JetOut {
   double t_hs = -999, var_hs_spread = -1, var_hs_mean = -1;
   int core_n = 0;
   double core_t = -999, core_sig = -1;
+  // the same core time without the misassigned hard-scatter tracks (tdr_common's misassignedHs): what the
+  // perfect-timing t0 sources' vetoes compare against
+  int core_n_fix = 0;
+  double core_t_fix = -999, core_sig_fix = -1;
   float jvt_rpt = -1, fjvt = -999;           // the JVT / fJVT discriminants (--jvt), -1 / -999 without
   float jvt_rpt_t0 = -1;                      // JVT's R_pT with the WAVeS t0 gate (--jvt), -1 without
 };
@@ -163,7 +167,7 @@ JetOut jetQuantities(BranchPointerWrapper& b, int j, const tdr::TrackLists& L, c
     std::vector<char> hsT(trk.size(), 0);
     for (size_t k = 0; k < trk.size(); ++k) {
       if (!hsZ[k]) continue;
-      hsT[k] = !tdr::timeGate(b, {trk[k]}, T.t[s], T.sig[s], T.ok[s], T.infl[s], gate, C).empty();
+      hsT[k] = !tdr::timeGate(b, {trk[k]}, T.t[s], T.sig[s], T.ok[s], T.infl[s], gate, C, tdr::fixesTimes(s)).empty();
     }
     o.jvf_t0[s] = jvfOf(b, trk, hsT, nearPu);
   }
@@ -194,16 +198,22 @@ JetOut jetQuantities(BranchPointerWrapper& b, int j, const tdr::TrackLists& L, c
     if (tdr::dR(o.eta, o.phi, b.trackEta[idx], b.trackPhi[idx]) >= CORE_DR) continue;
     cand.push_back(idx);
   }
-  if (!cand.empty()) {
+  auto core = [&](const std::vector<int>& tracks, double& t, double& sig, int& n) {
+    if (tracks.empty()) return;
     static const std::unordered_map<int, double> kNone;
-    std::vector<Cluster> cl = makeSimpleClusters(cand, &b, /*useSmearedTimes=*/false, kNone, kNone,
+    std::vector<Cluster> cl = makeSimpleClusters(tracks, &b, /*useSmearedTimes=*/false, kNone, kNone,
                                                  /*checkTimeValid=*/true, /*usez0=*/false);
     doIterativeClustering(&cl, CORE_DIST_CUT);
     const Cluster* best = nullptr;   // TRKPT score = sum pT
     for (const Cluster& c : cl)
       if (!best || c.scores.at(Score::TRKPT.id) > best->scores.at(Score::TRKPT.id)) best = &c;
-    o.core_t = best->values[0];  o.core_sig = best->sigmas[0];  o.core_n = (int)best->trackIndices.size();
-  }
+    t = best->values[0];  sig = best->sigmas[0];  n = (int)best->trackIndices.size();
+  };
+  core(cand, o.core_t, o.core_sig, o.core_n);
+  std::vector<int> candFix;
+  for (int idx : cand) if (!tdr::misassignedHs(b, idx)) candFix.push_back(idx);
+  if (candFix.size() == cand.size()) { o.core_t_fix = o.core_t;  o.core_sig_fix = o.core_sig;  o.core_n_fix = o.core_n; }
+  else core(candFix, o.core_t_fix, o.core_sig_fix, o.core_n_fix);
   return o;
 }
 }  // namespace
@@ -319,6 +329,9 @@ int main(int argc, char** argv) {
     tree.Branch((p + "core_t").c_str(), &o.core_t, (p + "core_t/D").c_str());
     tree.Branch((p + "core_sig").c_str(), &o.core_sig, (p + "core_sig/D").c_str());
     tree.Branch((p + "core_n").c_str(), &o.core_n, (p + "core_n/I").c_str());
+    tree.Branch((p + "core_t_fix").c_str(), &o.core_t_fix, (p + "core_t_fix/D").c_str());
+    tree.Branch((p + "core_sig_fix").c_str(), &o.core_sig_fix, (p + "core_sig_fix/D").c_str());
+    tree.Branch((p + "core_n_fix").c_str(), &o.core_n_fix, (p + "core_n_fix/I").c_str());
     tree.Branch((p + "jvt_rpt").c_str(), &o.jvt_rpt, (p + "jvt_rpt/F").c_str());
     tree.Branch((p + "fjvt").c_str(), &o.fjvt, (p + "fjvt/F").c_str());
     tree.Branch((p + "jvt_rpt_t0").c_str(), &o.jvt_rpt_t0, (p + "jvt_rpt_t0/F").c_str());

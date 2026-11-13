@@ -357,14 +357,25 @@ inline double sumPt(BranchPointerWrapper& b, const std::vector<int>& trk) {
   return s;
 }
 
-// rpt_v5's applyTimeGate
+// A hard-scatter track whose HGTD time is misassigned: >= TRUTH_PULL_CUT sigma from t_HS, the definition Fix::MISTIMED
+// drops from the t0 input (src/failure_fixes.h). The "perfect timing" t0 sources (wfix_time, wfix_both) treat such a
+// track as UNTIMED everywhere downstream too -- in the R_pT / JVF gate and in tdr_fwdpair's fixed core jet time --
+// so perfect timing is one consistent world. Fixing only the t0 made the gate reject these tracks on hard-scatter
+// jets that the WAVeS t0, built partly from them, had kept (2026-11-13: 99% of the HS jets whose R_pT fell).
+inline bool misassignedHs(BranchPointerWrapper& b, int idx) {
+  return b.trackToTruthvtx[idx] == 0 && b.trackTimeValid[idx] == 1 && b.trackTimeRes[idx] > 0 &&
+         std::abs(b.trackTime[idx] - b.truthVtxTime[0]) / b.trackTimeRes[idx] >= TRUTH_PULL_CUT;
+}
+inline bool fixesTimes(int k) { return k == T0_WFIX_TIME || k == T0_WFIX_BOTH; }
+
+// rpt_v5's applyTimeGate. untimeMisHs: a misassigned hard-scatter track passes as untimed (the perfect-timing sources).
 inline std::vector<int> timeGate(BranchPointerWrapper& b, const std::vector<int>& base,
                                  double t0, double sig0, bool ok, double infl, double gate,
-                                 const TimeCleaning& C) {
+                                 const TimeCleaning& C, bool untimeMisHs = false) {
   std::vector<int> out;
   out.reserve(base.size());
   for (int idx : base) {
-    if (!ok || !timed(b, idx, C, C.jets())) { out.push_back(idx); continue; }
+    if (!ok || !timed(b, idx, C, C.jets()) || (untimeMisHs && misassignedHs(b, idx))) { out.push_back(idx); continue; }
     const double dt = b.trackTime[idx] - t0;
     const double vt = b.trackTimeRes[idx] * b.trackTimeRes[idx];
     if (std::abs(dt) / std::sqrt(infl * infl * sig0 * sig0 + vt) < gate) out.push_back(idx);
@@ -414,7 +425,7 @@ inline JetRpt jetRpt(BranchPointerWrapper& b, int j, const TrackLists& L, const 
   r.ntrk = (int)trk.size();
   r.itk = sumPt(b, trk) / pt;
   for (int k = 0; k < N_T0; ++k)
-    r.t0[k] = sumPt(b, timeGate(b, trk, T.t[k], T.sig[k], T.ok[k], T.infl[k], gate, C)) / pt;
+    r.t0[k] = sumPt(b, timeGate(b, trk, T.t[k], T.sig[k], T.ok[k], T.infl[k], gate, C, fixesTimes(k))) / pt;
   r.self = selfTagSumPt(b, trk, C, &r.ntimed) / pt;
   r.comb = T.ok[T0_HGTD] ? r.t0[T0_HGTD] : r.self;
   return r;
@@ -436,7 +447,7 @@ inline JvtRpt jvtRpt(BranchPointerWrapper& b, int j, const T0Set& T, double gate
   const double pt = b.topoJetPt[j];
   r.plain = sumPt(b, pv) / pt;
   for (int k = 0; k < N_T0; ++k)
-    r.t0[k] = sumPt(b, timeGate(b, pv, T.t[k], T.sig[k], T.ok[k], T.infl[k], gate, C)) / pt;
+    r.t0[k] = sumPt(b, timeGate(b, pv, T.t[k], T.sig[k], T.ok[k], T.infl[k], gate, C, fixesTimes(k))) / pt;
   return r;
 }
 
