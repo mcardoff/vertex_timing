@@ -27,6 +27,14 @@ def jvt_short(wp):
 
 NBINS = [1, 2, 3, 4, 6, 9, 10**6]                    # python/vbs_time_veto_common.py's
 T0_SOURCES = ("hgtd", "trkptz", "waves", "truth")
+# util/tdr_common.h's truth-fixed WAVeS t0s (2026-11-13, todo vt-23j): perfect HS track times, perfect selection, both.
+# Vetoed on whenever a tree carries them (sources(E)); T0_SOURCES itself is unchanged, so the BDT features are too.
+T0_FIXED = ("wfix_time", "wfix_sel", "wfix_both")
+
+
+def sources(E):
+    """the t0 sources the trees E carry: T0_SOURCES, plus the truth-fixed ones when present"""
+    return T0_SOURCES + tuple(s for s in T0_FIXED if f"t0_{s}" in E)
 
 
 def calibration(E, verbose=True):
@@ -59,7 +67,7 @@ def pulls(E, f):
     both = h[1] & h[2]
     with np.errstate(invalid="ignore", divide="ignore"):
         out = {"jj": np.where(both, np.abs(t[1] - t[2]) / np.sqrt(np.where(both, sg[1] ** 2 + sg[2] ** 2, 1.0)), np.nan)}
-        for s in T0_SOURCES:
+        for s in sources(E):
             ok0, t0, s0 = E[f"ok_{s}"].astype(bool), E[f"t0_{s}"], E[f"infl_{s}"] * E[f"sig0_{s}"]
             for k in (1, 2):
                 out[f"{s}_{k}"] = np.where(ok0 & h[k], np.abs(t[k] - t0) / np.sqrt(sg[k] ** 2 + s0 ** 2), np.nan)
@@ -70,6 +78,6 @@ def vetoes(E, f, nsigma=3.0):
     """kept[method] per event, method in jj and the t0 sources: vbs_time_veto_plot.decisions()"""
     P = pulls(E, f)
     kept = {"jj": ~(np.nan_to_num(P["jj"], nan=0.0) >= nsigma)}
-    for s in T0_SOURCES:
+    for s in sources(E):
         kept[s] = ~((np.nan_to_num(P[f"{s}_1"], nan=0.0) >= nsigma) | (np.nan_to_num(P[f"{s}_2"], nan=0.0) >= nsigma))
     return kept

@@ -46,6 +46,9 @@ ap.add_argument("--mjj2-inframe", action="store_true", help="the compact S/sqrt(
                 "ATLAS label and legend INSIDE the frame, the y axis raised until every point sits below them (the Global "
                 "Performance talk, 2026-11-12); default: both in a band above the frame, the top fixed at --mjj2-ymax")
 ap.add_argument("--nsigma", type=float, default=3.0)
+ap.add_argument("--fixes", action="store_true", help="with --veto: also the vetoes on the truth-fixed WAVeS t0s (tdr_fwdpair "
+                "trees from commit dcf6a30: perfect HS track times, perfect selection, both; todo vt-23j), and the compact "
+                "m_jj pair shows WAVeS, the three fixes, truth and the perfect veto instead of jet vs jet")
 ap.add_argument("--summary", action="store_true", help="with --veto: <out>_veto_gain, the S/sqrt(B) factor of each veto "
                 "against the BDT cut (signal efficiency 1.0 = no BDT), the Z+jets MC events left below")
 ap.add_argument("--out", required=True)
@@ -81,6 +84,12 @@ cuts = [(None, None)] + [(e, s0[o][np.searchsorted(cs, e)]) for e in (float(x) f
 
 VETOES = [("jj", "jet vs jet"), ("hgtd", "jet vs HGTD t_{0}"), ("trkptz", "jet vs TRKPTZ t_{0}"),
           ("waves", "jet vs WAVeS t_{0}"), ("truth", "jet vs truth t_{0}"), ("perfect", "perfect HGTD")]
+FIX_ROWS = [("wfix_time", "WAVeS, perfect timing", "kP10Cyan", 22, 1), ("wfix_sel", "WAVeS, perfect selection", "kP10Green", 33, 1),
+            ("wfix_both", "WAVeS, perfect timing + selection", "kP10Red", 34, 1)]
+if args.fixes:
+    if not all(f"t0_{k}" in E for k, *_ in FIX_ROWS for _, _, E, _ in samples):
+        raise SystemExit("--fixes needs tdr_fwdpair trees with the truth-fixed t0s (commit dcf6a30)")
+    VETOES[4:4] = [(k, f"jet vs {lab.replace('WAVeS, ', 'WAVeS t_{0}, ')}") for k, lab, *_ in FIX_ROWS]
 
 
 def pu_in_hgtd(E):
@@ -181,6 +190,7 @@ if args.veto and args.summary:
             ("hgtd", "HGTD t_{0}", S.COL["hgtd"], 23, 1), ("truth", "Truth t_{0}", S.COL["truth"], 25, 3),
             ("jj", "Jet vs jet (no t_{0})", "kP10Violet", 33, 10),
             ("perfect", "Perfect HGTD veto (truth)", "#000000", 34, 2)]
+    if args.fixes: ROWS[1:1] = FIX_ROWS
     thr_of = lambda e: -np.inf if e >= 1.0 else ss[o_][np.searchsorted(cs_, e)]
 
     def veto_effs(v, bS, bB):
@@ -367,7 +377,8 @@ if args.veto and args.summary:
     # One y range per quantity, shared by the no-BDT and BDT figures so they read on the same scale (the user,
     # 2026-11-05), with the legend in the top-right corner: the frame is tall enough that every point sits below
     # the header and the legend (the top ~35% of the frame).
-    ROWS4 = [r for r in ROWS if r[0] in ("waves", "truth", "jj", "perfect")]
+    ROWS4 = [r for r in ROWS if r[0] in (("waves", "wfix_time", "wfix_sel", "wfix_both", "truth", "perfect") if args.fixes
+                                         else ("waves", "truth", "jj", "perfect"))]
     E2 = [0.0, 1000.0, 4000.0]
     for stem_, what_, ytitle_, fac_ in (
             ("veto_mjj2", "S/sqrt(B)", "S/#sqrt{B} change vs no veto [%]",

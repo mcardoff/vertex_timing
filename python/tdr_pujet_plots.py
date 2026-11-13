@@ -56,7 +56,12 @@ TAGGERS = [("rpt_itk", "ITk only", "ITk only", S.COL["itk"], 24, 2),
            ("rpt_t0_hgtd", "HGTD (Athena) t_{0}", "HGTD t_{0}", S.COL["hgtd"], 23, 1),
            ("rpt_t0_trkptz", "TRKPTZ t_{0}", "TRKPTZ t_{0}", S.COL["trkptz"], 21, 1),
            ("rpt_t0_waves", "WAVeS t_{0}", "WAVeS t_{0}", S.COL["waves"], 20, 1),
+           ("rpt_t0_wfix_time", "WAVeS t_{0}, perfect timing", "Perfect timing", "kP10Cyan", 22, 1),
+           ("rpt_t0_wfix_sel", "WAVeS t_{0}, perfect selection", "Perfect selection", "kP10Green", 33, 1),
+           ("rpt_t0_wfix_both", "WAVeS t_{0}, perfect timing + selection", "Perfect both", "kP10Red", 34, 1),
            ("rpt_t0_truth", "Truth t_{0}", "Truth t_{0}", S.COL["truth"], 25, 3)]
+# the truth-fixed WAVeS t0s (tdr_pujet from commit dcf6a30, todo vt-23j) are drawn only when the tree has them and
+# --t0s names them (wfix_time, wfix_sel, wfix_both) or is not given
 if args.t0s:   # ITk (the reference) always stays
     TAGGERS = [t for t in TAGGERS if t[0] == "rpt_itk" or t[0].replace("rpt_t0_", "") in args.t0s.split(",")]
 EFF = np.round(np.arange(0.800, 0.9751, 0.025), 3)    # the sampled working points
@@ -64,6 +69,7 @@ plain = lambda s: s.replace("_{0}", "0").replace("#", "")
 
 t = uproot.open(args.tree)
 J = t["jets"].arrays(library="np")
+TAGGERS = [tg for tg in TAGGERS if tg[0] in J]
 if args.lojo:   # inserted before the truth row, which stays last
     J["rpt_t0_waves_lojo_g2"] = np.where(J["ninjet_lojo"] >= 2, J["rpt_t0_waves_lojo"], J["rpt_t0_waves"])
     iw = [t[0] for t in TAGGERS].index("rpt_t0_waves") + 1   # right after WAVeS
@@ -157,7 +163,7 @@ for c, (lab, lo, hi) in enumerate(SLICES):
     fr = S.keep(p1.DrawFrame(0.80, 0.0, 1.0, ymax))
     S.axes(fr, "", "Pileup jet rejection", size=TS_M, ytoff=1.35)
     fr.GetXaxis().SetLabelSize(0); fr.GetXaxis().SetNdivisions(505)
-    leg = S.legend(0.72, 0.66, 0.94, 0.93, size=0.7 * TS_M, margin=0.25)   # top-right corner, short names
+    leg = S.legend(0.72 if len(TAGGERS) <= 5 else 0.69, 0.66, 0.94, 0.93, size=0.7 * TS_M, margin=0.25)   # top-right corner, short names; more room for > 5
     for (col, name, short, colour, mk, ls), (rej, rerr, _) in zip(TAGGERS, rows):
         g = S.style(S.graph(EFF, rej), colour, mk, ls, 2, 1.3); g.Draw("L SAME")      # the line in its style
         S.style(S.graph(EFF, rej, rerr), colour, mk, 1, 2, 1.3).Draw("P SAME")         # solid error bars
