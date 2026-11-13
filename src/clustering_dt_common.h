@@ -123,6 +123,14 @@ inline void makeComparisonPlots(
               {C03, kBlack, C06, C01, C02, C04}, -1.0, -1.0, 2.5,
               {"WAVeS", "Perfect (all four fixed with truth)", "Perfect + real HS track times",
                "Perfect + real cluster choice", "Perfect + real clustering", "Perfect + real HS track-time efficiency"});
+    // Perfect timing / selection / both (a reviewer, 2026-11-13: "the plot where you were considering perfect timing
+    // for tracks, and perfect selection"; the user: "a core fraction plot, with just 3 cases"): WAVeS as is, the
+    // misassigned HS track times removed, the HS cluster chosen, and both. Page 2 is the core fraction.
+    moneyPlot(MyUtl::plotFilePath("talk", TString::Format("talk_perfect_%s.pdf", key).Data()).c_str(), key, canvas,
+              {&mapHGTD.at(Score::WAVES), &mapHGTD.at(Score::WFIX_MISTIMED), &mapHGTD.at(Score::WFIX_SELECT),
+               &mapHGTD.at(Score::WFIX_C3)},
+              {C03, C06, C01, kBlack}, -1.0, -1.0, 2.5,
+              {"WAVeS", "Perfect timing", "Perfect selection", "Perfect timing + selection"});   // defined on the slide
     // ... and the same as the gap itself (user, 2026-11-12): each failure's cost,
     // read straight off the plot; WAVeS's whole gap in grey.
     gapPlot(MyUtl::plotFilePath("talk", TString::Format("talk_fix_cost_%s.pdf", key).Data()).c_str(), key, canvas,
