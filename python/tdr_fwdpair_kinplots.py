@@ -84,12 +84,12 @@ cuts = [(None, None)] + [(e, s0[o][np.searchsorted(cs, e)]) for e in (float(x) f
 
 VETOES = [("jj", "jet vs jet"), ("hgtd", "jet vs HGTD t_{0}"), ("trkptz", "jet vs TRKPTZ t_{0}"),
           ("waves", "jet vs WAVeS t_{0}"), ("truth", "jet vs truth t_{0}"), ("perfect", "perfect HGTD")]
-FIX_ROWS = [("wfix_time", "WAVeS, perfect timing", "kP10Cyan", 22, 1), ("wfix_sel", "WAVeS, perfect selection", "kP10Green", 33, 1),
-            ("wfix_both", "WAVeS, perfect timing + selection", "kP10Red", 34, 1)]
+FIX_ROWS = [("wfix_time", "Perfect timing", "kP10Cyan", 22, 1), ("wfix_sel", "Perfect selection", "kP10Green", 33, 1),
+            ("wfix_both", "Perfect timing + selection", "kP10Red", 34, 1)]   # the WAVeS t0 with those failures fixed by truth
 if args.fixes:
     if not all(f"t0_{k}" in E for k, *_ in FIX_ROWS for _, _, E, _ in samples):
         raise SystemExit("--fixes needs tdr_fwdpair trees with the truth-fixed t0s (commit dcf6a30)")
-    VETOES[4:4] = [(k, f"jet vs {lab.replace('WAVeS, ', 'WAVeS t_{0}, ')}") for k, lab, *_ in FIX_ROWS]
+    VETOES[4:4] = [(k, f"jet vs WAVeS t_{{0}}, {lab.lower()}") for k, lab, *_ in FIX_ROWS]
 
 
 def pu_in_hgtd(E):
