@@ -21,6 +21,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("tree")
 ap.add_argument("--label", default="VBF H#rightarrowinv.")
 ap.add_argument("--out", required=True)
+ap.add_argument("--rpt", action="store_true", help="the R_pT distributions of these pileup jets, ITk only and gated by each t0")
 ap.add_argument("--bars", action="store_true", help="one stacked bar per t0 instead of the distribution: the share of these jets the "
                 "gate keeps whole (>= 90%% of R_pT; the capture), trims, removes (< 10%%), or cannot act on (no timed R_pT track)")
 args = ap.parse_args()
@@ -40,6 +41,42 @@ def itk_cut(hs, pu, eff=0.85):
 
 
 ae = np.abs(J["eta"])
+if args.rpt:
+    ROWS = [("rpt_itk", "ITk only", "#000000", 2), ("rpt_t0_waves", "WAVeS t_{0}", S.COL["waves"], 1),
+            ("rpt_t0_waves_lojet", "Jet left out", "kP10Green", 1), ("guarded", "Guarded", "kP10Violet", 1),
+            ("rpt_t0_truth", "Truth t_{0}", S.COL["truth"], 3)]
+    cv = S.keep(R.TCanvas("capr", "", 1600, 700))
+    for p, (lab, lo, hi) in enumerate((("30 < p_{T} < 50 GeV", 30, 50), ("p_{T} > 50 GeV", 50, 1e9))):
+        m = (J["pt"] > lo) & (J["pt"] < hi) & (ae >= 2.4) & (ae < 4.0)
+        hs, pu = m & (J["hs"] == 1), m & (J["pu"] == 1)
+        cut = itk_cut(J["rpt_itk"][hs], J["rpt_itk"][pu])
+        sel = pu & (J["rpt_itk"] >= cut)
+        cv.cd(); S.pad(f"r{p}", 0.5 * p, 0.0, 0.5 * p + 0.5, 1.0, top=0.05, bottom=0.14, left=0.14, right=0.04)
+        hists = []
+        for col, name, colour, ls in ROWS:
+            h = S.keep(R.TH1D(f"r{p}{col}", "", 20, 0.0, 1.0))
+            for x in np.clip(J[col][sel], 0.0, 0.9999): h.Fill(x)
+            h.Scale(1.0 / max(h.Integral(), 1)); hists.append(h)
+        top = max(h.GetMaximum() for h in hists)
+        fr = S.keep(R.gPad.DrawFrame(0.0, 0.0, 1.0, 2.4 * top))
+        S.axes(fr, "R_{pT}   (overflow in the last bin)", "Fraction of these pileup jets", size=0.045, ytoff=1.45, xtoff=1.3)
+        ln = S.keep(R.TLine(cut, 0.0, cut, 1.45 * top)); ln.SetLineStyle(2); ln.SetLineColor(R.kGray + 2); ln.Draw()
+        t = S.keep(R.TLatex(cut - 0.01, 1.38 * top, f"ITk cut {cut:.2f}")); t.SetTextFont(42); t.SetTextSize(0.034); t.SetTextAlign(31); t.SetTextColor(R.kGray + 2); t.Draw()
+        leg = S.legend(0.47, 0.36, 0.95, 0.64, size=0.036, margin=0.16)
+        leg.SetHeader("still above the ITk cut after the gate:")
+        print(f"{lab.replace('_{T}', 'T')}: {sel.sum()} pileup jets with ITk-only R_pT >= {cut:.3f}")
+        for (col, name, colour, ls), h in zip(ROWS, hists):
+            S.style(h, colour, 0, ls, 3); h.Draw("HIST SAME")
+            leg.AddEntry(h, f"{name}: {100 * np.mean(J[col][sel] >= cut):.0f}%" if col != "rpt_itk" else "ITk only: 100% (by selection)", "L")
+            print(f"  {name.replace('_{0}', '0'):12s} still >= the ITk cut: {100 * np.mean(J[col][sel] >= cut):5.1f}%, median R_pT {np.median(J[col][sel]):.3f}")
+        leg.Draw()
+        S.header(0.18, 0.88, [f"#sqrt{{s}} = 14 TeV, #LT#mu#GT = 200, {args.label}",
+                              f"{lab}, 2.4 < |#eta| < 4.0: the {sel.sum():,} pileup jets",
+                              "passing the ITk-only cut at 85% HS efficiency"], size=0.040)
+        R.gPad.RedrawAxis()
+        S.end_pad()
+    S.save(cv, args.out)
+    raise SystemExit
 if args.bars:
     # categories, left to right: the capture against the axis, so it compares directly between the t0s
     CATS = [("Kept whole (#geq 90%)", "kP10Red", R.kWhite), ("Trimmed", "#9CC3E6", R.kBlack),
