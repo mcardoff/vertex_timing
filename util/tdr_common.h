@@ -87,10 +87,16 @@ constexpr double CENTRAL_Z_SIGNIF = 5.0;   // central association: |dz| / sigma_
 constexpr double RPT_TRACK_JET_DR = 0.2;   // R_pT cone
 constexpr double T0_ASSOC_NSIGMA  = 2.5;   // t0 clustering input (rpt_v5 / vbs_time_veto)
 
-// t0 sources, in this order everywhere
-constexpr int N_T0 = 4;
-enum T0Idx { T0_HGTD = 0, T0_TRKPTZ = 1, T0_WAVES = 2, T0_TRUTH = 3 };
-inline const char* const T0_NAMES[N_T0] = {"hgtd", "trkptz", "waves", "truth"};
+// t0 sources, in this order everywhere. The last three (2026-11-13, todo vt-23j) are the WAVeS t0 with its failures
+// repaired by truth, exactly as clustering_hist's rows of the talk's "perfect timing / perfect selection" slide
+// (src/failure_fixes.h's applyFixes on the same clustering input):
+//   wfix_sel   Fix::SELECT             the hard scatter's cluster chosen (WFIX_SELECT, "perfect selection")
+//   wfix_time  Fix::MISTIMED           the HS tracks >= 3 sigma from t_HS dropped, re-clustered (WFIX_MISTIMED, "perfect timing")
+//   wfix_both  Fix::MISTIMED | SELECT  both (WFIX_C3)
+// They use WAVeS's inflation; no t0 (ok = false) when no cluster qualifies.
+constexpr int N_T0 = 7;
+enum T0Idx { T0_HGTD = 0, T0_TRKPTZ = 1, T0_WAVES = 2, T0_TRUTH = 3, T0_WFIX_SEL = 4, T0_WFIX_TIME = 5, T0_WFIX_BOTH = 6 };
+inline const char* const T0_NAMES[N_T0] = {"hgtd", "trkptz", "waves", "truth", "wfix_sel", "wfix_time", "wfix_both"};
 
 struct T0Set {
   std::array<double, N_T0> t{}, sig{}, infl{};
@@ -189,6 +195,13 @@ inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL, const Ti
     if (x) { auto full = bW; x->wavesFullDt = full.calculateTime(Score::TRKPTZ, &b) - b.truthVtxTime[0]; }
     s.t[T0_WAVES] = bW.calculateTime(Score::WAVES, &b);       // in-jet refined
     s.sig[T0_WAVES] = bW.sigmas[0];  s.ok[T0_WAVES] = true;
+    // the truth-fixed WAVeS t0s (the cache lets wfix_both reuse wfix_time's re-clustering)
+    FixCache cache;
+    for (const auto& [k, mask] : {std::pair<int, int>{T0_WFIX_SEL, Fix::SELECT}, {T0_WFIX_TIME, Fix::MISTIMED},
+                                  {T0_WFIX_BOTH, Fix::MISTIMED | Fix::SELECT}}) {
+      const auto c = applyFixes(mask, trk_z, trk_z, clusters, &b, cache);
+      if (c) { s.t[k] = c->values[0];  s.sig[k] = c->sigmas[0];  s.ok[k] = true; }
+    }
   }
   if (x) {
     for (int idx : trk_z) {
@@ -219,7 +232,7 @@ inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL, const Ti
     }
   }
   s.t[T0_TRUTH] = b.truthVtxTime[0];  s.sig[T0_TRUTH] = 0.0;  s.ok[T0_TRUTH] = true;
-  s.infl = {INFL.hgtd, INFL.trkptz, INFL.waves, 1.0};
+  s.infl = {INFL.hgtd, INFL.trkptz, INFL.waves, 1.0, INFL.waves, INFL.waves, INFL.waves};
   return s;
 }
 
