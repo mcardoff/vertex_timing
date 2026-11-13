@@ -42,6 +42,9 @@ ap.add_argument("--label", default="VBF H#rightarrowinv.", help="sample, in ROOT
 ap.add_argument("--roc-ymax", type=float, default=400.0,
                 help="the ROC panels' common y maximum (user's choice, 2026-11-04); 0 = the larger of the two panels' needs")
 ap.add_argument("--out", required=True)
+ap.add_argument("--lojo", action="store_true", help="also draw the leave-one-jet-out WAVeS t0s of a tdr_pujet --lojo tree "
+                "(results/lojo_t0.md): the jet left out of WAVeS's score, and the jet + its tracks left out with the guard "
+                "(the leave-out t0 only when >= 2 of its cluster's tracks sit in another forward jet, else the event t0)")
 ap.add_argument("--t0s", default=None, help="comma list of the t0s to draw (hgtd, trkptz, waves, truth); default all. "
                 "The Global Performance talk shows WAVeS against Athena only (user, 2026-11-11): --t0s hgtd,waves,truth")
 args = ap.parse_args()
@@ -61,6 +64,11 @@ plain = lambda s: s.replace("_{0}", "0").replace("#", "")
 
 t = uproot.open(args.tree)
 J = t["jets"].arrays(library="np")
+if args.lojo:   # inserted before the truth row, which stays last
+    J["rpt_t0_waves_lojo_g2"] = np.where(J["ninjet_lojo"] >= 2, J["rpt_t0_waves_lojo"], J["rpt_t0_waves"])
+    iw = [t[0] for t in TAGGERS].index("rpt_t0_waves") + 1   # right after WAVeS
+    TAGGERS[iw:iw] = [("rpt_t0_waves_lojet", "WAVeS t_{0}, jet left out", "Jet left out", "kP10Green", 22, 1),
+                      ("rpt_t0_waves_lojo_g2", "WAVeS t_{0}, jet + tracks left out, guarded", "Guarded", "kP10Violet", 33, 1)]
 meta = t["meta"].arrays(library="np")
 gate = float(np.unique(meta["gate_sigma"])[0])
 clean = str(meta["time_cleaning"][0]) if "time_cleaning" in meta else "off"   # trees before 2026-11-03: uncleaned
@@ -156,6 +164,7 @@ for c, (lab, lo, hi) in enumerate(SLICES):
         leg.AddEntry(g, short, "LP")
     leg.Draw()
     S.header(0.20, 0.87, [f"#sqrt{{s}} = 14 TeV, #LT#mu#GT = 200, {args.label}{gate_txt}", f"{lab}, 2.4 < |#eta| < 4.0"] + clean_line, size=TS_M)
+    S.end_pad()
 
     cv.cd()
     p2 = S.pad(f"ratio{c}", 0.5 * c, 0.0, 0.5 * c + 0.5, RAT, top=0.03, bottom=0.36)
@@ -166,6 +175,7 @@ for c, (lab, lo, hi) in enumerate(SLICES):
     one = S.keep(R.TLine(0.80, 1.0, 1.0, 1.0)); one.SetLineStyle(2); one.SetLineColor(R.kGray + 2); one.Draw()
     for (col, name, short, colour, mk, ls), (_, _, ratio) in zip(TAGGERS[1:], rows[1:]):
         S.style(S.graph(EFF, ratio), colour, mk, ls, 2, 1.1).Draw("LP SAME")
+    S.end_pad()
 S.save(cv, f"{args.out}_roc")
 
 # ── Fig 3.21 analogue ─────────────────────────────────────────────────────────

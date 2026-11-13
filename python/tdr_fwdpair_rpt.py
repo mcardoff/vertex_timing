@@ -147,6 +147,7 @@ for row, (cat, ctxt) in enumerate(CONF):
             leg.AddEntry(g, SHORT[c], "LP")
         leg.Draw()
         S.header(0.20, 0.85, [f"{slab}, #LT#mu#GT = 200", ctxt, f"{int(hs.sum()):,} HS / {int(pu.sum()):,} PU jets"], size=0.06)
+        S.end_pad()
         cr.cd()
         p2 = S.pad(f"r{row}{col}r", x0, y0, x0 + 0.5, y0 + 0.5 * RAT_, top=0.03, bottom=0.36, left=0.15, right=0.04)
         ratios = [r[3] / ref for r in rows_[1:]]
@@ -159,6 +160,7 @@ for row, (cat, ctxt) in enumerate(CONF):
         for (c, colour, ls, rej, rerr), q in zip(rows_[1:], ratios):
             ok = np.isfinite(q)
             S.style(S.graph(EFF[ok], q[ok]), colour, MARK[c], ls, 2, 1.0).Draw("LP SAME")
+        S.end_pad()
         i85, i90 = int(np.argmin(np.abs(EFF - 0.85))), int(np.argmin(np.abs(EFF - 0.90)))
         print(f"  {slab.replace('#rightarrow', '->'):14s} {ctxt:40s} ({int(hs.sum())} HS / {int(pu.sum())} PU): " +
               ", ".join(f"{SHORT[c].replace('_{0}', '0')} {rej[i85]:.1f} ({rej[i85] / ref[i85]:.2f}) / {rej[i90]:.1f} ({rej[i90] / ref[i90]:.2f})" for c, colour, ls, rej, rerr in rows_))
