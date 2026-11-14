@@ -288,7 +288,7 @@ int main(int argc, char** argv) {
   const bool oneFwd = pairMode == "one";
   if (oneFwd) SELECTION_TAG = SELECTION_TAG.empty() ? "onefwd" : SELECTION_TAG + "_onefwd";
   const JvtWP* jwp = jvtWPByName(jvtName);
-  if (!jwp || jvtName == "looseext") { std::cerr << "[tdr_fwdpair] --jvt must be none, loose, tight, jvt4pt60, jvt4pt120, jvt4pt60t0, jvt4pt60t0tru, jvt4pt60f03, jvt4pt60f05 or jvt4pt60f10\n"; return 1; }
+  if (!jwp || jvtName == "looseext") { std::cerr << "[tdr_fwdpair] --jvt must be none, loose, tight, jvt4pt60, jvt4pt120, jvt4pt60t0, jvt4pt60t0tru, jvt4pt60f03, jvt4pt60f05, jvt4pt60f10, jvt4pt60tdr, jvt4pt60tdrw or jvt4pt60tdrtru\n"; return 1; }
   const bool jvtOn = jwp->rptMin >= 0.0;
   EXTENDED_BRANCHES = true;   // Track_recoVtx_idx: the JVT discriminants, and the waves_pv0 / waves_npu t0s (tdr_common.h)
   if (jvtOn) {
@@ -302,6 +302,10 @@ int main(int argc, char** argv) {
   }
   const tdr::CleanMode cleanMode = tdr::cleaningMode(argc, argv);   // before the output path: it tags the file
   tdr::rptTrkPtMaxMode(argc, argv);                                  // likewise
+  if (jvtOn && jwp->tdrRpt > -2 && std::isfinite(tdr::RPT_TRK_PT_MAX)) {
+    std::cerr << "[tdr_fwdpair] --jvt=" << jvtName << " is calibrated on the uncapped TDR R_pT: pass --rpt-trk-ptmax=none\n";
+    return 1;
+  }
   const Inflation INFL = inflationFor(SAMPLE_NAME);
   const std::string outPath = outOverride.empty() ? histFilePath("tdr_fwdpair.root") : outOverride;
   {
@@ -418,6 +422,17 @@ int main(int argc, char** argv) {
       for (int j = 0; j < (int)D.size(); ++j) {
         rptPlain[j] = D[j].rpt;
         D[j].rpt = (float)tdr::jvtRpt(branch, j, T, gate, CLEAN).t0[jwp->t0Gate];
+      }
+    }
+    if (jvtOn && jwp->tdrRpt > -2) {   // the TDR R_pT (ITk or t0-gated) on the forward window's jets, JVT's elsewhere
+      if (!haveT) { T = tdr::computeT0s(branch, INFL, CLEAN);  haveT = true; }
+      const tdr::TrackLists Lp = tdr::rptTrackLists(branch);
+      rptPlain.resize(D.size());
+      for (int j = 0; j < (int)D.size(); ++j) {
+        rptPlain[j] = D[j].rpt;
+        if (!D[j].rptFwdWin) continue;
+        const tdr::JetRpt r = tdr::jetRpt(branch, j, Lp, T, gate, CLEAN, tdr::RptMatch::GHOST);
+        D[j].rpt = (float)(jwp->tdrRpt < 0 ? r.itk : r.t0[jwp->tdrRpt]);
       }
     }
     std::vector<int> js;

@@ -70,6 +70,9 @@ namespace MyUtl {
     double      rptMinFwd = -1.0;         // ... at this threshold (< 0: rptMin)
     int         t0Gate = -1;              // >= 0: cut a t0-GATED R_pT instead, t0 source tdr::T0Idx (the caller
                                           // computes it -- util/tdr_common.h's jvtRpt -- and puts it in JetDisc::rpt)
+    int         tdrRpt = -2;              // > -2: in the FORWARD window cut the TDR R_pT instead of JVT's (ghost tracks
+                                          // z-associated to PV0, util/tdr_common.h's jetRpt): -1 ITk only, k >= 0
+                                          // t0-gated with t0 source k. The caller computes it (uncapped track pT)
   };
   // R_pT thresholds: calibrated on local-VBF paper-HS jets in the JVT window
   // (|eta| < 2.5, 30 < pT < 60 GeV) to the published JVT working-point HS
@@ -98,6 +101,15 @@ namespace MyUtl {
     {"jvt4pt60f03",   "_jvt4pt60f03",   0.0167, 1e9, true, 60.0, 0.03},
     {"jvt4pt60f05",   "_jvt4pt60f05",   0.0167, 1e9, true, 60.0, 0.05},
     {"jvt4pt60f10",   "_jvt4pt60f10",   0.0167, 1e9, true, 60.0, 0.10},
+    // Timing in the tagger itself (the user, 2026-11-14: "I want timing to implemented in the first row ... establish a
+    // WP at the same efficiency as JVT's 0.0167"). JVT's R_pT cannot carry it: it is 0 or >= ~0.015 (one PV0-fitted
+    // track), so 0.0167 means "has a PV0-fitted track" and a gated version cannot be matched back to its efficiency.
+    // Instead the forward window (2.5 <= |eta| < 4.0, pT < 60) cuts the TDR R_pT at JVT's forward HS efficiency on grid
+    // VBF (84.2%; condor/vbf/vbf_room_rptptmaxnone_tdr_pujet.root, uncapped tracks): ITk only, WAVeS-gated,
+    // truth-gated. Central jets keep JVT's 0.0167. Needs --rpt-trk-ptmax=none. results/jvt_timing_wp.md
+    {"jvt4pt60tdr",    "_jvt4pt60tdr",    0.0167, 1e9, true, 60.0, 0.2317, -1, -1},
+    {"jvt4pt60tdrw",   "_jvt4pt60tdrw",   0.0167, 1e9, true, 60.0, 0.2049, -1, 2},
+    {"jvt4pt60tdrtru", "_jvt4pt60tdrtru", 0.0167, 1e9, true, 60.0, 0.1962, -1, 3},
   };
 
   // The working point called `name`, or nullptr if there is none.
