@@ -59,9 +59,14 @@ TAGGERS = [("rpt_itk", "ITk only", "ITk only", S.COL["itk"], 24, 2),
            ("rpt_t0_wfix_time", "WAVeS t_{0}, perfect timing", "Perfect timing", "kP10Cyan", 22, 1),
            ("rpt_t0_wfix_sel", "WAVeS t_{0}, perfect selection", "Perfect selection", "kP10Green", 33, 1),
            ("rpt_t0_wfix_both", "WAVeS t_{0}, perfect timing + selection", "Perfect both", "kP10Red", 34, 1),
+           ("rpt_t0_waves_a0", "WAVeS t_{0}, (p_{T}^{jet})^{#alpha}, #alpha = 0", "#alpha = 0", "kP10Violet", 22, 1),
+           ("rpt_t0_waves_a025", "WAVeS t_{0}, (p_{T}^{jet})^{#alpha}, #alpha = 0.25", "#alpha = 0.25", "kP10Ash", 26, 1),
+           ("rpt_t0_waves_a05", "WAVeS t_{0}, (p_{T}^{jet})^{#alpha}, #alpha = 0.5", "#alpha = 0.5", "kP10Gray", 32, 1),
+           ("rpt_t0_waves_pv0", "WAVeS t_{0}, #times PV0 share", "#times PV0 share", "kP10Orange", 29, 1),
+           ("rpt_t0_waves_npu", "WAVeS t_{0}, #times (1 - other-vertex share)", "#times non-PU share", "#C849A9", 30, 1),
            ("rpt_t0_truth", "Truth t_{0}", "Truth t_{0}", S.COL["truth"], 25, 3)]
-# the truth-fixed WAVeS t0s (tdr_pujet from commit dcf6a30, todo vt-23j) are drawn only when the tree has them and
-# --t0s names them (wfix_time, wfix_sel, wfix_both) or is not given
+# the truth-fixed WAVeS t0s (tdr_pujet from commit dcf6a30, todo vt-23j) and the selection levers (waves_a0 / a025 /
+# a05 / pv0 / npu, todo vt-5t0) are drawn only when the tree has them and --t0s names them or is not given
 if args.t0s:   # ITk (the reference) always stays
     TAGGERS = [t for t in TAGGERS if t[0] == "rpt_itk" or t[0].replace("rpt_t0_", "") in args.t0s.split(",")]
 EFF = np.round(np.arange(0.800, 0.9751, 0.025), 3)    # the sampled working points

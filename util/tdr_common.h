@@ -94,9 +94,19 @@ constexpr double T0_ASSOC_NSIGMA  = 2.5;   // t0 clustering input (rpt_v5 / vbs_
 //   wfix_time  Fix::MISTIMED           the HS tracks >= 3 sigma from t_HS dropped, re-clustered (WFIX_MISTIMED, "perfect timing")
 //   wfix_both  Fix::MISTIMED | SELECT  both (WFIX_C3)
 // They use WAVeS's inflation; no t0 (ok = false) when no cluster qualifies.
-constexpr int N_T0 = 7;
-enum T0Idx { T0_HGTD = 0, T0_TRKPTZ = 1, T0_WAVES = 2, T0_TRUTH = 3, T0_WFIX_SEL = 4, T0_WFIX_TIME = 5, T0_WFIX_BOTH = 6 };
-inline const char* const T0_NAMES[N_T0] = {"hgtd", "trkptz", "waves", "truth", "wfix_sel", "wfix_time", "wfix_both"};
+// The next five (2026-11-14, todo vt-5t0) are two reco-level SELECTION levers against the > 50 GeV capture (a hard
+// forward pileup jet's collision wins WAVeS's choice, notes/gp_talk.md): WAVeS's choice re-made on the same clusters
+// with a modified score, then WAVeS's in-jet time and sigma for the new pick -- so they differ from WAVeS by the
+// selection alone (wavesLever below):
+//   waves_a0 / waves_a025 / waves_a05   pT_jet^alpha in place of WAVeS's pT_jet, alpha = 0 / 0.25 / 0.5 (WAVeS: 1)
+//   waves_pv0   WAVeS x the share of the cluster's pT the vertex fit gave PV0 (Track_recoVtx_idx)
+//   waves_npu   WAVeS x (1 - the share it gave ANOTHER reco vertex): tracks outside every fit count as PV0's
+// WAVeS's inflation. No t0 when no cluster qualifies, and for the vertex-fit pair when the input lacks Track_recoVtx_idx.
+constexpr int N_T0 = 12;
+enum T0Idx { T0_HGTD = 0, T0_TRKPTZ = 1, T0_WAVES = 2, T0_TRUTH = 3, T0_WFIX_SEL = 4, T0_WFIX_TIME = 5, T0_WFIX_BOTH = 6,
+             T0_WA0 = 7, T0_WA025 = 8, T0_WA05 = 9, T0_WPV0 = 10, T0_WNPU = 11 };
+inline const char* const T0_NAMES[N_T0] = {"hgtd", "trkptz", "waves", "truth", "wfix_sel", "wfix_time", "wfix_both",
+                                           "waves_a0", "waves_a025", "waves_a05", "waves_pv0", "waves_npu"};
 
 struct T0Set {
   std::array<double, N_T0> t{}, sig{}, infl{};
@@ -172,6 +182,55 @@ struct T0Extra {
   double hsPtInJet = 0.0;       // within dR < 0.4 of a forward jet (pT > 30, 2.38 < |eta| < 4.0): what WAVeS up-weights
 };
 
+// ── Selection levers (todo vt-5t0) ───────────────────────────────────────────
+// WAVeS's score (Cluster::updateScores) generalised:
+//   S(C) = [ SUM_trk pT_trk * pT_jet^alpha / max(dR, WAVES_DR_FLOOR) ] * exp(-1.5 |dz_C|) * f_vtx(C)
+// with the nearest qualifying forward jet per track, and TRKPTZ's score in place of the bracket when the event has no
+// qualifying forward jet -- updateScores' loop and arithmetic exactly, so alpha = 1 with f_vtx = 1 IS Score::WAVES.
+enum class VtxFactor { NONE, PV0, NOT_OTHER };
+struct WavesLever { int k; double alpha; VtxFactor vf; };
+inline constexpr std::array<WavesLever, 5> WAVES_LEVERS = {{
+    {T0_WA0, 0.0, VtxFactor::NONE}, {T0_WA025, 0.25, VtxFactor::NONE}, {T0_WA05, 0.5, VtxFactor::NONE},
+    {T0_WPV0, 1.0, VtxFactor::PV0}, {T0_WNPU, 1.0, VtxFactor::NOT_OTHER}}};
+// The index of the cluster the lever picks: the first maximum, as chooseCluster. When every cluster scores 0 (a vertex
+// factor of 0 everywhere: none of the input reached PV0) the factor says nothing, and WAVeS's own pick (iWaves) stands.
+inline int wavesLeverPick(const std::vector<Cluster>& clusters, BranchPointerWrapper& b, const WavesLever& L,
+                          const std::vector<double>& zTerm, int iWaves) {
+  int best = 0;
+  double bestS = -1.0;
+  for (int c = 0; c < (int)clusters.size(); ++c) {
+    const Cluster& cl = clusters[c];
+    double sum = 0.0;
+    for (int idx : cl.trackIndices) {
+      const double trkEta = b.trackEta[idx], trkPhi = b.trackPhi[idx], trkPt = b.trackPt[idx];
+      double minDR = 1e6, nearJetPt = 0.0;
+      for (int j = 0; j < (int)b.topoJetEta.GetSize(); ++j) {
+        if (b.isJetRemoved(j)) continue;
+        const double jEta = b.topoJetEta[j], jPt = b.topoJetPt[j];
+        if (jPt < MIN_JET_PT) continue;
+        if (std::abs(jEta) < MIN_ABS_ETA_JET || std::abs(jEta) > MAX_ABS_ETA_JET) continue;
+        const double dr = std::hypot(jEta - trkEta, TVector2::Phi_mpi_pi(b.topoJetPhi[j] - trkPhi));
+        if (dr < minDR) { minDR = dr; nearJetPt = jPt; }
+      }
+      if (nearJetPt <= 0.0) continue;
+      sum += trkPt * (L.alpha == 1.0 ? nearJetPt : std::pow(nearJetPt, L.alpha)) / std::max(minDR, WAVES_DR_FLOOR);
+    }
+    double S = sum > 0.0 ? sum * zTerm[c] : cl.scores.at(Score::TRKPTZ.id);
+    if (L.vf != VtxFactor::NONE) {
+      double all = 0.0, pv0 = 0.0, other = 0.0;
+      for (int idx : cl.trackIndices) {
+        const double pt = b.trackPt[idx];
+        const int v = b.recoVtxOf(idx);
+        all += pt;
+        if (v == 0) pv0 += pt; else if (v > 0) other += pt;   // v < 0: in no vertex fit
+      }
+      S *= L.vf == VtxFactor::PV0 ? pv0 / all : (all - other) / all;
+    }
+    if (S > bestS) { bestS = S; best = c; }
+  }
+  return (L.vf != VtxFactor::NONE && !(bestS > 0.0)) ? iWaves : best;
+}
+
 // The event's t0s -- util/vbs_time_veto.cxx's block, verbatim, without TZP.
 inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL, const TimeCleaning& C, T0Extra* x = nullptr) {
   T0Set s;
@@ -201,6 +260,22 @@ inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL, const Ti
                                   {T0_WFIX_BOTH, Fix::MISTIMED | Fix::SELECT}}) {
       const auto c = applyFixes(mask, trk_z, trk_z, clusters, &b, cache);
       if (c) { s.t[k] = c->values[0];  s.sig[k] = c->sigmas[0];  s.ok[k] = true; }
+    }
+    // the selection levers (todo vt-5t0): the same clusters re-scored, WAVeS's in-jet time for the pick
+    int iW = 0;
+    for (int c = 1; c < (int)clusters.size(); ++c)
+      if (clusters[c].scores.at(Score::WAVES.id) > clusters[iW].scores.at(Score::WAVES.id)) iW = c;
+    std::vector<double> zTerm(clusters.size());
+    for (size_t c = 0; c < clusters.size(); ++c) {
+      const float dz = std::get<1>(Cluster(clusters[c]).calcFeatures(&b));   // updateScores' rawDeltaZ
+      zTerm[c] = std::exp(-1.5 * std::abs(dz));
+    }
+    const bool haveVtx = (bool)b.trackRecoVtxIdx;   // bound only under EXTENDED_BRANCHES, and when the input has it
+    for (const WavesLever& L : WAVES_LEVERS) {
+      if (L.vf != VtxFactor::NONE && !haveVtx) continue;
+      const Cluster& p = clusters[wavesLeverPick(clusters, b, L, zTerm, iW)];
+      s.t[L.k] = p.calculateTime(Score::WAVES, &b);   // in-jet refined, as WAVeS
+      s.sig[L.k] = p.sigmas[0];  s.ok[L.k] = true;
     }
   }
   if (x) {
@@ -232,7 +307,8 @@ inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL, const Ti
     }
   }
   s.t[T0_TRUTH] = b.truthVtxTime[0];  s.sig[T0_TRUTH] = 0.0;  s.ok[T0_TRUTH] = true;
-  s.infl = {INFL.hgtd, INFL.trkptz, INFL.waves, 1.0, INFL.waves, INFL.waves, INFL.waves};
+  s.infl = {INFL.hgtd, INFL.trkptz, INFL.waves, 1.0, INFL.waves, INFL.waves, INFL.waves,
+            INFL.waves, INFL.waves, INFL.waves, INFL.waves, INFL.waves};
   return s;
 }
 

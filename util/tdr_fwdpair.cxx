@@ -243,8 +243,8 @@ int main(int argc, char** argv) {
   const JvtWP* jwp = jvtWPByName(jvtName);
   if (!jwp || jvtName == "looseext") { std::cerr << "[tdr_fwdpair] --jvt must be none, loose, tight, jvt4pt60, jvt4pt120, jvt4pt60t0, jvt4pt60t0tru, jvt4pt60f03, jvt4pt60f05 or jvt4pt60f10\n"; return 1; }
   const bool jvtOn = jwp->rptMin >= 0.0;
+  EXTENDED_BRANCHES = true;   // Track_recoVtx_idx: the JVT discriminants, and the waves_pv0 / waves_npu t0s (tdr_common.h)
   if (jvtOn) {
-    EXTENDED_BRANCHES = true;                     // the discriminants need Track_recoVtx_idx
     const std::string tag = std::string(jwp->tag).substr(1);
     SELECTION_TAG = SELECTION_TAG.empty() ? tag : SELECTION_TAG + "_" + tag;
   }
