@@ -102,11 +102,23 @@ constexpr double T0_ASSOC_NSIGMA  = 2.5;   // t0 clustering input (rpt_v5 / vbs_
 //   waves_pv0   WAVeS x the share of the cluster's pT the vertex fit gave PV0 (Track_recoVtx_idx)
 //   waves_npu   WAVeS x (1 - the share it gave ANOTHER reco vertex): tracks outside every fit count as PV0's
 // WAVeS's inflation. No t0 when no cluster qualifies, and for the vertex-fit pair when the input lacks Track_recoVtx_idx.
-constexpr int N_T0 = 12;
+// The last four (2026-11-14) size the room above 50 GeV, where perfect selection + timing (wfix_both = WFIX_C3) reach
+// ITk x1.58 at 85% and the truth t0 x2.88 (results/wfix_downstream.md):
+//   wfix_c4 / wfix_c5 / wfix_c6   the rest of clustering_hist's cumulative fix chain on WAVeS: + misclustering (the
+//                                 chosen cluster timed from its HS tracks alone), + HS track efficiency (untimed or
+//                                 cleaned HS tracks in HGTD given Gaus(t_HS, 30 ps)), + HS time resolution (timed HS
+//                                 tracks at Gaus(t_HS, 1 ps)); WAVeS's inflation; misassigned HS times untimed in the
+//                                 gate, as wfix_time / wfix_both (fixesTimes)
+//   truth_wsig                    t_HS exactly, but gated with WAVeS's sigma_t0 and inflation: the truth row's gate is
+//                                 narrower (sigma_t0 = 0), so truth - truth_wsig is the part of its gain that no real
+//                                 t0 can have; ok wherever WAVeS has a t0 (else sigma_t0 = 0, as truth)
+constexpr int N_T0 = 16;
 enum T0Idx { T0_HGTD = 0, T0_TRKPTZ = 1, T0_WAVES = 2, T0_TRUTH = 3, T0_WFIX_SEL = 4, T0_WFIX_TIME = 5, T0_WFIX_BOTH = 6,
-             T0_WA0 = 7, T0_WA025 = 8, T0_WA05 = 9, T0_WPV0 = 10, T0_WNPU = 11 };
+             T0_WA0 = 7, T0_WA025 = 8, T0_WA05 = 9, T0_WPV0 = 10, T0_WNPU = 11,
+             T0_WFIX_C4 = 12, T0_WFIX_C5 = 13, T0_WFIX_C6 = 14, T0_TRUTH_WSIG = 15 };
 inline const char* const T0_NAMES[N_T0] = {"hgtd", "trkptz", "waves", "truth", "wfix_sel", "wfix_time", "wfix_both",
-                                           "waves_a0", "waves_a025", "waves_a05", "waves_pv0", "waves_npu"};
+                                           "waves_a0", "waves_a025", "waves_a05", "waves_pv0", "waves_npu",
+                                           "wfix_c4", "wfix_c5", "wfix_c6", "truth_wsig"};
 
 struct T0Set {
   std::array<double, N_T0> t{}, sig{}, infl{};
@@ -238,6 +250,7 @@ inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL, const Ti
   s.sig[T0_HGTD] = b.recoVtxTimeRes[0];
   s.ok[T0_HGTD]  = (b.recoVtxValid[0] == 1);
   std::vector<int> trk_z = getAssociatedTracks(&b, MIN_TRACK_PT, MAX_TRACK_PT, T0_ASSOC_NSIGMA);
+  const std::vector<int> trk_pool = trk_z;   // before cleaning: the HS track-efficiency fix's pool (applyFixes' teffPool)
   if (C.t0())   // the clustering drops untimed tracks itself; drop the timed ones cleaning un-times
     trk_z.erase(std::remove_if(trk_z.begin(), trk_z.end(),
                                [&](int i) { return b.trackTimeValid[i] == 1 && !timed(b, i, C, true); }), trk_z.end());
@@ -246,6 +259,7 @@ inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL, const Ti
       /*useSmearedTimes=*/false, /*checkTimeValid=*/true, IDEAL_TRACK_RES,
       ClusteringMethod::ITERATIVE, /*useZ0=*/false,
       /*sortTracks=*/false, /*calcPurityFlag=*/true);
+  FixCache cache;   // the fixes' re-clusterings, shared by the rows with the same input bits
   if (!clusters.empty()) {
     auto bT = chooseCluster(clusters, Score::TRKPTZ);
     s.t[T0_TRKPTZ] = bT.calculateTime(Score::TRKPTZ, &b);
@@ -255,7 +269,6 @@ inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL, const Ti
     s.t[T0_WAVES] = bW.calculateTime(Score::WAVES, &b);       // in-jet refined
     s.sig[T0_WAVES] = bW.sigmas[0];  s.ok[T0_WAVES] = true;
     // the truth-fixed WAVeS t0s (the cache lets wfix_both reuse wfix_time's re-clustering)
-    FixCache cache;
     for (const auto& [k, mask] : {std::pair<int, int>{T0_WFIX_SEL, Fix::SELECT}, {T0_WFIX_TIME, Fix::MISTIMED},
                                   {T0_WFIX_BOTH, Fix::MISTIMED | Fix::SELECT}}) {
       const auto c = applyFixes(mask, trk_z, trk_z, clusters, &b, cache);
@@ -278,6 +291,18 @@ inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL, const Ti
       s.sig[L.k] = p.sigmas[0];  s.ok[L.k] = true;
     }
   }
+  // the rest of the cumulative fix chain (clustering_hist's WFIX_C4..C6). Outside the block above: the track-efficiency
+  // fix can make a t0 in an event with no timed track, as in clustering_hist
+  for (const auto& [k, mask] : {std::pair<int, int>{T0_WFIX_C4, Fix::MISTIMED | Fix::SELECT | Fix::MISCL},
+                                {T0_WFIX_C5, Fix::MISTIMED | Fix::SELECT | Fix::MISCL | Fix::TEFF},
+                                {T0_WFIX_C6, Fix::MISTIMED | Fix::SELECT | Fix::MISCL | Fix::TEFF | Fix::RESOL}}) {
+    const auto c = applyFixes(mask, trk_z, trk_pool, clusters, &b, cache);
+    if (c) { s.t[k] = c->values[0];  s.sig[k] = c->sigmas[0];  s.ok[k] = true; }
+  }
+  // the truth time with a real t0's gate width
+  s.t[T0_TRUTH_WSIG] = b.truthVtxTime[0];
+  s.sig[T0_TRUTH_WSIG] = s.ok[T0_WAVES] ? s.sig[T0_WAVES] : 0.0;
+  s.ok[T0_TRUTH_WSIG] = true;
   if (x) {
     for (int idx : trk_z) {
       if (b.trackToTruthvtx[idx] != 0 || b.trackTimeValid[idx] != 1) continue;   // cleaned-away times already dropped
@@ -308,7 +333,8 @@ inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL, const Ti
   }
   s.t[T0_TRUTH] = b.truthVtxTime[0];  s.sig[T0_TRUTH] = 0.0;  s.ok[T0_TRUTH] = true;
   s.infl = {INFL.hgtd, INFL.trkptz, INFL.waves, 1.0, INFL.waves, INFL.waves, INFL.waves,
-            INFL.waves, INFL.waves, INFL.waves, INFL.waves, INFL.waves};
+            INFL.waves, INFL.waves, INFL.waves, INFL.waves, INFL.waves,
+            INFL.waves, INFL.waves, INFL.waves, INFL.waves};
   return s;
 }
 
@@ -442,7 +468,9 @@ inline bool misassignedHs(BranchPointerWrapper& b, int idx) {
   return b.trackToTruthvtx[idx] == 0 && b.trackTimeValid[idx] == 1 && b.trackTimeRes[idx] > 0 &&
          std::abs(b.trackTime[idx] - b.truthVtxTime[0]) / b.trackTimeRes[idx] >= TRUTH_PULL_CUT;
 }
-inline bool fixesTimes(int k) { return k == T0_WFIX_TIME || k == T0_WFIX_BOTH; }
+inline bool fixesTimes(int k) {
+  return k == T0_WFIX_TIME || k == T0_WFIX_BOTH || k == T0_WFIX_C4 || k == T0_WFIX_C5 || k == T0_WFIX_C6;
+}
 
 // rpt_v5's applyTimeGate. untimeMisHs: a misassigned hard-scatter track passes as untimed (the perfect-timing sources).
 inline std::vector<int> timeGate(BranchPointerWrapper& b, const std::vector<int>& base,
