@@ -64,6 +64,10 @@ TAGGERS = [("rpt_itk", "ITk only", "ITk only", S.COL["itk"], 24, 2),
            ("rpt_t0_waves_a05", "WAVeS t_{0}, (p_{T}^{jet})^{#alpha}, #alpha = 0.5", "#alpha = 0.5", "kP10Gray", 32, 1),
            ("rpt_t0_waves_pv0", "WAVeS t_{0}, #times PV0 share", "#times PV0 share", "kP10Orange", 29, 1),
            ("rpt_t0_waves_npu", "WAVeS t_{0}, #times (1 - other-vertex share)", "#times non-PU share", "#C849A9", 30, 1),
+           ("rpt_t0_wfix_c4", "WAVeS t_{0}, ... + misclustering fixed", "+ misclustering", "kP10Orange", 29, 1),
+           ("rpt_t0_wfix_c5", "WAVeS t_{0}, ... + HS track efficiency fixed", "+ HS track eff.", "kP10Violet", 22, 1),
+           ("rpt_t0_wfix_c6", "WAVeS t_{0}, ... + HS time resolution fixed", "+ HS time res.", "kP10Ash", 26, 1),
+           ("rpt_t0_truth_wsig", "Truth t_{0}, WAVeS #sigma_{t_{0}}", "Truth, WAVeS #sigma", "kP10Gray", 32, 7),
            ("rpt_t0_truth", "Truth t_{0}", "Truth t_{0}", S.COL["truth"], 25, 3)]
 # the truth-fixed WAVeS t0s (tdr_pujet from commit dcf6a30, todo vt-23j) and the selection levers (waves_a0 / a025 /
 # a05 / pv0 / npu, todo vt-5t0) are drawn only when the tree has them and --t0s names them or is not given
