@@ -103,8 +103,20 @@ struct JetOut {
   double core_t_fix = -999, core_sig_fix = -1;
   float jvt_rpt = -1, fjvt = -999;           // the JVT / fJVT discriminants (--jvt), -1 / -999 without
   float jvt_rpt_t0 = -1;                      // JVT's R_pT with the WAVeS t0 gate (--jvt), -1 without
+  // the core-time variants (2026-11-14, todo vt-r2k.21 / vt-r2k.20): the same estimator on other track sets, to see
+  // what a better jet time buys the veto (CV_NAMES below; -999 / -1 / 0 without a track, as core_*)
+  static constexpr int N_CV = 4;
+  std::array<int, N_CV> cv_n{};
+  std::array<double, N_CV> cv_t{-999, -999, -999, -999}, cv_sig{-1, -1, -1, -1};
 };
 constexpr double CORE_DR = 0.2, CORE_DIST_CUT = 2.0;   // util/vbs_time_veto.cxx's JET_TIME_DR, JET_TIME_DIST_CUT
+// the core-time variants, j*_core_{t,sig,n}_<name>:
+//   r04       tracks within dR < 0.4 of the axis instead of 0.2
+//   nocap     no 30 GeV upper track pT (MAX_TRACK_PT, copied from the t0 clustering, never chosen for jets)
+//   r04nocap  both
+//   zwin      the dR < 0.2 core restricted to tracks inside PV0's forward z window (getNewDzpara x 1.4, the R_pT
+//             association): a hard-scatter core built from pileup tracks far in z (vt-r2k.20)
+constexpr const char* CV_NAMES[JetOut::N_CV] = {"r04", "nocap", "r04nocap", "zwin"};
 
 // weighted mean, weighted variance of the times, and 1 / sum w (w = 1 / sigma_t^2)
 void timeStats(const std::vector<std::pair<double, double>>& tw, double& t, double& vSpread, double& vMean) {
@@ -214,6 +226,21 @@ JetOut jetQuantities(BranchPointerWrapper& b, int j, const tdr::TrackLists& L, c
   for (int idx : cand) if (!tdr::misassignedHs(b, idx)) candFix.push_back(idx);
   if (candFix.size() == cand.size()) { o.core_t_fix = o.core_t;  o.core_sig_fix = o.core_sig;  o.core_n_fix = o.core_n; }
   else core(candFix, o.core_t_fix, o.core_sig_fix, o.core_n_fix);
+  // the core-time variants (CV_NAMES)
+  for (int v = 0; v < JetOut::N_CV; ++v) {
+    const double drMax = (v == 0 || v == 2) ? 0.4 : CORE_DR;
+    const double ptMax = (v == 1 || v == 2) ? std::numeric_limits<double>::infinity() : MAX_TRACK_PT;
+    std::vector<int> cv;
+    for (int idx : b.topoJetGhostTrackIdx[j]) {
+      if (idx < 0 || idx >= nT) continue;
+      if (!tdr::timed(b, idx, C, C.jets()) || !(b.trackTimeRes[idx] > 0.0)) continue;
+      if (!passTrackKinematics((size_t)idx, &b, MIN_TRACK_PT, ptMax)) continue;
+      if (tdr::dR(o.eta, o.phi, b.trackEta[idx], b.trackPhi[idx]) >= drMax) continue;
+      if (v == 3 && !assocZ(b, idx, b.recoVtxZ[0], /*fwd=*/true)) continue;
+      cv.push_back(idx);
+    }
+    core(cv, o.cv_t[v], o.cv_sig[v], o.cv_n[v]);
+  }
   return o;
 }
 }  // namespace
@@ -332,6 +359,12 @@ int main(int argc, char** argv) {
     tree.Branch((p + "core_t_fix").c_str(), &o.core_t_fix, (p + "core_t_fix/D").c_str());
     tree.Branch((p + "core_sig_fix").c_str(), &o.core_sig_fix, (p + "core_sig_fix/D").c_str());
     tree.Branch((p + "core_n_fix").c_str(), &o.core_n_fix, (p + "core_n_fix/I").c_str());
+    for (int v = 0; v < JetOut::N_CV; ++v) {
+      const std::string sfx = std::string("_") + CV_NAMES[v];
+      tree.Branch((p + "core_t" + sfx).c_str(), &o.cv_t[v], (p + "core_t" + sfx + "/D").c_str());
+      tree.Branch((p + "core_sig" + sfx).c_str(), &o.cv_sig[v], (p + "core_sig" + sfx + "/D").c_str());
+      tree.Branch((p + "core_n" + sfx).c_str(), &o.cv_n[v], (p + "core_n" + sfx + "/I").c_str());
+    }
     tree.Branch((p + "jvt_rpt").c_str(), &o.jvt_rpt, (p + "jvt_rpt/F").c_str());
     tree.Branch((p + "fjvt").c_str(), &o.fjvt, (p + "fjvt/F").c_str());
     tree.Branch((p + "jvt_rpt_t0").c_str(), &o.jvt_rpt_t0, (p + "jvt_rpt_t0/F").c_str());
