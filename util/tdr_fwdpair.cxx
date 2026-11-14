@@ -105,9 +105,9 @@ struct JetOut {
   float jvt_rpt_t0 = -1;                      // JVT's R_pT with the WAVeS t0 gate (--jvt), -1 without
   // the core-time variants (2026-11-14, todo vt-r2k.21 / vt-r2k.20): the same estimator on other track sets, to see
   // what a better jet time buys the veto (CV_NAMES below; -999 / -1 / 0 without a track, as core_*)
-  static constexpr int N_CV = 4;
+  static constexpr int N_CV = 5;
   std::array<int, N_CV> cv_n{};
-  std::array<double, N_CV> cv_t{-999, -999, -999, -999}, cv_sig{-1, -1, -1, -1};
+  std::array<double, N_CV> cv_t{-999, -999, -999, -999, -999}, cv_sig{-1, -1, -1, -1, -1};
 };
 constexpr double CORE_DR = 0.2, CORE_DIST_CUT = 2.0;   // util/vbs_time_veto.cxx's JET_TIME_DR, JET_TIME_DIST_CUT
 // the core-time variants, j*_core_{t,sig,n}_<name>:
@@ -115,8 +115,11 @@ constexpr double CORE_DR = 0.2, CORE_DIST_CUT = 2.0;   // util/vbs_time_veto.cxx
 //   nocap     no 30 GeV upper track pT (MAX_TRACK_PT, copied from the t0 clustering, never chosen for jets)
 //   r04nocap  both
 //   zwin      the dR < 0.2 core restricted to tracks inside PV0's forward z window (getNewDzpara x 1.4, the R_pT
-//             association): a hard-scatter core built from pileup tracks far in z (vt-r2k.20)
-constexpr const char* CV_NAMES[JetOut::N_CV] = {"r04", "nocap", "r04nocap", "zwin"};
+//             association): a hard-scatter core built from pileup tracks far in z (vt-r2k.20). It also strips the
+//             pileup jets of their own tracks, so the veto goes blind (results/jet_core_variants.md)
+//   zpref     the standard tracks, but the core is the time cluster with the most pT INSIDE that z window; the
+//             highest-sum-pT cluster when no cluster has a track there (a pileup jet keeps its collision's time)
+constexpr const char* CV_NAMES[JetOut::N_CV] = {"r04", "nocap", "r04nocap", "zwin", "zpref"};
 
 // weighted mean, weighted variance of the times, and 1 / sum w (w = 1 / sigma_t^2)
 void timeStats(const std::vector<std::pair<double, double>>& tw, double& t, double& vSpread, double& vMean) {
@@ -227,7 +230,7 @@ JetOut jetQuantities(BranchPointerWrapper& b, int j, const tdr::TrackLists& L, c
   if (candFix.size() == cand.size()) { o.core_t_fix = o.core_t;  o.core_sig_fix = o.core_sig;  o.core_n_fix = o.core_n; }
   else core(candFix, o.core_t_fix, o.core_sig_fix, o.core_n_fix);
   // the core-time variants (CV_NAMES)
-  for (int v = 0; v < JetOut::N_CV; ++v) {
+  for (int v = 0; v < 4; ++v) {
     const double drMax = (v == 0 || v == 2) ? 0.4 : CORE_DR;
     const double ptMax = (v == 1 || v == 2) ? std::numeric_limits<double>::infinity() : MAX_TRACK_PT;
     std::vector<int> cv;
@@ -240,6 +243,23 @@ JetOut jetQuantities(BranchPointerWrapper& b, int j, const tdr::TrackLists& L, c
       cv.push_back(idx);
     }
     core(cv, o.cv_t[v], o.cv_sig[v], o.cv_n[v]);
+  }
+  if (!cand.empty()) {   // zpref: the standard candidates, the cluster with the most z-compatible pT preferred
+    static const std::unordered_map<int, double> kNone;
+    std::vector<Cluster> cl = makeSimpleClusters(cand, &b, /*useSmearedTimes=*/false, kNone, kNone,
+                                                 /*checkTimeValid=*/true, /*usez0=*/false);
+    doIterativeClustering(&cl, CORE_DIST_CUT);
+    const Cluster* best = nullptr;
+    double bestZ = 0.0;
+    for (const Cluster& c : cl) {
+      double zpt = 0.0;
+      for (int t : c.trackIndices) if (assocZ(b, t, b.recoVtxZ[0], /*fwd=*/true)) zpt += b.trackPt[t];
+      if (zpt > bestZ) { bestZ = zpt; best = &c; }
+    }
+    if (!best)   // no z-compatible track anywhere: the standard choice
+      for (const Cluster& c : cl)
+        if (!best || c.scores.at(Score::TRKPT.id) > best->scores.at(Score::TRKPT.id)) best = &c;
+    o.cv_t[4] = best->values[0];  o.cv_sig[4] = best->sigmas[0];  o.cv_n[4] = (int)best->trackIndices.size();
   }
   return o;
 }

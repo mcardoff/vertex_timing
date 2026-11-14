@@ -1,7 +1,7 @@
 """The veto's jet time with more tracks, or a z window (results/jet_core_variants.md, todo vt-r2k.21 / vt-r2k.20).
 
 For each core jet time on tdr_fwdpair trees -- the standard one (dR < 0.2, 1 < pT < 30 GeV) and the variants
-j*_core_{t,sig,n}_<v> (r04, nocap, r04nocap, zwin; util/tdr_fwdpair.cxx CV_NAMES) -- the timing veto rebuilt on it,
+j*_core_{t,sig,n}_<v> (r04, nocap, r04nocap, zwin, zpref; util/tdr_fwdpair.cxx CV_NAMES) -- the timing veto rebuilt on it,
 with its own calibration f(n) from the VBF hard-scatter legs (tdr_fwdpair_common.calibration), and:
   - the hard-scatter legs in HGTD: timed share, median core tracks, out of time (pull >= 3 vs the truth t0), and the
     out-of-time rate of single-track cores;
@@ -20,7 +20,8 @@ import uproot
 import tdr_fwdpair_common as FC
 
 VARIANTS = [("", "dR < 0.2, 1-30 GeV (standard)"), ("r04", "dR < 0.4"), ("nocap", "no 30 GeV cap"),
-            ("r04nocap", "dR < 0.4, no cap"), ("zwin", "dR < 0.2, PV0 z window")]
+            ("r04nocap", "dR < 0.4, no cap"), ("zwin", "dR < 0.2, PV0 z window"),
+            ("zpref", "dR < 0.2, z-compatible cluster preferred")]
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument("sig")
 ap.add_argument("--bkg")
