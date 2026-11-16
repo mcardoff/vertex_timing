@@ -11,8 +11,10 @@
 //   The clustering has two candidate rules for deciding which tracks belong to
 //   the hard-scatter vertex in z, and therefore which tracks t0 is built from:
 //
-//     SIGNIFICANCE  |z0 - z_vtx| / sqrt(1.15^2 * var_z0) < N
-//                   the rule this analysis has always used, at N = 3.0.
+//     SIGNIFICANCE  |z0 - z_vtx| / sqrt(var_z0) < N
+//                   the rule this analysis has always used, at N = 3.0. (The study's
+//                   recorded results used 1.15^2 * var_z0, removed 2026-11-16: their
+//                   N is 1.15 N of the raw covariance.)
 //     DZ_PARA       |z0 - z_vtx| / getNewDzpara(eta, pT)  < S
 //                   the reference R_pT study's empirical parameterization of
 //                   the observed z0 spread, at S = 1.4 there.

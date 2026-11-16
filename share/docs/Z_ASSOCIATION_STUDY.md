@@ -329,6 +329,10 @@ others. The codebase already carries independent evidence for this: the
 underestimate the true z0 resolution by ~15% — and a single global factor cannot
 repair an η-dependent mis-modelling.
 
+⚠️ 2026-11-16: `Z0_VAR_INFLATION` was removed; the significance now uses the raw
+covariance. Every SIGNIFICANCE cut N in this study was run with the factor, so it
+corresponds to 1.15 N of the raw covariance (3.0 -> 3.45, 2.0 -> 2.3).
+
 ---
 
 ## Differential results

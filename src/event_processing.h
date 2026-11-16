@@ -163,7 +163,7 @@ namespace MyUtl {
              / getNewDzpara(branch->trackEta[trackIdx], branch->trackPt[trackIdx])
              < DZ0_PARA_SCALE_CLUSTER;
 
-    double nsigmaPrim = std::abs(trkZ0 - vxZ) / std::sqrt(Z0_VAR_INFLATION * trkZVar + vxZVar);
+    double nsigmaPrim = std::abs(trkZ0 - vxZ) / std::sqrt(trkZVar + vxZVar);   // raw covariance (no 1.15^2 since 2026-11-16)
     return nsigmaPrim < significanceCut;
   }
 
@@ -188,7 +188,7 @@ namespace MyUtl {
              < rule.cut;
 
     // Vertex z variance treated as zero, matching the global-rule path above.
-    return dz / std::sqrt(Z0_VAR_INFLATION * branch->trackVarZ0[trackIdx]) < rule.cut;
+    return dz / std::sqrt(branch->trackVarZ0[trackIdx]) < rule.cut;
   }
 
   // ---------------------------------------------------------------------------

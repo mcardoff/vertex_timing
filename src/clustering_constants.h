@@ -212,11 +212,13 @@ namespace MyUtl {
   inline OverlapMode OVERLAP_MODE = OverlapMode::REMOVE_JETS;
   const int    CONE_ITER_K        = 3;     // Top cone clusters to refine; used only by util/scratch/cone_iter_k_sweep.cxx
   const double TRUTH_PULL_CUT     = 3.0;   // |pull| < cut keeps track as truth-matched
-  // z₀ pull-width inflation factor (measured from z0_pull_diag: σ ≈ 1.15 across all
-  // η bins, indicating the covariance matrix underestimates the true z₀ resolution by
-  // ~15%).  Inflating var_z0 by this factor before taking the square root matches the
-  // observed spread, analogous to the 1.5² = 2.25 inflation used for the timing gate.
-  const double Z0_VAR_INFLATION   = 1.15 * 1.15;  // = 1.3225
+  // z0 significance uses the track's RAW z0 covariance: |z0 - z_vtx| / sqrt(var_z0).
+  // Until 2026-11-16 var_z0 was inflated by Z0_VAR_INFLATION = 1.15^2 (a 2026-06-15
+  // z0-pull diagnostic, width ~1.15 in every eta bin), so every quoted "N sigma" before
+  // then is 1.15 N sigma of the raw covariance (the t0 input's 2.5 -> 2.875, the HS-track
+  // count's 3 -> 3.45). Removed by the user as a non-standard convention that outside
+  // readers cannot reproduce. Impact on local VBF: WAVeS core fraction unchanged
+  // (92.71 -> 92.72%), TRKPTZ +0.20 points, forward-HS-track count 9.16 -> 8.99 on average.
 
   // ── Alternative track-to-vertex association: the R_pT parameterization ────
   // getNewDzpara is an empirical parameterization of the observed |z0 - z_vtx|
@@ -313,7 +315,7 @@ namespace MyUtl {
   // that does not pass one is bit-for-bit unchanged.
   struct AssocRule {
     enum class Kind {
-      SIGNIFICANCE,  // |z0 - z_vtx| / sqrt(Z0_VAR_INFLATION * var_z0) < cut
+      SIGNIFICANCE,  // |z0 - z_vtx| / sqrt(var_z0) < cut (raw covariance since 2026-11-16)
       DZ_PARA        // |z0 - z_vtx| / getNewDzpara(eta, pT)           < cut
     };
     Kind        kind = Kind::SIGNIFICANCE;
