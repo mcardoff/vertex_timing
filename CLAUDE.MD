@@ -671,7 +671,9 @@ VBS_JET_D_ETA         = 0.0   // NO |Deta| requirement (was 3.0 before 2026-08-2
                               //   requirement itself; see the novbs note below
 VBS_JET_MJJ           = 200.0 // GeV — m_jj now carries the topology cut (was 0)
 MAX_NSIGMA            = 3.0   // z0-significance track-to-vertex association (incumbent)
-Z0_VAR_INFLATION      = 1.15² // covariance underestimates true z0 resolution by ~15%
+// Z0_VAR_INFLATION REMOVED 2026-11-16 (f897b1e, the user): the significance now uses the
+// raw z0 covariance. Every "N sigma" in an output before then is 1.15 N sigma raw
+// (the talk's 2.5 -> 2.875, the HS-track count's 3 -> 3.45). See notes/gp_talk.md.
 DZ0_PARA_SCALE_CLUSTER= 1.4   // multiple of getNewDzpara used when --dzpara is passed
 COUNTING_NSIGMA       = 3.0   // association PINNED for the EventCounts scan under an AssocRule
 ```
@@ -1755,7 +1757,8 @@ worth **+5.6 points of recall at higher purity**, and TRKPTZ gains 0.5 ps and
 0.6 %pt from the shape alone. Likely cause: `sqrt(var_z0)` is a per-track
 covariance that does not capture the η dependence of the true z0 spread, and
 `Z0_VAR_INFLATION = 1.15²` is independent evidence it is mis-estimated — a
-single global factor cannot repair an η-dependent mis-modelling.
+single global factor cannot repair an η-dependent mis-modelling. (The factor was
+removed 2026-11-16; this study's significance cuts N are 1.15 N of the raw covariance.)
 
 **Union with ghost association: tested and rejected.** The idea was that ghost
 association, being derived independently of z, might recover HS tracks the
