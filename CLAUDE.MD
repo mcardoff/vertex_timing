@@ -14,111 +14,38 @@ The project performs timing-based vertex reconstruction using:
 
 ## Project Structure
 
-```
-vertex_timing/
-├── src/                           # Core library headers + main analysis executables
-│   ├── clustering_constants.h    # Analysis constants, Score struct + SCORE_REGISTRY, ClusteringMethod enum
-│   ├── clustering_functions.h    # Clustering algorithms (clusterTracksInTime, chooseCluster, ...)
-│   ├── clustering_includes.h     # Common ROOT/C++ includes
-│   ├── clustering_structs.h      # BranchPointerWrapper, Cluster (incl. updateScores/calcFeatures), EventCounts
-│   ├── sample_config.h           # --sample=vbf|zjets|dijet + --hist-file= resolution (default: local ../../ntuple-hgtd/)
-│   ├── histogram_io.h            # HistWriter/HistReader: TFile-based histogram+scalar I/O shared by the
-│   │                             #   *_hist/*_plot split executables (see "Main Executables" below)
-│   ├── event_processing.h        # setupChain, getAssociatedTracks, selectClusters, processEventData
-│   ├── idealised_timing.h        # rpt_v5's idealised world (truth / waves_ideal rows): per-event seed,
-│   │                             #   smeared track times, re-clustering -- shared with the display macro
-│   ├── jet_tagging.h             # In-code JVT (R_pT proxy) / fJVT taggers + working points, shared by
-│   │                             #   vbs_region_diag --jvt and rpt_v5_hist --jvt
-│   ├── plotting_utilities.h      # PlotObj / AnalysisObj + all plotting helpers (moneyPlot, inclusivePlot, ...)
-│   ├── AtlasLabels.h / AtlasStyle.h  # ATLAS plot style utilities
-│   ├── clustering_dt_common.h    # Shared by clustering_hist.cxx/clustering_plot.cxx: Scenario enum,
-│   │                             #   buildAnalysisMap, makeComparisonPlots
-│   ├── clustering_hist.cxx       # Histogramming stage: event loop only, writes <sample-prefixed>_clustering_hist.root
-│   ├── clustering_plot.cxx       # Plotting stage: reads that file, produces all PDFs, no ntuple access
-│   └── clustering_dt.cxx         # Legacy monolithic executable (event loop + plotting in one run); retained
-│                                 #   only as the validation ground truth for the split above, see Main Executables
-├── util/                          # Diagnostic / report / ML-data-export executables
-│   ├── failure_decomposition.cxx # Per-event principal-cause failure classification (see section below)
-│   ├── export_training_data.cxx  # Cluster-selection ML export: clusters/tracks/jets TTrees, shardable (see ML Data Export)
-│   ├── generate_rpt.cxx          # RpT-style timing/discrimination report (older version)
-│   ├── rpt_v2.cxx .. rpt_v4.cxx  # RpT discrimination study iterations
-│   ├── rpt_v5_common.h           # Shared by rpt_v5_hist.cxx/rpt_v5_plot.cxx: Scenario struct, RpT histogram
-│   │                             #   binning/booking, saveScenarios/loadScenarios
-│   ├── rpt_v5_hist.cxx           # Histogramming stage: event loop only, writes <sample-prefixed>_rpt_v5_hist.root
-│   ├── rpt_v5_plot.cxx           # Plotting stage: ROC/console-summary/PDF from that file, no ntuple access
-│   ├── rpt_v5.cxx                # Legacy monolithic executable; retained only as validation ground truth
-│   ├── assoc_study_common.h      # Shared by assoc_study_hist.cxx/assoc_study_plot.cxx: assocRules() rule
-│   │                             #   list, buildAssocMap, scalar-key naming
-│   ├── assoc_study_hist.cxx      # Histogramming stage of the z-association study: one event loop, every
-│   │                             #   AssocRule evaluated against the same event
-│   ├── assoc_study_plot.cxx      # Report stage: console tables + CSV block + PDFs, no ntuple access
-│   ├── vbs_region_mjj.cxx        # VBS pair composition vs m_jj (R1/R2/both-HS/Other; mjj>=500, |dEta|>=2.5)
-│   ├── maxpt_jet_test.cxx        # A/B/C test of the MAX_TRACK_PT cap vs per-event leading-jet pT
-│   ├── track_dt.cxx              # Inclusive per-track HGTD-time-vs-truth-particle-time residual
-│   ├── skim_ntuples.cxx          # Writes the skimmed+slimmed sample copies under
-│   │                             #   /data/mcardiff/skimmed_ntuples/ (see Data Format)
-│   ├── vbs_region_diag.cxx       # Per-event VBS pair composition: does an R1/R2-shaped pair
-│   │                             #   EXIST, and did the m_jj picker choose it (3 zone conventions);
-│   │                             #   truth-side jet columns + --no-or; --jvt=none|loose|tight applies
-│   │                             #   in-code JVT (R_pT proxy) / fJVT before pairing and writes a
-│   │                             #   per-jet `jets` tree. Write-ups: results/vbs_pair_composition.md,
-│   │                             #   results/vbs_pair_composition_jvt.md
-│   ├── vbs_time_veto.cxx         # Event-level timing veto on the VBS pair, jet vs jet against jet vs
-│   │                             #   t0: per selected event, both tests' INGREDIENTS (jet times, every
-│   │                             #   t0), the weight, truth MET / pT(ll). Write-up: results/vbs_time_veto.md.
-│   │                             #   --sr: VBF H->inv SR candidates instead, every jet + JVT/fJVT stored;
-│   │                             #   --sr-j1-pt/--sr-j2-pt lower the stored pair's pT (tagged sr_j1pt<v>_j2pt<v>)
-│   └── sweep_utilities.h         # Shared helpers for parameter-sweep executables (no sweep .cxx files currently present)
-├── python/                        # Interactive/visualisation scripts (run from within this dir)
-│   ├── event_display.py          # Event visualisation — calls runHGTD_Clustering.cxx, produces 3-page PDF
-│   ├── runHGTD_Clustering.cxx    # Interactive per-event clustering
-│   ├── clustering_animation.py   # Animates the iterative clustering algorithm for one event
-│   ├── event_tinkering.py        # Quick event inspection and jet printing via uproot
-│   ├── vbs_jvt_calibrate.py      # R_pT thresholds for vbs_region_diag's JVT working points, from its jets tree
-│   ├── vbs_jvt_plot.py           # 21-cell VBS pair composition under none/loose/tight, one sample
-│   ├── vbs_jvt_migration.py      # Event-by-event R1/R2 migration between the none and tagged outputs
-│   ├── vbs_pair_composition_plot.py  # The two-sample 21-cell figure for ANY set of vbs_region_diag outputs
-│   ├── vbs_region_stack.py       # Seven-band composition vs m_jj, ROOT/ATLAS style (PyROOT), any diag output
-│   ├── rpt_region_dists.py       # Wide-region R_pT, z-only vs timed per timing case, from rpt_v5_hist's region tree
-│   ├── rpt_region_displays.py    # select | pick | render: 20 R1 + 20 R2 displays per case, RPT_CHECK-verified
-│   ├── vbs_time_veto_plot.py     # vbs_time_veto outputs -> weighted S/B efficiency vs m_jj per veto,
-│   │                             #   S/sqrt(B), threshold trade-off, yield table (region-plot style)
-│   ├── vbs_time_veto_sr.py       # vbs_time_veto --sr outputs -> the same tests INSIDE the VBF H->inv SR
-│   │                             #   (ANA-EXOT-2020-11-INT1 emulated), event veto vs jet removal;
-│   │                             #   --region minimal|relaxed: S and B both in that set
-│   ├── vbs_time_veto_common.py   # shared by the two: normalisation, jet-time calibration, figure layouts
-│   ├── vbf_hinv_sr.py            # the VBF H->inv SR selection + timing variants, shared by the SR scripts
-│   ├── vbs_hspu_study.py         # pileup-tagged (HS+PU) SR background: VBF, Z+jets, dijet (fake MET from jets)
-│   └── vbs_sr_minimal.py         # which SR cuts the background's timing response needs (the minimal set)
-├── share/
-│   ├── models/                   # ML artifacts from a prior (currently inactive) DNN/BDT effort — see
-│   │                             #   Machine Learning section below
-│   ├── scripts/                  # ONNX export/inspection Python utilities (historical; no active consumer in src/)
-│   └── docs/                     # Design docs, incl. older ML integration guides
-├── results/                       # Markdown/JSON/HTML records of every study on this branch —
-│                                 #   positive AND negative results, one file per study; the TZP
-│                                 #   section below indexes the load-bearing ones
-├── condor/                        # HTCondor grid submission templates (see Grid Submission)
-│   ├── run_analysis.sh           # Generic job executable (any --sample/--threads-aware target)
-│   ├── run_training.sh           # ML training job executable (script transferred via $(script) macro)
-│   ├── train_*.sub, probe_env.*  # ML training/env-probe submit files (see Machine Learning)
-│   ├── export_training_data_*.sub, merge_exports.sh  # ML-export jobs + hadd-based shard merge
-│   ├── clustering_dt.sub         # Submit file: one job per sample, for the legacy clustering_dt
-│   ├── clustering_hist.sub       # Submit file: one job per sample, for clustering_hist (histogramming stage)
-│   ├── rpt_v5.sub                # Submit file: one job per sample, for the legacy rpt_v5
-│   ├── rpt_v5_hist.sub           # Submit file: one job per sample, for rpt_v5_hist (histogramming stage)
-│   ├── vbs_region_diag.sub       # One sample x one JVT working point per submit (jvt/jvttag macros must agree)
-│   ├── vbs_time_veto.sub         # Sharded; VBF MUST read the RAW ntuples (inputargs=--ntuple-dir=...), Z+jets its skim
-│   └── logs/                     # condor stdout/stderr/log output
-├── CMakeLists.txt
-└── build/                        # Build output (created by `cmake ..`)
-```
+**The GitHub repo (`mcardoff/vertex_timing`) is PUBLIC.** Since 2026-11-17 `results/`, `notes/` and
+`slides/` are local-only and git-ignored: they hold internal numbers, reviewer comments and the decks.
+Never commit them, and keep internal results out of PR descriptions. The `results/` files committed
+before that date stay tracked. The full pre-cleanup history, those files included, is the local tag
+`archive/full-history-2026-11-17`.
 
-Note: several directories/files described in earlier versions of this doc
-(`vertex_time.cxx`, `check_jet_sorting.cxx`, `test_vbf_*.cxx`, `DBSCAN.ipynb`,
-`figs/`, `old/`, `src/ml_model.h`, and most of the `util/` diagnostics and
-parameter-sweep executables) do not exist in the current tree — this section
-reflects what's actually present.
+Run `ls` for the layout; each executable's header describes it. Non-obvious points:
+- `src/clustering_dt.cxx` and `util/rpt_v5.cxx` are legacy monolithic executables kept only as
+  validation ground truth; the `*_hist` / `*_plot` pairs are the primary workflow.
+- `python/` scripts are run from within `python/` (the event display invokes its macro by relative name).
+- `slides/`: hand-written Beamer talks reading figures in place from `../figs` and `../condor`
+  (`vvhbeamer.sty` is a copy of `~/project/VBS_HIGGS/slides`' style). Build with
+  `cd slides && latexmk -pdf -outdir=build <deck>.tex`; `grep -c 'missing plot' build/<deck>.log`
+  must be 0 — a missing PNG is a grey box, not an error.
+- `results/`: one Markdown/JSON/HTML record per study, positive AND negative results (local-only, see above).
+- `share/models/`, `share/scripts/`: historical ML artifacts with no active consumer.
+- `util/scratch/`: one-off macros (e.g. the region-tree friend-file macros in `util/scratch/region_weights/`).
+- `condor/vbs_region_diag.sub` needs its `jvt`/`jvttag` macros to agree; `condor/vbs_time_veto.sub`
+  must read VBF from the RAW ntuples (`inputargs=--ntuple-dir=...`), Z+jets from its skim.
+
+## Notes map
+
+`notes/` (local-only) holds the dated history, read on demand; newer sections beat older ones and the
+repo beats both. New findings follow the `project-notes` skill; todos go in beads (`bd`).
+
+| note | covers |
+|---|---|
+| `notes/tdr_presentation.md` | the TDR-structured presentation (tdr_* programs, figures, grid runs) |
+| `notes/gp_talk.md` | the GPER / VDT talk and the studies after it (capture, failure fixes, levers, veto room) |
+| `notes/gp_talk_drafts.md` | the talk's removed draft text, by slide |
+| `notes/jvt_variants.md` | JVT variants and timing in the pileup-jet tagger |
+| `notes/repo.md` | repository state: the 2026-11-17 cleanup, the public code-only line, archive tags |
 
 ## Main Executables
 
@@ -222,66 +149,9 @@ primary workflow.
   must agree there. That check has caught two real bugs (see Physics
   Findings).
 
-  **Wide-window region tree** (2026-09-25): beside the histogram file,
-  `rpt_v5_hist` writes `<prefix>rpt_v5_regions.root`, tree `regions`, one row
-  per event whose max-m_jj pair is R1/R2 with forward = |eta| > 2.4 and **no
-  upper edge**. These are the same event sets as the composition plots, legs
-  past 3.8 included. Per row it stores:
-  - every scenario's per-leg R_pT (`rpt_hs_<s>`, `rpt_pu_<s>`; R2's
-    `rpt_hs_*` = −1, since its HS leg is central);
-  - each scenario's exact gate inputs (`t0_<s>`, `sig0_<s>` before inflation,
-    `infl_<s>`, `ok_<s>`);
-  - leg kinematics, and the z-associated / timed track counts in each leg's
-    R_pT cone;
-  - `core`, flagging the rows that are also in the narrow `_r1/_r2` region
-    (a strict subset);
-  - `n_jets_fwd_acc`, the jets >30 GeV in 2.38 < |eta| < 4.0.
-  `vbs_region_diag`'s preselection requires ≥1 such jet, and requiring it
-  here reproduces the composition counts exactly. Without it R2 is ~40%
-  larger (local VBF: 4,744 vs 3,350), almost all of that from PU legs past
-  |eta| 4.0 with R_pT = 0 in every row.
-  **`--jvt=none|loose|tight`** (2026-09-25) applies the in-code JVT/fJVT
-  taggers (`src/jet_tagging.h`, identical to `vbs_region_diag --jvt`) to the
-  pT-passing jets BEFORE the VBS pair is formed. It gates the regions only
-  (narrow histograms + wide tree), like the `--vbs-*` knobs; the inclusive
-  forward slices stay tagger-free. A tagged run:
-  - turns on EXTENDED_BRANCHES (+ `recordAvailableBranches`), and refuses a
-    sample without `Track_recoVtx_idx` rather than removing every jet;
-  - tags its outputs `jvtLoose_`/`jvtTight_` (SELECTION_TAG; condor
-    `selargs=--jvt=loose seltag=jvtLoose_`);
-  - writes `meta_vbs_jvt_wp`;
-  - fills `jvt_wp`, each leg's JVT R_pT / fJVT, and the removed jets
-    (`rm_jvt`, `rm_fjvt`, drawn by the displays) in the tree.
-  Validated on local VBF: `--jvt=none` is bit-identical to before, and
-  `--jvt=loose` reproduces `vbs_region_diag --jvt=loose`'s composition counts
-  exactly (R1 4,183, R2 2,579 with its preselection).
-  Merge shards with `hadd` (TTrees only); `hist_merge` refuses the key type,
-  which is why it is a separate file. Standing checks, all passing on local
-  VBF: the core rows reproduce all 21 region histograms bin for bin
-  (`python/rpt_region_dists.py --hist-file` runs this every time), and zero
-  narrow events fall outside the wide region.
-  The narrow `_r1/_r2` histograms are kept for the region ROCs. A wide ROC is
-  not meaningful: HS legs past |eta| 4.0 have no tracks, which puts the
-  HS-efficiency ceiling below the 0.80 window.
-
-  **Region R_pT distributions and displays** (from that tree):
-  - `python/rpt_region_dists.py` draws, per timing case (TRKPTZ, WAVeS, HGTD,
-    and the `truth` / `waves_ideal` rows presented as "Truth vertex t0" /
-    "Ideal track time assignment"):
-    - R1-HS, R1-PU and R2-PU pages, z-only (filled) vs timed, with a ratio pad;
-    - an |eta|-band page (2.4–3.8 vs >3.8);
-    - a markdown summary table.
-  - `python/rpt_region_displays.py select|pick|render` produces 20 R1 + 20 R2
-    event displays per case. `pick` copies the events out of the skims (AF
-    only) so `render` can run on the laptop. Every display must pass
-    RPT_CHECK, and the idealised rows REPLAY_CHECK (see Event Display).
-  - Results, grid VBF + Z+jets, untagged and JVT+fJVT loose:
-    `results/rpt_region_distributions.md`.
-    - Legs past |eta| 4.0 carry no tracks and are 57–60% of VBF PU legs.
-    - In R2, WAVeS zeroes far fewer fakes than TRKPTZ (26–27% vs 40% on VBF).
-    - The loose tagger removes 27% of VBF R1 events and 16% of R2 but leaves
-      the per-leg picture unchanged.
-    - A |Δmargin| ranking of R1 displays is mostly "timing hurt" events.
+  The wide-window region tree (`<prefix>rpt_v5_regions.root`, TTree-only: merge with `hadd`),
+  its friend files, `--jvt=none|loose|tight`, and the region R_pT distribution / display scripts are
+  documented in the `vbs-timing-studies` skill.
 
   Both idealised rows only smear tracks with `trackTimeValid == 1` — idealising
   the time of a track HGTD never measured invents coverage it does not have,
@@ -300,146 +170,11 @@ primary workflow.
   split pair is the primary workflow going forward.
 
 ### Event-level timing veto (2026-09-28)
-- **vbs_time_veto.cxx** (`util/`) + **python/vbs_time_veto_plot.py**: Friday
-  2026-09-25's question. R1 needs no t0: veto the event when the two tagging
-  jets' times are incompatible, |t_A - t_B| / sqrt(sA^2 + sB^2) >= 3. That is
-  compared with testing EACH timed leg against the event t0, which also reaches
-  R2. The metric is weighted signal (VBF, truth MET > 200) and background
-  (Z+jets, pT(ll) > 200) efficiency. Results: `results/vbs_time_veto.md`.
-  - **Answer (grid, JVT + fJVT loose): neither veto improves S/sqrt(B) after
-    the recoil cut.**
-    - Jet vs jet: eps_S 95.1%, eps_B 96.0%, S/sqrt(B) x 0.97. Only 6.5% of the
-      background has two timed legs, and R2 (a central leg) is 35% of it.
-    - Jet vs t0: eps_S ~86%, eps_B ~70%, x 1.02-1.04 (HGTD 0.98). That is
-      within the +-2.4% that 204 Z+jets MC events allow, but it beats jet vs
-      jet at matched eps_S.
-    - A PERFECT t0 does no better. The signal loss is the HS jet time's tail:
-      7% of HS legs fail 3 sigma against the true t_HS, half of them
-      single-track.
-  - **The executable writes ingredients, never decisions.** For every event in
-    the region plots' selection it stores both legs' jet times, all five t0s
-    with sigma and inflation, the weight, and both recoil proxies. Threshold,
-    jet-time calibration and cuts are applied offline, with weights.
-  - **The jet time is the crux.** Averaging ALL timed ghost tracks, the literal
-    prescription, gives a pileup average: only 21% of an HS jet's are
-    hard-scatter, chi2/ndf ~ 65. It passes 25% of HS+HS pairs, against 21% of
-    R1. The default `core_` time keeps timed ghost tracks passing
-    passTrackKinematics within dR < 0.2, clusters them in time (iterative,
-    2 sigma), and takes the highest-sum-pT cluster.
-  - **The jet-time calibration is ONE procedure for S and B.** sigma_jet is
-    scaled by f(n tracks), measured on VBF HS legs: 2.34 at n = 1 falling to
-    1.31 at n >= 9. The same factors apply to both samples. A per-sample
-    calibration (global 1.51 VBF / 1.83 Z+jets) would give the background a
-    looser veto than the signal; `--jet-infl per-file` shows it moves nothing.
-  - **VBF must be read from the RAW ntuples.** Its recoil cut is truth
-    |sum pT(nu)| > 200 GeV, and the skims drop the truth record.
-    `condor/vbs_time_veto.sub` passes it via `inputargs=--ntuple-dir=...`. On a
-    skim, met_truth = -1 and the plot script refuses the cut. It also checks
-    completeness: VBF 1,464,400 events and the raw sum of weights (matched
-    exactly); Z+jets 530,962 skim events.
-  - **Validated.**
-    - Every reco t0 equals rpt_v5's JVT-loose region trees event by event
-      (91,624 VBF, 5,528 Z+jets). The VBF run read the raw files and the trees
-      the skims.
-    - Truth MET and pT(ll) equal last week's friend files.
-    - Z+jets' 26,883 selected / 204 after pT(ll) > 200 equal the region
-      stacks' `vbs_region_diag` counts.
-    - Local VBF's event set equals `vbs_region_diag --jvt=loose`'s exactly.
-  - **Job cost:** VBF raw, 20 shards, ~11 min each; Z+jets skim, 8 shards,
-    ~3 min each.
-  - **Second method, jet removal + re-pairing (`rp_*`).** The event veto
-    rejects signal R1 events, and R1 is as common in VBF as in Z+jets. So the
-    tree now also carries every candidate jet (`jet_*`), and the plot script
-    removes the jets failing the t0 test and re-forms the pair. The forward-jet
-    preselection is not re-applied after removal.
-  - **Result (grid, recoil cuts at 100 GeV): jet removal does not beat the
-    event veto.** It keeps 90-92% of the signal (event veto 84-86%) but
-    78-85% of Z+jets (event veto 64-76%). S/sqrt(B) is x1.03-1.04 against
-    x1.04-1.06. Re-pairing recovers background as readily as signal.
-  - The event veto with a TRKPTZ / WAVeS / TZP t0 stays the best use of the
-    timing, about +5%.
-  - **In the VBF H->inv SIGNAL REGION (2026-09-29, `--sr` +
-    `python/vbs_time_veto_sr.py`, `results/vbs_time_veto_sr.md`).** The
-    selection is ANA-EXOT-2020-11-INT1's SR, emulated offline; the internal
-    note is `~/Downloads/ATL-COM-PHYS-2020-310.pdf`. It includes JVT, fJVT on
-    j1/j2 with the E_T^miss-dependent working point, 2-4 jets, the j3/j4
-    centrality and m_rel cuts, E_T^jet,no-jvt, the dphi/deta/m_jj cuts and the
-    16-bin union.
-    - The SR flips the jet-removal conclusion on the signal side. The event
-      veto costs 7-9% of the signal: SR pairs are 99.4% HS+HS. Removing
-      failing jets first GAINS 2-5%: removed out-of-time pileup jets no longer
-      fail the extra-jet cuts.
-    - Pileup jets cost the SR 42% of its signal (truth ceiling x1.71). Only
-      x1.14 of that lies in HGTD acceptance.
-    - **The background cannot be measured: 4 Z+jets MC events survive the
-      SR.** Inclusive Powheg DY has too little VBF topology; the whole sample
-      gives 223 candidates.
-    - `--sr` exists because 14% of SR candidates fail the region-plot
-      preselection. It stores every jet > 20 GeV with the JVT R_pT, fJVT and
-      windows.
-    - EMTopo, not the note's PFlow: this production's PFlow is miscalibrated
-      forward (HS response 1.14 at 2.4-4.0, 1.31 beyond).
-    - `python/vbs_time_veto_common.py` is shared by both plot scripts, which
-      is validated byte- and pixel-identical.
-    - Job cost: VBF raw ~22 min per shard (it reads the truth record for
-      every event), Z+jets ~5 min.
-    - **HS+PU study (`python/vbs_hspu_study.py`).** It asks how often a
-      pileup jet is a tagging jet, and whether the t0 test catches it.
-      - Multijet = dijet raw with `--sr --sr-met=jets`: `met_jets` is
-        |sum pT| of the JVT-passing jets > 20 GeV, since truth MET is ~0.
-      - The JZ slices carry pT-biased weights (5e-9 to 1), so quote
-        effective counts; they are not normalised to each other.
-      - The multijet MC reaches the tagging-pair stages only: nothing
-        survives |dphi_jj| < 2 plus the jet veto.
-      - At the pair stage (MET > 100) the HS+PU share is Z+jets 44%,
-        JZ2 53%, JZ3 10%, JZ4 0%, and VBF 5%.
-      - Of the PU tagging jets, 1/3-1/2 lie beyond |eta| 4. The t0 test
-        catches ~2/3 of those in HGTD.
-      - **The event veto pays when the pileup-tagged background share f
-        exceeds f* ~ 30%.** That is with eps_S, c and h all in the minimal
-        set: WAVeS 31%, truth 30%, TRKPTZ 35%, HGTD 47%. An earlier 20%
-        mixed selections (eps_S from the full SR, c and h at the pair
-        stage).
-      - Our Z+jets at 34-44% overstates f (Powheg DY). Run 2 measured
-        6-13%.
-    - **WITHDRAWN 2026-10-01: the "SR background, estimated" numbers.** They
-      took S from the full SR, and B from Z+jets at +dphi times a transfer
-      factor, so S and B sat in different selections. Its "jet removal
-      +10 to +12%" came from that factor. **S/sqrt(B) only ever compares S
-      and B measured in the same selection.**
-    - **Minimal cut set** (`python/vbs_sr_minimal.py`, 2026-10-01). Only
-      B(timing)/B(none) enters S/sqrt(B), so a cut uncorrelated with the
-      timing decision can be dropped. Each cut is tested pass vs fail on f
-      and on the veto's kept fraction.
-      - Keep: the pair (j1/j2 pT, deta, m_jj), fJVT, and E_T^miss > 100.
-        Also keep |dphi_jj| < 2: a back-to-back multijet pair passes it only
-        with a PU leg (+5 sigma).
-      - Drop: E_T^miss > 160/200 with the bins, E_T^jet,no-jvt, and the jet
-        veto (<= 1.6 sigma everywhere). That leaves Z+jets 52 MC events
-        (SR: 4).
-      - The pair cuts and the floor cannot be loosened. f depends on m_jj,
-        deta and j2 pT within the SR range. Below pT(ll) = 100, f is 81-85%
-        (`--sr-recoil-min=0`, tagged `sr_rec0p0`).
-      - S/sqrt(B), with S and B both in the minimal set
-        (`vbs_time_veto_sr.py --region minimal`, figs/time_veto/srmin_*):
-        - event veto: +3.6% WAVeS, +2.9% TZP, +2.0% truth, +0.6% TRKPTZ,
-          -3.8% HGTD (+-4%);
-        - jet removal: 0.8 points more. Without the jet veto it is just the
-          veto plus re-pairing.
-      - At Run 2's f = 6-13% the event veto costs 3-4%.
-    - **Relaxed set** (2026-10-01, REGIONS["relaxed"]): the minimal set with
-      j1 > 40, j2 > 30 GeV and |m_ll - 91.2| < 40 GeV, on the `vbs_time_veto
-      --sr --sr-j1-pt=40 --sr-j2-pt=30` files (`sr_j1pt40p0_j2pt30p0`).
-      - Z+jets: 110 MC events.
-      - S/sqrt(B), S and B both in it: +2.0% WAVeS, +1.9% TZP, +2.2% truth,
-        +0.2% TRKPTZ, -2.8% HGTD (+-2.8%). Jet removal is the same.
-      - The added j2 < 50 GeV Z+jets pairs are 82% pileup-tagged, so f rises
-        31% -> 55%, and f* = 40%.
-      - Validated: under the 80/50 file's calibration (`--calib-file`), those
-        files reproduce the SR and minimal-set results exactly.
-      - eps_B equals f x the signal's per-type response within 1 sigma. So
-        the background MC is needed for f (and where its PU legs sit), not
-        for the response.
+- **vbs_time_veto.cxx** (`util/`) + `python/vbs_time_veto_{plot,sr,common}.py`, `vbs_hspu_study.py`,
+  `vbs_sr_minimal.py`, `vbf_hinv_sr.py`: method, validation and results are in the
+  `vbs-timing-studies` skill and `results/vbs_time_veto*.md`. Two rules that must not be missed:
+  VBF must be read from the RAW ntuples (its recoil cut is truth MET and the skims drop the truth
+  record), and S/sqrt(B) only ever compares S and B measured in the same selection.
 
 ### ML Data Export
 - **export_training_data.cxx** (`util/`): Exports the cluster-SELECTION
@@ -646,41 +381,15 @@ non-exclusive four-category scheme:
 
 ## Key Analysis Parameters
 
-From `src/clustering_constants.h`:
-```cpp
-MIN_TRACK_PT          = 1.0   // GeV — track selection floor
-MAX_TRACK_PT          = 30.0  // GeV — track selection ceiling
-DIST_CUT_CONE         = 3.0   // σ — main iterative clustering distance (also CONE baseline)
-DIST_CUT_T_REFINED    = 2.0   // σ — JET_T_REFINED (WAVES_RECLUST) stage-2 iterative distance
-MIN_CLUSTER_TRACKS    = 0     // minimum tracks required to select a cluster
-IDEAL_TRACK_RES       = 1.0   // ps — flat per-track resolution for ideal scenarios
-PASS_SIGMA            = 60.0  // ps — ±window for "Core Fraction" efficiency oracle
-TRUTH_PULL_CUT        = 3.0   // σ — |pull| threshold for oracle timing purity gates
-WAVES_DR_FLOOR        = 0.05  // minimum ΔR for the WAVeS 1/ΔR weight (prevents divergence)
-// TZP classical selector (2026-09-01, see Physics Findings) — these three are
-// TZP-ONLY; TRACK_DZ_WEIGHT (0.7) and the 1.5 stay untouched for the ladder rows
-TZP_TRACK_DZ_WEIGHT   = 1.0   // /mm — per-track exp(−α|z0_t − z_PV|) inside the pT sum
-TZP_CLUSTER_DZ_WEIGHT = 0.6   // /mm — cluster-level exp(−β|Δz|); TRKPTZ's 1.5 was never tuned and is too steep
-TZP_D0_PRECISION      = 0.45  // exponent on (1/σ_d0^cluster); d0 beat its qP/z0 siblings head-to-head
-MIN_INJET_TRACKS_FOR_TIME = 3 // Score::minSubsetTracks — in-jet time only when ≥3 in-jet tracks (sample-independence guard)
-TRACK_DZ_WEIGHT       = 0.7   // /mm — the TZ-family ladder rows (historical, kept for continuity)
-QP_PRECISION_WEIGHT   = 0.8   // unused; superseded by d0 (kept for the record)
-JET_FRAC_WEIGHT       = 0.0   // jet-fraction term REJECTED by the population check (kept as diagnostic)
-VBS_JET_D_ETA         = 0.0   // NO |Deta| requirement (was 3.0 before 2026-08-26)
-                              //   NEGATIVE (--vbs-deta=-1) drops the VBS PAIR
-                              //   requirement itself; see the novbs note below
-VBS_JET_MJJ           = 200.0 // GeV — m_jj now carries the topology cut (was 0)
-MAX_NSIGMA            = 3.0   // z0-significance track-to-vertex association (incumbent)
-// Z0_VAR_INFLATION REMOVED 2026-11-16 (f897b1e, the user): the significance now uses the
-// raw z0 covariance. Every "N sigma" in an output before then is 1.15 N sigma raw
-// (the talk's 2.5 -> 2.875, the HS-track count's 3 -> 3.45). See notes/gp_talk.md.
-DZ0_PARA_SCALE_CLUSTER= 1.4   // multiple of getNewDzpara used when --dzpara is passed
-COUNTING_NSIGMA       = 3.0   // association PINNED for the EventCounts scan under an AssocRule
-```
+Values, with their rationale comments, live in `src/clustering_constants.h`; the notes below are
+what those comments do not carry.
 
 **Track-to-vertex association.** Three ways to express it, all in
 `clustering_constants.h`:
-- `MAX_NSIGMA` — the incumbent z0-significance cut.
+- `MAX_NSIGMA` — the incumbent z0-significance cut. **Since 2026-11-16 (f897b1e) every z0
+  significance uses the RAW z0 covariance** (`Z0_VAR_INFLATION = 1.15²` removed, the user's
+  decision): an "N sigma" in any earlier output or note is 1.15 N sigma raw (the talk's 2.5 ->
+  2.875, the HS-track count's 3 -> 3.45). See notes/gp_talk.md.
 - `USE_DZ_PARA` (runtime, from `--dzpara`) — swaps in `getNewDzpara ×
   DZ0_PARA_SCALE_CLUSTER` instead; the caller's significance argument is then
   ignored, since the two rules are not on a common scale.
@@ -710,18 +419,8 @@ The z-association study (see below) found the incumbent `MAX_NSIGMA = 3.0` is
 **not** the best choice for TRKPTZ. It has not been changed, because the study
 has so far only been run on the local VBF sample.
 
-RpT-specific, from `util/rpt_v5_hist.cxx`:
-```cpp
-JET_ETA_MIN / MAX     = 2.4 / 3.8  // forward jet acceptance (inclusive slices + NARROW regions)
-CENTRAL_ETA_MAX       = 2.4        // central baseline, |eta| < this
-RPT_TRACK_JET_DR      = 0.2        // track must be within this of the jet axis
-DZ0_PARA_SCALE        = 1.4        // x getNewDzpara, FORWARD track-to-vertex association
-CENTRAL_Z_SIGNIF      = 5.0        // |z0-z_vtx|/sigma_z0, CENTRAL association
-GATE_SIGMA            = 3.0        // per-track time-gate half-width, in pulls (2.5 until 7d81111)
-// src/idealised_timing.h (shared with the event-display macro):
-TRUTH_VTX_SMEAR       = 10.0       // ps, truth-t0 row's vertex smear
-TRUTH_TRK_SMEAR       = 30.0       // ps, idealised per-track smear
-```
+RpT-specific constants (`JET_ETA_MIN/MAX`, `RPT_TRACK_JET_DR`, `DZ0_PARA_SCALE`, `CENTRAL_Z_SIGNIF`,
+`GATE_SIGMA`) are at the top of `util/rpt_v5_hist.cxx`; the idealised smears in `src/idealised_timing.h`.
 
 **The two z-association rules are not interchangeable.** `getNewDzpara` comes
 from a FORWARD-region reference study and does not extrapolate inward: it
@@ -760,40 +459,16 @@ tree, so it's currently unused.
 
 ## Build System
 
-### Requirements
-- CMake ≥ 3.10
-- C++17 compiler
-- ROOT (RIO, Core, Gpad, Graf, Hist, Tree)
-- Boost (filesystem)
-
 TMVA is intentionally excluded (see `CMakeLists.txt:34`) — `HGTD_SORT`/
 `CONE_BDT` are registered `Score`s but their selector
 (`chooseHGTDSortCluster`) is currently a stub returning an empty `Cluster`,
 and neither is emplaced in `buildAnalysisMap`.
 
-### Build Commands
-```bash
-cd build
-cmake ..
-make [<target>]   # e.g. make failure_decomposition
-```
-
-### Compiler Flags
-`-O3 -march=native -g` (no `-DNDEBUG`, no LTO — `CMakeLists.txt:37`).
+Flags are `-O3 -march=native -g` (no `-DNDEBUG`, no LTO) — see the SIGILL caveat under Grid Submission.
 
 ## Data Format
 
-ROOT ntuples (tree name `"ntuple"`) with the branches bound in
-`BranchPointerWrapper` (`src/clustering_structs.h`):
-
-| Group | Branches |
-|-------|----------|
-| Tracks | `Track_z0/d0/pt/eta/phi/theta/qOverP`, `Track_var_z0/d0/qOverP/theta/phi0`, `Track_time/timeRes/hasValidTime`, `Track_quality`, `Track_truthVtx_idx/truthPart_idx`, `Track_nHGTDHits/nHGTDPrimaryHits` |
-| Vertices | `TruthVtx_z/time/isHS`, `RecoVtx_z/time/timeRes/hasValidTime` |
-| Reco jets | `AntiKt4EMTopoJets_pt/eta/phi`, `AntiKt4EMTopoJets_truthHSJet_idx`, `AntiKt4EMTopoJets_ghostTrack_idx` |
-| Truth jets | `TruthHSJet_pt/eta/phi`, `TruthITPUJet_pt/eta/phi`, `TruthOOTPUJet_pt/eta/phi` |
-| Particles | `TruthPart_prodVtx_time` (bound as `particleT`) |
-| Event | `weight` |
+ROOT ntuples, tree `"ntuple"`; the branches are bound in `BranchPointerWrapper` (`src/clustering_structs.h`).
 
 **The grid productions keep ONLY the hard-scatter truth vertex.**
 - `TruthVtx_*` has exactly one entry per event on grid VBF and Z+jets, in the
@@ -937,7 +612,7 @@ across slices with very different survival rates.
 export (23 T total, chronically ~80% full) and is quota'd per user; `/data` is
 CephFS with petabytes free. Merged products belong on `/data`; per-shard
 intermediates are disposable and should be deleted once their merge is
-verified. See "Cleaning up after a sharded campaign" under Grid Submission for
+verified. See "Cleaning up after a sharded campaign" in the `condor-grid-submission` skill for
 the procedure and the 2026-09-08 precedent (50 G recovered from one directory,
 which was half the `$HOME` quota).
 
@@ -1005,416 +680,31 @@ and `src/plotting_utilities.h` fails to compile.
 
 ## Machine Learning
 
-Two distinct ML eras, neither active in the C++ analysis today.
-
-### Cluster-selection ML (2026-08, concluded — see `results/ml_overview.md`)
-
-A GBDT / Deep Sets / transformer effort against the same cluster-selection
-problem TZP now solves classically. **`results/ml_overview.md` is the
-consolidated record** — the endpoint ladder (TRKPTZ 61.87 → TZP 64.31 → Deep
-Sets selector 66.94 → full guarded pipeline 69.79 on canonical zjets, against
-an honest ceiling of ~74.3 after the best-of-N oracle correction), the
-measured mechanism (the per-track HS tagger is load-bearing; the learned
-cluster score is 43% agreement-with-aggregate-t0 and 0.19% raw trkptz_score),
-the transfer matrix (learned selection transfers across topologies, ttbar
-alone ≈ pooled; WAVeS doesn't transfer), the null levers, and the methodology
-rules (AUC anti-correlated with core fraction; null-test best-of-N oracles;
-split-dominated variance). Individual run records live beside it in
-`results/` (`PLAN.md`, `README.md`, `oracle_is_inflated.md`,
-`feature_ablation_4sample.md`, `final_method_eval_results.md`, the `.json`
-histories, the `.html` reports).
-
-Retained infrastructure: `util/export_training_data.cxx` (the exporter — ML
-Data Export section above), `python/train_deepsets.py` /
-`train_transformer.py` / `ensemble_eval.py` / `compare_models.py` /
-`final_method_eval.py`, and `condor/run_training.sh` + `condor/train_*.sub` +
-`condor/probe_env.*` (GPU-less AF training jobs). The ~35 one-off study
-scripts that produced the `results/` documents were **removed from `python/`
-once their findings were captured** — recover from git history if a
-measurement needs rerunning; do not rewrite them from scratch.
-
-### Event-graph GNN (2026-09, exploratory — see `results/gnn_event_graph.md`)
-
-`python/train_gnn.py` represents an event as a graph over its tracks (all-pairs
-edges, typed same-cluster / cross-cluster, so the existing partition is a prior
-the model can override rather than the topology). It never re-partitions; the
-time head emits per-track weights and `t_hat = Σ w_i t_i / Σ w_i` keeps the
-averaging structural. Both heads are residual from the incumbent with zero-init
-last layers, so epoch 0 IS TRKPTZ selection with inverse-variance timing.
-
-**Finding (VBF, local export, 5-seed paired sweep): message passing is worth
-+0.80 ± 0.14 on the timing head and +0.26 ± 0.10 on selection.** Its value is
-trust estimation — a track's own features cannot say whether its time is
-reliable (timeRes separates HS from PU at AUC 0.508), but its neighbourhood
-can. Two thirds of the total gain over TRKPTZ is the listwise objective and
-pooled selector, not the graph.
-
-**Not established, and why this is exploratory rather than concluded:** VBF
-only, on the small local export (23k fit events). VBF carries 47% of HS timing
-weight inside jets against zjets' 10%, which is exactly the quantity governing
-whether jet-neighbourhood information means anything — expect the +0.80 to
-SHRINK on zjets. That is the falsifying test and it has not been run. Nor has
-`--no-residual`. The residual-init control fired on first use against the wrong
-denominator (whole test fold vs the 1,000-event tensor) — compute controls on
-the tensor's own events.
-
-### Legacy DNN/TMVA artifacts (historical)
-
-There is no `src/ml_model.h`, no ONNX runtime integration, and no
-`Score::TEST_ML` in the current `Score` registry. What remains from that
-earlier effort:
-- `share/models/` still holds artifacts (`model.onnx`, `model_weights.json`,
-  `normalization_params.json`, a TMVA `.weights.xml`) from that earlier
-  work, but nothing in `src/` currently loads or runs inference against
-  them.
-- `share/scripts/export_onnx_model.py` (SavedModel → ONNX → JSON weights
-  pipeline) and `share/docs/ML_MODEL_INTEGRATION.md` /
-  `ONNX_INTEGRATION_GUIDE.md` document that pipeline for reference, but it
-  has no active consumer.
-- `src/clustering_structs.h`'s `Cluster::calcFeatures()` still computes and
-  normalises the same 8-feature vector (used historically as DNN input); its
-  `rawDeltaZ`/`rawDeltaZResunits` outputs are reused by `updateScores` for
-  TRKPTZ, but the normalised `features` vector itself is otherwise unused
-  today.
-
-## Common Workflows
-
-```bash
-# Run against the SKIMMED copies (the default choice for any grid sample --
-# 20-25x fewer files, see "Skimmed + slimmed copies" under Data Format):
-cd build && ./rpt_v5_hist --sample=zjets \
-    --ntuple-dir=/data/mcardiff/skimmed_ntuples/zjets
-
-# Full analysis (two-step: histogram once, then plot — see "Histogramming
-# vs. Plotting Split" above)
-cd build && ./clustering_hist && ./clustering_plot
-
-# Iterate on plotting only (styling, binning, a new comparison group) without
-# re-running the event loop, as long as ../figs/hists/clustering_hist.root
-# is already there:
-cd build && ./clustering_plot
-
-# Failure decomposition
-cd build && ./failure_decomposition
-
-# Event display for a specific event
-cd python && python event_display.py --file_num 000009 --event_num 1856 --extra_time 0.0
-
-# RpT study (WAVeS-based), two-step
-cd build && ./rpt_v5_hist && ./rpt_v5_plot
-
-# Iterate on rpt_v5's plotting only (e.g. tuning the harmonized ROC window's
-# roc_xmin_default/roc_xmax_default)
-cd build && ./rpt_v5_plot
-
-# z-association study (11 rules in one pass), two-step. ~35 s + ~15 s on the
-# full local VBF sample; add --sample=<name> to both stages for a grid sample.
-cd build && ./assoc_study_hist --threads=8 && ./assoc_study_plot
-
-# Iterate on the study's report/plots only (rules unchanged)
-cd build && ./assoc_study_plot
-
-# Rebuild after header change
-cd build && make
-```
+No ML is active in the C++ analysis. The history — cluster-selection GBDT / Deep Sets / transformer
+(2026-08, concluded), the event-graph GNN (2026-09, exploratory), and the legacy DNN/ONNX artifacts in
+`share/models/` — is in the `physics-findings` skill, `results/ml_overview.md` and
+`results/gnn_event_graph.md`. Removed study scripts: recover from git history, do not rewrite from scratch.
 
 ## Grid Submission (condor)
 
-Templates in `condor/` run `clustering_hist` / `rpt_v5_hist` on the UChicago AF HTCondor pool, one job per `--sample` value (`vbf`, `zjets`, `dijet`). Condor only runs the **histogramming** stage — the plotting stage is fast/local and runs afterward on whatever machine the `.root` file lands on, with no condor submission needed:
-
-- **`condor/run_analysis.sh`** — generic executable, invoked as `run_analysis.sh <executable> <sample> [<threads>]`. Sources `atlasLocalSetup.sh` + `lsetup "root <version>"` (relaxing `set -e`/`-u` around just that call — those scripts reference unset internal variables like `ALRB_frontlineSite` and aren't strict-mode safe), then runs the transferred `<executable>` **directly from the job's scratch directory** with `--sample=<sample>` and, if given, `--threads=<N>`. No longer moves the binary into a fake `build/` subdir first (see `src/sample_config.h`'s output-path note below) — that indirection existed only to make the old `../<sample>` output convention resolve to the scratch root; the grid-sample output paths are cwd-relative now, so it's unnecessary and was a latent risk (if that step were ever skipped, `../<sample>` would climb out of the scratch directory into its parent, which may not be writable). Unchanged by the histogramming/plotting split otherwise — generic enough for both the legacy and `*_hist` executables.
-- **`condor/clustering_hist.sub`** / **`condor/rpt_v5_hist.sub`** — one `.sub` file per histogramming executable, each queuing 3 jobs via `queue sample in (vbf, zjets, dijet)`. Submit each separately (own `condor_submit` call) to get independent job clusters. `arguments` passes `4` as the `<threads>` arg, matching `request_cpus = 4` — both `*_hist` executables parallelize their event loop via `TTreeProcessorMT` (see Multicore in Development Notes), and condor's cgroup throttles any threads spawned beyond `request_cpus`, so the two must track each other.
-- **`condor/skim_ntuples.sub`** — regenerates the skimmed+slimmed sample copies (see "Skimmed + slimmed copies" under Data Format). One sample per submit, `$(nshards)` jobs; writes straight to `/data/mcardiff/skimmed_ntuples/<sample>/` and sets `transfer_output_files = ""`, since the output goes to a ceph path the execute hosts already mount rather than back to the submit node. Belongs on condor rather than the login node: the four samples are ~2.1 TB read twice, and 24 concurrent readers on a login node pushed cold reads from 0.3 s/file to 8 s/file and the node to load 94.
-- **`condor/clustering_dt.sub`** / **`condor/rpt_v5.sub`** — legacy templates for the monolithic executables; still work, kept for reference/fallback, not the primary workflow.
-
-Execute hosts do **not** share a filesystem with the submit host on this pool — confirmed via a `TARGET.FileSystemDomain == MY.FileSystemDomain` match failure when `should_transfer_files = NO` was tried first (0 of 157 slots matched). The `*_hist.sub` files use `transfer_input_files` (stages the prebuilt binary in) and `transfer_output_files = $(sample)/$(sample)_<name>.root` (stages back a single small histogram file — much smaller than the full PDF tree the legacy `.sub` files' `transfer_output_files = $(sample)` transfers). Ntuple inputs are read via the absolute `/data/mcardiff/exotic_superntuples/...` path baked into `--sample=` (see `src/sample_config.h`), so they don't need transferring.
-
-**`transfer_output_remaps` is used** on both `*_hist.sub` files, though its role has narrowed since output file names became sample-prefixed (see "Sample-prefixed output paths" above): condor's default output-transfer behavior flattens any nested `transfer_output_files` path to its basename when staging back, it does not recreate `$(sample)/` in the submit directory on its own. Historically (when every sample wrote a bare `clustering_hist.root`/`rpt_v5_hist.root`), skipping the remap meant all 3 queued jobs silently overwrote each other's output — confirmed by running the real `rpt_v5_hist` jobs once without one: only the last-to-finish sample's histogram survived, and no `vbf/`, `zjets/`, `dijet/` subdirectories were created at all. Now that each job's basename is already unique (`vbf_clustering_hist.root`, `zjets_clustering_hist.root`, `dijet_clustering_hist.root`, ...), that particular collision can no longer happen — the remap is kept purely so the file lands nested under `$(sample)/` on the submit side, matching the local `--sample=` convention (so `clustering_plot --sample=<sample>` finds it without needing `--hist-file=`). (The legacy `.sub` files' `transfer_output_files = $(sample)` isn't affected either way — that argument has no nested subdirectory, so its basename already equals the whole thing they want back.) The obvious alternative, `preserve_relative_paths = True`, was tried first and rejected: it's a submit-wide knob that also governs `transfer_input_files`, and turned `../build/<exe>` (which deliberately climbs *out* of the sandbox to reach the built binary) from silently-flattened into a hard `Attempt to write to illegal sandbox path` hold — confirmed by running the real jobs with it set. `transfer_output_remaps` only touches the output side, so it can't have that side effect.
-
-**`transfer_output_remaps`'s LHS (`name`) must be a bare filename** — per `condor_submit(1)`: "You cannot specify directories to be remapped." A first attempt using a full nested path (`$(sample)/hists/clustering_hist.root`, back when the histogram still lived under a `hists/` subdirectory) on the LHS silently failed to match anything and fell back to the same basename-flattening bug it was meant to fix — confirmed against the real jobs. Directories *are* allowed on the RHS (`newname`) and are created as needed, so the working form is `transfer_output_remaps = "$(sample)_clustering_hist.root=$(sample)/$(sample)_clustering_hist.root"` (bare sample-prefixed basename on the left, full destination path on the right).
-
-```bash
-cd build && cmake .. && make clustering_hist rpt_v5_hist   # build before submitting; condor doesn't rebuild
-cd condor
-condor_submit -dump dryrun.ad clustering_hist.sub          # dry-run: validate without queuing
-condor_submit clustering_hist.sub
-condor_submit rpt_v5_hist.sub                               # separate job cluster
-condor_q
-# After jobs complete, the .root files land in
-# ../<sample>/<sample>_{clustering,rpt_v5}_hist.root. Plot locally — fast, no
-# further condor submission:
-cd ../build
-./clustering_plot --sample=<sample>
-./rpt_v5_plot --sample=<sample>
-```
-
-Logs land in `condor/logs/clustering_hist_<sample>.<ClusterId>.<ProcId>.{out,err,log}` (prefixed `rpt_v5_hist_` for the rpt_v5_hist cluster). `stream_output`/`stream_error` are **on**, so `.out`/`.err` are written back to the submit node as the job runs rather than only on exit — without that, `condor_tail` mid-job shows only whatever happened to be flushed.
-
-### Job cost: where the time actually goes
-
-Measured from the three-sample `rpt_v5_hist` clusters of 2026-07-03 (`condor/logs/`, three repeats each). **The event counts here are stale — see the 2026-08-26 table below for current values.** Kept because the *wall/CPU* analysis that motivated the sharding work is still the record of how the problem was found:
-
-| sample | files | events | wall | CPU | wall/event |
-|---|---:|---:|---:|---:|---:|
-| vbf   | 1002 |   499,100 |  24.9 min | 12.2 min | 2.99 ms |
-| dijet | 1414 |   699,500 |  25.2 min |  8.4 min | 2.16 ms |
-| zjets | 2005 | 8,084,000 | 183.3 min | 108.0 min | 1.36 ms |
-
-**Z+jets is not inefficient — it is 16.2x larger than vbf** (both DSIDs, Zee+Zmumu). Per event it is the *fastest* of the three. File count is not a driver either: dijet has 1.4x vbf's files and 1.4x its events at the same wall time.
-
-**Startup dead time is the real inefficiency, and it is not proportional to anything.** From the condor `.log` image-size timeline (memory sits at ~60 MB with ROOT loaded and nothing allocated, then jumps to ~500 MB when the worker threads book their histograms):
-
-| sample | run 1 | run 2 | run 3 |
-|---|---|---|---|
-| vbf   | 20.2 min |  5.1 min | 15.2 min |
-| dijet | 10.2 min | 20.2 min | 10.1 min |
-| zjets | 30.2 min | 25.2 min | 20.2 min |
-
-That is 5–30 min, varying **4x run-to-run on the same sample** — filesystem contention, not a per-sample property. It is 15–20% of a zjets job but **40–80% of a vbf or dijet job**. Sampled at condor's 5-minute granularity, so ±5 min.
-
-Mechanism: `TChain::Add` is lazy (opens nothing), but `TChain::GetEntries()` opens **every file** in the chain to sum entry counts — 0.3–1.2 s per file on `/data` against 4.3 ms on local SSD. That call has been removed from `setupChain` (the "did we find files?" question is answered by `GetListOfFiles()->GetEntries()` with no I/O) and from the `*_hist` progress denominators, leaving only `TTreeProcessorMT`'s own pass. **Do not reintroduce it** — see the note on `setupChain` in `src/event_processing.h`.
-
-How much that actually saved, measured on the local 33-file sample (time from start to the first event reaching a worker):
-
-| | serial startup |
-|---|---:|
-| with `GetEntries()` | 0.205 s (6.1 ms/file) |
-| deferred | 0.103 s (3.1 ms/file) |
-
-**~50%**, not more: `TTreeProcessorMT` still opens every file serially for cluster boundaries before dispatching any task. In the old ordering that second pass was nearly free (0.004 s) only because `GetEntries` had already warmed the files.
-
-**What is left, and what does NOT fix it.** The remaining pass is latency-bound, so overlapping it looks attractive — opening every file concurrently first does collapse the serial scan to 0.004 s. But the prewarm then costs as much as it saves (0.132 s at 8 threads vs a 0.117 s scan): on local SSD the opens are bandwidth-bound and concurrency buys nothing. Whether the AF's shared storage behaves differently is untested and should not be assumed — an earlier plausible-sounding fix here (hoisting `passBasicCuts` above the Z+jets lepton work, so rejected events never touch per-track branches) measured at **1 µs/event**, i.e. 0.1 min over 8M events, and was dropped.
-
-### Sharding a sample across jobs
-
-`--file-shard=<i>/<N>` restricts a `*_hist` process to files i, i+N, i+2N, … of the **sorted** file list, and `hist_merge` combines the per-shard outputs. N jobs each pay 1/N of the per-file startup *and* run 1/N of the event loop concurrently, so it attacks both costs at once.
-
-Both `*_hist.sub` files now take `sample` and `nshards` as submit macros and queue `$(nshards)` jobs for **one** sample, with `$(ProcId)` as the shard index — so each sample gets its own ClusterId and its own shard count:
-
-```bash
-cd build && cmake .. && make clustering_hist rpt_v5_hist hist_merge
-cd condor
-condor_submit -a sample=vbf   -a nshards=4  clustering_hist.sub
-condor_submit -a sample=dijet -a nshards=4  clustering_hist.sub
-condor_submit -a sample=zjets -a nshards=12 clustering_hist.sub
-# after they land -- note condor/<sample>/, NOT <repo-root>/<sample>/:
-cd ..
-./build/hist_merge condor/zjets/zjets_clustering_hist.root \
-                   condor/zjets/zjets_clustering_hist.shard*of12.root
-./build/clustering_plot --sample=zjets --hist-file=condor/zjets/zjets_clustering_hist.root
-```
-
-**Outputs land in `condor/<sample>/`.** `transfer_output_remaps`' RHS resolves
-against the **submit** directory, and submission happens from `condor/`. An
-earlier version of this section said `<repo-root>/<sample>/`; that is wrong,
-and since `clustering_plot --sample=` looks under `OUTPUT_DIR` it needs
-`--hist-file=` unless the merged file is moved.
-
-A non-default VBS selection needs **two** matching macros, because
-`resolveSelection` stamps a `SELECTION_TAG` onto the output filename (so a
-loosened run cannot overwrite the standard one) and `transfer_output_files`
-must name that same file:
-
-| `selargs` | `seltag` (note trailing `_`) |
-|---|---|
-| *(empty)* — no \|Deta\|, m_jj >= 200 | *(empty)* |
-| `--vbs-mjj=500` | `mjj500p0_` |
-| `--vbs-deta=3 --vbs-mjj=0` (pre-2026-08-26 default) | `deta3p0_mjj0p0_` |
-| `--vbs-deta=-1` — VBS **pair** requirement dropped | `novbs_` |
-
-**A negative `--vbs-deta` is a third mode, not a smaller threshold.** It drops
-the VBS candidate-*pair* requirement outright, keeping events with no
-opposite-hemisphere jet pair. No combination of the two thresholds expresses
-this: `calcBestVbsPair` leaves both `dEta` and `mjj` at their `-1` sentinel when
-no pair exists, so each fails any `>= 0` test — lowering a threshold relaxes only
-that quantity's *magnitude* cut while the pair requirement survives. Setting
-`--vbs-deta=0` was measured worth **+4% on Z+jets** (67,074 → 69,745) where
-dropping the pair requirement was expected to be worth several-fold; the loose
-mode is +13% on local VBF (48,314 → 54,659).
-
-`passJetPtCut` bypasses the m_jj test as well as the |Δη| one in this mode —
-bypassing only |Δη| would let the default `m_jj >= 200` reject every no-pair
-event on its own, reproducing the original bug exactly. Tagged `novbs` alone,
-with no m_jj component, since naming a cut that is not applied would describe a
-selection that does not exist. `--vbs-mjj` still rejects negatives; there is
-deliberately one flag for disabling the pair, not two.
-
-```bash
-condor_submit -a sample=zjets -a nshards=12 \
-              -a 'selargs=--vbs-mjj=500' \
-              -a seltag=mjj500p0_ clustering_hist.sub
-```
-
-A mismatch is not silent — the job completes and then goes on hold failing to
-transfer a file that does not exist — but `condor_submit -dump` shows the
-expanded name, and running the executable locally with the same `selargs`
-prints `[selection] ... (tag: ...)`.
-
-**Shard counts should track EVENT count, not file count.** Beware that the
-counts in the "Job cost" table above are from the 2026-07-03 runs, and the
-zjets dataset has since been **replaced** (`...20260712_Output`, produced
-2026-07-12): the current zjets is **2.0M events over 2000 files**, not 8.08M.
-Re-measure before sizing shards for a sample you have not run recently -- the
-`[chain] N files added` line plus the run's own event total give it for free.
-At 2.0M, zjets wants ~12 shards, not 32; the 32-shard run below spent 49 s of
-cvmfs setup against 257 s of actual work per job.
-
-`--file-shard` tags the output filename whenever it is passed, **including at N = 1** (`Shard::given`, not `count > 1`). That looks redundant but is what lets one `.sub` template the output name on `$(ProcId)/$(nshards)` for any shard count: tying the tag to `count > 1` would make `nshards=1` write an untagged file the submit file then fails to transfer back — a foot-gun that only fires at the least-tested value.
-
-The sort in `setupChain` is load-bearing, not tidiness: `directory_iterator` order is filesystem-defined and not guaranteed stable, so without it two shards could disagree about which file is "3rd" and silently double-process or skip data. It also makes an unsharded run deterministic, which it previously was not — harmless for full runs, but it changes *which* events a `--max-events` run sees.
-
-**`hadd` will not do this job.** It merges anything with a `Merge()` method and keeps the **first occurrence** of everything else. Every scalar `HistWriter` emits is a `TParameter` — event counts, rejection tallies, the pT accumulators `rpt_v5_plot` turns into untimed-fraction percentages — and `TParameter` has no `Merge()`. `hadd` would produce histograms summed over N shards alongside one shard's event counts, silently. `util/hist_merge.cxx` sums them explicitly, and refuses (rather than dropping) any key type it does not recognise.
-
-**`rpt_v5_hist` shards come in pairs.** Each shard also writes `<sample>_rpt_v5_regions.shard<i>of<N>.root`, the wide-window VBS-region tree, and `condor/rpt_v5_hist.sub` transfers and remaps both files. That file is TTree-only, so it is the export rule, not the histogram rule: merge it with `hadd -f`. `hist_merge` would refuse its key type.
-
-**Not every scalar is additive, though.** `meta_vbs_*` describe the RUN rather than accumulate during it, so `hist_merge` treats them like `meta_energy_label`: must agree across inputs, kept once. Summing them is not merely meaningless — m_jj = 200 in every shard summed to 2400 over 12 shards, which then tripped `HistReader::CheckSelection` and made every merged file unreadable by the plot stage. (Found exactly that way on the first three-sample run, by `CheckSelection` itself.) The `meta_vbs_` prefix IS the rule, so a future selection constant gets the right behaviour by being named that way.
-
-**Full three-sample run at the new default selection** (clusters 2928810–15,
-2026-08-26 09:20 CST, both `clustering_hist` and `rpt_v5_hist`): **40/40 jobs
-completed, none held.** These are the current numbers — the 2026-07-03 table
-below them is superseded for vbf and zjets.
-
-| sample | files | events | accepted | shards | wall | loop/shard | cvmfs |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| vbf   | 1001 | **1,464,400** | 630,720 (43.1%) | 4  | 21.5 min | 1092 s | 52 s |
-| dijet | 1400 |   699,500     | 105,137 (15.0%) | 4  | 14.0 min |  781 s | 54 s |
-| zjets | 2000 | **2,000,000** |  64,950 ( 3.2%) | 12 | 13.7 min |  759 s | 50 s |
-
-**Every event count in the older table was wrong except dijet's.** vbf is
-~2.9x larger than recorded (1.46M vs 499k) and zjets ~4x smaller (2.0M vs
-8.08M) — the datasets were re-made after the July baseline. Re-measure rather
-than trusting any recorded count; one `--max-events=1` run prints
-`[chain] N files` and the sample's total.
-
-**Rebalance shards accordingly**: aim for **shards ≈ events / 150,000**, which
-puts every job near 10 min. On the counts above that is vbf 8–10 (not 4),
-dijet 5–6, zjets 13–16. There is a ~50 s cvmfs floor per job, so splitting
-below ~5 min of work per shard buys little.
-
-A useful accident: zjets accepted **64,950** in this 12-shard default run and
-**64,950** in the earlier 32-shard run that requested `--vbs-deta=0
---vbs-mjj=200` explicitly. Exact agreement confirms both that sharding is
-invariant on real grid data at a different shard count, and that the new
-default is precisely the selection that run asked for.
-
-**Merging: glob on the shard count, not on `shard*`.** A sample directory can
-accumulate several shardings of the same data, and `*clustering_hist.shard*.root`
-matches all of them — merging that glob double-counts every event. Always pin
-the count: `*clustering_hist.shard*of12.root`.
-
-As of the 2026-09-08 prune **every stem holds exactly one sharding**, so the
-glob is currently safe; it will not stay that way the next time a sample is
-re-run at a different shard count. Surviving sets: dijet clustering `of4` +
-rpt_v5 `of6`, ttbar rpt_v5 `of16`, vbf clustering `of4` + rpt_v5 `of4`, zjets
-clustering `of12` + rpt_v5 `of14`.
-
-**Identify a shard generation by CONTENT, not by mtime and not by event count.**
-Two traps, both hit on 2026-09-08:
-- `meta_n_total` counts events *read*, so **any complete sharding sums to the
-  full sample** — dijet's `of4` and `of6` sets both summed to exactly 699,500,
-  matching the merged file, and the scalar discriminated nothing.
-- What does discriminate is the histogram set the code version wrote. The
-  pre-TZP `rpt_v5_hist` shards carry 91 keys and zero `tzp`-named histograms;
-  post-TZP shards and the merged files carry 103 keys including 12 `tzp` ones.
-  That is what proved dijet `of4` and zjets `of12` were superseded and could
-  not have been the merge source.
-
-**`vbf/vbf_rpt_v5_hist.root` predates TZP** (2026-08-27, merged from `of4`).
-dijet/zjets/ttbar were re-run 2026-09-01 with the tzp scenario; VBF was not, so
-plotting it yields six scenarios, not seven. It needs a fresh submission before
-VBF's RpT can be read beside the other three.
-
-### Cleaning up after a sharded campaign
-
-Shards and archives are intermediates. Once a merge is verified they are pure
-duplication of something already on `/data`, and on `/home` they are actively
-expensive. Precedent: on 2026-09-08 `condor/` held **50 G** — half the `$HOME`
-quota — and cleaning it left **73 M** with no loss.
-
-**Verify before deleting, and verify with entry counts, not sizes.** `hadd`
-header overhead makes a merged file's *size* match the shard sum approximately
-even when a shard was silently dropped, so size agreement proves nothing. The
-check that does: open the merged file and its shards, compare
-`clusters->GetEntries()` against the sum over the shard set, and require exact
-equality. All 14 exports in `training_new` passed (e.g. vbf_novbs 3,994,782 =
-3,994,782) before anything was removed. For an archived directory holding its
-own merged copy, compare `stat -c %s` against the `/data` copy — 14 were
-byte-identical.
-
-That pass also surfaces what is NOT duplicated: three
-`*_deta0p0_mjj500p0_training.root` files (vbf_mu0, ttbar_mu0, zeejets_mu0,
-~2.4 G) existed only inside the archives with no `/data` copy. They were the
-pre-vtx column set at a selection that `mjj500p0` now expresses identically, and
-were deleted deliberately after being flagged — the point is that a wholesale
-`rm -rf` of the archives would have destroyed them silently.
-
-What must survive a cleanup: the merged `*_hist.root` files (the `*_plot` stage
-inputs, ~9 M total), the PDF output subdirectories, the `.sub`/`.sh` templates,
-and `logs/`.
-
-**First sharded grid run** (cluster 2928803, zjets `clustering_hist`,
-32 shards, `--vbs-deta=0 --vbs-mjj=200`): **32/32 shards completed, none held**,
-end-to-end **5.3 min**. Per shard: cvmfs setup 49 s mean / 58 s max, `[chain]`
-build **0.1 s for 63 files**, event loop 257 s mean / 265 s max.
-
-Two things that confirms:
-
-- **The startup diagnosis was right.** cvmfs is only ~50 s, so the 5–30 min of
-  pre-loop dead time seen in July was almost entirely the `TChain::GetEntries()`
-  file-open pass — 0.1 s for 63 files now, against 0.3–1.2 s *per file* before.
-- **Sharding delivers.** The 32 shards' event loops total 137 min, which is
-  what one unsharded job would have spent (same 4 threads, 32x the events),
-  plus the 10–40 min serial open pass that no longer exists. So ~150–180 min
-  unsharded against 5.3 min sharded: **~30x**.
-
-**Validation** (local VBF, `util/scratch/compare_hists.py`, unsharded vs sharded-and-merged):
-
-| executable | shards | histograms bit-identical | worst relative bin diff |
-|---|---|---|---|
-| `rpt_v5_hist`      | 3 | **72 / 72**       | **0** (exactly) |
-| `clustering_hist`  | 4 | 461 / 477         | 5.6e-13 |
-| `assoc_study_hist` | 5 | 1326 / 1378       | 1.1e-12 |
-
-Every scalar matched exactly in all three, and shard event counts summed to the unsharded total exactly (12353+11785+11635+11762 = 47535). `assoc_study_plot`'s full numeric output was **byte-identical** between the unsharded and merged files.
-
-The only objects that differ are `TProfile2D`s, which accumulate sums of floating-point values whose addition order changes with the partition — machine epsilon, ~12 orders of magnitude below any physics tolerance. Every other histogram is bit-identical because all fills in this codebase are unweighted, so bin contents are integer-valued sums. `rpt_v5_hist` matching exactly also independently confirms that its per-event RNG re-seeding really is independent of how work is distributed (see the Diagnostics section) — sharding is a stronger test of that than varying the thread count.
-
-The remaining dead time is the ATLAS/cvmfs `lsetup` in `run_analysis.sh`, which now prints `[job t+NNNNs]` stamps around itself so setup and analysis are separately attributable; the executables print `[t+NNN.N s]` phase marks (`MyUtl::PhaseTimer`). Both flush immediately — a block-buffered stdout with no flushes is why a working job looked hung under `condor_tail`, which is what sent an earlier investigation after "file loading" in the first place.
-
-**Caveat:** the build uses `-march=native` (see Compiler Flags above), tuned to whichever machine ran `make`. If execute hosts have a different CPU microarchitecture than the build host, jobs can crash with an "Illegal instruction" (SIGILL) rather than a normal error.
+The full procedure — submit templates, `transfer_output_remaps`, sharding, selection tags, job cost,
+cleanup — is in the `condor-grid-submission` skill; load it before any condor work. Rules that must
+never be missed:
+- **Merge `*_hist` shards with `build/hist_merge`, never `hadd`**: `hadd` keeps one shard's
+  `TParameter` scalars beside histograms summed over all shards, silently. TTree-only files (ML
+  exports, `*_rpt_v5_regions*.root`) are the opposite: `hadd -f`.
+- **Glob on the shard count** (`*.shard*of12.root`), never `shard*`: a directory can hold several
+  shardings of the same data, and the loose glob double-counts every event.
+- Outputs land in `condor/<sample>/`, not `<repo-root>/<sample>/`; give the plot stage `--hist-file=`.
+- The build is `-march=native`: an execute host with a different CPU dies with SIGILL.
+- Verify a merge by entry counts, never by file sizes, before deleting shards.
 
 ## Score Registry
 
 All scores are defined as `static const Score` members of the `Score` struct in `src/clustering_constants.h` and listed in `SCORE_REGISTRY`. Each carries its own collection spec: `distCut`, `method` (`CONE`/`ITERATIVE`/`SIMULTANEOUS`/`ITERATIVE_SPLIT`), `useZ0`, `filter` (`TrackFilterType`: `ALL`, `JET`, `HS_ONLY`), plus `buildsCollection()` to indicate it manages its own cluster collection (only true when `usesOwnCollection && distCut >= 0`).
 
-| id | Short | Long name | Notes |
-|----|-------|-----------|-------|
-| 0  | HGTD  | HGTD Algorithm | Own collection; selected by proximity to `RecoVtx_time` |
-| 1  | TRKPT | Σ pT | Plain pT sum |
-| 2  | TRKPTZ | Σ pTe^{−1.5\|Δz\|} | Primary/baseline score |
-| 3  | PASS  | Pass Cluster | First cluster passing quality cuts (not currently emplaced in `buildAnalysisMap`) |
-| 7  | CONE  | Cone | Legacy cone baseline; own collection at `DIST_CUT_CONE`, `ClusteringMethod::CONE` (not currently emplaced) |
-| 8  | CONE_BDT | Cone (BDT) | Threshold 0.3; selector is a stub (TMVA excluded) — currently non-functional |
-| 9  | FILTJET | Filter Tracks in Jets | JET filter; own collection at `DIST_CUT_CONE`, `ClusteringMethod::CONE` (not currently emplaced) |
-| 10 | HGTD_SORT | HGTD BDT (pT-sorted) | Threshold 0.3; selector is a stub (TMVA excluded) — currently non-functional |
-| 13 | TEST_MISAS | ΣpTe^{−1.5\|Δz\|} [Events with Perfect Timing] | Oracle: `requiresPurity`, gated on event-level HS timing purity ≥ 0.95 |
-| 14 | TEST_HS | ΣpTe^{−1.5\|Δz\|} (HS only) | Own collection; `HS_ONLY` filter, `ClusteringMethod::CONE` at `DIST_CUT_CONE` (not currently emplaced) |
-| 18 | WAVES | WAVeS Score | Jet-proximity weighted score; main collection (see WAVeS section above) |
-| 19 | JET_T_REFINED | WAVeS 2σ t Re-clustering | Own collection (`WAVES_RECLUST` short name); `JET` filter, `ClusteringMethod::ITERATIVE` at `DIST_CUT_T_REFINED`; selected by TRKPTZ |
-| 20 | WAVES_MISCL | WAVeS [Events with Pure Clusters] | Oracle: `requiresPurity`, gated on cluster purity > 0.75 |
-| 21 | WAVES_MISAS | WAVeS [Events with Perfect Timing] | Oracle: `requiresPurity`, gated on event-level HS timing purity ≥ 0.95 |
-| 22 | VBF_R1 | WAVeS [VBF R1: both tags fwd] | WAVeS selection, denominator gated on VBS region R1 (`regionGate`) |
-| 23 | VBF_R2 | WAVeS [VBF R2: fwd PU + cen. HS] | Same, region R2 |
-| 24 | TRKPTZ_PV | ... [PV-side tracks] | pT sum restricted to tracks closer to PV than any PU vtx — hard veto, **−1.27** on VBF |
-| 25 | TRKPTZ_PU | ... [PU-side tracks] | Orientation control for 24 (−9.03) |
-| 26 | TRKPTZ_PUW | ... [PU-side down-weighted] | Softened veto (w=0.4); superseded by TRKPTZ_TZ |
-| 27 | TRKPTZ_TZ | ... [per-track #Deltaz] | + per-track `exp(−0.7·dz)` weight; +1.76 zjets / +0.68 vbf |
-| 28 | TRKPTZ_TZ_IJ | ... [, in-jet t] | TZ selection (identical score value), `TimeSource::IN_JET` unconditional |
-| 29 | TRKPTZ_TZ_OJ | ... [, out-jet t] | Same, `OUT_JET` complement |
-| 30 | TRKPTZ_TZ_GIJ | ... [, guarded in-jet t] | Same, in-jet time gated at `minSubsetTracks = 3` |
-| 31 | WAVES_GIJ | WAVeS Score [guarded in-jet t] | WAVeS selection with the ≥3 guard |
-| 32 | TRKPTZ_TZJ | ... [+ jet frac] | Bounded jet term — REJECTED (population coin-flip on zjets); `JET_FRAC_WEIGHT = 0` |
-| 33 | TRKPTZ_TZP | ... [+ d0 precision] | **The final classical selector (TZP)** — C++ symbol is still `Score::TRKPTZ_TZQ`, renamed short/long name after the d0-supersedes-qP swap. See Physics Findings |
+The id / short-name / long-name table is `SCORE_REGISTRY` itself. Score 33 (TZP) is still the C++
+symbol `Score::TRKPTZ_TZQ`, renamed after the d0-supersedes-qP swap.
 
 Two fields added to `Score` (2026-09-01): **`timeSource`**
 (`TimeSource::{FULL, IN_JET, OUT_JET}`) — which subset of the SELECTED
@@ -1445,28 +735,6 @@ Plus inclusive resolution/pull plots (`inclusive/inclusivereso_*`,
 `inclusive/inclusivepull_*`, log/lin) and shape-comparison plots
 (`inclusive/shape_comparison*`) over `{HGTD, TRKPTZ, WAVES, WAVES_MISAS}`
 (resolution set) / `{TRKPTZ, WAVES, WAVES_MISAS}` (shape set).
-
-## event_processing.h Internals
-
-Key structures and entry points:
-
-- **`EventResult`**:
-  ```cpp
-  struct EventResult {
-    int    code          = -1;   // -1: rejected by selection; 0: normal; 3: MISAS fail
-    double time          = -1.0; // TRKPTZ-selected cluster time
-    int    nFwdHS        =  0;   // n forward HS tracks (3σ counting step)
-    bool   trkptzPass    = false;
-    bool   misasInDenom  = false; // event entered the TEST_MISAS denominator
-    bool   misasPass     = false; // in denominator AND passed
-    double clusQuality   =  0.0;  // combined quality of the TRKPTZ-selected cluster
-  };
-  ```
-  `processEventData` returns `EventResult`; early-exit returns `{}` (code=-1).
-
-- **Section E** (auxiliary collections): an `applyFilter` lambda dispatches on `TrackFilterType`, then a `SCORE_REGISTRY` loop calls `clusterTracksInTime` for every score where `s.buildsCollection()` is true, populating `unordered_map<int, vector<Cluster>> auxCollections`. No named per-score collection variables.
-
-- **`selectClusters`**: takes the main clusters, tracks, branch, the active `analyses` map, and `auxCollections`; returns `unordered_map<int,Cluster>` keyed on `Score::id`. Handles the main-collection scores via the all-scores `chooseCluster` overload, aux-collection scores via TRKPTZ selection, and `HGTD`/`HGTD_SORT`/`CONE_BDT` via their own dedicated logic.
 
 ## plotting_utilities.h Notes
 
@@ -1525,32 +793,8 @@ rpt_v5 section): VBF >40 GeV rejection +3–4% over deployed WAVeS at 0.90;
 ttbar a wash among real scenarios but above the truth row; zjets RpT stays
 ~10–15% behind WAVeS at matched eff despite the +6.4 core-fraction margin —
 the core-fraction/RpT dissociation above.
-Full trail: `results/{trkptz_pv_augmentation, injet_decomposition,
-sample_independent_timing, guarded_allsamples, qoverp_term, score_grid_search,
-t0_integration, failure_modes, tiebreak_scan, jet_term_consistency,
-classical_scoring_brainstorm, split_clustering}.md`. Key mechanisms:
+Mechanisms and the full results trail are in the `physics-findings` skill.
 
-- **WAVeS decomposes into selection (+0.5) and in-jet re-timing (+0.8), and the
-  re-timing is a pure additive term** — identical to two decimals across
-  TRKPTZ/TZ/WAVeS selectors on every sample tested. Unconditionally applied
-  (deployed WAVeS) it is NEGATIVE on 3 of 4 samples (zjets −1.4); the ≥3-track
-  guard makes it safe everywhere because the sample dependence then emerges
-  from the data (fires on 70% of VBF events, 9% of zjets) instead of being
-  configured in. The sign is set by the share of HS *timing weight* inside
-  jets: 48% VBF vs 10% zjets — a statistics effect, not purity (zjets in-jet
-  purity is still 2.1× enriched and the subset still times worse).
-- **Gentle-beats-steep, uniformly.** Every steep/binary z- or agreement-based
-  penalty lost (PV-proximity veto −1.27, vertex-WAVeS multiplier −5.7, t0
-  fallback −2.8); the gentle continuous versions of the same information won
-  (+1.76). At ~106 vertices/event the HS cluster is often NOT nearest the PV.
-- **TRKPTZ's cluster-level 1.5 was stale.** Never tuned by anyone; jointly with
-  the per-track term the optimum softens it 2.5× to 0.6 (α 0.7→1.0, γ 1.2→0.45,
-  each 1-D optimum having been conditioned on the others' old values).
-- **The three precision sums (z0/d0/qP) are one signal** (mutual corr
-  0.86–0.95); d0 is the best packaging and stacking a second adds nothing.
-- **Raw |Δz| in mm beats z0 significance** as the per-track weight (+1.76 vs
-  +1.21 on zjets) — same conclusion as the z-association study reached about
-  `sqrt(var_z0)`.
 - **Closed negatives** (do not retry): canonical vertex-WAVeS weighting (its
   score is ~10⁴:1 concentrated on the PV, so it cancels in the within-event
   argmax); jet-fraction score term (population coin-flip on zjets, 0.612 AUC vs
@@ -1571,238 +815,17 @@ classical_scoring_brainstorm, split_clustering}.md`. Key mechanisms:
   (4) `truth_n_hs_tracks` is PER CLUSTER — event totals are the SUM, and
   `.first()` silently reads one cluster's count.
 
-### VBS pair composition, and what JVT/fJVT do to it (2026-09-02 / 2026-09-18)
+### Detailed findings (lazy-loaded)
 
-`util/vbs_region_diag` classifies every selected event's chosen tagging pair
-by the truth identity and detector region of each leg (21 cells; R1 and R2
-are two of them). `results/vbs_pair_composition.md`: **Z+jets has no
-hard-scatter leg to pair with** — at m_jj >= 200, 79.7% of its pairs carry no
-paper-HS jet and the two pileup-only cells hold 65.6%, while VBF puts an HS
-jet on both legs 55% of the time on the same code. R2's scarcity on Z+jets is
-the central HS leg mostly not being there, not the m_jj picker outranking it.
-
-The SuperNtuples carry **no Jvt/fJvt branch**, so `--jvt=loose|tight`
-computes both in-code (`src/jet_tagging.h`, since 2026-09-25 shared with
-`rpt_v5_hist --jvt`) from `Track_recoVtx_idx` + ghost tracks (R_pT as the
-JVT proxy, calibrated to the published 92% / 85% HS efficiencies on local
-VBF; fJVT per arXiv:1705.02211 with the published 0.5 / 0.4 cuts) and
-applies them BEFORE pairing. `results/vbs_pair_composition_jvt.md`:
-
-- **Z+jets: the taggers do not make it an R2 sample.** They remove central
-  pileup (JVT PU eff 15% / 1.8%) far better than forward pileup (fJVT PU eff
-  67% / 47% at μ = 200), so F-PU + C-PU drains 37.8 → 5.7% while F-PU + F-PU
-  GROWS 27.8 → 42.0% of pairs. R2 rises 7.8 → 20.3% by losing its
-  competition, not by creation (78% of post-loose R2 was R2 before); even
-  tight leaves 60% of pairs with no HS leg. 59% / 77% of selected events are
-  dropped. The no-tagger run reproduces the earlier 64,950 pairs exactly.
-- **VBF, the control:** removal is 98.5% pileup-pure on the JVT side, HS+HS
-  share of the pair rises 56 → 71 → 78%, R1/R2 shrink only modestly and 70% /
-  67% of R1 / R2 events are still R1 / R2 after the loose point.
-- **The forward-pileup dominance is a selection artefact plus a sample
-  limitation.** The diagnostic has no recoil requirement; 64% of its selected
-  Z+jets events have no HS jet above 30 GeV, and two forward pileup jets pass
-  the VBS cuts alone in 3.7% of all μ = 200 events. With pT(ll) > 200 (the
-  analysis' MET cut in the Z→ll CR) the survivors are R2 36% + HS+HS 34% and
-  F-PU+F-PU 7% — but only 0.9% of events survive, since inclusive Powheg DY
-  has almost no Z above 200 GeV, and the sample has ≤1 ME parton and no EW
-  Zjj. `z_pt`/`z_mass` are stored per event; `vbs_region_stack.py --zpt-min`.
-- dijet not run. `--jvt=none` is bit-identical to the pre-JVT diagnostic.
+The VBS pair composition / JVT study is in the `vbs-timing-studies` skill; the loss decomposition,
+topology gain, R2 capture, gate severity, efficiency ceiling, calibration, z-association study and
+reference replication are in the `physics-findings` skill.
 
 **Anything setting `EXTENDED_BRANCHES` must call `recordAvailableBranches`
 (src/event_processing.h) after `setupChain` and before constructing the
 wrapper.** The grid samples lack `Track_btagIp_*`; a TTreeReader with a
 missing branch iterates ZERO entries and exits 0. The first Z+jets submission
 of this diagnostic produced three "successful" empty files that way.
-
-Results as of 2026-08-20, from `rpt_v5` (grid samples, |Deta| >= 0 and
-m_jj >= 500 GeV) and `failure_decomposition` (local VBF). Numbers are pileup
-rejection (1/mistag) at fixed hard-scatter efficiency unless stated.
-
-### Where the loss actually lives
-
-`failure_decomposition` assigns each failing event one principal cause:
-
-| cause | share |
-|---|---|
-| Timing misassignment | **67.4%** |
-| Selection failure | 26.5% |
-| Misclustering | **3.1%** |
-| Track efficiency loss | 0.7% |
-| Irreducible | 2.3% |
-
-**The clustering is not the bottleneck.** Grouping all truth-HS tracks into
-one perfect cluster almost never rescues a lost event, so the good cluster is
-essentially always present and simply not chosen. Selection dominates in
-sparse events (52.9% at 0–1 forward HS tracks) and that is where nearly all
-failures live (78% fail rate at 0–1 tracks, ~1% above 14); timing
-misassignment dominates in track-rich ones.
-
-The scenario ladder says the same thing independently. VBF forward >40 GeV at
-0.90 efficiency: `zonly 65.0 -> waves 87.1 -> waves_ideal 106.2 -> truth
-111.3`. So **idealising times and selection together is worth ~22%, and the
-clustering leaves only ~5% more on the table**. dijet agrees (63.9 vs 68.0,
-~6%). Two independent measurements plus the 3.1% above.
-
-Caveat: part of the residual `waves_ideal -> truth` gap is not a clustering
-error at all — truth is handed a 10 ps vertex time, while even a perfectly
-chosen cluster must estimate t0 from a handful of 30 ps tracks. Separating
-those is open.
-
-### The gain is concentrated in the topology
-
-ITk -> WAVeS at 0.80 efficiency:
-
-| selection | VBF | dijet | Z+jets |
-|---|---|---|---|
-| Inclusive forward | x1.3 | x1.2 | x1.2 |
-| R1 (both tags forward) | **x1.87** | **x2.53** | x1.19 |
-| R2 (fwd PU + central HS) | x1.17 | x1.18 | x1.04 |
-
-The inclusive number understates HGTD roughly two-fold, because it averages
-over jets where timing is irrelevant: pileup jets with no PV0 tracks to begin
-with, and HS jets with ample track support.
-
-### R2 fails because WAVeS is captured by the fake
-
-The score ordering **inverts** between regions, consistently across all three
-samples — WAVeS wins R1, the jet-agnostic TRKPTZ wins R2 (VBF x1.32 vs x1.17;
-dijet x1.44 vs x1.18; Z+jets x1.09 vs x1.04).
-
-WAVeS weights tracks by proximity to forward jets. In R2 *the only forward jet
-is the pileup one*, so WAVeS up-weights exactly the tracks of the fake vertex,
-drags t0 toward it, and the fake then passes its own gate. The fix is either
-regional (use TRKPTZ in R2) or structural (compute t0 from tracks outside
-jets, so no single jet can capture the score).
-
-### Timing discriminates by severity, not frequency
-
-Per forward jet, VBF, WAVeS gate vs ITk-only:
-
-| jet | n | raised | lowered | -> zero | mean loss |
-|---|---|---|---|---|---|
-| HS | 56,342 | **0** | 26.5% | 0.6% | 18.4% |
-| PU | 15,307 | **0** | 7.3% | 6.0% | **90.4%** |
-
-The gate fires on HS jets more often than PU ones, but a touched PU jet loses
-90% of its R_pT against 18% for an HS jet. Most PU jets are untouched because
-they had nothing to remove (they pass the z-association at 0.8%). "Raised" is
-0 by construction: `applyTimeGate` returns a SUBSET, so R_pT can only fall.
-
-### The efficiency ceiling is the binding constraint
-
-A jet the gate empties goes to R_pT = 0 and becomes indistinguishable from
-pileup, so every timed scenario has a LOWER maximum reachable HS efficiency
-than ITk-only (VBF 30–40: 93.8% -> 91.0%; Z+jets: 87.6% -> 82.4%). This, not
-resolution, is why curves collapse above ~0.93 and why ratio panels fall back
-to 1. Proposed fix, NOT implemented: fall back to the jet's ITk-only R_pT when
-the gate empties it — the jet-level analogue of TDR self-tagging.
-
-### Calibration is correct but near-irrelevant
-
-The pull denominator is sqrt(f^2 sigma_vtx^2 + sigma_trk^2) with sigma_vtx
-~9 ps against sigma_trk ~26 ps, so a **17% change in inflation moves the
-effective gate width by 3%**. Worth having right; not worth another iteration.
-Offsets are 0.6–1.5 ps (negligible). Non-Gaussian tails outside a 150 ps core
-are 14–15% (VBF), 16–18% (dijet), 21–25% (Z+jets) — the tail, not the core, is
-what a Gaussian pull cannot handle.
-
-Z+jets is limited by t0 AVAILABILITY, not by the algorithm: Athena produces a
-valid vertex time for 80.1% of VBF events, 73.6% of dijet, and **16.5%** of
-Z+jets.
-
-### The z-association is mistuned for TRKPTZ, and irrelevant for WAVeS
-
-From `assoc_study_hist`/`assoc_study_plot`, local VBF, 47,535 selected events,
-11 association rules evaluated against the same events (2026-08-26). Full
-write-up: `share/docs/Z_ASSOCIATION_STUDY.md`.
-
-The incumbent `significance < 3.0` keeps a track list that is **68% pileup**,
-and it is the second-worst of the eleven rules for TRKPTZ:
-
-| score | best rule | vs. incumbent |
-|---|---|---|
-| TRKPTZ | `getNewDzpara × 1.0` | **−1.58 ps core σ** (15.95 → 14.37), **+0.92 %pt core fraction** (90.38 → 91.30) |
-| WAVeS  | `getNewDzpara × 1.2` | +0.13 ps, +0.10 %pt — i.e. nothing |
-
-Both families improve as they tighten and then turn over (significance at
-~2.0, the parameterization at ~1.0), so there is a real optimum and the
-incumbent is not near it. Simply passing the existing `--dzpara` flag
-(`getNewDzpara × 1.4`) already captures ~3/4 of the gain with no code change.
-The TRKPTZ gain is concentrated at low multiplicity — σ(nHS≤5) improves
-29.3 → 25.3 ps (−13%), which is exactly where the failure decomposition says
-the failures live.
-
-**The two scores want opposite things, for a mechanical reason.**
-`Cluster::calculateTime` recomputes the WAVeS time from only the tracks within
-ΔR < 0.4 of a forward jet, and that in-jet filter already does the
-pileup-shedding a tighter z-association would do. The two mechanisms are
-redundant, so tightening can only cost WAVeS hard-scatter tracks — and it does,
-monotonically (`dzpara × 0.6`: +1.86 ps, −1.83 %pt, and worse at *every*
-multiplicity, not just sparse events). Expect any future selector that
-recomputes its time from a track subset to behave the same way, and to want a
-LOOSE association.
-
-**~59% of WAVeS's advantage over TRKPTZ is just the z-association.** The
-core-fraction gap is 1.38 %pt at the incumbent rule but 0.56 %pt when each
-score gets its own best rule. On core σ the ordering inverts outright: TRKPTZ
-at `dzpara × 1.0` (14.37 ps) beats WAVeS at any rule (best 14.95 ps). WAVeS's
-residual edge is in core FRACTION, not core width — i.e. it suppresses gross
-misassignment, consistent with the failure decomposition, not resolution.
-
-**The parameterization is a better shape, not merely a tighter cut.** Compared
-at matched track purity the two families separate, and the gap widens the
-tighter the working point: at ~31.5% purity the parameterization is worth +1.0
-points of HS recall and the two perform identically; at ~43.7% purity it is
-worth **+5.6 points of recall at higher purity**, and TRKPTZ gains 0.5 ps and
-0.6 %pt from the shape alone. Likely cause: `sqrt(var_z0)` is a per-track
-covariance that does not capture the η dependence of the true z0 spread, and
-`Z0_VAR_INFLATION = 1.15²` is independent evidence it is mis-estimated — a
-single global factor cannot repair an η-dependent mis-modelling. (The factor was
-removed 2026-11-16; this study's significance cuts N are 1.15 N of the raw covariance.)
-
-**Union with ghost association: tested and rejected.** The idea was that ghost
-association, being derived independently of z, might recover HS tracks the
-z-cut misses. OR-ing it in costs **20–24 %pt of core fraction** for BOTH
-scores (TRKPTZ 91.30 → 68.47, WAVeS 91.80 → 72.98, on a `dzpara × 1.0` base).
-
-The failure mode is worth remembering because it is not the obvious one.
-**Core σ barely moves (~1 ps) while core fraction collapses** — so the added
-tracks are not dragging the HS cluster's time, they are causing the wrong
-cluster to be *selected*. Confirmed differentially: every z-only rule
-saturates at ~99.9% core fraction once there are ≥20 forward HS tracks, while
-the union plateaus at **84%** and never saturates. It picks wrong one time in
-six even in the most track-rich events.
-
-Why: the added pileup is **time-random** (mean |Δt| to the truth HS vertex of
-224 ps, against 229 ps for a track drawn at random from the event — measured
-in `util/scratch/ghost_assoc_diag.cxx`), but sits inside forward jets and so
-carries real pT. It builds *decoy clusters* rather than poisoning the HS one,
-feeding the selection channel that the failure decomposition already names as
-dominant. WAVeS is hit as hard as TRKPTZ here despite being immune to every
-z-only change, because jet-proximate tracks are exactly what its score
-up-weights.
-
-Also established while testing this: **ghost association is numerically the
-same as `filterTracksInJets` at ΔR < 0.4** (1,142,857 tracks / 24.44% HS vs
-1,139,170 / 24.54%), so it is not new information relative to what WAVeS
-already uses.
-
-**Not yet acted on.** `MAX_NSIGMA` is unchanged: this has only been run on the
-local VBF sample. Z+jets in particular should be checked first, since Athena
-produces a valid vertex time for only 16.5% of its events. Rerunning is cheap
-(~35 s hist + ~15 s plot on the full local sample; condor via `--sample=`).
-
-### Reference-study replication
-
-Central region at the reference configuration (`util/myJet_ana_fr.C`, present
-in the main working tree but not committed — it covers both regions via
-commented-out eta lines and carries the z0-significance cut as a commented
-alternative): the
-**timing improvement factor reproduces** (ours 1.63 vs their ~1.6 at 0.800)
-but both absolute rejections sit ~2.3x low. A uniform offset cannot be caused
-by the time gate, so the open question is the pileup population or its
-normalisation, not the timing model. Jet collection (EMTopo) and the
-isHS/isPU definitions are confirmed to match.
 
 ### Methodological warnings
 

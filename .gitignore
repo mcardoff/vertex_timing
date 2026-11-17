@@ -20,3 +20,15 @@
 *.root
 /build-wt/
 /runs/
+
+# grid outputs, merged or per shard (condor/<sample>/, transfer_output_remaps); bulk data belongs on /data
+/condor/vbf/
+/condor/zjets/
+/condor/dijet/
+/condor/ttbar/
+
+# local-only since 2026-11-17: the GitHub repo is public (results with internal numbers, notes, the decks).
+# results/ files tracked before then stay tracked; new ones are ignored.
+/results/
+/notes/
+/slides/
