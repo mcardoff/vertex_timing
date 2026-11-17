@@ -148,6 +148,10 @@ int main(int argc, char** argv) {
   // ===========================================================================
   // SECTION 1: Load histograms (raw, unstyled) from the saved ROOT file.
   // ===========================================================================
+  // --dzpara / --rpt-signif: rpt_v5_hist's tag for them (appended after every
+  // other tag, as there), so the plot stage finds the file; checked below.
+  recordRptAssoc(MyUtl::hasFlag(argc, argv, "--dzpara"),
+                 MyUtl::hasFlag(argc, argv, "--rpt-signif"));
   const std::string histFile = MyUtl::resolveHistFile(
     argc, argv, MyUtl::histFilePath("rpt_v5_hist.root"));
   std::cout << "Reading histograms from " << histFile << '\n';
@@ -187,6 +191,7 @@ int main(int argc, char** argv) {
     pu_floor_lo  = reader.ReadScalarDouble("meta_pu_floor_lo");
     hs_tot_lo    = reader.ReadScalarDouble("meta_hs_tot_lo");
     hs_floor_lo  = reader.ReadScalarDouble("meta_hs_floor_lo");
+    reader.CheckRunSettings(MyUtl::RUN_SETTINGS);  // --dzpara / --rpt-signif
   }
 
   // ── Output paths ─────────────────────────────────────────────────────────────

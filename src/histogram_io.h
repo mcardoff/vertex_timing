@@ -113,6 +113,16 @@ namespace MyUtl {
       WriteScalar("meta_vbs_mjj",  vbsMjj);
     }
 
+    // The run's non-default settings (MyUtl::RUN_SETTINGS, sample_config.h),
+    // each as a meta_vbs_<key> scalar: the prefix makes hist_merge keep it once
+    // and require the shards to agree. A default setting is not written, so a
+    // default run's key set is unchanged. See HistReader::CheckRunSettings.
+    template <typename Settings>
+    void WriteRunSettings(const Settings& settings) {
+      for (const auto& s : settings)
+        if (!s.isDefault()) WriteScalar("meta_vbs_" + s.key, static_cast<Double_t>(s.value));
+    }
+
   private:
     TFile* file_;
   };
@@ -244,6 +254,49 @@ namespace MyUtl {
               "histogramming stage.";
         throw std::runtime_error(os.str());
       }
+    }
+
+    // -----------------------------------------------------------------------
+    // CheckRunSettings
+    //   CheckSelection for the run settings (MyUtl::RUN_SETTINGS,
+    //   sample_config.h): aborts if the file records a value that differs from
+    //   this process's. Only non-default settings are written, so a missing key
+    //   reads as the default. A missing key while this process expects a
+    //   non-default value cannot be verified -- the file predates the record, or
+    //   was made without the flag (which its tagged name normally rules out) --
+    //   so warn and continue, as CheckSelection does for pre-metadata files.
+    // -----------------------------------------------------------------------
+    template <typename Settings>
+    void CheckRunSettings(const Settings& settings) {
+      if (!file_) throw std::runtime_error("HistReader: file not open");
+      for (const auto& s : settings) {
+        const std::string key = "meta_vbs_" + s.key;
+        double v = s.def;
+        if (!ReadRunConstant(key, v) && !s.isDefault()) {
+          std::cerr << "WARNING: this histogram file carries no " << key << ", so its "
+                    << s.flag << " setting cannot be verified (the file predates the\n"
+                       "         record, or was made without " << s.flag << "). Plots assume "
+                    << s.key << " = " << s.value << ".\n";
+          continue;
+        }
+        if (std::abs(v - s.value) > 1e-9) {
+          std::ostringstream os;
+          os << "HistReader::CheckRunSettings: this file was produced with " << s.key
+             << " = " << v << ", but this process is configured for " << s.key << " = "
+             << s.value << " (" << s.flag << "). Pass the histogramming stage's flags, "
+                "or re-run it.";
+          throw std::runtime_error(os.str());
+        }
+      }
+    }
+
+    // A meta_vbs_* run constant of either scalar type (hist_merge rewrites them
+    // as TParameter<Double_t>). False, with `v` untouched, when the key is absent.
+    bool ReadRunConstant(const std::string& name, double& v) {
+      if (!file_) throw std::runtime_error("HistReader: file not open");
+      if (auto* d = file_->Get<TParameter<Double_t>>(name.c_str())) { v = d->GetVal(); return true; }
+      if (auto* l = file_->Get<TParameter<Long64_t>>(name.c_str())) { v = static_cast<double>(l->GetVal()); return true; }
+      return false;
     }
 
   private:

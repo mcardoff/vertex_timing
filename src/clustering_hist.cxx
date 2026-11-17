@@ -100,13 +100,11 @@ auto main(int argc, char** argv) -> int {
   // --- Sample selection (--sample=vbf|zjets|dijet; default: local VBF ntuple) ---
   auto sample = MyUtl::resolveSample(argc, argv);
   MyUtl::resolveSelection(argc, argv);  // --vbs-deta=<x>; sets SELECTION_TAG
-  // --clean-times / --assoc-nsigma=X: the talk's t0 inputs (tags the output)
+  // --clean-times / --assoc-nsigma=X (the talk's t0 inputs), --dzpara and
+  // --fix-select-share=X: each tags the output and is recorded in it
   const double assocNsigma = MyUtl::resolveTimingInputs(argc, argv);
   // --fix-select-share=X: the selection fix's "significant share" of the
   // clustered pT (src/failure_fixes.h); changes only the WFIX_* rows
-  for (int i = 1; i < argc; ++i)
-    if (std::string(argv[i]).rfind("--fix-select-share=", 0) == 0)
-      MyUtl::FIX_SELECT_MIN_PT_SHARE = std::stod(std::string(argv[i]).substr(19));
   std::cout << "[fixes] selection fix: >= 1 HS track and >= " << MyUtl::FIX_SELECT_MIN_PT_SHARE
             << " of the clustered pT\n";
   std::unique_ptr<MyUtl::AssocRule> assocRule;
@@ -128,10 +126,9 @@ auto main(int argc, char** argv) -> int {
   unsigned nThreads = MyUtl::resolveThreads(argc, argv);
 
   // --dzpara: use the R_pT study's getNewDzpara parameterization for
-  // track-to-vertex association instead of the z0-significance cut. Set here,
-  // before TTreeProcessorMT starts any worker, and read-only thereafter.
-  for (int i = 1; i < argc; ++i)
-    if (std::string(argv[i]) == "--dzpara") MyUtl::USE_DZ_PARA = true;
+  // track-to-vertex association instead of the z0-significance cut. Set by
+  // resolveTimingInputs above, before TTreeProcessorMT starts any worker, and
+  // read-only thereafter.
   std::cout << "[assoc] track-to-vertex association: "
             << (MyUtl::USE_DZ_PARA
                   ? "getNewDzpara x " + std::to_string(MyUtl::DZ0_PARA_SCALE_CLUSTER)
@@ -367,6 +364,7 @@ auto main(int argc, char** argv) -> int {
   writer.WriteScalar("meta_n_rej_jetpt_cut",    static_cast<Long64_t>(nRejJetPtCut));
   writer.WriteScalar("meta_n_rej_other",        static_cast<Long64_t>(nRejOther));
   writer.WriteRunMeta(MyUtl::ENERGY_LABEL, nEventsProcessed, MyUtl::VBS_JET_D_ETA, MyUtl::VBS_JET_MJJ);
+  writer.WriteRunSettings(MyUtl::RUN_SETTINGS);  // non-default resolveTimingInputs flags only
   writer.Close();
   std::cout << "Wrote histograms to " << histPath << '\n';
   phase.mark("histograms written");
