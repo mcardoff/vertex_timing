@@ -539,10 +539,7 @@ int main(int argc, char** argv) {
   // table at the end then prints the freshly measured ratio beside these in its
   // "in use" column, making a stale entry visible in the same log.
   INFL = inflationFor(MyUtl::SAMPLE_NAME);
-  std::printf("[calibration] vertex-time inflation for '%s': "
-              "hgtd %.2f  trkptz %.2f  waves %.2f  tzp %.2f\n",
-              MyUtl::SAMPLE_NAME.empty() ? "local (vbf)" : MyUtl::SAMPLE_NAME.c_str(),
-              INFL.hgtd, INFL.trkptz, INFL.waves, INFL.tzp);
+  printInflation(MyUtl::SAMPLE_NAME);
 
   TChain chain("ntuple");
   // setupChain now validates the file list itself (and aborts if empty) with
@@ -1612,7 +1609,7 @@ int main(int argc, char** argv) {
     std::printf("  mean dt : systematic offset -- an inflation CANNOT correct this.\n");
     std::printf("  tail    : fraction outside the core window, i.e. how much\n");
     std::printf("            structure the core-width calibration does not see.\n");
-    std::printf("  (ratio != in use -> update this sample's row in inflationFor() and rebuild)\n");
+    std::printf("  (ratio != in use -> update this sample's row in inflationRow() and rebuild)\n");
   }
 
   {
