@@ -109,7 +109,9 @@ for i in range(len(b.Track_eta[EVT])):
     valid  = int(b.Track_hasValidTime[EVT][i]) == 1
     qual   = int(b.Track_quality[EVT][i]) == 1
     tvtx   = int(b.Track_truthVtx_idx[EVT][i])
-    is_hs  = bool(b.TruthVtx_isHS[EVT][tvtx])
+    # tvtx = -1 (no truth-vertex link) must not index [-1]: on the grid samples,
+    # which keep only the HS truth vertex, that wraps round to it
+    is_hs  = tvtx >= 0 and bool(b.TruthVtx_isHS[EVT][tvtx])
 
     in_hgtd  = MIN_ABS_ETA < abs(eta) < MAX_ABS_ETA
     nsigma_z = abs(z0 - reco_z) / np.sqrt(max(vz0, 1e-12))

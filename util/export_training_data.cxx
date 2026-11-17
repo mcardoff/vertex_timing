@@ -538,17 +538,8 @@ auto main(int argc, char** argv) -> int {
 
   setupChain(chain, cfg.ntupleDir.c_str(), shard);
   // Record what this sample actually carries, so the wrapper binds only real
-  // branches. The productions are NOT uniform: local VBF has 241 branches, the
-  // grid samples 183-195, and Track_btagIp_* is missing from every grid sample.
-  if (auto* fl = chain.GetListOfFiles(); fl && fl->GetEntries() > 0) {
-    std::unique_ptr<TFile> f0(TFile::Open(fl->At(0)->GetTitle()));
-    if (f0 && !f0->IsZombie())
-      if (auto* t0 = f0->Get<TTree>("ntuple"))
-        for (auto* o : *t0->GetListOfBranches())
-          MyUtl::AVAILABLE_BRANCHES.insert(o->GetName());
-  }
-  std::cout << "[branches] sample carries " << MyUtl::AVAILABLE_BRANCHES.size()
-            << " branches\n";
+  // branches -- see recordAvailableBranches in src/event_processing.h.
+  recordAvailableBranches(chain);
   TTreeReader reader(&chain);
   BranchPointerWrapper branch(reader);
 
