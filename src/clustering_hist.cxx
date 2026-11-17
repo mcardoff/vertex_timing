@@ -141,6 +141,13 @@ auto main(int argc, char** argv) -> int {
   // --- Data source ---
   TChain chain("ntuple");
   setupChain(chain, sample.ntupleDir.c_str(), MyUtl::FILE_SHARD);
+  // --clean-times binds Track_hitInLastLayer, which the skims drop. The
+  // wrapper's hasBranch() guard can only fire once AVAILABLE_BRANCHES is
+  // filled (empty means "assume everything is present"); without it the
+  // missing branch is bound, the reader iterates ZERO entries and the run
+  // writes empty histograms with exit code 0.
+  if (MyUtl::CLEAN_TIMES || MyUtl::EXTENDED_BRANCHES)
+    recordAvailableBranches(chain);
   phase.mark("chain built");
   ROOT::EnableImplicitMT(nThreads);
 
