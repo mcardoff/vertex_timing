@@ -106,8 +106,9 @@ static constexpr double GATE_SIGMA = 3.0;
 // worker threads -- write-once-before-fork, so no synchronisation is needed.
 static Inflation INFL = {1.48, 1.39, 1.38, 1.38};
 
-// --jvt=none|loose|tight: pileup-jet tagging (src/jet_tagging.h) applied to
-// the pT-passing jets BEFORE the VBS pair is formed, as an analysis would --
+// --jvt=<wp>: pileup-jet tagging (src/jet_tagging.h; every working point but
+// the t0-gated / TDR ones, whose R_pT this program does not compute) applied
+// to the pT-passing jets BEFORE the VBS pair is formed, as an analysis would --
 // the same taggers and working points vbs_region_diag --jvt uses. It gates the
 // REGIONS only (the narrow _r1/_r2 histograms and the wide region tree), like
 // the --vbs-* knobs: the inclusive forward slices stay the selection-free
@@ -501,22 +502,18 @@ int main(int argc, char** argv) {
     if (a == "--dzpara")     MyUtl::USE_DZ_PARA = true;   // clustering input
     if (a == "--rpt-signif") RPT_USE_DZ_PARA    = false;  // R_pT track list
   }
-  for (int i = 1; i < argc; ++i) {
-    const std::string a(argv[i]);
-    if (a.rfind("--jvt=", 0) != 0) continue;
-    const JvtWP* wp = jvtWPByName(a.substr(6));
-    if (!wp) { std::cerr << "unknown " << a << " (none|loose|tight)\n"; return 1; }
-    JVT_SEL = wp;
-  }
+  // --jvt: a tagged run must not overwrite an untagged one, so the working
+  // point's tag (jvtLoose, ...) joins SELECTION_TAG and every output name (hist
+  // file and region tree) carries it. resolveRptJvt builds it, the same call
+  // rpt_v5_plot makes, and refuses the t0-gated / TDR working points this
+  // program does not compute.
+  JVT_SEL = resolveRptJvt(argc, argv, "rpt_v5_hist");
+  if (!JVT_SEL) return 1;
   JVT_ON = (JVT_SEL->rptMin >= 0.0);
   if (JVT_ON) {
     // The discriminants need the vertex fit's track assignment, an EXTENDED
     // branch; set before any BranchPointerWrapper binds.
     MyUtl::EXTENDED_BRANCHES = true;
-    // A tagged run must not overwrite an untagged one: jvtLoose/jvtTight join
-    // SELECTION_TAG, so every output name (hist file and region tree) carries it.
-    const std::string tag = std::string(JVT_SEL->tag).substr(1);
-    MyUtl::SELECTION_TAG = MyUtl::SELECTION_TAG.empty() ? tag : MyUtl::SELECTION_TAG + "_" + tag;
   }
   std::cout << "[jvt] " << JVT_SEL->name;
   if (JVT_ON)
@@ -545,10 +542,7 @@ int main(int argc, char** argv) {
   // table at the end then prints the freshly measured ratio beside these in its
   // "in use" column, making a stale entry visible in the same log.
   INFL = inflationFor(MyUtl::SAMPLE_NAME);
-  std::printf("[calibration] vertex-time inflation for '%s': "
-              "hgtd %.2f  trkptz %.2f  waves %.2f  tzp %.2f\n",
-              MyUtl::SAMPLE_NAME.empty() ? "local (vbf)" : MyUtl::SAMPLE_NAME.c_str(),
-              INFL.hgtd, INFL.trkptz, INFL.waves, INFL.tzp);
+  printInflation(MyUtl::SAMPLE_NAME);
 
   TChain chain("ntuple");
   // setupChain now validates the file list itself (and aborts if empty) with
@@ -1004,10 +998,7 @@ int main(int argc, char** argv) {
         for (int idx : trk_z) {
           if (branch.trackToTruthvtx[idx] != 0 || branch.trackTimeValid[idx] != 1) continue;
           ++nTimedHS;
-          const int    pi = branch.trackToParticle[idx];
-          const double tTrue = (pi != -1) ? branch.particleT[pi]
-                                          : branch.truthVtxTime[branch.trackToTruthvtx[idx]];
-          if (std::abs(branch.trackTime[idx] - tTrue) / branch.trackTimeRes[idx] >= TRUTH_PULL_CUT)
+          if (std::abs(branch.trackTime[idx] - tTruth) / branch.trackTimeRes[idx] >= TRUTH_PULL_CUT)   // vs t_HS
             ++nMisTimed;
         }
         const float pur = calcHSTimingPurity(trk_z, &branch);
@@ -1623,7 +1614,7 @@ int main(int argc, char** argv) {
     std::printf("  mean dt : systematic offset -- an inflation CANNOT correct this.\n");
     std::printf("  tail    : fraction outside the core window, i.e. how much\n");
     std::printf("            structure the core-width calibration does not see.\n");
-    std::printf("  (ratio != in use -> update this sample's row in inflationFor() and rebuild)\n");
+    std::printf("  (ratio != in use -> update this sample's row in inflationRow() and rebuild)\n");
   }
 
   {

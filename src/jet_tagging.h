@@ -35,6 +35,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 #include <limits>
 #include <string>
 #include <vector>
@@ -116,6 +117,44 @@ namespace MyUtl {
   inline const JvtWP* jvtWPByName(const std::string& name) {
     for (const auto& wp : JVT_WPS) if (name == wp.name) return &wp;
     return nullptr;
+  }
+
+  // True for a working point whose cut needs an R_pT computeJetDiscriminants does not compute: a t0-gated one
+  // (t0Gate >= 0) or, in the forward window, the TDR one (tdrRpt > -2). The caller has to compute it and put it in
+  // JetDisc::rpt, which only util/tdr_fwdpair.cxx does. Anywhere else jvtRemoves would cut JVT's plain R_pT at
+  // thresholds calibrated on a different quantity.
+  inline bool jvtNeedsCallerRpt(const JvtWP& wp) { return wp.t0Gate >= 0 || wp.tdrRpt > -2; }
+
+  // The working points computeJetDiscriminants alone can evaluate, "none|loose|...", for messages.
+  inline std::string jvtSupportedNames() {
+    std::string s;
+    for (const auto& wp : JVT_WPS)
+      if (!jvtNeedsCallerRpt(wp)) s += (s.empty() ? "" : "|") + std::string(wp.name);
+    return s;
+  }
+
+  // --jvt=<name> for a program that evaluates the taggers with computeJetDiscriminants alone (rpt_v5_hist and
+  // rpt_v5_plot, vbs_region_diag, vbs_time_veto): the last --jvt= given, "none" without one. An unknown name, or a
+  // working point needing a caller-computed R_pT (jvtNeedsCallerRpt), prints an error naming the supported working
+  // points and returns nullptr; the caller exits non-zero. `prog` prefixes the message.
+  inline const JvtWP* resolveJvtWP(int argc, char** argv, const std::string& prog) {
+    const JvtWP* sel = &JVT_WPS[0];
+    for (int i = 1; i < argc; ++i) {
+      const std::string a = argv[i];
+      if (a.rfind("--jvt=", 0) != 0) continue;
+      const JvtWP* wp = jvtWPByName(a.substr(6));
+      if (!wp) {
+        std::cerr << "[" << prog << "] unknown " << a << "; supported: " << jvtSupportedNames() << "\n";
+        return nullptr;
+      }
+      if (jvtNeedsCallerRpt(*wp)) {
+        std::cerr << "[" << prog << "] " << a << " cuts a t0-gated or TDR R_pT, which this program does not compute "
+                     "(only tdr_fwdpair does); supported: " << jvtSupportedNames() << "\n";
+        return nullptr;
+      }
+      sel = wp;
+    }
+    return sel;
   }
 
   // One jet's discriminants, computed for EVERY jet in the array (not just the

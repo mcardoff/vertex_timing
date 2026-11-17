@@ -389,9 +389,11 @@ int main(int argc, char** argv) {
   FILE_SHARD = resolveShard(argc, argv);
   const Long64_t maxEvents = resolveMaxEvents(argc, argv);
 
-  // --jvt=none|loose|tight: pileup-jet tagging before pairing, exactly as
-  // vbs_region_diag / rpt_v5_hist (src/jet_tagging.h). Joins SELECTION_TAG.
-  const JvtWP* wpSel = &JVT_WPS[0];
+  // --jvt=<wp>: pileup-jet tagging before pairing, exactly as vbs_region_diag /
+  // rpt_v5_hist (src/jet_tagging.h; the t0-gated / TDR working points are
+  // refused, their R_pT is not computed here). Joins SELECTION_TAG.
+  const JvtWP* wpSel = resolveJvtWP(argc, argv, "veto");
+  if (!wpSel) return 1;
   std::string outOverride;
   bool srMode = false, srMetJets = false;
   float srRecoilMin = SR_RECOIL_MIN_DEFAULT;
@@ -412,10 +414,6 @@ int main(int argc, char** argv) {
     if (a == "--pure-times") { gPureTimes = true; continue; }
     if (a == "--jet-time-score=waves") { gJetTimeWaves = true; continue; }
     if (a == "--jet-time-score=sumpt") { gJetTimeWaves = false; continue; }
-    if (a.rfind("--jvt=", 0) != 0) continue;
-    const JvtWP* hit = jvtWPByName(a.substr(6));
-    if (!hit) { std::cerr << "[veto] unknown " << a << " (none|loose|tight|looseext)\n"; return 1; }
-    wpSel = hit;
   }
   const JvtWP& WP = *wpSel;
   const bool jvtOn = WP.rptMin >= 0.0;
@@ -478,9 +476,7 @@ int main(int argc, char** argv) {
   std::cout << "  jet time: core = timed ghost tracks, " << MIN_TRACK_PT << "-" << MAX_TRACK_PT
             << " GeV, dR < " << gJetTimeDr << ", " << JET_TIME_DIST_CUT
             << "-sigma time clustering, max sum-pT cluster\n";
-  std::printf("[veto] t0 inflation (rpt_v5's, '%s'): hgtd %.2f trkptz %.2f waves %.2f tzp %.2f\n",
-              SAMPLE_NAME.empty() ? "local (vbf)" : SAMPLE_NAME.c_str(),
-              INFL.hgtd, INFL.trkptz, INFL.waves, INFL.tzp);
+  printInflation(SAMPLE_NAME);   // rpt_v5's t0 inflation, and whether it is measured or seeded
   std::cout << "[veto] out=" << outPath << "\n";
 
   TChain chain("ntuple");

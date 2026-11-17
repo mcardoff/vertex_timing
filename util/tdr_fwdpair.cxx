@@ -56,9 +56,12 @@
 //
 // Usage:  tdr_fwdpair [--sample=<s>] [--ntuple-dir=<d>] [--file-shard=i/N] [--max-events=N]
 //                     [--gate-sigma=X (default 2)] [--clean-times=all|t0|off (default all)] [--pair=ff|one (default ff)]
-//                     [--jvt=none|loose|tight|jvt4pt60|jvt4pt120|jvt4pt60t0|jvt4pt60t0tru|jvt4pt60f03|jvt4pt60f05|jvt4pt60f10 (default none)]
+//                     [--jvt=none|loose|tight|jvt4pt60|jvt4pt120|jvt4pt60t0|jvt4pt60t0tru|jvt4pt60f03|jvt4pt60f05|jvt4pt60f10
+//                            |jvt4pt60tdr|jvt4pt60tdrw|jvt4pt60tdrtru (default none)]
 //   jvt4pt60t0(tru): JVT's cut on the t0-gated R_pT (WAVeS / truth t0, --gate-sigma, cleaned times; untimed tracks
-//   count); jvt4pt60fNN: forward threshold 0.NN. j*_jvt_rpt is always the plain R_pT, j*_jvt_rpt_t0 the WAVeS-gated.
+//   count); jvt4pt60fNN: forward threshold 0.NN; jvt4pt60tdr(w|tru): the forward window cuts the TDR R_pT (ITk only,
+//   WAVeS- or truth-gated), central jets JVT's, and needs --rpt-trk-ptmax=none. j*_jvt_rpt is always the plain R_pT,
+//   j*_jvt_rpt_t0 the WAVeS-gated. Every working point but none needs Track_recoVtx_idx.
 //                     [--out=<path>]
 // Output: <prefix>tdr_fwdpair.root (TTrees "events", "meta"; merge shards with hadd -f).
 // Track-time cleaning needs Track_hitInLastLayer: read the RAW ntuples (--ntuple-dir=).
@@ -315,12 +318,18 @@ int main(int argc, char** argv) {
   std::printf("[tdr_fwdpair] sample=%s: two leading jets in %s|eta| < %.1f, opposite eta, > %.0f / %.0f GeV%s; gate %.1f sigma\n",
               SAMPLE_NAME.empty() ? "local" : SAMPLE_NAME.c_str(), oneFwd ? "" : "2.4 < ", ETA_MAX, J1_PT_MIN, J2_PT_MIN,
               oneFwd ? ", at least one in 2.4 < |eta| < 3.8" : "", gate);
+  printInflation(SAMPLE_NAME);
   std::cout << "[tdr_fwdpair] track-time cleaning: " << tdr::cleanModeName(cleanMode) << "; JVT/fJVT before pairing: " << jvtName << "\n";
   std::cout << "[tdr_fwdpair] out=" << outPath << "\n";
 
   TChain chain("ntuple");
   setupChain(chain, cfg.ntupleDir.c_str(), FILE_SHARD);
   recordAvailableBranches(chain);
+  if (jvtOn && !hasBranch("Track_recoVtx_idx")) {
+    std::cerr << "[tdr_fwdpair] --jvt needs Track_recoVtx_idx, which this sample lacks; a silent fallback would give "
+                 "every jet a JVT R_pT of 0 and remove them all\n";
+    return 1;
+  }
   TTreeReader reader(&chain);
   BranchPointerWrapper branch(reader);
   const tdr::TimeCleaning CLEAN = tdr::setupCleaning(reader, cleanMode);

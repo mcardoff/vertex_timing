@@ -7,17 +7,20 @@
 //   file) and rpt_v5_plot.cxx (reads that file, produces the RpT PDF) --
 //   split out of the former single rpt_v5.cxx. Houses the Scenario container,
 //   the shared RpT histogram binning/booking, the save/load helpers that
-//   round-trip a Scenario set through histogram_io.h, and the per-sample
-//   vertex-t0 inflation table (also used by util/vbs_time_veto.cxx).
+//   round-trip a Scenario set through histogram_io.h, the per-sample
+//   vertex-t0 inflation table (also used by util/vbs_time_veto.cxx), and the
+//   --jvt parsing and file check both stages share.
 // ---------------------------------------------------------------------------
 
 #include "clustering_constants.h"
 #include "histogram_io.h"
+#include "jet_tagging.h"
 #include "sample_config.h"   // recordRunSetting / recordDzPara
 
 #include <TH1.h>
 #include <TString.h>
 
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -94,8 +97,9 @@ inline std::vector<Scenario> makeScenarios(const std::string& suffix) {
 }
 
 // ── Vertex-time error inflation, per scenario ────────────────────────────────
-// Shared by util/rpt_v5_hist.cxx (the R_pT time gate) and util/vbs_time_veto.cxx
-// (the event-level jet-vs-t0 veto), so both use one calibration.
+// Shared by util/rpt_v5_hist.cxx (the R_pT time gate), util/vbs_time_veto.cxx
+// (the event-level jet-vs-t0 veto) and the tdr_* programs (via util/tdr_common.h),
+// so all of them use one calibration.
 //
 // The quoted vertex-time uncertainty understates the true spread, so a nominal
 // N-sigma gate behaves like a much tighter one and discards genuine HS tracks.
@@ -141,20 +145,98 @@ inline std::vector<Scenario> makeScenarios(const std::string& suffix) {
 // measured after the z-association, which already removes the worst outliers.
 struct Inflation { double hgtd, trkptz, waves, tzp; };
 
-// Keyed on MyUtl::SAMPLE_NAME. The local default run (no --sample, so an empty
-// SAMPLE_NAME) reads the VBF ntuples, so it correctly falls through to the VBF
-// row rather than needing an entry of its own.
-inline Inflation inflationFor(const std::string& sample) {
-  // tzp inflation seeded from the waves value per sample; the PRINT_PULL_DIAG
-  // table prints the freshly measured ratio next to it -- update after the
-  // first run per sample if they disagree.
-  if (sample == "zjets") return {1.61, 1.63, 1.65, 1.65};
-  if (sample == "dijet") return {1.53, 1.45, 1.46, 1.46};
-  // SEEDED, NOT MEASURED: no rpt_v5 run has measured ttbar's ratios yet. Seeded
-  // from the dijet row (ttbar has tracked dijet in every core-fraction study
-  // this branch). Check this run's calibration table and replace.
-  if (sample == "ttbar") return {1.53, 1.45, 1.46, 1.46};
-  return {1.48, 1.39, 1.38, 1.38};  // vbf, and the local default run
+// One sample's row, and where its numbers came from:
+//   MEASURED  the hgtd/trkptz/waves columns are PRINT_PULL_DIAG ratios from a
+//             run on this sample (the table above).
+//   SEEDED    no measurement on this sample is in use: the row is a copy of
+//             another sample's row, the closest stand-in available. It stays a
+//             copy (re-measuring the source moves it too) until it is replaced
+//             by a MEASURED row of its own.
+// The tzp column is seeded from the same row's waves value in EVERY row, so
+// MEASURED describes the other three columns.
+//
+// Keyed on MyUtl::SAMPLE_NAME: a --sample= registry name (src/sample_config.h),
+// or "" for the local default run. EVERY registered sample needs a row here,
+// and an unknown name aborts. This used to fall through to the VBF row for any
+// sample without one, which silently ran zeejets and the three mu=0 samples on
+// VBF's factors. Registering a new sample means adding it below, measured or
+// seeded.
+struct InflationRow {
+  Inflation   f;
+  bool        measured;    // false = SEEDED
+  std::string provenance;  // for the startup [calibration] echo
+};
+
+inline InflationRow inflationRow(const std::string& sample) {
+  // MEASURED. Each row's tzp value is a copy of its waves value; the
+  // PRINT_PULL_DIAG table prints the freshly measured tzp ratio beside it, so
+  // replace the copy when a run's measurement disagrees. The 2026-09-01 grid
+  // run measured tzp at 1.59 (zjets) and 1.43 (dijet) against the 1.65 and
+  // 1.46 in use: 2-4%, under 1% on the gate width, so the copies were kept.
+  static const std::map<std::string, Inflation> measured = {
+    {"vbf",   {1.48, 1.39, 1.38, 1.38}},
+    {"zjets", {1.61, 1.63, 1.65, 1.65}},
+    {"dijet", {1.53, 1.45, 1.46, 1.46}},
+  };
+
+  // SEEDED: sample -> {the row it copies, a note for the echo}.
+  struct Seed { std::string from, note; };
+  static const std::map<std::string, Seed> seeded = {
+    // Seeded from dijet, which ttbar has tracked in every core-fraction study.
+    // The 2026-09-01 grid run then measured ttbar's own ratios (tzp 1.43
+    // against this row's 1.46) and the dijet-seeded row held up in every
+    // scenario, so the seed was kept rather than replaced by those numbers.
+    {"ttbar",       {"dijet",   "checked against a 2026-09-01 ttbar measurement and kept"}},
+    // Z->ee at mu=200, the 601189 half of zjets: zjets's row, not VBF's.
+    {"zeejets",     {"zjets",   ""}},
+    // mu=0: each seeded from its mu=200 counterpart, the pairing documented in
+    // the registry (src/sample_config.h). These are PLACEHOLDERS: the factor
+    // tracks how often a usable vertex time exists, which pileup changes, so a
+    // pileup-free sample has no reason to share its counterpart's value. Run
+    // PRINT_PULL_DIAG on the sample before relying on a gated mu=0 result.
+    {"vbf_mu0",     {"vbf",     "mu=200 counterpart; not measured at mu=0"}},
+    {"zeejets_mu0", {"zeejets", "mu=200 counterpart; not measured at mu=0"}},
+    {"ttbar_mu0",   {"ttbar",   "mu=200 counterpart; not measured at mu=0"}},
+  };
+
+  // The local default run (no --sample) reads the local VBF ntuples, so it IS
+  // the VBF row, not a fallback to it.
+  if (sample.empty()) {
+    InflationRow r = inflationRow("vbf");
+    r.provenance += " (local default run reads VBF)";
+    return r;
+  }
+  if (auto m = measured.find(sample); m != measured.end())
+    return {m->second, true, "MEASURED on " + sample};
+  if (auto s = seeded.find(sample); s != seeded.end()) {
+    const Seed& seed = s->second;
+    InflationRow r = inflationRow(seed.from);
+    std::string p = "SEEDED from " + seed.from;
+    if (!seed.note.empty()) p += " (" + seed.note + ")";
+    if (!r.measured) p += ", itself " + r.provenance;
+    r.measured   = false;
+    r.provenance = p;
+    return r;
+  }
+  std::cerr << "inflationFor: FATAL: no vertex-time inflation row for sample '"
+            << sample << "'. Add one to inflationRow() in util/rpt_v5_common.h, "
+               "MEASURED (rpt_v5_hist's PRINT_PULL_DIAG ratios on that sample) or "
+               "SEEDED from the sample it most resembles. Refusing to borrow "
+               "another sample's factors silently.\n";
+  std::exit(1);
+}
+
+inline Inflation inflationFor(const std::string& sample) { return inflationRow(sample).f; }
+
+// The startup echo, printed by every consumer once inflationFor() has resolved,
+// so a run's own stdout records which row produced its outputs and whether that
+// row was measured on this sample or seeded from another.
+inline void printInflation(const std::string& sample) {
+  const InflationRow r = inflationRow(sample);
+  std::printf("[calibration] vertex-time inflation for '%s': "
+              "hgtd %.2f  trkptz %.2f  waves %.2f  tzp %.2f  -- %s\n",
+              sample.empty() ? "local (vbf)" : sample.c_str(),
+              r.f.hgtd, r.f.trkptz, r.f.waves, r.f.tzp, r.provenance.c_str());
 }
 
 // -----------------------------------------------------------------------------
@@ -189,6 +271,46 @@ inline void loadScenarios(MyUtl::HistReader& r, std::vector<Scenario>& sv) {
 inline void recordRptAssoc(bool clusterDzPara, bool rptSignif) {
   MyUtl::recordDzPara(clusterDzPara);
   MyUtl::recordRunSetting("rpt_signif", "--rpt-signif", rptSignif ? 1.0 : 0.0, 0.0, "rptsignif");
+}
+
+// -----------------------------------------------------------------------------
+// resolveRptJvt
+//   --jvt=<wp> for both stages (src/jet_tagging.h's resolveJvtWP), so the plot
+//   stage builds the same output tag as the hist stage and finds its file: a
+//   working point that tags (every one but none) appends its tag (jvtLoose,
+//   ...) to SELECTION_TAG. Call after resolveSelection. nullptr after an error
+//   message, for an unknown working point or one rpt_v5 cannot evaluate.
+// -----------------------------------------------------------------------------
+inline const JvtWP* resolveRptJvt(int argc, char** argv, const std::string& prog) {
+  const JvtWP* wp = resolveJvtWP(argc, argv, prog);
+  if (wp && wp->rptMin >= 0.0) {
+    const std::string tag = std::string(wp->tag).substr(1);
+    SELECTION_TAG = SELECTION_TAG.empty() ? tag : SELECTION_TAG + "_" + tag;
+  }
+  return wp;
+}
+
+// -----------------------------------------------------------------------------
+// checkJvtWP
+//   The plot stage's check that the file was made with the requested --jvt
+//   working point, as HistReader::CheckSelection does for the VBS cuts: the
+//   tag in the path no longer says which working point a --hist-file= file
+//   has. rpt_v5_hist writes meta_vbs_jvt_wp (the index in JVT_WPS) for every
+//   tagged run and has since --jvt existed (630cb9b), so a file without the
+//   key was made without pileup-jet tagging: that is fine for --jvt=none and a
+//   mismatch otherwise. Throws on a mismatch.
+// -----------------------------------------------------------------------------
+inline void checkJvtWP(MyUtl::HistReader& r, const JvtWP& wp) {
+  const Long64_t want = static_cast<Long64_t>(&wp - JVT_WPS);
+  const Long64_t nWP  = static_cast<Long64_t>(sizeof(JVT_WPS) / sizeof(JVT_WPS[0]));
+  Long64_t have = 0;   // none: what a file without the key was made with
+  r.FindScalarLong("meta_vbs_jvt_wp", have);
+  if (have == want) return;
+  const std::string haveName = (have >= 0 && have < nWP) ? JVT_WPS[have].name
+                                                         : "unknown index " + std::to_string(have);
+  throw std::runtime_error("checkJvtWP: this file was produced with --jvt=" + haveName +
+                           ", but this process is configured for --jvt=" + wp.name +
+                           ". Pass the matching --jvt=, or re-run the histogramming stage.");
 }
 
 #endif  // RPT_V5_COMMON_H

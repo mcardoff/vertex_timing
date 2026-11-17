@@ -7,9 +7,9 @@
 #
 # WHY hadd AND NOT util/hist_merge. This is the inverse of the rule for the
 # *_hist outputs, and the reason is what the files contain. hist_merge exists
-# because those carry TParameter scalars (event counts, pT accumulators) which
-# have no Merge() method, so hadd would silently keep the FIRST input's copy and
-# pair N-shard-summed histograms with one shard's event count. A training export
+# because those carry TParameter run constants (meta_vbs_*) beside the additive
+# scalars, and hadd sums every TParameter, so it would silently report N times
+# the selection the shards ran with (see util/hist_merge.cxx). A training export
 # holds only TTrees, which hadd concatenates correctly -- and hist_merge would
 # refuse them outright, since it recognises histograms and scalars only.
 #

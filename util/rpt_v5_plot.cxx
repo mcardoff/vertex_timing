@@ -19,7 +19,8 @@
 //      generate_roc()/rejAtEff() below.
 //   4. PDF drawing (ROC+ratio, per-scenario pages, overlays).
 //
-// Output: <OUTPUT_DIR>/rpt_plots/rpt_v5.pdf
+// Output: <OUTPUT_DIR>/rpt_plots/rpt_v5.pdf (plotFilePath: sample-prefixed and
+// selection-tagged, the --jvt=<wp> tag included, like the file it reads).
 
 #include <TCanvas.h>
 #include <TGraph.h>
@@ -136,6 +137,10 @@ int main(int argc, char** argv) {
   // --- Sample selection (--sample=vbf|zjets|dijet; default: local VBF ntuple) ---
   auto sample = MyUtl::resolveSample(argc, argv);
   MyUtl::resolveSelection(argc, argv);  // --vbs-deta=<x>; sets SELECTION_TAG
+  // --jvt=<wp>, as rpt_v5_hist: its tag joins SELECTION_TAG, so the default
+  // input path finds the tagged histogram file and the PDF is tagged too.
+  const JvtWP* jvtSel = resolveRptJvt(argc, argv, "rpt_v5_plot");
+  if (!jvtSel) return 1;
   MyUtl::ENERGY_LABEL = sample.energyLabel;
   MyUtl::OUTPUT_DIR   = sample.outputDir;
   MyUtl::SAMPLE_NAME  = sample.sampleName;
@@ -168,6 +173,7 @@ int main(int argc, char** argv) {
   {
     MyUtl::HistReader reader(histFile);
     reader.CheckSelection(MyUtl::VBS_JET_D_ETA, MyUtl::VBS_JET_MJJ);
+    checkJvtWP(reader, *jvtSel);
     loadScenarios(reader, scen_lo);
     loadScenarios(reader, scen_hi);
     loadScenarios(reader, scen_r1);

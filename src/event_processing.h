@@ -467,16 +467,20 @@ namespace MyUtl {
   // ---------------------------------------------------------------------------
   // 5b. calcHSTimingPurity
   //   Computes the fraction of forward HS track pT whose HGTD time is consistent
-  //   with the truth vertex (|pull| < HS_TIMING_QUALITY_CUT).
-  //   Used as an event-level gate for Score::TEST_MISAS: only events where
-  //   >= 75% of HS pT has a good timing measurement enter its denominator.
+  //   with the truth vertex (|pull| < TRUTH_PULL_CUT).
+  //   Used as an event-level gate for Score::TEST_MISAS and Score::WAVES_MISAS:
+  //   only events where >= 95% of HS pT has a good timing measurement enter
+  //   their denominators.
   //   Returns 0.0 when no HS tracks with valid HGTD time exist, so such events
-  //   are excluded from the TEST_MISAS denominator rather than counted as clean.
+  //   are excluded from those denominators rather than counted as clean.
   //
-  //   Truth time resolution:
-  //     Primary tracks   (trackToParticle != -1): use particleT (most precise).
-  //     Secondary tracks (no particle link, vtxIdx != -1): use truthVtxTime.
-  //     Unlinked fakes   (vtxIdx == -1): excluded from denominator.
+  //   The truth reference is the hard-scatter VERTEX time t_HS, as everywhere
+  //   else a track's time is judged (Fix::MISTIMED, tdr::misassignedHs,
+  //   failure_decomposition). Reconstruction propagates a track's time back to
+  //   the beam line as if it were prompt, so a secondary's measured time sits at
+  //   t_HS, not at its own (later) production time: judged against the
+  //   particle's production time, ~2% of HS tracks with a right time were
+  //   flagged wrong (2026-11-17; the particle time was used before then).
   // ---------------------------------------------------------------------------
   float calcHSTimingPurity(
     const std::vector<int>& tracks,
@@ -487,10 +491,7 @@ namespace MyUtl {
       if (branch->trackToTruthvtx[idx] != 0) continue;  // not HS
       if (branch->trackTimeValid[idx]  != 1) continue;  // no HGTD measurement
 
-      int    partIdx   = branch->trackToParticle[idx];
-      double truthTime = (partIdx != -1)
-                         ? branch->particleT[partIdx]
-                         : branch->truthVtxTime[branch->trackToTruthvtx[idx]];
+      const double truthTime = branch->truthVtxTime[0];               // t_HS
 
       double pull = std::abs(branch->trackTime[idx] - truthTime)
                     / branch->trackTimeRes[idx];
@@ -905,8 +906,10 @@ namespace MyUtl {
         passes = scored.scores.at(score.id) > score.threshold;
 
       // Purity-gated scores (TEST_MISAS, WAVES_MISCL, WAVES_MISAS): restrict both
-      // denominator and numerator to pure clusters/events.  Purity cut comes from
-      // score.threshold when set (≥ 0), otherwise falls back to 0.75.
+      // denominator and numerator to pure clusters/events.  TEST_MISAS and
+      // WAVES_MISAS gate on event-level HS timing purity >= 0.95; the cluster
+      // purity cut (WAVES_MISCL) comes from score.threshold when set (≥ 0),
+      // otherwise falls back to > 0.75.
       bool inDenominator = !score.gatesDenominator();
       if (score.gatesDenominator()) {
         bool passesGate;
@@ -919,7 +922,7 @@ namespace MyUtl {
         } else if (score == Score::WSEL_OK || score == Score::WSEL_OK_MISCL) {
           passesGate = waveChoseHS;
         } else if (score == Score::TEST_MISAS || score == Score::WAVES_MISAS) {
-          // Gate on event-level HS timing purity: 100% of HS pT must have |pull|<3σ
+          // Gate on event-level HS timing purity: >= 95% of HS pT must have |pull| < TRUTH_PULL_CUT (3σ)
           passesGate = (hsTimingPurity >= 0.95f);
         } else {
           float purityCut = score.hasThreshold() ? score.threshold : 0.75f;
@@ -1023,7 +1026,7 @@ namespace MyUtl {
       }
     }
 
-    // returnCode == 3: event has clean HS timing (hsTimingPurity > 0.75, in TEST_MISAS
+    // returnCode == 3: event has clean HS timing (hsTimingPurity >= 0.95, in TEST_MISAS
     // denominator) but TRKPTZ still fails — the failure is not caused by timing
     // misassignment.  Only meaningful in the HGTD scenario where TEST_MISAS is active.
     if (analyses.count(Score::TEST_MISAS) &&

@@ -83,6 +83,7 @@ int main(int argc, char** argv) {
   }
   std::printf("[tdr_vbf] sample=%s: jets > %.0f / %.0f GeV, |Deta(j1,j2)| > %.0f; gate %.1f sigma\n",
               SAMPLE_NAME.empty() ? "local" : SAMPLE_NAME.c_str(), J1_PT_MIN, J2_PT_MIN, DETA_MIN, gate);
+  printInflation(SAMPLE_NAME);
   std::cout << "[tdr_vbf] track-time cleaning: " << tdr::cleanModeName(cleanMode) << "; R_pT matching: " << tdr::rptMatchName(rptMatch) << "\n";
   std::cout << "[tdr_vbf] out=" << outPath << "\n";
 

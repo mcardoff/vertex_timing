@@ -1,6 +1,7 @@
 // -----------------------------------------------------------------------------
 // tdr_common.h -- shared pieces of the TDR-structured programs (util/tdr_pujet.cxx,
-// util/tdr_vbf.cxx), which present the HGTD timing results the way ATLAS-TDR-031
+// util/tdr_vbf.cxx, util/tdr_fwdpair.cxx, util/tdr_t0.cxx; util/failure_decomposition.cxx
+// borrows its track-time cleaning), which present the HGTD timing results the way ATLAS-TDR-031
 // does: Sec. 3.3.3 (pileup-jet suppression with R_pT and timing) and Sec. 3.4.1
 // (VBF H->inv against Z+jets).
 //
@@ -88,8 +89,10 @@ constexpr double RPT_TRACK_JET_DR = 0.2;   // R_pT cone
 constexpr double T0_ASSOC_NSIGMA  = 2.5;   // t0 clustering input (rpt_v5 / vbs_time_veto)
 
 // t0 sources, in this order everywhere. The last three (2026-11-13, todo vt-23j) are the WAVeS t0 with its failures
-// repaired by truth, exactly as clustering_hist's rows of the talk's "perfect timing / perfect selection" slide
-// (src/failure_fixes.h's applyFixes on the same clustering input):
+// repaired by truth, as clustering_hist's rows of the talk's "perfect timing / perfect selection" slide
+// (src/failure_fixes.h's applyFixes). The clustering input is the same only when clustering_hist runs with
+// --assoc-nsigma=2.5 --clean-times (its defaults are z0 significance < 3.0 and no cleaning; here it is
+// T0_ASSOC_NSIGMA = 2.5 and, unless --clean-times=off, cleaned track times):
 //   wfix_sel   Fix::SELECT             the hard scatter's cluster chosen (WFIX_SELECT, "perfect selection")
 //   wfix_time  Fix::MISTIMED           the HS tracks >= 3 sigma from t_HS dropped, re-clustered (WFIX_MISTIMED, "perfect timing")
 //   wfix_both  Fix::MISTIMED | SELECT  both (WFIX_C3)

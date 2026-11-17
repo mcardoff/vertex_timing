@@ -100,6 +100,7 @@ int main(int argc, char** argv) {
   }
   std::printf("[tdr_t0] sample=%s: t0s with and without the TDR track-time cleaning\n",
               SAMPLE_NAME.empty() ? "local" : SAMPLE_NAME.c_str());
+  printInflation(SAMPLE_NAME);
   std::cout << "[tdr_t0] out=" << outPath << "\n";
 
   EXTENDED_BRANCHES = true;   // Track_recoVtx_idx: the waves_pv0 / waves_npu t0s (tdr_common.h)

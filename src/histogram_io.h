@@ -190,6 +190,15 @@ namespace MyUtl {
       return p->GetVal();
     }
 
+    // A Long64_t scalar that only some runs write: false, `val` untouched, when the file does not carry it.
+    bool FindScalarLong(const std::string& name, Long64_t& val) {
+      if (!file_) throw std::runtime_error("HistReader: file not open");
+      auto* p = file_->Get<TParameter<Long64_t>>(name.c_str());
+      if (!p) return false;
+      val = p->GetVal();
+      return true;
+    }
+
     Double_t ReadScalarDouble(const std::string& name) {
       if (!file_) throw std::runtime_error("HistReader: file not open");
       auto* p = file_->Get<TParameter<Double_t>>(name.c_str());
