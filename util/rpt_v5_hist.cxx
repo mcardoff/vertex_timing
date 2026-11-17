@@ -992,10 +992,7 @@ int main(int argc, char** argv) {
         for (int idx : trk_z) {
           if (branch.trackToTruthvtx[idx] != 0 || branch.trackTimeValid[idx] != 1) continue;
           ++nTimedHS;
-          const int    pi = branch.trackToParticle[idx];
-          const double tTrue = (pi != -1) ? branch.particleT[pi]
-                                          : branch.truthVtxTime[branch.trackToTruthvtx[idx]];
-          if (std::abs(branch.trackTime[idx] - tTrue) / branch.trackTimeRes[idx] >= TRUTH_PULL_CUT)
+          if (std::abs(branch.trackTime[idx] - tTruth) / branch.trackTimeRes[idx] >= TRUTH_PULL_CUT)   // vs t_HS
             ++nMisTimed;
         }
         const float pur = calcHSTimingPurity(trk_z, &branch);
