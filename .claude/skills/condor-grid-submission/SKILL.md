@@ -31,6 +31,9 @@ condor_q
 cd ../build
 ./clustering_plot --sample=<sample>
 ./rpt_v5_plot --sample=<sample>
+# A tagged run (selargs below) is plotted with the SAME flags, e.g.
+# ./rpt_v5_plot --sample=<sample> --jvt=loose: the plot stage builds the tag
+# from them to find the file, then checks the file's record against them.
 ```
 
 Logs land in `condor/logs/clustering_hist_<sample>.<ClusterId>.<ProcId>.{out,err,log}` (prefixed `rpt_v5_hist_` for the rpt_v5_hist cluster). `stream_output`/`stream_error` are **on**, so `.out`/`.err` are written back to the submit node as the job runs rather than only on exit — without that, `condor_tail` mid-job shows only whatever happened to be flushed.
@@ -106,6 +109,32 @@ must name that same file:
 | `--vbs-mjj=500` | `mjj500p0_` |
 | `--vbs-deta=3 --vbs-mjj=0` (pre-2026-08-26 default) | `deta3p0_mjj0p0_` |
 | `--vbs-deta=-1` — VBS **pair** requirement dropped | `novbs_` |
+
+The other result-changing flags tag the name the same way (`--jvt` through
+`resolveRptJvt`, the rest through `recordRunSetting` in `src/sample_config.h`;
+since 2026-11-17 for `--dzpara`, `--rpt-signif` and `--fix-select-share`):
+
+| `selargs` | `seltag` | executables |
+|---|---|---|
+| `--jvt=loose` (any `JVT_WPS` point but the t0-gated / TDR ones) | `jvtLoose_` (the point's tag) | `rpt_v5_hist` |
+| `--dzpara` | `dzpara_` | `clustering_hist`, `rpt_v5_hist` |
+| `--rpt-signif` | `rptsignif_` | `rpt_v5_hist` |
+| `--clean-times` (raw ntuples: add `--ntuple-dir=`, which does not tag) | `cleant0_` | `clustering_hist` |
+| `--assoc-nsigma=2.5` | `assoc2p5_` | `clustering_hist` |
+| `--fix-select-share=0.3` | `fixshare0p30_` | `clustering_hist` |
+
+Combined, the tags join in a fixed order whatever the order of the flags:
+`<sel>_<jvt>_dzpara_rptsignif_` for `rpt_v5_hist` and
+`<sel>_cleant0_assoc<X>_dzpara_fixshare<X>_` for `clustering_hist`, e.g.
+`--vbs-mjj=500 --jvt=loose --dzpara` gives `seltag=mjj500p0_jvtLoose_dzpara_`.
+
+**Plot a tagged run with the same flags.** `rpt_v5_plot` takes `--jvt=` like
+`rpt_v5_hist`, and both plot stages take the run-setting flags: from them they
+build the tag that finds the merged file, and then they check the file's own
+record (`meta_vbs_jvt_wp`, `meta_vbs_<setting>`). A mismatch aborts, which also
+covers a `--hist-file=` whose name says nothing. Files made before 2026-11-17
+carry no setting record: a missing key reads as the default, and a non-default
+flag against such a file gets a warning instead of the check.
 
 **A negative `--vbs-deta` is a third mode, not a smaller threshold.** It drops
 the VBS candidate-*pair* requirement outright, keeping events with no

@@ -14,9 +14,13 @@ time and fails on its in-jet one -- and selection by the hard scatter's OWN clus
 "another cluster passes", which a pileup cluster satisfies by chance (~21% per cluster). Timing is split into its two
 routes: (b) "the hard scatter's track times are wrong" and (a) only, "resolution".
 Run with --clean-times --assoc-nsigma=2.5 --waves-time=injet the program reproduces the talk's t0s event by event.
+Those options tag its output, <sample>_cleant0_assoc2p5_wavesinjet_failure_decomposition.root, and are recorded per
+row (clean_times, assoc_nsigma, waves_time_injet). Trees made before 2026-11-17 carry neither: the talk's were written
+untagged, as <sample>_failure_decomposition.root.
 
-  PYTHONNOUSERSITE=1 ~/.venv-hgtd/bin/python gp_failure_ladder.py --trees ../condor/vbf/vbf_failure_decomposition.root \\
-      ../condor/zjets/zjets_failure_decomposition.root --out ../figs/tdr/gp/gp_failure_ladder
+  PYTHONNOUSERSITE=1 ~/.venv-hgtd/bin/python gp_failure_ladder.py \\
+      --trees ../condor/vbf/vbf_cleant0_assoc2p5_wavesinjet_failure_decomposition.root \\
+      ../condor/zjets/zjets_cleant0_assoc2p5_wavesinjet_failure_decomposition.root --out ../figs/tdr/gp/gp_failure_ladder
 """
 import argparse
 

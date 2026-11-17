@@ -20,7 +20,8 @@
 //   4. PDF drawing (ROC+ratio, per-scenario pages, overlays).
 //
 // Output: <OUTPUT_DIR>/rpt_plots/rpt_v5.pdf (plotFilePath: sample-prefixed and
-// selection-tagged, the --jvt=<wp> tag included, like the file it reads).
+// selection-tagged, the --jvt=<wp>, --dzpara and --rpt-signif tags included,
+// like the file it reads; give this stage the hist stage's flags).
 
 #include <TCanvas.h>
 #include <TGraph.h>

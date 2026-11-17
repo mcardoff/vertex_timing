@@ -751,7 +751,9 @@ namespace MyUtl {
   //
   // WAVeS is the base (rather than the TRKPTZ baseline) to match WAVES_MISAS
   // and because WAVeS is the algorithm under study; swapping the base is a
-  // one-line change in Cluster::updateScores plus calculateTime's score list.
+  // one-line change in Cluster::updateScores (which copies the WAVES score into
+  // these two) plus their TimeSource below (calculateTime dispatches on
+  // Score::timeSource: IN_JET here, FULL for a TRKPTZ base).
   inline const Score Score::VBF_R1 = { 22, "WAVeS [VBF R1: both tags fwd]"    , "VBF_R1", false, false, -1.f,
                                        -1.0, ClusteringMethod::ITERATIVE, false,
                                        TrackFilterType::ALL, VbsRegion::R1, TimeSource::IN_JET };

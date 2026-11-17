@@ -150,8 +150,13 @@ primary workflow.
   Findings).
 
   The wide-window region tree (`<prefix>rpt_v5_regions.root`, TTree-only: merge with `hadd`),
-  its friend files, `--jvt=none|loose|tight`, and the region R_pT distribution / display scripts are
-  documented in the `vbs-timing-studies` skill.
+  its friend files, `--jvt=<wp>`, and the region R_pT distribution / display scripts are
+  documented in the `vbs-timing-studies` skill. `--jvt` takes any `JVT_WPS` working point except
+  the t0-gated / TDR ones (`jvt4pt60t0*`, `jvt4pt60tdr*`), which only `tdr_fwdpair` computes, and
+  `rpt_v5_plot` needs the same `--jvt=` to find the tagged file (it checks `meta_vbs_jvt_wp`).
+  `--dzpara` (the clustering input's association) and `--rpt-signif` (the R_pT track list by z0
+  significance) tag the outputs `dzpara_` / `rptsignif_` and are recorded; see "Selection and
+  run-setting tags" under the split below.
 
   Both idealised rows only smear tracks with `trackTimeValid == 1` — idealising
   the time of a track HGTD never measured invents coverage it does not have,
@@ -280,6 +285,37 @@ condor-scale for real work) even though the underlying data hadn't changed.
   earlier `rpt_v2`/`rpt_v4`, `maxpt_jet_test` and `ttreemt_prototype` resolve
   `--sample=` but never set it, and so keep their original unprefixed,
   un-flattened output paths unconditionally.
+- **Selection and run-setting tags**: a non-default VBS selection
+  (`resolveSelection`) and every non-default result-changing flag join
+  `SELECTION_TAG`, which `histFilePath()`/`plotFilePath()` put ahead of the
+  base name (`vbf/vbf_mjj500p0_rpt_v5_hist.root`), so such a run never
+  overwrites the default output. The flags are `RunSetting`s
+  (`recordRunSetting`, `src/sample_config.h`), kept in `MyUtl::RUN_SETTINGS`.
+  Numeric tags carry a fixed number of decimals, and a value given more
+  precisely is refused. Tag order:
+  - `clustering_hist`/`clustering_plot` (`resolveTimingInputs`):
+    `<sel>_cleant0_assoc<X>_dzpara_fixshare<X>` from `--clean-times`,
+    `--assoc-nsigma=X` (`assoc2p5`), `--dzpara`, `--fix-select-share=X`
+    (`fixshare0p30`).
+  - `rpt_v5_hist`/`rpt_v5_plot`: `<sel>_<jvt>_dzpara_rptsignif` from `--jvt=<wp>`
+    (`resolveRptJvt`; e.g. `jvtLoose`), `--dzpara`, `--rpt-signif`
+    (`recordRptAssoc`).
+  - `failure_decomposition`: `<sel>_cleant0_assoc<X>_wavesinjet` from
+    `--clean-times`, `--assoc-nsigma=X` (default 3.0, so only another value
+    tags), `--waves-time=injet`. Its PDF name carries the tag too.
+- **Run-setting records**: a `*_hist` stage writes each non-default setting as
+  a `meta_vbs_<key>` scalar (`HistWriter::WriteRunSettings`: `clean_times`,
+  `assoc_nsigma`, `dzpara`, `fix_select_share`, `rpt_signif`), and its `*_plot`
+  stage, given the same flags, checks them (`HistReader::CheckRunSettings`,
+  beside `CheckSelection`). A mismatched value aborts. A missing key reads as
+  the default, and a file with no record while the plot stage expects a
+  non-default value (made before 2026-11-17) gets a warning. `--jvt` has its own
+  key, `meta_vbs_jvt_wp`, checked by `checkJvtWP` (`util/rpt_v5_common.h`; no
+  key means `none`). Default settings are never written, so a default run's
+  output is unchanged. TTree outputs record each non-default setting as a
+  per-row branch `<key>` instead, which survives `hadd`: the rpt_v5 region tree
+  (`dzpara`, `rpt_signif`) and `failure_decomposition`'s tree (`clean_times`,
+  `assoc_nsigma`, `waves_time_injet`).
 - **Reconstruction pattern**: the plotting stage always "construct-empty-
   then-load" — it re-runs the *same* booking logic the histogramming stage
   used (`buildAnalysisMap()` / `makeScenarios()`) to get correctly-named,
@@ -378,7 +414,7 @@ non-exclusive four-category scheme:
 
 | Precedence | Name | Condition |
 |---|------|-----------|
-| 1 | Timing misassignment | Ideal Resolution scenario passes, **or** a majority of HS pT is mis-timed vs. truth (`|pull| ≥ 3σ`) — the latter isn't fixed by ideal resolution since the times are offset, not just smeared |
+| 1 | Timing misassignment | Ideal Resolution scenario passes, **or** a majority of HS pT is mis-timed vs. the HS vertex time t_HS (`|pull| ≥ 3σ`) — the latter isn't fixed by ideal resolution since the times are offset, not just smeared |
 | 2 | Selection failure | Another qualifying cluster in the same real-time collection passes `passEfficiency()` — the right answer existed but wasn't chosen |
 | 3 | Misclustering | Grouping *all* truth-HS tracks into one cluster (real times, no PU contamination) passes the window, but the algorithm's chosen cluster does not |
 | 4 | Track efficiency loss | Ideal Res. + Ideal Eff. passes but Ideal Res. alone does not — giving currently time-less HS tracks an ideal time is what recovers the event |
@@ -397,7 +433,11 @@ what those comments do not carry.
   2.875, the HS-track count's 3 -> 3.45). See notes/gp_talk.md.
 - `USE_DZ_PARA` (runtime, from `--dzpara`) — swaps in `getNewDzpara ×
   DZ0_PARA_SCALE_CLUSTER` instead; the caller's significance argument is then
-  ignored, since the two rules are not on a common scale.
+  ignored, since the two rules are not on a common scale. In `clustering_hist`
+  and `rpt_v5_hist` the flag tags the output `dzpara_` and is recorded as
+  `meta_vbs_dzpara` (`recordDzPara`, `src/sample_config.h`); give the plot
+  stage the same flag (see "Run-setting records" under "Histogramming vs.
+  Plotting Split").
 - `struct AssocRule` — the same information as an explicit *value* (kind +
   cut), so several rules can be evaluated against one event in a single pass.
   `passTrackVertexAssociation` / `getAssociatedTracks` have AssocRule
@@ -438,7 +478,9 @@ best working point.
 
 **Vertex-time inflation is per sample AND per scenario**, resolved by
 `inflationFor(SAMPLE_NAME)` in `main()` before any worker thread starts. The
-table lives in `util/rpt_v5_common.h`, shared with `vbs_time_veto`:
+table is `inflationRow()` in `util/rpt_v5_common.h`, shared by `rpt_v5_hist`,
+`vbs_time_veto` and the `tdr_*` programs (`tdr_t0`, `tdr_vbf`, `tdr_pujet`,
+`tdr_fwdpair`):
 
 | scenario | vbf | zjets | dijet | ttbar |
 |---|---|---|---|---|
@@ -447,13 +489,27 @@ table lives in `util/rpt_v5_common.h`, shared with `vbs_time_veto`:
 | waves | 1.38 | 1.65 | 1.46 | (1.46) |
 | tzp | 1.38 | 1.65 | 1.46 | (1.46) |
 
-The ttbar column (parenthesised) is SEEDED from dijet, not measured — the
-2026-09-01 grid run measured tzp at 1.59/1.43/1.43 vs the seeds (2–4% off,
-sub-percent on the gate width), and the dijet-seeded ttbar row validated
-across every scenario.
+Every row is explicit, and either MEASURED (vbf, zjets, dijet) or SEEDED, a
+copy of another sample's row kept until a measured row replaces it. Each row's
+`tzp` value is a copy of its `waves` value. The seeded rows:
+- `ttbar` (parenthesised) from dijet. The 2026-09-01 grid run measured tzp at
+  1.59/1.43/1.43 (zjets/dijet/ttbar) vs the seeds (2–4% off, sub-percent on the gate width), and
+  the dijet-seeded ttbar row validated across every scenario.
+- `zeejets` from zjets.
+- `vbf_mu0`, `zeejets_mu0`, `ttbar_mu0` from their mu=200 counterparts. These
+  are placeholders: measure on the sample before relying on a gated mu=0 result.
 
-Measured off `PRINT_PULL_DIAG`'s ratio column; the run echoes `[calibration]`
-at startup and prints the freshly measured ratio beside the value in use, so a
+The local default run (no `--sample`) uses the vbf row. **An unregistered
+sample aborts**: before 2026-11-17 any sample without a row fell through to
+VBF's, which silently ran zeejets and the three mu=0 samples on VBF's factors.
+Registering a new sample means adding its row here, measured or seeded.
+
+Measured off `PRINT_PULL_DIAG`'s ratio column. Every consumer echoes the row
+it uses at startup (`printInflation`): `[calibration] vertex-time inflation for
+'<sample>': hgtd … tzp … -- MEASURED on <sample>` or `-- SEEDED from <source>`,
+so a run's own log says which row it used and whether that row was measured
+on the sample. This replaced `vbs_time_veto`'s `[veto] t0 inflation` line.
+`rpt_v5_hist` also prints the freshly measured ratio beside the value in use, so a
 stale entry is visible in the same log. The measurement is NOT circular (raw
 `var_vtx`, ungated track list, vertex times independent of the gate), so one
 pass suffices. Re-measure for any NEW sample. See Physics Findings for why
@@ -669,7 +725,8 @@ The VBS candidate pair is marked with a muted steel-blue cross-hatch drawn
 UNDER the jet wedges (fill colour is already spoken for: green = truth HS,
 grey = PU), and each tagging jet's label carries `R_pT = <z-only> -> <timed>`.
 The timed value applies rpt_v5's gate, so it needs `--infl` set to the
-sample's WAVeS inflation (vbf 1.38, zjets 1.65, dijet 1.46). t0 comes from
+sample's WAVeS inflation (vbf 1.38, zjets 1.65, dijet 1.46; seeded: ttbar 1.46
+from dijet, zeejets 1.65 from zjets). t0 comes from
 `--extra_time` directly — NOT from the matched cluster's own weighted-mean
 time, which differs from WAVeS's in-jet refined time and made the displayed
 R_pT disagree with the analysis.
@@ -727,7 +784,7 @@ WAVES score list. **Score long names must never contain `/`** — the histogram
 key embeds them, and `TFile::Get`/uproot treat `/` as a directory separator:
 the write succeeds and every readback fails.
 
-Oracle scores (`requiresPurity=true`) gate their denominator: events outside the gate are not counted. **Important:** `calcHSTimingPurity` (event-level, used by `TEST_MISAS`/`WAVES_MISAS`) returns `0.0f` — not `1.0f` — when no qualifying HS tracks exist, ensuring that events with zero forward HS tracks are excluded from oracle denominators.
+Oracle scores (`requiresPurity=true`) gate their denominator: events outside the gate are not counted. **Important:** `calcHSTimingPurity` (event-level, used by `TEST_MISAS`/`WAVES_MISAS`) returns `0.0f` — not `1.0f` — when no qualifying HS tracks exist, ensuring that events with zero forward HS tracks are excluded from oracle denominators. It judges each HS track's time against the hard-scatter VERTEX time t_HS (`truthVtxTime[0]`), as every other misassigned-time test does (`Fix::MISTIMED`, `tdr::misassignedHs`, `failure_decomposition`); before 2026-11-17 it used the truth particle's production time.
 
 `clustering_hist`/`clustering_plot`'s currently active scores (built by `buildAnalysisMap`, `src/clustering_dt_common.h`) are `TRKPTZ`, `WAVES`, `JET_T_REFINED`, `TEST_MISAS`, `WAVES_MISCL`, `WAVES_MISAS`, `VBF_R1/R2`, the full id 24–33 ladder in `SCORE_REGISTRY` (`TRKPTZ_PV`/`_PU`/`_PUW`, `TRKPTZ_TZ`/`_TZ_IJ`/`_TZ_OJ`/`_TZ_GIJ`, `WAVES_GIJ`, `TRKPTZ_TZJ`, `TRKPTZ_TZQ`), the WAVeS failure-mode rows (fixes applied by `src/failure_fixes.h`: `WFIX_*` ids 40–44 and 46–49, `WSEL_OK`/`WSEL_OK_MISCL` 59–60, `WLOO_*` 61–65), plus `HGTD`.
 
@@ -837,11 +894,18 @@ The VBS pair composition / JVT study is in the `vbs-timing-studies` skill; the l
 topology gain, R2 capture, gate severity, efficiency ceiling, calibration, z-association study and
 reference replication are in the `physics-findings` skill.
 
-**Anything setting `EXTENDED_BRANCHES` must call `recordAvailableBranches`
-(src/event_processing.h) after `setupChain` and before constructing the
-wrapper.** The grid samples lack `Track_btagIp_*`; a TTreeReader with a
-missing branch iterates ZERO entries and exits 0. The first Z+jets submission
-of this diagnostic produced three "successful" empty files that way.
+**Anything that makes the wrapper bind a `hasBranch()`-guarded branch must call
+`recordAvailableBranches` (src/event_processing.h) after `setupChain` and
+before constructing the wrapper.** That is `EXTENDED_BRANCHES` (the grid
+samples lack `Track_btagIp_*`) and `CLEAN_TIMES` / `--clean-times`
+(`Track_hitInLastLayer`, which the skims drop). `hasBranch()` passes every name
+while `AVAILABLE_BRANCHES` is empty, so without the record the guard never
+fires: the missing branch is bound, and a TTreeReader with a missing branch
+iterates ZERO entries and exits 0. The first Z+jets submission of this
+diagnostic produced three "successful" empty files that way. `clustering_hist`
+and the event-display macros (`python/runHGTD_Clustering.cxx`,
+`python/clustering_dump.cxx`) record it for `--clean-times`, so a cleaned run on
+a skim exits with an error naming the branch instead of writing empty output.
 
 ### Methodological warnings
 
