@@ -4,7 +4,7 @@
 
 (t0 - t_HS) / (f sigma_t0) for the WAVeS and Athena t0s of the jet section's events (util/tdr_fwdpair --pair=one trees:
 the talk's t0s, cleaned track times, 2.5 sigma association), with f the per-sample inflation the gate uses
-(src/rpt_v5_common.h's table, read from the tree), against a unit Gaussian. If f is right the core is a unit Gaussian.
+(util/rpt_v5_common.h's table, read from the tree), against a unit Gaussian. If f is right the core is a unit Gaussian.
 Weighted (generator weights). Each legend gives the core width fitted to |pull| < 2 (a Gaussian), the share beyond
 3 and the median f sigma_t0. The style follows python/vbs_time_veto_plot.py's t0_figure (the time-veto study's version,
 which also drew TRKPTZ and predates the cleaning).
