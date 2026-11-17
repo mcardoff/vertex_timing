@@ -20,3 +20,9 @@
 *.root
 /build-wt/
 /runs/
+
+# grid outputs, merged or per shard (condor/<sample>/, transfer_output_remaps); bulk data belongs on /data
+/condor/vbf/
+/condor/zjets/
+/condor/dijet/
+/condor/ttbar/
