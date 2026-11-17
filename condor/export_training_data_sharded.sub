@@ -97,8 +97,9 @@ nshards                  = 4
 #   --vbs-deta=-1  [the LOOSE one]    novbs_
 #
 # A NEGATIVE --vbs-deta is a third mode, not a smaller threshold: it drops the
-# VBS candidate-PAIR requirement outright, so an event with no
-# opposite-hemisphere jet pair is kept. No combination of the two thresholds
+# VBS candidate-PAIR requirement outright, so an event with no valid
+# leading-jet pair (fewer than two jets in |eta| < 4.0, or the leading two in
+# one hemisphere) is kept. No combination of the two thresholds
 # expresses that -- the pair's |Deta| and m_jj keep a -1 sentinel when no pair
 # exists, so both fail any >= 0 test. It is tagged "novbs" alone, with no m_jj
 # component, because naming a cut that is not being applied would describe a

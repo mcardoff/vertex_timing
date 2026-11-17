@@ -3,14 +3,17 @@
 //
 // The selection currently defines its "VBS topology" with |Deta| >= 3 on the
 // candidate pair (VBS_JET_D_ETA, runtime-settable via --vbs-deta=). m_jj is the
-// standard VBS discriminant, and calcBestVbsPair already computes it while
+// standard VBS discriminant, and calcLeadingVbsPair already computes it while
 // finding the pair. Before swapping the cut, this dumps what the distribution
-// actually looks like.
+// actually looks like. (The swap was made on 2026-08-26 with the then pair,
+// the largest-m_jj opposite-hemisphere one; since 2026-11-17 the pair is the
+// leading-jet pair -- see calcLeadingVbsPair.)
 //
 // Denominator: every event the rest of the selection admits -- lepton
 // selection / overlap veto / passBasicCuts / >=MIN_PASSPT_JETS above
-// MIN_JET_PT / >=MIN_PASSETA_JETS forward -- with an opposite-hemisphere pair,
-// but WITHOUT any |Deta| or m_jj requirement. That is the population a cut on
+// MIN_JET_PT / >=MIN_PASSETA_JETS forward -- with a valid leading-jet pair
+// (the two highest-pT jets with |eta| < 4.0, in opposite hemispheres), but
+// WITHOUT any |Deta| or m_jj requirement. That is the population a cut on
 // either variable gets chosen from.
 //
 // Every distribution is split by whether both legs of the candidate pair are
@@ -195,8 +198,8 @@ int main(int argc, char** argv) {
     if (nPt    < MIN_PASSPT_JETS)  continue;
     if (nPtEta < MIN_PASSETA_JETS) continue;
 
-    auto pair = branch.calcBestVbsPair(passPtIdx);
-    if (!pair.valid()) { ++nNoPair; continue; }  // no opposite-hemisphere pair
+    auto pair = branch.calcLeadingVbsPair(passPtIdx);
+    if (!pair.valid()) { ++nNoPair; continue; }  // no valid leading-jet pair
     ++nSel;
 
     const bool bothHS = branch.isJetTruthHS(pair.idxI) &&
@@ -248,7 +251,7 @@ int main(int argc, char** argv) {
   printf("  Events read                    : %8ld\n", nSeen);
   printf("  Passing selection minus |Deta| : %8ld  (%.2f%% of read)\n",
          nSel, nSeen ? 100.0 * nSel / nSeen : 0.0);
-  printf("    ... rejected: no opp.-hemisphere pair : %8ld\n", nNoPair);
+  printf("    ... rejected: no leading-jet pair  : %8ld  (< 2 jets in |eta| < 4, or same hemisphere)\n", nNoPair);
   printf("    ... both pair legs truth-HS   : %8ld  (%.2f%%)\n",
          nBothHS, nSel ? 100.0 * nBothHS / nSel : 0.0);
   printf("    ... >=1 pair leg in HGTD accept.: %6ld  (%.2f%%), of which both-HS %ld (%.2f%%)\n",

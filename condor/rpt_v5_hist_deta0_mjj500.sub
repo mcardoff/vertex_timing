@@ -12,7 +12,8 @@
 #
 # Why these values: vbs_mjj_diag (util/vbs_mjj_diag.cxx) measured both topology
 # variables against the candidate pair's truth-HS-match denominator on all
-# three samples. The default |Deta| >= 3 cut is purity-NEGATIVE on Z+jets
+# three samples (with the pre-2026-11-17 max-m_jj pair; the pair is now the
+# leading-jet pair, calcLeadingVbsPair). The default |Deta| >= 3 cut is purity-NEGATIVE on Z+jets
 # (2.69% -> 2.51%) and dijet (40.1% -> 35.0%) -- it preferentially admits
 # pileup-legged pairs -- so it is disabled here rather than stacked with m_jj.
 # m_jj >= 500 sits on the rising edge of the purity curve (VBF 61.0% at 81.6%
@@ -23,8 +24,9 @@
 # legs forward; R2: forward PU leg + central HS leg). They do NOT affect the
 # inclusive _lo/_hi histograms, which rpt_v5 keeps selection-free by design.
 # (An earlier version of this header claimed otherwise, and before the fix in
-# rpt_v5_hist.cxx the knobs were inert entirely -- calcBestVbsPair only finds
-# the pair, it does not cut on it -- so two different --vbs-mjj runs produced
+# rpt_v5_hist.cxx the knobs were inert entirely -- the pair search (then
+# calcBestVbsPair, now calcLeadingVbsPair) only finds the pair, it does not
+# cut on it -- so two different --vbs-mjj runs produced
 # identical physics under different filenames.) On Z+jets in
 # particular, expect R1 to be statistics-starved -- vbs_mjj_diag found only
 # 1,872 genuine (both-legs-truth-HS) pairs in 2M events even with NO topology

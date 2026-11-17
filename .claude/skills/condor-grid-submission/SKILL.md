@@ -136,15 +136,24 @@ covers a `--hist-file=` whose name says nothing. Files made before 2026-11-17
 carry no setting record: a missing key reads as the default, and a non-default
 flag against such a file gets a warning instead of the check.
 
+**The pair is the leading-jet pair** (since 2026-11-17, `calcLeadingVbsPair`):
+the two highest-pT jets with pT > 30 GeV and |eta| < 4.0, required in opposite
+hemispheres, with no fallback to another pair. Files from that date carry
+`meta_vbs_pair_lead = 1` (a `meta_vbs_` run constant, so `hist_merge` keeps it
+once and checks the shards agree; `hadd` would sum it and the plot stage then
+aborts), and the plot stages warn on a file without it: that file used the old
+max-m_jj pair, and its untagged name cannot say so.
+
 **A negative `--vbs-deta` is a third mode, not a smaller threshold.** It drops
-the VBS candidate-*pair* requirement outright, keeping events with no
-opposite-hemisphere jet pair. No combination of the two thresholds expresses
-this: `calcBestVbsPair` leaves both `dEta` and `mjj` at their `-1` sentinel when
+the VBS candidate-*pair* requirement outright, keeping events with no valid
+pair. No combination of the two thresholds expresses
+this: `calcLeadingVbsPair` leaves both `dEta` and `mjj` at their `-1` sentinel when
 no pair exists, so each fails any `>= 0` test — lowering a threshold relaxes only
 that quantity's *magnitude* cut while the pair requirement survives. Setting
 `--vbs-deta=0` was measured worth **+4% on Z+jets** (67,074 → 69,745) where
 dropping the pair requirement was expected to be worth several-fold; the loose
-mode is +13% on local VBF (48,314 → 54,659).
+mode is +13% on local VBF (48,314 → 54,659). Both numbers are from the old
+max-m_jj pair.
 
 `passJetPtCut` bypasses the m_jj test as well as the |Δη| one in this mode —
 bypassing only |Δη| would let the default `m_jj >= 200` reject every no-pair

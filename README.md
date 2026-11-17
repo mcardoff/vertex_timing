@@ -267,7 +267,7 @@ Several scores have been removed from the codebase over time as they were supers
 
 Every event must pass `branch->passBasicCuts()` (minimum jet count, reco/truth HS vertex within `MAX_VTX_DZ`) and `branch->passJetPtCut()` (both in `src/clustering_structs.h`), the latter requiring:
 - At least `MIN_PASSPT_JETS` reco jets above `MIN_JET_PT`, at least `MIN_PASSETA_JETS` of which are in the forward HGTD acceptance — no truth-HS jet matching required.
-- The VBS candidate pair — the opposite-hemisphere, pT-passing jet pair with the largest invariant mass `m_jj` (`calcBestVbsDeltaEta()`) — must have an η separation ≥ `VBS_JET_D_ETA`.
+- The VBS candidate pair — the leading-jet pair (`calcLeadingVbsPair()`): the two highest-pT jets with pT > `MIN_JET_PT`, not removed by the lepton overlap removal and |η| < `MAX_ABS_ETA_JET`, which must be in opposite η hemispheres (no fallback to another pair when they are not) — must have an η separation ≥ `VBS_JET_D_ETA` and `m_jj` ≥ `VBS_JET_MJJ`. Until 2026-11-17 the pair was the opposite-hemisphere pT-passing pair with the largest `m_jj`.
 
 `branch->passForwardHsTracks(nForwardHSTrack)` (`src/clustering_structs.h`) is an available but currently-unused testing-only helper that gates on a minimum forward hard-scatter track count; not applied in the primary analysis.
 

@@ -239,10 +239,15 @@ for idx, jet_pt in enumerate(branch.AntiKt4EMTopoJets_pt):
                      'x':x_jet, 'y':y_jet, 'idx':idx, 'isVBS':False})
 
 # --- VBS candidate pair -------------------------------------------------------
-# Mirrors BranchPointerWrapper::calcBestVbsPair: among the pT-passing jets (the
-# >30 GeV filter above is already MIN_JET_PT), the pair in OPPOSITE eta
-# hemispheres with the largest invariant mass. Flagged on every display, not
-# only region events, so the tagging pair is always identifiable at a glance.
+# Mirrors BranchPointerWrapper::calcLeadingVbsPair, the project-wide pair since
+# 2026-11-17: the two highest-pT jets with pT > MIN_JET_PT (30 GeV) and
+# |eta| < MAX_ABS_ETA_JET (4.0), found by pT (a tie goes to the lower jet
+# index), which must sit in OPPOSITE eta hemispheres. If the two leading jets
+# are on the same side there is no pair and nothing is hatched: there is no
+# fallback to another jet, exactly as in the C++. (Before that date this
+# mirrored calcBestVbsPair, the largest-m_jj opposite-hemisphere pair.)
+# Flagged on every display, not only region events, so the tagging pair is
+# always identifiable at a glance.
 #
 # Encoded as a HATCH rather than a colour: fill colour is already fully spoken
 # for (green = truth-HS, grey = PU, orange = --jet_idx target) and VBS-ness is
@@ -296,14 +301,12 @@ if args.tagged_out:
         _i, _why = _tok.split(':')
         tagged_out[int(_i)] = _why
 if vbs_pair[0] is None:
-    for _a in range(len(jet_info)):
-        for _b in range(_a + 1, len(jet_info)):
-            _ja, _jb = jet_info[_a], jet_info[_b]
-            if _ja['eta'] * _jb['eta'] >= 0:      # require opposite hemispheres
-                continue
-            _mjj, _de = _pair_mass(_ja, _jb)
-            if _mjj > vbs_mjj:
-                vbs_mjj, vbs_deta, vbs_pair = _mjj, _de, (_a, _b)
+    _cand = sorted((_k for _k, _j in enumerate(jet_info)
+                    if _j['pt'] > 30.0 and abs(_j['eta']) < 4.0),
+                   key=lambda _k: (-jet_info[_k]['pt'], jet_info[_k]['idx']))
+    if len(_cand) >= 2 and jet_info[_cand[0]]['eta'] * jet_info[_cand[1]]['eta'] < 0:
+        vbs_pair = (_cand[0], _cand[1])
+        vbs_mjj, vbs_deta = _pair_mass(jet_info[_cand[0]], jet_info[_cand[1]])
 if vbs_pair[0] is not None:
     jet_info[vbs_pair[0]]['isVBS'] = True
     jet_info[vbs_pair[1]]['isVBS'] = True

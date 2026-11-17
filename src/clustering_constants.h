@@ -57,6 +57,16 @@ namespace MyUtl {
   const int    MIN_CLUSTER_TRACKS = 0;     // min tracks required to select a cluster
   const int    MIN_NHS_TRACK      = 2;     // testing only
   const int    MAX_NHS_TRACK      = 6;     // testing only
+  // The VBS candidate pair (BranchPointerWrapper::calcLeadingVbsPair, since
+  // 2026-11-17): the two highest-pT jets with pT > MIN_JET_PT, not lepton-
+  // overlap-removed and |eta| < MAX_ABS_ETA_JET, required in opposite
+  // hemispheres -- no fallback to another pair when the leading two are on one
+  // side. Before that date it was the largest-m_jj opposite-hemisphere pair of
+  // pT-passing jets at any |eta|, and EVERY number in the VBS_JET_D_ETA /
+  // VBS_JET_MJJ comments below (and on VBS_FWD_ETA_MAX) was measured with that
+  // old pair. They are kept as the history behind the defaults, not as
+  // statements about the current pair.
+  //
   // VBS candidate-pair |Deta| requirement. RUNTIME-SETTABLE (inline, not const)
   // via --vbs-deta=<x>; see resolveSelection() in sample_config.h.
   //
@@ -156,21 +166,29 @@ namespace MyUtl {
   // MAX_ABS_ETA_JET above is HGTD ACCEPTANCE: it answers "can timing act on
   // this jet". VBS region membership was using the same number to answer a
   // different question -- "is this a forward tagging jet" -- and the two are
-  // not the same question. calcBestVbsPair maximises m_jj, and m_jj ~
-  // cosh(dEta), so the winning pair systematically holds the most forward jet
-  // in the event; capping "forward" at 4.00 made every such pair land in
-  // neither zone and fall through to "Other".
+  // not the same question. The pair picker of the time (calcBestVbsPair,
+  // replaced 2026-11-17) maximised m_jj, and m_jj ~ cosh(dEta), so the
+  // winning pair systematically held the most forward jet in the event;
+  // capping "forward" at 4.00 made every such pair land in neither zone and
+  // fall through to "Other".
   //
-  // Measured (vbs_region_diag, m_jj >= 500, |dEta| >= 2.5): on Z+jets the
+  // Since 2026-11-17 the pair (calcLeadingVbsPair) only takes jets with
+  // |eta| < MAX_ABS_ETA_JET, so no pair leg sits past 4.00 and this window
+  // classifies the PAIR exactly as MAX_ABS_ETA_JET would. It is kept so that
+  // "forward" stays a topology statement wherever it is applied, and so the
+  // measurement below, made with the old pair, keeps its context.
+  //
+  // Measured (vbs_region_diag, m_jj >= 500, |dEta| >= 2.5, old pair): on Z+jets the
   // status quo put 92.51% of pairs in Other and only 5.85% in R1+R2, with the
   // chosen pair's more-forward leg sitting at a median |eta| of 4.17 -- i.e.
   // just outside. Unbounding forward moves that to 11.32% (R1 2.39 -> 5.94,
   // R2 3.46 -> 5.38). VBF 9.35 -> 22.01, dijet 15.30 -> 29.96.
   //
-  // THE COST, stated plainly: a leg past |eta| 4.00 is outside HGTD, so region
-  // membership is now a statement about EVENT TOPOLOGY, not a promise that
-  // timing can act on both legs. Those two readings were the same thing while
-  // this was capped at acceptance, and they are not any more.
+  // THE COST under the old pair, stated plainly: a leg past |eta| 4.00 is
+  // outside HGTD, so region membership became a statement about EVENT
+  // TOPOLOGY, not a promise that timing can act on both legs. With the
+  // leading-jet pair both legs are inside 4.00 again, so for the pair the two
+  // readings coincide once more.
   //
   // rpt_v5_hist deliberately does NOT use this -- it passes its own
   // JET_ETA_MIN/JET_ETA_MAX because it fills an R_pT histogram FOR each leg,
@@ -457,7 +475,8 @@ namespace MyUtl {
   // ---------------------------------------------------------------------------
   // 3d. VBS topology region
   //   The two topologies where forward timing is the deciding information.
-  //   Classified from the VBS candidate pair by
+  //   Classified from the VBS candidate pair (the leading-jet pair,
+  //   calcLeadingVbsPair) by
   //   BranchPointerWrapper::classifyVbsRegion (clustering_structs.h); lives
   //   here rather than nested in that class so Score can carry one as a
   //   denominator gate (see regionGate below).
@@ -480,8 +499,9 @@ namespace MyUtl {
   // Supersedes the pair-level VbsRegion above for the R_pT study and the m_jj
   // composition plot. Two things differ:
   //
-  //   1. Scope. VbsRegion classifies the VBS CANDIDATE PAIR -- the single
-  //      highest-m_jj opposite-hemisphere pair. EventRegion classifies the
+  //   1. Scope. VbsRegion classifies the VBS CANDIDATE PAIR -- the
+  //      leading-jet pair (calcLeadingVbsPair; the single highest-m_jj
+  //      opposite-hemisphere pair before 2026-11-17). EventRegion classifies the
   //      EVENT, over every jet in it, so an event is not mislabelled because
   //      the pair search happened to pick two jets that misrepresent it.
   //

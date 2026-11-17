@@ -19,8 +19,9 @@
 //
 // Denominator: every event the rest of the selection admits -- lepton selection
 // / overlap veto / passBasicCuts / >=MIN_PASSPT_JETS above MIN_JET_PT /
-// >=MIN_PASSETA_JETS forward -- that HAS an opposite-hemisphere candidate pair
-// with |Delta eta| >= 2.5. The m_jj axis starts at the 500 GeV working point
+// >=MIN_PASSETA_JETS forward -- that HAS a valid candidate pair (the
+// leading-jet pair: the two highest-pT jets with |eta| < 4.0, in opposite
+// hemispheres) with |Delta eta| >= 2.5. The m_jj axis starts at the 500 GeV working point
 // and events below it are dropped and counted, so the plot describes the sample
 // the analysis actually runs on rather than one it never sees.
 //
@@ -113,8 +114,8 @@ namespace {
   // the VBS_JET_D_ETA global -- classifyVbsRegion consults that global
   // internally and returns NONE on failure, which would silently break the
   // local-vs-shared R1/R2 cross-check. The pair itself is still
-  // calcBestVbsPair's highest-m_jj opposite-hemisphere pair; the cut is on the
-  // chosen pair, it does not re-choose one that passes.
+  // calcLeadingVbsPair's leading-jet pair; the cut is on the chosen pair, it
+  // does not re-choose one that passes.
   const double PLOT_MIN_DETA = 2.5;
 
   // ── Region eta window ────────────────────────────────────────────────────
@@ -125,7 +126,8 @@ namespace {
   // Worth knowing when comparing against the R_pT study: util/rpt_v5_hist.cxx
   // classifies the SAME regions with its own 2.4 < |eta| < 3.8 instead, and the
   // difference is not cosmetic. On local VBF above m_jj 500 this window calls
-  // 2348 events R1 where rpt_v5's calls 1830 -- a factor 1.3 -- because it also
+  // 2348 events R1 where rpt_v5's calls 1830 (measured with the pre-2026-11-17
+  // max-m_jj pair) -- a factor 1.3 -- because it also
   // admits pairs with a leg between 3.8 and 4.0. So the R1/R2 fractions here are
   // the clustering analysis's regions, and will read HIGHER than the region
   // yields rpt_v5_plot prints for the same sample. That is a real difference in
@@ -216,10 +218,11 @@ int main(int argc, char** argv) {
     if (nPt    < MIN_PASSPT_JETS)  continue;
     if (nPtEta < MIN_PASSETA_JETS) continue;
 
-    // No opposite-hemisphere pair means no m_jj, so the event cannot be placed
-    // on this axis at all. Excluded from the denominator and counted, so the
+    // No valid leading-jet pair (fewer than two jets in |eta| < 4.0, or the
+    // leading two in one hemisphere) means no m_jj, so the event cannot be
+    // placed on this axis at all. Excluded from the denominator and counted, so the
     // exclusion shows up in the summary instead of quietly shrinking the sample.
-    auto pair = branch.calcBestVbsPair(passPtIdx);
+    auto pair = branch.calcLeadingVbsPair(passPtIdx);
     if (!pair.valid()) { ++nNoPair; continue; }
     ++nSel;
 
@@ -385,7 +388,7 @@ int main(int argc, char** argv) {
   printf("  Events read                      : %8ld\n", nSeen);
   printf("  Passing selection, with a pair   : %8ld  (%.2f%% of read)\n",
          nSel, nSeen ? 100.0 * nSel / nSeen : 0.0);
-  printf("    excluded: no opp.-hemisphere pair : %8ld\n", nNoPair);
+  printf("    excluded: no leading-jet pair     : %8ld\n", nNoPair);
   printf("    excluded: |dEta| below %.1f          : %8ld\n",
          PLOT_MIN_DETA, nBelowDeta);
   printf("    excluded: m_jj below %.0f GeV        : %8ld\n",

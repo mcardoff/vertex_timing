@@ -67,7 +67,9 @@ if "hs_rm_trk_trkptz" not in a:
     raise SystemExit(f"{args.file} predates the attribution columns (rpt_v5_hist c57a46f); rerun it")
 reg = a["region"]
 jvt = ["none", "loose", "tight"][int(a["jvt_wp"][0])] if "jvt_wp" in a else "none"
-sel_txt = (f"max-$m_{{jj}}$ pair, $m_{{jj}}$ > {float(a['vbs_mjj_cut'][0]):g} GeV"
+# vbs_pair_lead exists from 2026-11-17 (the leading-jet pair); an older tree used the max-m_jj pair
+pair_txt = "leading-jet pair" if "vbs_pair_lead" in a else "max-$m_{jj}$ pair"
+sel_txt = (f"{pair_txt}, $m_{{jj}}$ > {float(a['vbs_mjj_cut'][0]):g} GeV"
            + (f", JVT + fJVT {jvt} before pairing" if jvt != "none" else ""))
 
 

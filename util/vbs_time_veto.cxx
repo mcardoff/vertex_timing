@@ -30,9 +30,12 @@
 // efficiency here describes the same events as a region-plot column:
 //   vertex |z_reco - z_truth| < MAX_VTX_DZ, Z->ll + lepton-jet OR (Z+jets only),
 //   >= 2 jets > 30 GeV and >= 1 of them in 2.38 < |eta| < 4.0, re-checked after
-//   the --jvt tagger removes jets, then the max-m_jj opposite-hemisphere pair
-//   of the surviving jets, m_jj >= VBS_JET_MJJ (default 200 GeV; --vbs-mjj=)
-//   and |Deta| >= VBS_JET_D_ETA (default 0; --vbs-deta=).
+//   the --jvt tagger removes jets, then the leading-jet pair of the surviving
+//   jets (calcLeadingVbsPair: the two highest-pT jets with |eta| < 4.0, which
+//   must be in opposite hemispheres -- no fallback to another pair), m_jj >=
+//   VBS_JET_MJJ (default 200 GeV; --vbs-mjj=) and |Deta| >= VBS_JET_D_ETA
+//   (default 0; --vbs-deta=). Before 2026-11-17 the pair was the max-m_jj
+//   opposite-hemisphere one; the meta tree's vbs_pair_lead = 1 marks the new.
 // The recoil cut is NOT applied here; both recoil variables are stored:
 //   met_truth  |sum pT(nu)| over the truth record (pdgId 12/14/16). The skims
 //              DROP the truth record, so VBF must be read from the ORIGINAL
@@ -324,10 +327,19 @@ struct Row {
   double   t0[N_T0] = {}, sig0[N_T0] = {}, infl[N_T0] = {};
   bool     ok[N_T0] = {};
   // EVERY jet the pair was chosen from -- the pT-passing, not-overlap-removed
-  // jets that survived --jvt -- so a timing tagger can remove jets and the pair
-  // be re-formed offline. Removing jets can only lower the maximum m_jj and the
-  // jet counts, so these events are a superset of any re-paired selection. The
-  // legs are the entries whose jet_idx equals a_idx / b_idx.
+  // jets that survived --jvt, at any |eta| (the pair itself only takes jets
+  // with |eta| < MAX_ABS_ETA_JET) -- so a timing tagger can remove jets and the
+  // pair be re-formed offline. The legs are the entries whose jet_idx equals
+  // a_idx / b_idx (a the leading leg, b the subleading one).
+  //
+  // NOT a superset of every re-paired selection any more. Under the old
+  // max-m_jj pair, removing jets could only lower the maximum m_jj and the jet
+  // counts, so a re-paired selection was a subset of these events. Under the
+  // leading-jet pair a removal promotes the next jet, which can turn an event
+  // with no valid pair (leading two in one hemisphere) or a failing one (m_jj
+  // below the cut) into a selected one. Those events are not stored, so the
+  // re-pairing offline measures what removal does to the selected events --
+  // which it loses and where the rest move -- not what it would newly admit.
   std::vector<int>    jet_idx, jet_hs, jet_pu, jet_n;
   std::vector<int>    jet_nhgtd;        // hgtdTracks().n
   std::vector<float>  jet_pt, jet_eta, jet_phi;
@@ -660,8 +672,8 @@ int main(int argc, char** argv) {
       }
       ++nTagger;
 
-      // ── The pair: max m_jj, opposite hemispheres (vbs_region_diag's wide_) ─
-      const BranchPointerWrapper::VbsPair pair = branch.calcBestVbsPair(passPtIdx);
+      // ── The pair: the leading-jet pair (vbs_region_diag's wide_) ─────────
+      const BranchPointerWrapper::VbsPair pair = branch.calcLeadingVbsPair(passPtIdx);
       if (!pair.valid()) continue;
       ++nPair;
       if (pair.mjj < VBS_JET_MJJ || pair.dEta < VBS_JET_D_ETA) continue;
@@ -871,6 +883,11 @@ int main(int argc, char** argv) {
   meta.Branch("jvt_wp", &jvtWp, "jvt_wp/I");
   meta.Branch("vbs_mjj_cut", &cutMjj, "vbs_mjj_cut/D");
   meta.Branch("vbs_deta_cut", &cutDeta, "vbs_deta_cut/D");
+  // 1: the non---sr pair is the leading-jet pair (calcLeadingVbsPair); a meta
+  // tree without this branch predates 2026-11-17 and used the max-m_jj pair.
+  // --sr's legs are its own leading-pair definition either way.
+  int    pairLead = 1;
+  meta.Branch("vbs_pair_lead", &pairLead, "vbs_pair_lead/I");
   meta.Branch("jet_time_dr", &jdr, "jet_time_dr/D");
   meta.Branch("jet_time_score", &jscore, "jet_time_score/I");
   meta.Branch("jet_time_dist_cut", &jcut, "jet_time_dist_cut/D");

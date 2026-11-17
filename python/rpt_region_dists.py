@@ -3,11 +3,13 @@
 against the timed one, one set of pages per timing case, from the per-event
 tree rpt_v5_hist writes beside its histograms (<prefix>rpt_v5_regions.root).
 
-The regions are rpt_v5_hist's WIDE window (see RegionRow there): the max-m_jj
-VBS pair, forward = |eta| > 2.4 with NO upper edge, central = |eta| < 2.4,
-paper HS/PU labels. Legs past |eta| 3.8 are included on purpose. Past 4.0 a
-jet has no tracks and sits at R_pT = 0 under every case, and the |eta|-band
-page separates those legs out.
+The regions are rpt_v5_hist's WIDE window (see RegionRow there): the VBS
+pair, forward = |eta| > 2.4 with NO upper edge, central = |eta| < 2.4, paper
+HS/PU labels. The pair is the leading-jet pair (calcLeadingVbsPair) in trees
+carrying vbs_pair_lead = 1 (2026-11-17 on), the max-m_jj pair before; the
+labels say which. Legs past |eta| 3.8 are included on purpose. Only the old
+pair reached past 4.0, where a jet has no tracks and sits at R_pT = 0 under
+every case; the |eta|-band page separates those legs out.
 
     PYTHONNOUSERSITE=1 ~/.venv-hgtd/bin/python python/rpt_region_dists.py \\
         condor/vbf/vbf_rpt_v5_regions.root --sample vbf \\
@@ -78,8 +80,11 @@ os.makedirs(os.path.join(args.out_dir, "png"), exist_ok=True)
 tree = uproot.open(args.file)["regions"]
 # jvt_wp exists from 2026-09-25; an older tree was necessarily untagged.
 has_jvt = "jvt_wp" in tree.keys()
+# vbs_pair_lead exists from 2026-11-17 (the leading-jet pair); an older tree used the max-m_jj pair.
+pair_lead = "vbs_pair_lead" in tree.keys()
 cols = (["region", "core", "hs_eta", "pu_eta", "n_jets_fwd_acc",
          "vbs_mjj_cut", "vbs_deta_cut", "gate_sigma"] + (["jvt_wp"] if has_jvt else [])
+        + (["vbs_pair_lead"] if pair_lead else [])
         + [f"rpt_{leg}_{s}" for leg in ("hs", "pu") for s in SCEN])
 a = tree.arrays(cols, library="np")
 if len(a["region"]) == 0:
@@ -114,7 +119,11 @@ sel = np.ones(len(a["region"]), dtype=bool)
 if args.require_fwd_acc_jet:
     sel &= a["n_jets_fwd_acc"] >= 1
 mjj_cut, deta_cut = float(a["vbs_mjj_cut"][0]), float(a["vbs_deta_cut"][0])
-sel_text = f"max-m_{{jj}} pair, m_{{jj}} > {mjj_cut:g} GeV"
+if pair_lead and not np.all(a["vbs_pair_lead"] == 1):
+    raise SystemExit(f"{args.file}: vbs_pair_lead is not 1 on every row -- trees with different pairs were merged")
+if not pair_lead:
+    print(f"WARNING: {args.file} has no vbs_pair_lead: made before 2026-11-17 with the max-m_jj pair")
+sel_text = ("leading-jet pair" if pair_lead else "max-m_{jj} pair") + f", m_{{jj}} > {mjj_cut:g} GeV"
 if deta_cut > 0:
     sel_text += f", |#Delta#eta| > {deta_cut:g}"
 sel_text += ", p_{T}^{jet} > 30 GeV"

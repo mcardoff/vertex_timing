@@ -258,13 +258,14 @@ namespace MyUtl {
   //
   //   A NEGATIVE --vbs-deta (e.g. --vbs-deta=-1) is a THIRD mode, not a smaller
   //   threshold: it drops the VBS candidate-PAIR requirement outright, so an
-  //   event with no opposite-hemisphere jet pair is kept. Neither knob can
+  //   event with no valid leading-jet pair (fewer than two jets in |eta| < 4.0,
+  //   or the leading two in one hemisphere) is kept. Neither knob can
   //   express this by being set to 0, because the pair's m_jj/|Deta| keep a -1
   //   sentinel when no pair exists and so fail any >= 0 test -- see passJetPtCut.
   //   This is the "novbs" loose selection, and it is the only way to widen the
   //   Z+jets training population meaningfully: --vbs-deta=0 was measured worth
-  //   +4% (67,074 -> 69,745) where dropping the pair requirement was expected to
-  //   be worth several-fold.
+  //   +4% (67,074 -> 69,745, with the pre-2026-11-17 max-m_jj pair) where
+  //   dropping the pair requirement was expected to be worth several-fold.
   //
   //   Each sets a SELECTION_TAG component whenever its value differs from its
   //   default, joined with '_' if both are non-default, so a loosened run

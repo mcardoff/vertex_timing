@@ -102,6 +102,14 @@ namespace MyUtl {
     //   "untagged" file kept a name that now denotes a different selection.
     //   Recording the actual values inside the file makes that detectable --
     //   see HistReader::CheckSelection, which the plot stages call.
+    //
+    //   meta_vbs_pair_lead = 1 is written on EVERY run, for the same reason:
+    //   on 2026-11-17 the VBS candidate pair itself changed, from the largest-
+    //   m_jj opposite-hemisphere pair to the leading-jet pair
+    //   (BranchPointerWrapper::calcLeadingVbsPair), with no change to any
+    //   threshold or file name. The key's absence is what marks a file made
+    //   with the old pair. Its meta_vbs_ prefix makes hist_merge keep it once
+    //   and require every shard to agree, rather than sum it.
     void WriteRunMeta(const std::string& energyLabel, Long64_t nEventsTotal,
                       double vbsDeta, double vbsMjj) {
       if (!file_) throw std::runtime_error("HistWriter: file not open");
@@ -111,6 +119,7 @@ namespace MyUtl {
       WriteScalar("meta_n_events_total", nEventsTotal);
       WriteScalar("meta_vbs_deta", vbsDeta);
       WriteScalar("meta_vbs_mjj",  vbsMjj);
+      WriteScalar("meta_vbs_pair_lead", 1.0);
     }
 
     // The run's non-default settings (MyUtl::RUN_SETTINGS, sample_config.h),
@@ -227,9 +236,31 @@ namespace MyUtl {
     //   loudly and continue, because refusing would make every pre-existing
     //   histogram file unreadable. That warning is the whole point: those are
     //   exactly the files whose name no longer implies their selection.
+    //
+    //   The pair DEFINITION is checked the same way: a file without
+    //   meta_vbs_pair_lead predates 2026-11-17 and was made with the old
+    //   max-m_jj pair, so it gets its own warning (not an abort, for the same
+    //   reason). A value other than 1 is not a definition this code knows --
+    //   hadd'd shards sum it -- and aborts.
     // -----------------------------------------------------------------------
     void CheckSelection(double vbsDeta, double vbsMjj) {
       if (!file_) throw std::runtime_error("HistReader: file not open");
+      double pairLead = 0.0;
+      if (!ReadRunConstant("meta_vbs_pair_lead", pairLead)) {
+        std::cerr << "WARNING: this histogram file carries no meta_vbs_pair_lead, so it was\n"
+                     "         made BEFORE the 2026-11-17 change of the VBS candidate pair:\n"
+                     "         its pair is the OLD one, the largest-m_jj opposite-hemisphere pair\n"
+                     "         of pT > 30 GeV jets at any |eta|, not the current leading-jet pair\n"
+                     "         (the two highest-pT jets with |eta| < 4.0, in opposite hemispheres).\n"
+                     "         Its file name cannot show this. Plots will describe the current\n"
+                     "         pair regardless. Re-run the histogramming stage if the pair matters.\n";
+      } else if (std::abs(pairLead - 1.0) > 1e-9) {
+        std::ostringstream os;
+        os << "HistReader::CheckSelection: meta_vbs_pair_lead = " << pairLead
+           << ", expected 1 (the leading-jet VBS pair). A merged file with a summed "
+              "value was made with hadd; merge *_hist shards with hist_merge.";
+        throw std::runtime_error(os.str());
+      }
       auto* d = file_->Get<TParameter<Double_t>>("meta_vbs_deta");
       auto* m = file_->Get<TParameter<Double_t>>("meta_vbs_mjj");
       if (!d || !m) {

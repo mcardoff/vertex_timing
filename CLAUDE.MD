@@ -721,7 +721,9 @@ defaults are unchanged, but a display can be given that row's exact gate:
 `python/rpt_region_displays.py render` passes all of these from the region
 tree and fails on any mismatch, so do not hand-assemble region commands.
 
-The VBS candidate pair is marked with a muted steel-blue cross-hatch drawn
+The VBS candidate pair (the leading-jet pair, mirrored from
+`calcLeadingVbsPair`; none when the two leading jets in |eta| < 4.0 share a
+hemisphere) is marked with a muted steel-blue cross-hatch drawn
 UNDER the jet wedges (fill colour is already spoken for: green = truth HS,
 grey = PU), and each tagging jet's label carries `R_pT = <z-only> -> <timed>`.
 The timed value applies rpt_v5's gate, so it needs `--infl` set to the
@@ -756,7 +758,7 @@ The full procedure — submit templates, `transfer_output_remaps`, sharding, sel
 cleanup — is in the `condor-grid-submission` skill; load it before any condor work. Rules that must
 never be missed:
 - **Merge `*_hist` shards with `build/hist_merge`, never `hadd`**: `hadd` sums every `TParameter`,
-  the run constants (`meta_vbs_deta`, `meta_vbs_mjj`, `meta_vbs_jvt_wp`) included, silently;
+  the run constants (`meta_vbs_deta`, `meta_vbs_mjj`, `meta_vbs_pair_lead`, `meta_vbs_jvt_wp`) included, silently;
   `hist_merge` keeps those once after checking the shards agree, and refuses unknown key types.
   TTree-only files (ML exports, `*_rpt_v5_regions*.root`) are the opposite: `hadd -f`.
 - **Glob on the shard count** (`*.shard*of12.root`), never `shard*`: a directory can hold several
@@ -820,6 +822,32 @@ Plus inclusive resolution/pull plots (`inclusive/inclusivereso_*`,
 - **`AnalysisObj`/`PlotObj::saveTo`/`loadFrom`** (adjacent to `mergeFrom`/`plotPostProcessing`): round-trip the raw, event-loop-filled histograms through `src/histogram_io.h`'s `HistWriter`/`HistReader`. Mirror `mergeFrom`'s exact member list by construction — if a new histogram member is added to `AnalysisObj`, add it to `mergeFrom`, `saveTo`, and `loadFrom` together. See "Histogramming vs. Plotting Split" above for the full design.
 
 ## Physics Findings
+
+> ### ⚠ Pair definition change, 2026-11-17
+> The VBS candidate pair is now the **leading-jet pair**
+> (`BranchPointerWrapper::calcLeadingVbsPair`): the two highest-pT jets with
+> pT > 30 GeV, not lepton-overlap-removed and |eta| < 4.0 (found by pT, not by
+> ntuple order), which must be in opposite hemispheres. If the leading two are
+> on the same side the event has NO pair: there is no fallback to another jet.
+> m_jj (massless jets) and |Deta| are computed on it, and the cuts, the
+> forward-jet rule (>= 1 jet, any jet, in 2.38 < |eta| < 4.0), the negative
+> `--vbs-deta` mode and the region classifiers are otherwise unchanged.
+>
+> **Every result below this banner used the OLD pair**: the opposite-hemisphere
+> pair of pT > 30 GeV jets at any |eta| with the largest m_jj (`calcBestVbsPair`,
+> removed with no flag or fallback). That pair often had a leg past |eta| 4.0;
+> the new one never does. Untagged output names now mean the leading-jet pair,
+> and nothing in a name tells the two apart. Histogram files from this date carry
+> `meta_vbs_pair_lead = 1` (a run constant `hist_merge` keeps once), and
+> `HistReader::CheckSelection` warns on a file without it; the rpt_v5 region
+> tree and `vbs_time_veto`'s `meta` tree carry a `vbs_pair_lead` branch.
+> `vbs_region_diag --pair=` is gone (refused): every block's chosen pair is the
+> shared one, and `pair_same_hemi` / `_leadpair` no longer exist.
+>
+> Re-pairing after jet removal is no longer monotone: removing a jet promotes
+> the next one, which can create a passing pair the event did not have.
+> `vbs_time_veto` stores only events selected before removal, so its `rp_*`
+> methods count losses and migrations, not newly admitted events.
 
 > ### ⚠ Selection change, 2026-08-26
 > The default VBS selection changed from **|Deta| >= 3, m_jj >= 0** to
