@@ -338,7 +338,7 @@ _DZ_COEFF = [
 ]
 
 def _get_new_dzpara(eta, pt):
-    """Expected |z0 - z_vtx| scale in mm; mirrors rpt_v5_hist.cxx::getNewDzpara."""
+    """Expected |z0 - z_vtx| scale in mm; mirrors MyUtl::getNewDzpara (src/clustering_constants.h)."""
     eta = abs(eta)
     coeff = next(c for hi, c in _DZ_COEFF if pt <= hi)
     d, e = coeff[0], 1.0
@@ -698,7 +698,7 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
         txt_color = 'orange' if highlighted else ('green' if _is_hs(jet_tup) else 'black')
         # numbered by ntuple index: the same as the list position (jets are pT-ordered and
         # only those >= 30 GeV are kept), and stable when --drop_tagged hides some
-        label = f"Jet {jet_tup['idx']+1}: $p_T$={jet_tup['pt']:.0f} GeV, $\eta$={jet_tup['eta']:.1f}"
+        label = f"Jet {jet_tup['idx']+1}: $p_T$={jet_tup['pt']:.0f} GeV, $\\eta$={jet_tup['eta']:.1f}"
         if jet_tup.get('isVBS'):
             _rz = jet_tup.get('rpt', float('nan'))
             _rt = jet_tup.get('rpt_t')

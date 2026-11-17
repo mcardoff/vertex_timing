@@ -257,7 +257,6 @@ worth **+5.6 points of recall at higher purity**, and TRKPTZ gains 0.5 ps and
 covariance that does not capture the η dependence of the true z0 spread, and
 `Z0_VAR_INFLATION = 1.15²` is independent evidence it is mis-estimated — a
 single global factor cannot repair an η-dependent mis-modelling. (The factor was
-removed 2026-11-16; this study's significance cuts N are 1.15 N of the raw covariance.) (The factor was
 removed 2026-11-16, f897b1e; this study's significance cuts N are 1.15 N of the raw covariance.)
 
 **Union with ghost association: tested and rejected.** The idea was that ghost

@@ -64,9 +64,9 @@
 #
 # That is the opposite of the rule for clustering_hist/rpt_v5_hist, and the
 # reason is the file contents. hist_merge exists because those files carry
-# TParameter scalars (event counts, pT accumulators) which have no Merge()
-# method, so hadd would keep the FIRST input's copy and silently pair
-# N-shard-summed histograms with one shard's event count. This file holds only
+# TParameter run constants (meta_vbs_*) beside the additive scalars, and hadd
+# sums every TParameter, so it would silently report N times the selection the
+# shards ran with (see util/hist_merge.cxx). This file holds only
 # TTrees, which hadd merges correctly by concatenating rows -- and hist_merge
 # would refuse them, since it recognises histograms and scalars only.
 #

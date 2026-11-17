@@ -1428,7 +1428,7 @@ auto main(int argc, char** argv) -> int {
             << "\n  Merge shards with `hadd`, NOT util/hist_merge: this file holds\n"
             << "  only TTrees, which hadd merges correctly by concatenating rows.\n"
             << "  hist_merge exists for the *_hist outputs, whose TParameter\n"
-            << "  scalars hadd would silently take from the first input only --\n"
+            << "  run constants hadd would silently sum with the counts --\n"
             << "  there are no such scalars here.\n";
   return 0;
 }

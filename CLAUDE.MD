@@ -66,11 +66,11 @@ primary workflow.
   future reuse, but `main()` no longer instantiates or iterates those maps)
   and writes its histogram file via `MyUtl::histFilePath()` (see
   "Sample-prefixed output paths" below). `clustering_plot`
-  reads that file and produces the `theplot_*`, `waves_oracle_*`, and
-  `hgtd_trkptz_waves_*` comparison PDF groups (see Score Registry section),
-  plus inclusive resolution/pull plots and shape-comparison plots — no
-  ntuple access, runs in seconds. Active scores: `TRKPTZ`, `WAVES`,
-  `JET_T_REFINED`, `TEST_MISAS`, `WAVES_MISCL`, `WAVES_MISAS`, plus `HGTD`.
+  reads that file and produces the `theplot_*`, `waves_oracle_*`,
+  `hgtd_trkptz_waves_*` and other comparison PDF groups (see Score Registry
+  section), plus inclusive resolution/pull plots and shape-comparison plots — no
+  ntuple access, runs in seconds. Active scores: listed in the Score Registry
+  section below (`buildAnalysisMap` is the authority).
   Iterative clustering (`ClusteringMethod::ITERATIVE`, `DIST_CUT_CONE =
   3.0σ`) is the default main collection. Shared booking/plotting logic
   (`Scenario` enum, `buildAnalysisMap`, `makeComparisonPlots`) lives in
@@ -135,7 +135,7 @@ primary workflow.
 
   **Core fraction and RpT-gate quality are NOT the same objective.** On zjets
   WAVeS has the worst core fraction of any selector (57.9%) and the best real
-  matched-efficiency RpT rejection: the 2.5σ gate passes untimed tracks
+  matched-efficiency RpT rejection: the 3σ gate (`GATE_SIGMA`) passes untimed tracks
   unconditionally and empties the timed component on a catastrophically wrong
   t0, so it forgives WAVeS's failure mode and punishes slightly-wrong t0s.
   What the RpT gate actually rewards in a t0 is an open question.
@@ -199,7 +199,7 @@ primary workflow.
   Supports `--file-shard=<i>/<N>`; **merge the shards with `hadd`, not
   `hist_merge`** — the inverse of the rule for the `*_hist` outputs, because
   this file holds only TTrees (which `hadd` concatenates correctly) and none
-  of the `TParameter` scalars that make `hadd` wrong there. Validated on the
+  of the run-constant scalars `hadd` would sum there. Validated on the
   local 33-file VBF sample: a 4-way sharded run, `hadd`'d, is bit-identical to
   the unsharded run in all three trees with row counts summing exactly.
   Submit template: `condor/export_training_data_sharded.sub`.
@@ -234,7 +234,7 @@ primary workflow.
 - **track_dt.cxx** (`util/`): Inclusive per-track HGTD-time-vs-truth-particle
   residual, no event selection.
 - **runHGTD_Clustering.cxx** (`python/`): Interactive per-event clustering.
-  Output is parsed by `event_display.py` to produce a 2-page PDF.
+  Output is parsed by `event_display.py` to produce a 3-page PDF.
 
 ## Histogramming vs. Plotting Split
 
@@ -269,12 +269,17 @@ condor-scale for real work) even though the underlying data hadn't changed.
   `vbf/rpt_plots/vbf_rpt_v5.pdf`. For the local/default run (no `--sample`),
   both helpers fall back to the original unprefixed conventions
   (`<OUTPUT_DIR>/hists/<name>.root`, `<OUTPUT_DIR>/<subdir>/<name>.pdf`) —
-  `MyUtl::SAMPLE_NAME` is only set to a non-empty value by the four primary
-  split executables (`clustering_hist`/`clustering_plot`/`rpt_v5_hist`/
-  `rpt_v5_plot`) when `resolveSample()` matched a real `--sample=` flag; the
-  legacy monolithic executables (`clustering_dt.cxx`, `rpt_v5.cxx`) never set
-  it and so keep their original unprefixed, un-flattened output paths
-  unconditionally, even when run with `--sample=`.
+  `MyUtl::SAMPLE_NAME` is non-empty only when `resolveSample()` matched a real
+  `--sample=` flag, and only in executables that copy it over: the split pairs
+  (`clustering_hist`/`clustering_plot`, `rpt_v5_hist`/`rpt_v5_plot`,
+  `assoc_study_hist`/`assoc_study_plot`), `export_training_data`,
+  `failure_decomposition`, `skim_ntuples`, `rpt_v6`, the `vbs_*` executables
+  (`vbs_mjj_diag`, `vbs_region_diag`, `vbs_region_mjj`, `vbs_time_veto`) and
+  the `tdr_*` ones (`tdr_pujet`, `tdr_vbf`, `tdr_t0`, `tdr_fwdpair`). The
+  legacy monolithic executables (`clustering_dt.cxx`, `rpt_v5.cxx`), the
+  earlier `rpt_v2`/`rpt_v4`, `maxpt_jet_test` and `ttreemt_prototype` resolve
+  `--sample=` but never set it, and so keep their original unprefixed,
+  un-flattened output paths unconditionally.
 - **Reconstruction pattern**: the plotting stage always "construct-empty-
   then-load" — it re-runs the *same* booking logic the histogramming stage
   used (`buildAnalysisMap()` / `makeScenarios()`) to get correctly-named,
@@ -342,11 +347,11 @@ the baseline `Score::TRKPTZ`, implemented in `Cluster::updateScores`
   the cluster's constituent tracks (nearest qualifying forward jet per
   track), then multiplied by `exp(−1.5·|Δz_cluster|)`. Falls back to the
   TRKPTZ score if no qualifying forward jets exist in the event.
-- **Time/purity**: for the `WAVES` row specifically (not its oracle
-  variants), both the reported time and purity are recomputed using only the
-  subset of the selected cluster's tracks that fall within `ΔR < 0.4` of a
-  qualifying forward jet — this purifies the time by dropping absorbed PU
-  tracks that the jet-agnostic clustering step picked up.
+- **Time/purity**: the reported time (`TimeSource::IN_JET`, which the oracle
+  variants below share) and, for the `WAVES` row alone, the purity are
+  recomputed using only the subset of the selected cluster's tracks that fall
+  within `ΔR < 0.4` of a qualifying forward jet — this purifies the time by
+  dropping absorbed PU tracks that the jet-agnostic clustering step picked up.
 - **`Score::JET_T_REFINED`** (short name `WAVES_RECLUST`, id 19): a
   *dedicated* collection — tracks are first filtered to those within
   `ΔR < 0.4` of a forward jet (`TrackFilterType::JET`), then re-clustered
@@ -453,13 +458,14 @@ stale entry is visible in the same log. The measurement is NOT circular (raw
 `var_vtx`, ungated track list, vertex times independent of the gate), so one
 pass suffices. Re-measure for any NEW sample. See Physics Findings for why
 this matters far less than it looks.
-`CONE_ITER_K` also still exists as a constant but its only historical
-consumer (a `cone_iter_k_sweep.cxx` sweep executable) is not present in this
-tree, so it's currently unused.
+`CONE_ITER_K` also still exists as a constant, but no built code reads it.
+Its sweep, `util/scratch/cone_iter_k_sweep.cxx` (local-only, like the rest of
+`util/scratch/`), no longer compiles: it uses `DIST_CUT_REFINE`, which has been
+removed.
 
 ## Build System
 
-TMVA is intentionally excluded (see `CMakeLists.txt:34`) — `HGTD_SORT`/
+TMVA is intentionally excluded (see the "TMVA excluded" comment in `CMakeLists.txt`) — `HGTD_SORT`/
 `CONE_BDT` are registered `Score`s but their selector
 (`chooseHGTDSortCluster`) is currently a stub returning an empty `Cluster`,
 and neither is emplaced in `buildAnalysisMap`.
@@ -571,7 +577,9 @@ that constructor must be added to `KEEP_ALWAYS` / `KEEP_LEPTON` /
 `KEEP_EXTENDED` in `util/skim_ntuples.cxx`, or the skimmed sample fails at
 first access. Branches absent from a given production (`Track_btagIp_*` is
 absent from every grid sample) are reported and skipped, matching
-`BranchPointerWrapper`'s own `hasBranch()` tolerance.
+`BranchPointerWrapper`'s own `hasBranch()` tolerance. The one deliberate
+exception is `Track_hitInLastLayer`, bound only under `--clean-times` and not
+kept: a cleaned run reads the raw ntuples.
 
 Validated original-vs-skimmed on the same input files: `vbs_region_diag` all
 89 columns bit-identical (row-by-row after sorting), `rpt_v5_hist` all 84
@@ -690,9 +698,10 @@ No ML is active in the C++ analysis. The history — cluster-selection GBDT / De
 The full procedure — submit templates, `transfer_output_remaps`, sharding, selection tags, job cost,
 cleanup — is in the `condor-grid-submission` skill; load it before any condor work. Rules that must
 never be missed:
-- **Merge `*_hist` shards with `build/hist_merge`, never `hadd`**: `hadd` keeps one shard's
-  `TParameter` scalars beside histograms summed over all shards, silently. TTree-only files (ML
-  exports, `*_rpt_v5_regions*.root`) are the opposite: `hadd -f`.
+- **Merge `*_hist` shards with `build/hist_merge`, never `hadd`**: `hadd` sums every `TParameter`,
+  the run constants (`meta_vbs_deta`, `meta_vbs_mjj`, `meta_vbs_jvt_wp`) included, silently;
+  `hist_merge` keeps those once after checking the shards agree, and refuses unknown key types.
+  TTree-only files (ML exports, `*_rpt_v5_regions*.root`) are the opposite: `hadd -f`.
 - **Glob on the shard count** (`*.shard*of12.root`), never `shard*`: a directory can hold several
   shardings of the same data, and the loose glob double-counts every event.
 - Outputs land in `condor/<sample>/`, not `<repo-root>/<sample>/`; give the plot stage `--hist-file=`.
@@ -720,7 +729,7 @@ the write succeeds and every readback fails.
 
 Oracle scores (`requiresPurity=true`) gate their denominator: events outside the gate are not counted. **Important:** `calcHSTimingPurity` (event-level, used by `TEST_MISAS`/`WAVES_MISAS`) returns `0.0f` — not `1.0f` — when no qualifying HS tracks exist, ensuring that events with zero forward HS tracks are excluded from oracle denominators.
 
-`clustering_hist`/`clustering_plot`'s currently active scores (built by `buildAnalysisMap`, `src/clustering_dt_common.h`) are `TRKPTZ`, `WAVES`, `JET_T_REFINED`, `TEST_MISAS`, `WAVES_MISCL`, `WAVES_MISAS`, `VBF_R1/R2`, the full id 24–33 ladder above, plus `HGTD`.
+`clustering_hist`/`clustering_plot`'s currently active scores (built by `buildAnalysisMap`, `src/clustering_dt_common.h`) are `TRKPTZ`, `WAVES`, `JET_T_REFINED`, `TEST_MISAS`, `WAVES_MISCL`, `WAVES_MISAS`, `VBF_R1/R2`, the full id 24–33 ladder in `SCORE_REGISTRY` (`TRKPTZ_PV`/`_PU`/`_PUW`, `TRKPTZ_TZ`/`_TZ_IJ`/`_TZ_OJ`/`_TZ_GIJ`, `WAVES_GIJ`, `TRKPTZ_TZJ`, `TRKPTZ_TZQ`), the WAVeS failure-mode rows (fixes applied by `src/failure_fixes.h`: `WFIX_*` ids 40–44 and 46–49, `WSEL_OK`/`WSEL_OK_MISCL` 59–60, `WLOO_*` 61–65), plus `HGTD`.
 
 Comparison PDF groups produced by `clustering_plot` from histograms written by `clustering_hist` (`makeComparisonPlots`, one set per `KEYS = {pu_frac, fjet, ftrack, hs_track, truthjets}`):
 - `theplot_*.pdf` — HGTD vs TRKPTZ vs TEST_MISAS
@@ -730,6 +739,13 @@ Comparison PDF groups produced by `clustering_plot` from histograms written by `
 - `trkptz_tz_*.pdf` — TRKPTZ vs TRKPTZ_TZ vs WAVES (the per-track Δz term isolated)
 - `timesource_*.pdf` — TRKPTZ_TZ raw vs in-jet vs out-of-jet time (selection bit-identical)
 - `guarded_*.pdf` — the deployable set: TRKPTZ / TZ / TZ_GIJ / **TZP** / WAVES
+- `fixes/fix_<mode>_*.pdf` — TRKPTZ vs WAVES vs WAVeS with one failure mode fixed (`WFIX_*`), one file per mode
+- `fixes/fix_chain_*.pdf` — WAVES and the cumulative fix chain (`WFIX_MISTIMED`, `WFIX_C3`..`C6`)
+- `talk/talk_*.pdf` — the talk's versions: `talk_t0` (HGTD vs WAVES), `talk_athena`, `talk_perfect`,
+  `talk_fix_alone`/`_chain`/`_allbut`, and the `talk_fix_cost` gap plot (`WLOO_*`)
+
+`fixes/*`, `talk_perfect` and `talk_fix_*` are drawn only when the histogram file holds the `WFIX_*`
+rows; `talk_t0` and `talk_athena` always are.
 
 Plus inclusive resolution/pull plots (`inclusive/inclusivereso_*`,
 `inclusive/inclusivepull_*`, log/lin) and shape-comparison plots
