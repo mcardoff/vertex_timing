@@ -474,10 +474,13 @@ namespace MyUtl {
   //   Returns 0.0 when no HS tracks with valid HGTD time exist, so such events
   //   are excluded from those denominators rather than counted as clean.
   //
-  //   Truth time resolution:
-  //     Primary tracks   (trackToParticle != -1): use particleT (most precise).
-  //     Secondary tracks (no particle link, vtxIdx != -1): use truthVtxTime.
-  //     Unlinked fakes   (vtxIdx == -1): excluded from denominator.
+  //   The truth reference is the hard-scatter VERTEX time t_HS, as everywhere
+  //   else a track's time is judged (Fix::MISTIMED, tdr::misassignedHs,
+  //   failure_decomposition). Reconstruction propagates a track's time back to
+  //   the beam line as if it were prompt, so a secondary's measured time sits at
+  //   t_HS, not at its own (later) production time: judged against the
+  //   particle's production time, ~2% of HS tracks with a right time were
+  //   flagged wrong (2026-11-17; the particle time was used before then).
   // ---------------------------------------------------------------------------
   float calcHSTimingPurity(
     const std::vector<int>& tracks,
@@ -488,10 +491,7 @@ namespace MyUtl {
       if (branch->trackToTruthvtx[idx] != 0) continue;  // not HS
       if (branch->trackTimeValid[idx]  != 1) continue;  // no HGTD measurement
 
-      int    partIdx   = branch->trackToParticle[idx];
-      double truthTime = (partIdx != -1)
-                         ? branch->particleT[partIdx]
-                         : branch->truthVtxTime[branch->trackToTruthvtx[idx]];
+      const double truthTime = branch->truthVtxTime[0];               // t_HS
 
       double pull = std::abs(branch->trackTime[idx] - truthTime)
                     / branch->trackTimeRes[idx];
