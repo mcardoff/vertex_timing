@@ -478,9 +478,7 @@ int main(int argc, char** argv) {
   std::cout << "  jet time: core = timed ghost tracks, " << MIN_TRACK_PT << "-" << MAX_TRACK_PT
             << " GeV, dR < " << gJetTimeDr << ", " << JET_TIME_DIST_CUT
             << "-sigma time clustering, max sum-pT cluster\n";
-  std::printf("[veto] t0 inflation (rpt_v5's, '%s'): hgtd %.2f trkptz %.2f waves %.2f tzp %.2f\n",
-              SAMPLE_NAME.empty() ? "local (vbf)" : SAMPLE_NAME.c_str(),
-              INFL.hgtd, INFL.trkptz, INFL.waves, INFL.tzp);
+  printInflation(SAMPLE_NAME);   // rpt_v5's t0 inflation, and whether it is measured or seeded
   std::cout << "[veto] out=" << outPath << "\n";
 
   TChain chain("ntuple");

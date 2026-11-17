@@ -315,6 +315,7 @@ int main(int argc, char** argv) {
   std::printf("[tdr_fwdpair] sample=%s: two leading jets in %s|eta| < %.1f, opposite eta, > %.0f / %.0f GeV%s; gate %.1f sigma\n",
               SAMPLE_NAME.empty() ? "local" : SAMPLE_NAME.c_str(), oneFwd ? "" : "2.4 < ", ETA_MAX, J1_PT_MIN, J2_PT_MIN,
               oneFwd ? ", at least one in 2.4 < |eta| < 3.8" : "", gate);
+  printInflation(SAMPLE_NAME);
   std::cout << "[tdr_fwdpair] track-time cleaning: " << tdr::cleanModeName(cleanMode) << "; JVT/fJVT before pairing: " << jvtName << "\n";
   std::cout << "[tdr_fwdpair] out=" << outPath << "\n";
 

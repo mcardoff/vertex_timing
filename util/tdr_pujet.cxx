@@ -74,6 +74,7 @@ int main(int argc, char** argv) {
   }
   std::printf("[tdr_pujet] sample=%s gate=%.1f sigma, t0 inflation hgtd %.2f trkptz %.2f waves %.2f\n",
               SAMPLE_NAME.empty() ? "local" : SAMPLE_NAME.c_str(), gate, INFL.hgtd, INFL.trkptz, INFL.waves);
+  printInflation(SAMPLE_NAME);
   std::cout << "[tdr_pujet] track-time cleaning: " << tdr::cleanModeName(cleanMode) << "; R_pT matching: " << tdr::rptMatchName(rptMatch) << "\n";
   std::cout << "[tdr_pujet] out=" << outPath << "\n";
 
