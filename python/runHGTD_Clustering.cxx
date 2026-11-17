@@ -35,6 +35,10 @@ void runHGTD_Clustering(std::string filePath, Long64_t eventNum,
   // for the local default VBF ntuple's fixed naming convention.
   TChain chain("ntuple");
   chain.Add(filePath.c_str());
+  // cleanTimes needs Track_hitInLastLayer (the skims drop it): fill
+  // AVAILABLE_BRANCHES so the wrapper's hasBranch() guard can fire, instead of
+  // binding a missing branch and reading nothing.
+  if (cleanTimes) recordAvailableBranches(chain);
   TTreeReader reader(&chain);
   BranchPointerWrapper branch(reader);
 

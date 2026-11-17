@@ -160,6 +160,9 @@ void clustering_dump(std::string filePath, Long64_t eventNum = -1, std::string o
   CLEAN_TIMES = true;                       // binds Track_hitInLastLayer
   TChain chain("ntuple");
   chain.Add(filePath.c_str());
+  // the skims drop Track_hitInLastLayer: fill AVAILABLE_BRANCHES so the
+  // wrapper's hasBranch() guard can fire instead of a silent zero-entry read
+  recordAvailableBranches(chain);
   TTreeReader reader(&chain);
   BranchPointerWrapper branch(reader);
   if (eventNum >= 0) { reader.SetEntry(eventNum); dumpCurrent(branch, filePath, eventNum, out); return; }
@@ -179,6 +182,8 @@ void clustering_dump_list(std::string listPath, std::string outDir) {
   for (auto& [f, evs] : byFile) {
     TChain chain("ntuple");
     chain.Add(f.c_str());
+    AVAILABLE_BRANCHES.clear();             // check each file on its own, not the union
+    recordAvailableBranches(chain);
     TTreeReader reader(&chain);
     BranchPointerWrapper branch(reader);
     for (auto& [e, name] : evs) { reader.SetEntry(e); dumpCurrent(branch, f, e, outDir + "/" + name + ".json"); }
