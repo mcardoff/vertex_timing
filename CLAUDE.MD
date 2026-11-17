@@ -14,6 +14,12 @@ The project performs timing-based vertex reconstruction using:
 
 ## Project Structure
 
+**The GitHub repo (`mcardoff/vertex_timing`) is PUBLIC.** Since 2026-11-17 `results/`, `notes/` and
+`slides/` are local-only and git-ignored: they hold internal numbers, reviewer comments and the decks.
+Never commit them, and keep internal results out of PR descriptions. The `results/` files committed
+before that date stay tracked. The full pre-cleanup history, those files included, is the local tag
+`archive/full-history-2026-11-17`.
+
 Run `ls` for the layout; each executable's header describes it. Non-obvious points:
 - `src/clustering_dt.cxx` and `util/rpt_v5.cxx` are legacy monolithic executables kept only as
   validation ground truth; the `*_hist` / `*_plot` pairs are the primary workflow.
@@ -22,7 +28,7 @@ Run `ls` for the layout; each executable's header describes it. Non-obvious poin
   (`vvhbeamer.sty` is a copy of `~/project/VBS_HIGGS/slides`' style). Build with
   `cd slides && latexmk -pdf -outdir=build <deck>.tex`; `grep -c 'missing plot' build/<deck>.log`
   must be 0 — a missing PNG is a grey box, not an error.
-- `results/`: one Markdown/JSON/HTML record per study, positive AND negative results.
+- `results/`: one Markdown/JSON/HTML record per study, positive AND negative results (local-only, see above).
 - `share/models/`, `share/scripts/`: historical ML artifacts with no active consumer.
 - `util/scratch/`: one-off macros (e.g. the region-tree friend-file macros in `util/scratch/region_weights/`).
 - `condor/vbs_region_diag.sub` needs its `jvt`/`jvttag` macros to agree; `condor/vbs_time_veto.sub`

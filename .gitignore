@@ -26,3 +26,9 @@
 /condor/zjets/
 /condor/dijet/
 /condor/ttbar/
+
+# local-only since 2026-11-17: the GitHub repo is public (results with internal numbers, notes, the decks).
+# results/ files tracked before then stay tracked; new ones are ignored.
+/results/
+/notes/
+/slides/
