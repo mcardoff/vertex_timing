@@ -88,6 +88,13 @@ parser.add_argument('--jet_time_tracks', type=str, default=None,
 parser.add_argument('--drop_tagged', action='store_true',
                     help='leave the --tagged_out jets out of the drawing altogether (listed in one '
                          'line instead); the other jets keep their ntuple numbering (Jet N = index + 1)')
+parser.add_argument('--rpt_match', choices=['dr02', 'ghost'], default='dr02',
+                    help='R_pT track matching: ghost tracks within dR < 0.2 of the axis (rpt_v5, the default) '
+                         'or every ghost-associated track (the TDR programs, util/tdr_common.h RptMatch::GHOST)')
+parser.add_argument('--clean_times', action='store_true',
+                    help="the TDR's track-time cleaning in the R_pT gate (util/tdr_common.h timed()): a timed "
+                         'track counts as untimed unless its last ITk hit is on the last layer and, at '
+                         '3.5 < |eta| < 3.9, it has >= 2 HGTD hits. Needs Track_hitInLastLayer')
 parser.add_argument('--expect_rpt', type=str, default=None,
                     help='"z_hs,t_hs,z_pu,t_pu" from the analysis for the --legs pair '
                          '(nan to skip one); prints RPT_CHECK OK|MISMATCH')
@@ -152,7 +159,7 @@ class _Branches:
     pass
 
 branch = _Branches()
-for _name in _FLAT_BRANCHES:
+for _name in _FLAT_BRANCHES + (['Track_hitInLastLayer'] if args.clean_times else []):
     setattr(branch, _name, np.array(list(getattr(tree, _name))))
 
 # Jagged (per-jet list of matched truth-HS-jet indices) -- kept as a plain
@@ -360,7 +367,7 @@ for _j in jet_info:
         _de = _j['eta'] - branch.Track_eta[_t]
         _dp = np.arctan2(np.sin(_j['phi'] - branch.Track_phi[_t]),
                          np.cos(_j['phi'] - branch.Track_phi[_t]))
-        if np.sqrt(_de * _de + _dp * _dp) > RPT_TRACK_JET_DR:
+        if args.rpt_match == 'dr02' and np.sqrt(_de * _de + _dp * _dp) > RPT_TRACK_JET_DR:
             continue
         _sumpt += branch.Track_pt[_t]
     _j['rpt'] = _sumpt / _j['pt']
@@ -483,7 +490,14 @@ def _trk_res(_t):
     return smeared_res if args.ideal_times else branch.Track_timeRes[_t]
 
 def _trk_timed(_t):
-    return (_t in smeared_times) if args.ideal_times else branch.Track_hasValidTime[_t] == 1
+    if args.ideal_times:
+        return _t in smeared_times
+    if branch.Track_hasValidTime[_t] != 1:
+        return False
+    if not args.clean_times:
+        return True
+    _ae = abs(branch.Track_eta[_t])          # util/tdr_common.h timed(): cuts (a) and (b)
+    return bool(branch.Track_hitInLastLayer[_t]) and not (3.5 < _ae < 3.9 and branch.Track_nHGTDHits[_t] < 2)
 
 _t_vtx = _sig_vtx = None
 if args.extra_time is not None and args.t0_sigma is not None:
@@ -516,7 +530,7 @@ for _j in jet_info:
         _de = _j['eta'] - branch.Track_eta[_t]
         _dp = np.arctan2(np.sin(_j['phi'] - branch.Track_phi[_t]),
                          np.cos(_j['phi'] - branch.Track_phi[_t]))
-        if np.sqrt(_de * _de + _dp * _dp) > RPT_TRACK_JET_DR:
+        if args.rpt_match == 'dr02' and np.sqrt(_de * _de + _dp * _dp) > RPT_TRACK_JET_DR:
             continue
         if _trk_timed(_t):
             _st = _trk_res(_t)
