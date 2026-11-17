@@ -117,8 +117,8 @@ transfer_output_files    = $(sample)/$(sample)_$(seltag)clustering_hist.shard$(P
 transfer_output_remaps   = "$(sample)_$(seltag)clustering_hist.shard$(ProcId)of$(nshards).root=$(sample)/$(sample)_$(seltag)clustering_hist.shard$(ProcId)of$(nshards).root"
 # $(ProcId) is the shard index: `queue $(nshards)` below runs ProcId
 # 0..nshards-1, which --file-shard consumes directly. Merge the results
-# afterwards with hist_merge -- NOT hadd, which would silently keep one
-# shard's event counts (see util/hist_merge.cxx).
+# afterwards with hist_merge -- NOT hadd, which would silently sum the run
+# constants (meta_vbs_*) along with the counts (see util/hist_merge.cxx).
 
 getenv                   = True
 

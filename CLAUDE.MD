@@ -199,7 +199,7 @@ primary workflow.
   Supports `--file-shard=<i>/<N>`; **merge the shards with `hadd`, not
   `hist_merge`** — the inverse of the rule for the `*_hist` outputs, because
   this file holds only TTrees (which `hadd` concatenates correctly) and none
-  of the `TParameter` scalars that make `hadd` wrong there. Validated on the
+  of the run-constant scalars `hadd` would sum there. Validated on the
   local 33-file VBF sample: a 4-way sharded run, `hadd`'d, is bit-identical to
   the unsharded run in all three trees with row counts summing exactly.
   Submit template: `condor/export_training_data_sharded.sub`.
@@ -690,9 +690,10 @@ No ML is active in the C++ analysis. The history — cluster-selection GBDT / De
 The full procedure — submit templates, `transfer_output_remaps`, sharding, selection tags, job cost,
 cleanup — is in the `condor-grid-submission` skill; load it before any condor work. Rules that must
 never be missed:
-- **Merge `*_hist` shards with `build/hist_merge`, never `hadd`**: `hadd` keeps one shard's
-  `TParameter` scalars beside histograms summed over all shards, silently. TTree-only files (ML
-  exports, `*_rpt_v5_regions*.root`) are the opposite: `hadd -f`.
+- **Merge `*_hist` shards with `build/hist_merge`, never `hadd`**: `hadd` sums every `TParameter`,
+  the run constants (`meta_vbs_deta`, `meta_vbs_mjj`, `meta_vbs_jvt_wp`) included, silently;
+  `hist_merge` keeps those once after checking the shards agree, and refuses unknown key types.
+  TTree-only files (ML exports, `*_rpt_v5_regions*.root`) are the opposite: `hadd -f`.
 - **Glob on the shard count** (`*.shard*of12.root`), never `shard*`: a directory can hold several
   shardings of the same data, and the loose glob double-counts every event.
 - Outputs land in `condor/<sample>/`, not `<repo-root>/<sample>/`; give the plot stage `--hist-file=`.

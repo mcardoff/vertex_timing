@@ -4,15 +4,19 @@
 //
 //   ./hist_merge <output.root> <input1.root> <input2.root> ...
 //
-// WHY NOT hadd. `hadd` merges anything with a Merge() method and, for
-// everything else, keeps the FIRST occurrence. Every scalar HistWriter emits
-// is a TParameter -- event counts, rejection tallies, the pT accumulators
-// rpt_v5_plot turns into untimed-fraction percentages -- and TParameter has no
-// Merge(). hadd would therefore produce a file whose histograms are the sum of
-// N shards but whose event counts are one shard's, silently and with no error.
-// Every one of those scalars is an additive accumulator (a count, or a sum of
-// pT that the plot stage only ever divides by another summed scalar), so the
-// correct merge is to add them -- which is what this does.
+// WHY NOT hadd. Every scalar HistWriter emits is a TParameter, and
+// TParameter<T>::Merge exists: hadd SUMS them (checked with ROOT 6.40.04:
+// Long64_t 10 + 11 -> 21, Double_t 1.5 + 1.5 -> 3.0). For the accumulators --
+// event counts, rejection tallies, the pT accumulators rpt_v5_plot turns into
+// untimed-fraction percentages -- that is the right answer. The hazard is the
+// RUN CONSTANTS, which are TParameters too: hadd sums meta_vbs_deta,
+// meta_vbs_mjj and meta_vbs_jvt_wp exactly like the accumulators, so a merged
+// file reports N times the selection it was run with (and a summed
+// meta_vbs_mjj fails HistReader::CheckSelection). hadd also keeps every copy of
+// meta_energy_label without checking that they agree. This tool sums the
+// accumulators, keeps each run constant and string ONCE after checking that
+// every input agrees, and refuses any key type it does not recognise rather
+// than passing it through.
 //
 // Types handled:
 //   TH1 and everything deriving from it (TH1D/TH2D/TProfile/TProfile2D) -> Add
