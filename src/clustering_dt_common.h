@@ -67,6 +67,14 @@ inline auto buildAnalysisMap(
   m.emplace(Score::WAVES_GIJ,   AnalysisObj(label, Score::WAVES_GIJ));
   m.emplace(Score::TRKPTZ_TZJ,  AnalysisObj(label, Score::TRKPTZ_TZJ));
   m.emplace(Score::TRKPTZ_TZQ,  AnalysisObj(label, Score::TRKPTZ_TZQ));
+  // Failure-mode fixes on WAVeS (src/failure_fixes.h): each alone, then the
+  // cumulative chain in the failure ladder's order.
+  for (const Score* s : {&Score::WFIX_RETIME, &Score::WFIX_MISTIMED, &Score::WFIX_SELECT,
+                         &Score::WFIX_MISCL, &Score::WFIX_TEFF, &Score::WFIX_C3,
+                         &Score::WFIX_C4, &Score::WFIX_C5, &Score::WFIX_C6,
+                         &Score::WSEL_OK, &Score::WSEL_OK_MISCL,
+                         &Score::WLOO_ALL, &Score::WLOO_MISTIMED, &Score::WLOO_SELECT, &Score::WLOO_MISCL, &Score::WLOO_TEFF})
+    m.emplace(*s, AnalysisObj(label, *s));
 
   // Scores active only in the real-HGTD scenario
   if (scenario == Scenario::HGTD) {
@@ -89,6 +97,61 @@ inline void makeComparisonPlots(
   TCanvas* canvas,
   std::map<Score, AnalysisObj>& mapHGTD
 ) {
+  // Failure-mode fixes (src/failure_fixes.h). One file per failure mode: TRKPTZ
+  // and WAVeS, then WAVeS with that one mode fixed -- the gap to WAVeS is what
+  // the mode costs. Then the cumulative chain, in the failure ladder's order.
+  const std::vector<std::pair<const char*, const Score*>> FIXES = {
+    {"retime", &Score::WFIX_RETIME}, {"mistimed", &Score::WFIX_MISTIMED}, {"selection", &Score::WFIX_SELECT},
+    {"miscl", &Score::WFIX_MISCL}, {"teff", &Score::WFIX_TEFF}};
+  if (mapHGTD.count(Score::WFIX_RETIME)) {
+    for (const auto& [name, sc] : FIXES)
+      moneyPlot(MyUtl::plotFilePath("fixes", TString::Format("fix_%s_%s.pdf", name, key).Data()).c_str(), key, canvas,
+                {&mapHGTD.at(Score::TRKPTZ), &mapHGTD.at(Score::WAVES), &mapHGTD.at(*sc)}, {C02, C03, C05});
+    moneyPlot(MyUtl::plotFilePath("fixes", TString::Format("fix_chain_%s.pdf", key).Data()).c_str(), key, canvas,
+              {&mapHGTD.at(Score::WAVES), &mapHGTD.at(Score::WFIX_MISTIMED), &mapHGTD.at(Score::WFIX_C3),
+               &mapHGTD.at(Score::WFIX_C4), &mapHGTD.at(Score::WFIX_C5), &mapHGTD.at(Score::WFIX_C6)},
+              {C03, C06, C01, C02, C04, C09});
+    // The talk's version (slide 13, user 2026-11-11): the differential gain of
+    // each fix, WAVeS then the chain through HS track efficiency, core
+    // fraction from 0. The gap between two curves is that mode's contribution.
+    // Slide 14 (user, 2026-11-12): P(good time | everything fixed but x), all
+    // four fixed as the reference; n_HS >= 3, both pages (core width, fraction).
+    // Named from "perfect" (user, 2026-11-12): each row is perfect with ONE failure mode left real; WAVeS as is.
+    moneyPlot(MyUtl::plotFilePath("talk", TString::Format("talk_fix_allbut_%s.pdf", key).Data()).c_str(), key, canvas,
+              {&mapHGTD.at(Score::WAVES), &mapHGTD.at(Score::WLOO_ALL), &mapHGTD.at(Score::WLOO_MISTIMED),
+               &mapHGTD.at(Score::WLOO_SELECT), &mapHGTD.at(Score::WLOO_MISCL), &mapHGTD.at(Score::WLOO_TEFF)},
+              {C03, kBlack, C06, C01, C02, C04}, -1.0, -1.0, 2.5,
+              {"WAVeS", "Perfect (all four fixed with truth)", "Perfect + real HS track times",
+               "Perfect + real cluster choice", "Perfect + real clustering", "Perfect + real HS track-time efficiency"});
+    // Perfect timing / selection / both (a reviewer, 2026-11-13: "the plot where you were considering perfect timing
+    // for tracks, and perfect selection"; the user: "a core fraction plot, with just 3 cases"): WAVeS as is, the
+    // misassigned HS track times removed, the HS cluster chosen, and both. Page 2 is the core fraction.
+    moneyPlot(MyUtl::plotFilePath("talk", TString::Format("talk_perfect_%s.pdf", key).Data()).c_str(), key, canvas,
+              {&mapHGTD.at(Score::WAVES), &mapHGTD.at(Score::WFIX_MISTIMED), &mapHGTD.at(Score::WFIX_SELECT),
+               &mapHGTD.at(Score::WFIX_C3)},
+              {C03, C06, C01, kBlack}, -1.0, -1.0, 2.5,
+              {"WAVeS", "Perfect timing", "Perfect selection", "Perfect timing + selection"});   // defined on the slide
+    // ... and the same as the gap itself (user, 2026-11-12): each failure's cost,
+    // read straight off the plot; WAVeS's whole gap in grey.
+    gapPlot(MyUtl::plotFilePath("talk", TString::Format("talk_fix_cost_%s.pdf", key).Data()).c_str(), key, canvas,
+            &mapHGTD.at(Score::WLOO_ALL),
+            {&mapHGTD.at(Score::WLOO_MISTIMED), &mapHGTD.at(Score::WLOO_SELECT), &mapHGTD.at(Score::WLOO_MISCL),
+             &mapHGTD.at(Score::WLOO_TEFF)},
+            {C06, C01, C02, C04},
+            {"misassigned HS track times", "the wrong cluster chosen", "pileup in the cluster", "untimed HS tracks"},
+            &mapHGTD.at(Score::WAVES), "WAVeS: all of them, as now", 2.5, /*zoomCoreFraction=*/true);
+    // Slide 14 before (user, 2026-11-11): each fix ALONE on WAVeS, to see which are
+    // worth fixing at reco level first; n_HS >= 3 as the June talk.
+    moneyPlot(MyUtl::plotFilePath("talk", TString::Format("talk_fix_alone_%s.pdf", key).Data()).c_str(), key, canvas,
+              {&mapHGTD.at(Score::WAVES), &mapHGTD.at(Score::WFIX_MISTIMED), &mapHGTD.at(Score::WFIX_SELECT),
+               &mapHGTD.at(Score::WFIX_MISCL), &mapHGTD.at(Score::WFIX_TEFF)},
+              {C03, C06, C01, C02, C04}, -1.0, -1.0, 2.5);
+    moneyPlot(MyUtl::plotFilePath("talk", TString::Format("talk_fix_chain_%s.pdf", key).Data()).c_str(), key, canvas,
+              {&mapHGTD.at(Score::WAVES), &mapHGTD.at(Score::WFIX_MISTIMED), &mapHGTD.at(Score::WFIX_C3),
+               &mapHGTD.at(Score::WFIX_C4), &mapHGTD.at(Score::WFIX_C5)},
+              {C03, C06, C01, C02, C04}, 0.0, 1.3);
+  }
+
   moneyPlot(MyUtl::plotFilePath("comparisons", TString::Format("theplot_%s.pdf", key).Data()).c_str(), key, canvas,
 	    {
 	      &mapHGTD.at(Score::HGTD),
@@ -108,6 +171,19 @@ inline void makeComparisonPlots(
 	      &mapHGTD.at(Score::WAVES_MISAS),
 	    },
 	    {C01, C02, C03, C04});
+
+  // Athena's t0 alone (the talk's "vertex time today" slide, user 2026-11-12): core
+  // width and core fraction against the forward HS tracks, n_HS >= 3.
+  moneyPlot(MyUtl::plotFilePath("talk", TString::Format("talk_athena_%s.pdf", key).Data()).c_str(), key, canvas,
+	    {&mapHGTD.at(Score::HGTD)}, {C01}, -1.0, -1.0, 2.5);
+
+  // The talk's t0s (the Global Performance talk, slides 8/9): WAVeS against
+  // HGTD (Athena) -- WAVeS is the one algorithm presented (user, 2026-11-11) --
+  // with the core-fraction page down to 0 -- Z+jets sits at
+  // 0.2-0.7 below 5 HS tracks, under the default floor.
+  moneyPlot(MyUtl::plotFilePath("talk", TString::Format("talk_t0_%s.pdf", key).Data()).c_str(), key, canvas,
+	    {&mapHGTD.at(Score::HGTD), &mapHGTD.at(Score::WAVES)},
+	    {C01, C03}, -1.0, -1.0, 2.5);   // n_HS >= 3 as in the June GPER talk (user, 2026-11-11); y range from the points
 
   // Simple three-way comparison: HGTD vs TRKPTZ vs WAVeS (no oracles).
   moneyPlot(MyUtl::plotFilePath("comparisons", TString::Format("hgtd_trkptz_waves_%s.pdf", key).Data()).c_str(), key, canvas,

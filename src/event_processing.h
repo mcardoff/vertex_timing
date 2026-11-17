@@ -18,6 +18,7 @@
 #include "clustering_constants.h"
 #include "clustering_structs.h"
 #include "clustering_functions.h"
+#include "failure_fixes.h"
 #include "plotting_utilities.h"
 
 using boost::filesystem::directory_iterator;
@@ -697,6 +698,33 @@ namespace MyUtl {
     std::vector<int> tracks =
       assoc ? getAssociatedTracks(branch, MIN_TRACK_PT, MAX_TRACK_PT, COUNTING_RULE)
             : getAssociatedTracks(branch, MIN_TRACK_PT, MAX_TRACK_PT, 3.0);
+    // The counting list narrowed to the clustering list (see below the counts).
+    auto toClusteringList = [&](std::vector<int> v) -> std::vector<int> {
+      if (assoc) return getAssociatedTracks(branch, MIN_TRACK_PT, MAX_TRACK_PT, *assoc);
+      if (MAX_NSIGMA != 3.0)
+        v.erase(std::remove_if(v.begin(), v.end(), [&](int trk) {
+                  return !passTrackVertexAssociation(trk, 0, branch, MAX_NSIGMA); }), v.end());
+      return v;
+    };
+    // --clean-times: drop the timed tracks the TDR's cleaning un-times, as
+    // tdr::computeT0s and util/failure_decomposition do, before the counts so
+    // the x-axes count the times the clustering sees. A no-op without it.
+    auto cleanList = [&](std::vector<int>& v) {
+      if (!CLEAN_TIMES) return;
+      v.erase(std::remove_if(v.begin(), v.end(), [&](int i) {
+                return branch->trackTimeValid[i] == 1 && !branch->timeSurvivesCleaning(i); }), v.end());
+    };
+    // The failure-mode fixes (src/failure_fixes.h): their HS-track-efficiency
+    // fix needs the clustering list BEFORE the cleaning, to refill what it
+    // un-timed.
+    bool anyFix = false, anyTeffFix = false;
+    for (const auto& [score, a] : analyses) {
+      anyFix     |= score.fixes != 0;
+      anyTeffFix |= (score.fixes & Fix::TEFF) != 0;
+    }
+    std::vector<int> teffPool;
+    if (anyTeffFix && CLEAN_TIMES) teffPool = toClusteringList(tracks);
+    cleanList(tracks);
 
     // ── C. Per-event counts ─────────────────────────────────────────────────
     EventCounts ev(branch, tracks, checkValidTimes);
@@ -713,18 +741,14 @@ namespace MyUtl {
     // narrowed, since a parameterized rule need not be a subset of the
     // counting scan. `ev` above is already built, so replacing `tracks` here
     // leaves every x-axis on the pinned counting definition.
-    if (assoc)
-      tracks = getAssociatedTracks(branch, MIN_TRACK_PT, MAX_TRACK_PT, *assoc);
-    else if (MAX_NSIGMA != 3.0)
-      tracks.erase(std::remove_if(tracks.begin(), tracks.end(),
-        [&](int trk) {
-          return !passTrackVertexAssociation(trk, 0, branch, MAX_NSIGMA);
-        }), tracks.end());
+    tracks = toClusteringList(std::move(tracks));
+    cleanList(tracks);   // the re-selected list (assoc) is uncleaned
+    if (anyTeffFix && !CLEAN_TIMES) teffPool = tracks;
 
     // ── D. Main iterative clustering ─────────────────────────────────────────
     // Purity is only computed when a purity-gated score is active (it is expensive).
 
-    const bool NEEDS_PURITY = analyses.count(Score::WAVES_MISCL) > 0;
+    const bool NEEDS_PURITY = analyses.count(Score::WAVES_MISCL) > 0 || anyFix;
     auto clusters = clusterTracksInTime(tracks, branch, DIST_CUT_CONE,
                                         useSmearedTimes, checkValidTimes, IDEAL_TRACK_RES,
                                         ClusteringMethod::ITERATIVE, /*useZ0=*/false,
@@ -762,7 +786,24 @@ namespace MyUtl {
     auto chosen = selectClusters(clusters, tracks, branch, analyses, auxCollections);
     if (DEBUG) std::cout << "Chose clusters\n";
 
+    // ── G¼. Failure-mode fixes: each fix row's cluster and time ─────────────
+    if (anyFix && !tracks.empty()) {
+      FixCache fixCache;
+      for (const auto& [score, a] : analyses) {
+        if (!score.fixes) continue;
+        auto c = applyFixes(score.fixes, tracks, teffPool, clusters, branch, fixCache);
+        if (c) chosen[score.id] = std::move(*c);
+      }
+    }
+
     // ── G½. HS timing purity for TEST_MISAS gate ────────────────────────────
+    // ── G⅓. Did WAVeS choose the hard scatter's cluster? (WSEL_OK gate) ────
+    bool waveChoseHS = false;
+    if (analyses.count(Score::WSEL_OK) && chosen.count(Score::WAVES.id)) {
+      const Cluster* hs = hsClusterOf(clusters, branch);
+      if (hs) waveChoseHS = (chosen.at(Score::WAVES.id).trackIndices == hs->trackIndices);
+      chosen[Score::WSEL_OK.id] = chosen.at(Score::WAVES.id);
+    }
     float hsTimingPurity = 1.0f;
     if (analyses.count(Score::TEST_MISAS) || analyses.count(Score::WAVES_MISAS))
       hsTimingPurity = calcHSTimingPurity(tracks, branch);
@@ -875,6 +916,8 @@ namespace MyUtl {
           // pure event-topology restriction, so the row reads as "the same
           // WAVeS algorithm, measured only in these events".
           passesGate = (eventRegion == score.regionGate);
+        } else if (score == Score::WSEL_OK || score == Score::WSEL_OK_MISCL) {
+          passesGate = waveChoseHS;
         } else if (score == Score::TEST_MISAS || score == Score::WAVES_MISAS) {
           // Gate on event-level HS timing purity: 100% of HS pT must have |pull|<3σ
           passesGate = (hsTimingPurity >= 0.95f);

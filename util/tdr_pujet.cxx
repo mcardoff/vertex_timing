@@ -16,7 +16,7 @@
 // 3 sigma; this program follows the TDR); the ingredients are copied from it.
 //
 // Usage:  tdr_pujet [--sample=<s>] [--ntuple-dir=<d>] [--file-shard=i/N]
-//                   [--max-events=N] [--gate-sigma=X (default 2)] [--clean-times=all|t0|off (default all)] [--rpt-match=ghost|dr02 (default ghost)] [--out=<path>]
+//                   [--max-events=N] [--gate-sigma=X (default 2)] [--clean-times=all|t0|off (default all)] [--rpt-match=ghost|dr02 (default ghost)] [--rpt-trk-ptmax=X|none (default 30)] [--out=<path>]
 // Output: <prefix>tdr_pujet.root (TTrees "jets", "meta"; merge shards with hadd -f).
 // -----------------------------------------------------------------------------
 #include <TChain.h>
@@ -60,6 +60,7 @@ int main(int argc, char** argv) {
   }
   const tdr::CleanMode cleanMode = tdr::cleaningMode(argc, argv);   // before the output path: it tags the file
   const tdr::RptMatch rptMatch = tdr::rptMatchMode(argc, argv);     // likewise
+  tdr::rptTrkPtMaxMode(argc, argv);                                  // likewise
   const Inflation INFL = inflationFor(SAMPLE_NAME);
   const std::string outPath = outOverride.empty() ? histFilePath("tdr_pujet.root") : outOverride;
   {
@@ -71,6 +72,7 @@ int main(int argc, char** argv) {
   std::cout << "[tdr_pujet] track-time cleaning: " << tdr::cleanModeName(cleanMode) << "; R_pT matching: " << tdr::rptMatchName(rptMatch) << "\n";
   std::cout << "[tdr_pujet] out=" << outPath << "\n";
 
+  EXTENDED_BRANCHES = true;                      // JVT's R_pT needs the vertex fit's Track_recoVtx_idx
   TChain chain("ntuple");
   setupChain(chain, cfg.ntupleDir.c_str(), FILE_SHARD);
   recordAvailableBranches(chain);
@@ -87,6 +89,7 @@ int main(int argc, char** argv) {
   bool okHgtd = false;
   double rItk = 0.0, rSelf = 0.0, rComb = 0.0;
   double rT0[tdr::N_T0] = {};
+  double rJvt = 0.0, rJvtT0[tdr::N_T0] = {};   // JVT's R_pT (vertex-fit PV0 tracks), plain and t0-gated
   jets.Branch("file_idx", &file_idx, "file_idx/I");
   jets.Branch("entry", &entry, "entry/L");
   jets.Branch("weight", &weight, "weight/F");
@@ -105,6 +108,11 @@ int main(int argc, char** argv) {
   }
   jets.Branch("rpt_self", &rSelf, "rpt_self/D");
   jets.Branch("rpt_comb", &rComb, "rpt_comb/D");
+  jets.Branch("jvt_rpt", &rJvt, "jvt_rpt/D");
+  for (int k = 0; k < tdr::N_T0; ++k) {
+    const std::string n = std::string("jvt_rpt_t0_") + tdr::T0_NAMES[k];
+    jets.Branch(n.c_str(), &rJvtT0[k], (n + "/D").c_str());
+  }
 
   Long64_t nRead = 0, nVtx = 0, nLep = 0, nJetRows = 0;
   while (reader.Next()) {
@@ -145,6 +153,9 @@ int main(int argc, char** argv) {
       ntrk = r.ntrk;  ntimed = r.ntimed;
       rItk = r.itk;  rSelf = r.self;  rComb = r.comb;
       for (int k = 0; k < tdr::N_T0; ++k) rT0[k] = r.t0[k];
+      const tdr::JvtRpt jr = tdr::jvtRpt(branch, j, T, gate, CLEAN);
+      rJvt = jr.plain;
+      for (int k = 0; k < tdr::N_T0; ++k) rJvtT0[k] = jr.t0[k];
       jets.Fill();
       ++nJetRows;
     }
@@ -167,6 +178,8 @@ int main(int argc, char** argv) {
   meta.Branch("time_cleaning", &cleanName);
   std::string matchName = tdr::rptMatchName(rptMatch);
   meta.Branch("rpt_match", &matchName);
+  double rptPtMax = tdr::RPT_TRK_PT_MAX;
+  meta.Branch("rpt_trk_ptmax", &rptPtMax, "rpt_trk_ptmax/D");
   meta.Branch("jet_pt_min", &ptMin, "jet_pt_min/D");
   meta.Branch("fwd_eta_min", &fwdMin, "fwd_eta_min/D");
   meta.Branch("fwd_eta_max", &fwdMax, "fwd_eta_max/D");

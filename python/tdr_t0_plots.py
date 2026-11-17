@@ -31,7 +31,10 @@ ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDe
 ap.add_argument("tree", help="tdr_t0 output (its fits are read from <stem>_fits.root)")
 ap.add_argument("--label", default="VBF H#rightarrowinv.", help="sample, ROOT TLatex")
 ap.add_argument("--out", required=True)
+ap.add_argument("--t0s", default=None, help="comma list of the t0s to draw (hgtd, trkptz, waves); default all. "
+                "The Global Performance talk shows WAVeS against Athena only (user, 2026-11-11): --t0s hgtd,waves,truth")
 args = ap.parse_args()
+SHOW = lambda name: not args.t0s or name.split("_")[0] in args.t0s.split(",")
 R = S.setup()
 PASS = 60.0
 FOLD = 20
@@ -52,7 +55,7 @@ for s in ("trkptz", "waves"):
     gain, loss = np.sum(~a & b), np.sum(a & ~b)
     print(f"  {s}: cleaning moves {gain} events into the core and {loss} out: {100 * (gain - loss) / N:+.2f} +- {100 * np.sqrt(gain + loss) / N:.2f} points (paired)")
 
-T0S = [("trkptz", "TRKPTZ t_{0}", S.COL["trkptz"]), ("waves", "WAVeS t_{0}", S.COL["waves"])]
+T0S = [t for t in [("trkptz", "TRKPTZ t_{0}", S.COL["trkptz"]), ("waves", "WAVeS t_{0}", S.COL["waves"])] if SHOW(t[0])]
 MAIN, RAT = 0.68, 0.32
 TS_M, TS_R = 0.05 * 600 / (800 * MAIN), 0.05 * 600 / (800 * RAT)
 
@@ -103,6 +106,7 @@ leg.SetHeader("Core fraction (|t_{0} #minus t_{HS}| < 60 ps), core width:")
 first = True
 for name, lab, col, w in [("hgtd", "HGTD (Athena) t_{0}", S.COL["hgtd"], 3), ("trkptz_clean", "TRKPTZ t_{0}", S.COL["trkptz"], 3),
                           ("waves_clean", "WAVeS t_{0}", S.COL["waves"], 3)]:
+    if not SHOW(name): continue
     h = S.keep(fits.Get(f"h_{name}").Clone(f"t319_{name}"))
     h.GetListOfFunctions().Clear()
     h.Scale(1.0 / N)
@@ -140,6 +144,7 @@ leg = S.legend(0.45, 0.30, 0.93, 0.60, size=0.75 * TS_M, margin=0.18)
 for name, lab, col, mk, ls in [("hgtd", "HGTD (Athena) t_{0}", S.COL["hgtd"], 23, 1),
                                ("trkptz_raw", "TRKPTZ t_{0}, as is", S.COL["trkptz"], 25, 2), ("trkptz_clean", "TRKPTZ t_{0}, cleaned", S.COL["trkptz"], 21, 1),
                                ("waves_raw", "WAVeS t_{0}, as is", S.COL["waves"], 24, 2), ("waves_clean", "WAVeS t_{0}, cleaned", S.COL["waves"], 20, 1)]:
+    if not SHOW(name): continue
     f, e = per_bin(core[name])
     g = S.style(S.graph(bins, f, e), col, mk, ls, 2, 1.1); g.Draw("LP SAME")
     leg.AddEntry(g, lab, "LP")

@@ -1658,13 +1658,32 @@ namespace MyUtl {
     const std::string& key,
     TCanvas* canvas,
     const std::vector<AnalysisObj*>& plts,
-    const std::vector<Color_t>& colorOverride = {}
+    const std::vector<Color_t>& colorOverride = {},
+    double effYMin = EFF_YMIN,  // the core-fraction page's floor (Z+jets falls below 0.7 at low multiplicity);
+                                // < 0: 0.05 below the lowest point drawn
+    double effYMax = EFF_YMAX,  // and its ceiling: room for the label above 1; < 0: 1 + 0.45 x (1 - floor)
+    double xMinOverride = -1e9, // > -1e9: draw from here (e.g. 2.5, the June talk's n_HS >= 3), binning unchanged
+    const std::vector<std::string>& labelOverride = {}   // legend text per plt (default: the score's long name);
+                                                         // plot-only, unlike renaming a score, which renames its histograms
   ) {
     // std::cout << fname << "\n";
     if (plts.empty()) return;
 
     double xMin = plts[0]->get(key)->xMin;
     double xMax = plts[0]->get(key)->foldMax;
+    if (xMinOverride > -1e9) xMin = xMinOverride;
+    if (effYMin < 0.0) {
+      double lo = 1.0;
+      for (const auto& ana : plts) {
+        TEfficiency* e = ana->get(key)->efficiency.get();
+        if (!e) continue;
+        for (int b = 1; b <= e->GetTotalHistogram()->GetNbinsX(); ++b)
+          if (e->GetTotalHistogram()->GetBinContent(b) > 0 && e->GetTotalHistogram()->GetBinCenter(b) > xMin)
+            lo = std::min(lo, e->GetEfficiency(b) - e->GetEfficiencyErrorLow(b));
+      }
+      effYMin = std::max(0.0, std::floor((lo - 0.05) * 20.0) / 20.0);
+    }
+    if (effYMax < 0.0) effYMax = 1.0 + 0.45 * (1.0 - effYMin);
 
     auto plotWithLegend = [&](
         auto getter, const char* title,
@@ -1710,7 +1729,8 @@ namespace MyUtl {
 	  gr->SetMarkerSize(obj->GetMarkerSize());
 	  gr->SetLineWidth(obj->GetLineWidth());
 	  // legend->AddEntry(gr, TString::Format("%s (%s)", plt->scoreToUse.toString(), plt->times), "lep");
-	  legend->AddEntry(gr, TString::Format("%s", plt->scoreToUse.toString()), "lep");
+	  legend->AddEntry(gr, colorIdx < (int)labelOverride.size() ? labelOverride[colorIdx].c_str()
+	                                                            : plt->scoreToUse.toString(), "lep");
 	  if (first) {
 	    gr->SetTitle(TString::Format("%s vs %s", title, plt->xtitle));
 	    gr->Draw("AP");
@@ -1726,8 +1746,8 @@ namespace MyUtl {
 	} else {
 	  obj->SetLineColor(plotCol);
 	  obj->SetMarkerColor(plotCol);
-	  // legend->AddEntry(obj, TString::Format("%s (%s)", plt->scoreToUse.toString(), plt->times), "lep");
-	  legend->AddEntry(obj, TString::Format("%s", plt->scoreToUse.toString()), "lep");
+	  legend->AddEntry(obj, colorIdx < (int)labelOverride.size() ? labelOverride[colorIdx].c_str()
+	                                                             : plt->scoreToUse.toString(), "lep");
 	  if (first) {
 	    obj->SetTitle(TString::Format("%s vs %s", title, plt->xtitle));
 	    obj->Draw("E1");
@@ -1806,7 +1826,7 @@ namespace MyUtl {
     // Plot Efficiency — linear scale
     plotWithLegend(
         [](auto& plt) { return plt->efficiency.get(); },
-	"Core Fraction", EFF_YMIN, EFF_YMAX,
+	"Core Fraction", effYMin, effYMax,
 	0.99, "99% Core Fraction", false,                     // logY
 	0.60, 0.30, 0.80, 0.60);
     canvas->Print(fname);
@@ -1832,6 +1852,112 @@ namespace MyUtl {
     canvas->Print(TString::Format("%s]", fname));
   }
 
+
+  // ---------------------------------------------------------------------------
+  // gapPlot (2026-11-12, the Global Performance talk)
+  //   The cost of each failure mode drawn directly as its gap to a reference
+  //   row ("perfect"), per bin of `key`, so the viewer reads each curve as that
+  //   failure's contribution instead of subtracting curves by eye. Two pages:
+  //     1. core fraction lost   = 100 (eff_ref - eff_x)          [points]
+  //     2. core width added     = sigma_x - sigma_ref             [ps]
+  //   `total` (e.g. WAVeS as it is) is drawn in grey as the whole gap, for scale.
+  //   Errors: the two rows' errors in quadrature. They are the same events, so
+  //   this overstates the error of the difference. Must run after
+  //   postProcessing (it reads the fitted sigmaDist).
+  // ---------------------------------------------------------------------------
+  inline void gapPlot(const char* fname, const std::string& key, TCanvas* canvas,
+                      AnalysisObj* ref, const std::vector<AnalysisObj*>& plts,
+                      const std::vector<Color_t>& colors, const std::vector<std::string>& labels,
+                      AnalysisObj* total, const char* totalLabel, double xMinOverride = -1e9,
+                      bool zoomCoreFraction = false) {   // page 1's y range from the failures alone; the total's
+                                                         // points above it drawn as up-triangles at the top edge
+    PlotObj* R0 = ref->get(key).get();
+    double xMin = (xMinOverride > -1e9) ? xMinOverride : R0->xMin;
+    double xMax = R0->foldMax;
+    const int nb = R0->efficiency->GetTotalHistogram()->GetNbinsX();
+    auto center = [&](int b) { return R0->efficiency->GetTotalHistogram()->GetBinCenter(b); };
+    std::vector<AnalysisObj*> all = plts; all.push_back(total);
+    canvas->Print(TString::Format("%s[", fname));
+    for (int page = 0; page < 2; ++page) {
+      canvas->Clear(); canvas->cd(); gPad->SetLogy(0);
+      std::vector<TGraphErrors*> graphs;
+      double lo = 0.0, hi = 0.0, hiParts = 0.0;
+      for (size_t k = 0; k < all.size(); ++k) {
+        PlotObj* P = all[k]->get(key).get();
+        auto* g = new TGraphErrors();
+        const double off = (k + 1 == all.size()) ? 0.0 : 0.09 * (k - 0.5 * (plts.size() - 1));
+        for (int b = 1; b <= nb; ++b) {
+          const double x = center(b);
+          if (x < xMin || x > xMax) continue;
+          double v, e;
+          if (page == 0) {
+            if (R0->efficiency->GetTotalHistogram()->GetBinContent(b) <= 0 ||
+                P->efficiency->GetTotalHistogram()->GetBinContent(b) <= 0) continue;
+            v = 100.0 * (R0->efficiency->GetEfficiency(b) - P->efficiency->GetEfficiency(b));
+            const double e1 = 0.5 * (R0->efficiency->GetEfficiencyErrorLow(b) + R0->efficiency->GetEfficiencyErrorUp(b));
+            const double e2 = 0.5 * (P->efficiency->GetEfficiencyErrorLow(b) + P->efficiency->GetEfficiencyErrorUp(b));
+            e = 100.0 * std::hypot(e1, e2);
+          } else {
+            const double s0 = R0->params->sigmaDist->GetBinContent(b), s1 = P->params->sigmaDist->GetBinContent(b);
+            if (s0 <= 0 || s1 <= 0) continue;
+            v = s1 - s0;
+            e = std::hypot(R0->params->sigmaDist->GetBinError(b), P->params->sigmaDist->GetBinError(b));
+          }
+          const int n = g->GetN();
+          g->SetPoint(n, x + off, v); g->SetPointError(n, 0.0, e);
+          lo = std::min(lo, v - e); hi = std::max(hi, v + e);
+          if (k + 1 < all.size()) hiParts = std::max(hiParts, v + e);
+        }
+        graphs.push_back(g);
+      }
+      const bool zoom = zoomCoreFraction && page == 0;
+      if (zoom) hi = hiParts;
+      const double span = std::max(hi - lo, 1e-3);
+      const double ylo = lo - 0.05 * span, yhi = hi + 1.05 * span;     // headroom: label and legend above the data
+      TH1F* fr = gPad->DrawFrame(xMin, ylo, xMax, yhi);
+      fr->GetXaxis()->SetTitle(R0->xtitle);
+      fr->GetYaxis()->SetTitle(page == 0 ? "Core fraction lost [points]" : "Core width added [ps]");
+      // the event distribution, grey, along the bottom
+      TH1D* dist = R0->effTotal.get();
+      double dmax = 0.0;
+      for (int b = 1; b <= dist->GetNbinsX(); ++b)
+        if (dist->GetBinCenter(b) >= xMin && dist->GetBinCenter(b) <= xMax) dmax = std::max(dmax, dist->GetBinContent(b));
+      for (int b = 1; b <= dist->GetNbinsX() && dmax > 0; ++b) {
+        if (dist->GetBinCenter(b) < xMin || dist->GetBinCenter(b) > xMax) continue;
+        auto* box = new TBox(std::max(xMin, dist->GetBinLowEdge(b)), ylo, std::min(xMax, dist->GetBinLowEdge(b + 1)),
+                             ylo + 0.22 * (yhi - ylo) * dist->GetBinContent(b) / dmax);
+        box->SetFillColor(kGray); box->SetLineWidth(0); box->Draw();
+      }
+      auto* zero = new TLine(xMin, 0.0, xMax, 0.0); zero->SetLineStyle(2); zero->SetLineColor(kGray + 2); zero->Draw();
+      auto* leg = new TLegend(0.52, 0.50, 0.92, 0.79);   // below the ATLAS label
+      StyleLegend(leg, 0.03);
+      leg->SetHeader(page == 0 ? "Lost to each failure alone:" : "Width added by each failure alone:");
+      for (size_t k = 0; k < graphs.size(); ++k) {
+        auto* g = graphs[k];
+        const bool isTotal = (k + 1 == graphs.size());
+        if (isTotal && zoom) {   // off-scale points: an up-triangle at the top edge instead
+          auto* over = new TGraph();
+          for (int n = g->GetN() - 1; n >= 0; --n)
+            if (g->GetPointY(n) > yhi) { over->SetPoint(over->GetN(), g->GetPointX(n), yhi - 0.03 * (yhi - ylo)); g->RemovePoint(n); }
+          over->SetMarkerStyle(22); over->SetMarkerSize(1.4); over->SetMarkerColor(kGray + 2);
+          if (over->GetN() > 0) over->Draw("P SAME");
+        }
+        const Color_t c = isTotal ? (Color_t)(kGray + 2) : colors[k % colors.size()];
+        g->SetMarkerColor(c); g->SetLineColor(c); g->SetLineWidth(2);
+        g->SetMarkerStyle(isTotal ? 24 : 20); g->SetMarkerSize(isTotal ? 1.3 : 1.1);
+        g->Draw("P SAME");
+        leg->AddEntry(g, isTotal ? (zoom ? TString::Format("%s (#uparrow off scale)", totalLabel).Data() : totalLabel)
+                                 : labels[k].c_str(), "lep");
+      }
+      leg->Draw();
+      // top right, above the legend: the top-left corner is where the low-n points (and off-scale marks) are
+      ATLASLabel(0.52, 0.88, "Simulation Internal");
+      ATLASEnergyLabel(0.52, 0.82, MyUtl::ENERGY_LABEL.c_str());
+      gPad->RedrawAxis();
+      canvas->Print(fname);
+    }
+    canvas->Print(TString::Format("%s]", fname));
+  }
 
   // ---------------------------------------------------------------------------
   // inclusivePlot
@@ -2077,7 +2203,9 @@ namespace MyUtl {
       //   TRKPTZ=red, TEST_MISAS=violet; fallback to COLORS cycle.
       Color_t col;
       switch (plt->score.id) {
+        case 0:  col = C01; break;  // HGTD       → blue
         case 2:  col = C02; break;  // TRKPTZ     → red
+        case 18: col = C03; break;  // WAVES      → yellow (was COLORS' cycle: red, beside TRKPTZ)
         case 13: col = C04; break;  // TEST_MISAS → violet
         default: col = COLORS[colorCounter % COLORS.size()]; break;
       }

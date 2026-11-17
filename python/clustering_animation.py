@@ -69,6 +69,12 @@ parser.add_argument('--event_num', type=int, default=2808,
                     help='Event entry number within the file (default: 2808)')
 parser.add_argument('--output',    default=None,
                     help='Output path (.gif or .mp4); default: ../figs/clustering_animation_<file>_<event>.gif')
+parser.add_argument('--no-scores', action='store_true',
+                    help="label the clusters with n, t and sigma only: no TRKPTZ scores and no 'SELECTED' (the "
+                         "clustering alone; the talk presents WAVeS's selection separately)")
+parser.add_argument('--still', default=None,
+                    help="save ONE step as a PNG instead of the animation: a step index, or 'last' (all clusters "
+                         "final). For slides, e.g. the Global Performance talk's clustering slide")
 args   = parser.parse_args()
 F_NUM  = args.file_num
 EVT    = args.event_num
@@ -432,7 +438,7 @@ def update(frame_idx):
         col      = pal[ci]
         cy       = centroid_y(fc)
         score    = trkptz(fc)
-        is_winner = (ci == winner_ci) and (kind == 'end')
+        is_winner = (ci == winner_ci) and (kind == 'end') and not args.no_scores
         ms    = 28 if is_winner else 22
         edge  = '#111111' if is_winner else '#333333'
         ew    = 1.8 if is_winner else 0.8
@@ -442,9 +448,9 @@ def update(frame_idx):
         n     = len(fc['indices'])
         st     = time_spread(fc)
         score2 = score * np.exp(-st / 30.0)
-        label_lines = [f" n={n}  t={fc['t']:.0f} ps  σ={fc['tres']:.0f} ps",
-                       f" TRKPTZ={score:.2f}",
-                       f" TRKPTZ·exp(-σ_t/30ps)={score2:.2f}"]
+        label_lines = [f" n={n}  t={fc['t']:.0f} ps  σ={fc['tres']:.0f} ps"]
+        if not args.no_scores:
+            label_lines += [f" TRKPTZ={score:.2f}", f" TRKPTZ·exp(-σ_t/30ps)={score2:.2f}"]
         if is_winner:
             label_lines.append(" ◀ SELECTED")
         lbl   = ax.text(fc['t'] + 0.012*T_RANGE, cy,
@@ -467,6 +473,14 @@ def update(frame_idx):
     status_txt.set_text(STATUS.get(kind, kind) + extra)
     step_txt.set_text(f'step {frame_idx+1} / {len(steps)}')
 
+
+if args.still is not None:
+    k = len(steps) - 1 if args.still == 'last' else int(args.still)
+    update(k)
+    png = OUT.with_suffix('.png')
+    fig.savefig(str(png), dpi=200, bbox_inches='tight')
+    print(f'Still of step {k}/{len(steps) - 1} ({steps[k]["kind"]}) -> {png}')
+    raise SystemExit(0)
 
 # ── Build frame sequence (hold each step for a duration appropriate to its type)
 # GIFs run at lower fps to keep file size manageable; MP4 can afford higher fps.

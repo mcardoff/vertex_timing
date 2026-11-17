@@ -56,6 +56,7 @@
 
 #include <algorithm>
 #include <array>
+#include <limits>
 #include <cmath>
 #include <string>
 #include <unordered_map>
@@ -142,13 +143,31 @@ inline TimeCleaning setupCleaning(TTreeReader& reader, CleanMode m) {
 inline bool timed(BranchPointerWrapper& b, int idx, const TimeCleaning& C, bool clean) {
   if (b.trackTimeValid[idx] != 1) return false;
   if (!clean) return true;
-  if (!(**C.lastLayer)[idx]) return false;
-  const double ae = std::abs((double)b.trackEta[idx]);
-  return !(ae > 3.5 && ae < 3.9 && b.trackHgtdHits[idx] < 2);
+  return MyUtl::tdrTimeSurvivesCleaning((**C.lastLayer)[idx], b.trackEta[idx], b.trackHgtdHits[idx]);   // shared with clustering_hist
 }
 
+// What the clustering offered, for the failure breakdown (util/tdr_t0, 2026-11-09 Global Performance talk): the
+// number of time clusters, the cluster time (full cluster, TRKPTZ's) closest to t_HS, and the full-cluster time of
+// the cluster WAVeS chose (before its in-jet re-timing). NaN without clusters.
+struct T0Extra {
+  int nClusters = 0;
+  double bestDt = std::numeric_limits<double>::quiet_NaN();
+  double wavesFullDt = std::numeric_limits<double>::quiet_NaN();
+  // the hard scatter's cluster, by its tracks' truth origin: the one holding the most hard-scatter pT. bestDt alone
+  // overstates "a good cluster existed": a pileup cluster lands within 60 ps of t_HS by chance (~21% per cluster)
+  double hsDt = std::numeric_limits<double>::quiet_NaN();
+  double hsPurity = 0.0;   // its pT fraction from the hard scatter (0: no cluster has a hard-scatter track)
+  // the hard scatter's own timed tracks in the t0 input (truth vertex 0, a cleaned time), for "are its track times
+  // wrong?" and "where is its timing weight?" (the user, 2026-11-09):
+  int nHsTimed = 0, nHsMistimed = 0;
+  double hsPtTimed = 0.0;
+  double hsPtMistimed = 0.0;    // |t - t_HS| >= 3 sigma_trk: the time is wrong
+  double hsPtMisassigned = 0.0; // the TDR's definition: <= 50% of its HGTD hits from its own particle
+  double hsPtInJet = 0.0;       // within dR < 0.4 of a forward jet (pT > 30, 2.38 < |eta| < 4.0): what WAVeS up-weights
+};
+
 // The event's t0s -- util/vbs_time_veto.cxx's block, verbatim, without TZP.
-inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL, const TimeCleaning& C) {
+inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL, const TimeCleaning& C, T0Extra* x = nullptr) {
   T0Set s;
   s.t[T0_HGTD]   = b.recoVtxTime[0];
   s.sig[T0_HGTD] = b.recoVtxTimeRes[0];
@@ -167,8 +186,37 @@ inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL, const Ti
     s.t[T0_TRKPTZ] = bT.calculateTime(Score::TRKPTZ, &b);
     s.sig[T0_TRKPTZ] = bT.sigmas[0];  s.ok[T0_TRKPTZ] = true;
     auto bW = chooseCluster(clusters, Score::WAVES);
+    if (x) { auto full = bW; x->wavesFullDt = full.calculateTime(Score::TRKPTZ, &b) - b.truthVtxTime[0]; }
     s.t[T0_WAVES] = bW.calculateTime(Score::WAVES, &b);       // in-jet refined
     s.sig[T0_WAVES] = bW.sigmas[0];  s.ok[T0_WAVES] = true;
+  }
+  if (x) {
+    for (int idx : trk_z) {
+      if (b.trackToTruthvtx[idx] != 0 || b.trackTimeValid[idx] != 1) continue;   // cleaned-away times already dropped
+      const double pt = b.trackPt[idx];
+      ++x->nHsTimed;  x->hsPtTimed += pt;
+      if (b.trackTimeRes[idx] > 0 && std::abs(b.trackTime[idx] - b.truthVtxTime[0]) / b.trackTimeRes[idx] >= 3.0) {
+        ++x->nHsMistimed;  x->hsPtMistimed += pt;
+      }
+      if (b.trackPrimHits[idx] * 2 <= b.trackHgtdHits[idx]) x->hsPtMisassigned += pt;
+      for (int j = 0; j < (int)b.topoJetPt.GetSize(); ++j) {
+        if (b.isJetRemoved(j) || b.topoJetPt[j] < MIN_JET_PT) continue;
+        const double ae = std::abs((double)b.topoJetEta[j]);
+        if (ae < MIN_ABS_ETA_JET || ae > MAX_ABS_ETA_JET) continue;
+        if (dR(b.trackEta[idx], b.trackPhi[idx], b.topoJetEta[j], b.topoJetPhi[j]) < 0.4) { x->hsPtInJet += pt; break; }
+      }
+    }
+    x->nClusters = (int)clusters.size();
+    double best = std::numeric_limits<double>::infinity();
+    double hsMax = 0.0;
+    for (const auto& c0 : clusters) {
+      auto c = c0;
+      const double d = c.calculateTime(Score::TRKPTZ, &b) - b.truthVtxTime[0];
+      if (std::abs(d) < best) { best = std::abs(d); x->bestDt = d; }
+      double sum = 0.0;
+      for (int t : c.trackIndices) sum += b.trackPt[t];
+      if (c.purity * sum > hsMax) { hsMax = c.purity * sum; x->hsDt = d; x->hsPurity = c.purity; }
+    }
   }
   s.t[T0_TRUTH] = b.truthVtxTime[0];  s.sig[T0_TRUTH] = 0.0;  s.ok[T0_TRUTH] = true;
   s.infl = {INFL.hgtd, INFL.trkptz, INFL.waves, 1.0};
@@ -180,12 +228,33 @@ inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL, const Ti
 struct TrackLists {
   std::unordered_set<int> fwd, cen;
 };
+// The R_pT tracks' upper pT limit. It defaults to the time clustering's MAX_TRACK_PT (30 GeV), which rpt_v5 copied
+// and this header copied from it -- never chosen for R_pT (the PUB note's macro, util/myJet_ana_fr.C, uses 45). The user,
+// 2026-11-12: "why are we restricting track pT to be between 1 and 30 GeV???". --rpt-trk-ptmax=X|none moves it for
+// the R_pT tracks ONLY (the t0 clustering input keeps MAX_TRACK_PT) and tags the file (rptptmaxnone / rptptmax45p0).
+inline double RPT_TRK_PT_MAX = MAX_TRACK_PT;
+inline void rptTrkPtMaxMode(int argc, char** argv) {
+  for (int i = 1; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a.rfind("--rpt-trk-ptmax=", 0) != 0) continue;
+    const std::string v = a.substr(16);
+    RPT_TRK_PT_MAX = (v == "none") ? std::numeric_limits<double>::infinity() : std::stod(v);
+    if (!(RPT_TRK_PT_MAX > MIN_TRACK_PT)) { std::cerr << "[tdr] --rpt-trk-ptmax=" << v << ": must exceed " << MIN_TRACK_PT << "\n"; std::exit(1); }
+  }
+  if (RPT_TRK_PT_MAX == MAX_TRACK_PT) return;   // the default: untagged
+  std::string tag = "rptptmaxnone";
+  if (std::isfinite(RPT_TRK_PT_MAX)) {
+    char buf[32]; std::snprintf(buf, sizeof buf, "rptptmax%.1f", RPT_TRK_PT_MAX); tag = buf;
+    std::replace(tag.begin(), tag.end(), '.', 'p');
+  }
+  SELECTION_TAG = SELECTION_TAG.empty() ? tag : SELECTION_TAG + "_" + tag;
+}
 inline TrackLists rptTrackLists(BranchPointerWrapper& b) {
   TrackLists L;
   const double vtxZ = b.recoVtxZ[0];
   for (size_t trk = 0; trk < b.trackZ0.GetSize(); ++trk) {
     const double pt = b.trackPt[trk];
-    if (pt < MIN_TRACK_PT || pt > MAX_TRACK_PT || !b.trackQuality[trk]) continue;
+    if (pt < MIN_TRACK_PT || pt > RPT_TRK_PT_MAX || !b.trackQuality[trk]) continue;
     const double dz = std::abs(b.trackZ0[trk] - vtxZ);
     if (dz / MyUtl::getNewDzpara(b.trackEta[trk], pt) <= DZ0_PARA_SCALE) L.fwd.insert((int)trk);
     const double vz = b.trackVarZ0[trk];
@@ -290,6 +359,26 @@ inline JetRpt jetRpt(BranchPointerWrapper& b, int j, const TrackLists& L, const 
     r.t0[k] = sumPt(b, timeGate(b, trk, T.t[k], T.sig[k], T.ok[k], T.infl[k], gate, C)) / pt;
   r.self = selfTagSumPt(b, trk, C, &r.ntimed) / pt;
   r.comb = T.ok[T0_HGTD] ? r.t0[T0_HGTD] : r.self;
+  return r;
+}
+
+// JVT's R_pT (src/jet_tagging.h's: the pT of the jet's ghost tracks the vertex fit gave PV0, over the jet pT), plain
+// and with the t0 gate on those same tracks, per t0 source: a timed PV0 track counts only within `gate` sigma of the
+// t0; untimed tracks, and every track of an event without that t0, count (timeGate's rule). The time-gated JVT of
+// the 2026-11-09 mini deck: at <mu> = 200 a forward pileup jet usually passes JVT on ONE PV0 track, often from another
+// collision at the same z, which the gate can see. Needs EXTENDED_BRANCHES (Track_recoVtx_idx).
+struct JvtRpt {
+  double plain = 0.0;
+  std::array<double, N_T0> t0{};
+};
+inline JvtRpt jvtRpt(BranchPointerWrapper& b, int j, const T0Set& T, double gate, const TimeCleaning& C) {
+  std::vector<int> pv;
+  for (int idx : b.topoJetGhostTrackIdx[j]) if (b.recoVtxOf(idx) == 0) pv.push_back(idx);
+  JvtRpt r;
+  const double pt = b.topoJetPt[j];
+  r.plain = sumPt(b, pv) / pt;
+  for (int k = 0; k < N_T0; ++k)
+    r.t0[k] = sumPt(b, timeGate(b, pv, T.t[k], T.sig[k], T.ok[k], T.infl[k], gate, C)) / pt;
   return r;
 }
 

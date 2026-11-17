@@ -22,8 +22,13 @@ using namespace MyUtl;
 // waves_ideal row does ("tclosest:" is the cluster that row selects). Same
 // seed, same draw order, so these are the times the histograms were filled
 // with, not a fresh draw.
+//
+// cleanTimes: the TDR's track-time cleaning on the clustering input (as the talk's t0s,
+// util/failure_decomposition --clean-times and python/clustering_dump.cxx): a timed track
+// that fails it is dropped. Off by default, so earlier displays reproduce.
 void runHGTD_Clustering(std::string filePath, Long64_t eventNum,
-                        double assocNSigma = 3.0, bool idealTimes = false) {
+                        double assocNSigma = 3.0, bool idealTimes = false, bool cleanTimes = false) {
+  if (cleanTimes) CLEAN_TIMES = true;   // before the wrapper: binds Track_hitInLastLayer
   // Initialize TChain to read the ntuple file. A single Add() of the full
   // path (any sample -- vbf/zjets/dijet/local) replaces the old
   // setupChain(chain, std::string) single-file overload, which only worked
@@ -40,6 +45,9 @@ void runHGTD_Clustering(std::string filePath, Long64_t eventNum,
   std::cout << std::setprecision(17);
 
   std::vector<int> tracks = getAssociatedTracks(&branch, MIN_TRACK_PT, MAX_TRACK_PT, assocNSigma);
+  if (cleanTimes)
+    tracks.erase(std::remove_if(tracks.begin(), tracks.end(), [&](int i) {
+                   return branch.trackTimeValid[i] == 1 && !branch.timeSurvivesCleaning(i); }), tracks.end());
 
   bool useSmearTimes = false, useValidTimesOnly = true, useZ0 = false;
 

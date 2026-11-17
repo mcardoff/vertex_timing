@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+"""Where the clustering t0 fails, for the Global Performance talk (slides/slides_gp_timing.tex): every selected event
+put in one class, against the number of forward hard-scatter tracks with a time.
+
+  core              |t0 - t_HS| < 60 ps
+  re-timing         (WAVeS) the chosen cluster is within 60 ps, its in-jet recomputed time is not
+  HS times wrong    (with --mistimed) most of the hard scatter's timed track pT (> 50%) is >= 3 sigma from t_HS: the
+                    tracks' times are wrong, whatever the clustering does (the old ladder's "timing misassignment")
+  selection         the hard scatter's cluster -- the one holding the most hard-scatter pT, > 50% hard scatter -- is
+                    within 60 ps of t_HS (its full-cluster time), and the score chose another
+  HS cluster off    the hard scatter's cluster exists but is > 60 ps off: mistimed tracks, or merged with pileup
+  no HS cluster     no cluster is > 50% hard scatter: too few timed hard-scatter tracks, or merged into pileup clusters
+  no t0             no cluster at all: no timed forward track compatible with the vertex
+The hard scatter's cluster is identified by truth origin, not by time: "some cluster within 60 ps" (dt_best_clean) is a
+best-of-N oracle, and a pileup cluster lands within 60 ps of t_HS by chance -- 60% of the events with NO timed
+hard-scatter track have one (~21% per cluster).
+Inputs: util/tdr_t0 trees with the T0Extra columns (commit c413fbc): dt_<t0>_clean, n_clusters_clean,
+dt_waves_full_clean, dt_hs_clean, hs_purity_clean. Cleaned track times, generator weights, the t0 selection.
+
+  PYTHONNOUSERSITE=1 ~/.venv-hgtd/bin/python gp_t0_failures.py --trees ../condor/vbf/vbf_tdr_t0_v3.root \\
+      ../condor/zjets/zjets_tdr_t0_v3.root --out ../figs/tdr/gp/gp_t0_failures
+"""
+import argparse
+
+import numpy as np
+import uproot
+
+import tdr_root_style as S
+
+ap = argparse.ArgumentParser()
+ap.add_argument("--trees", nargs=2, required=True, metavar=("VBF", "ZJETS"))
+ap.add_argument("--out", required=True)
+ap.add_argument("--mistimed", action="store_true", help="add the 'HS times wrong' class (trees from commit 5e7571b)")
+args = ap.parse_args()
+PASS, FOLD = 60.0, 20
+CLASSES = [("core", "within 60 ps of t_{HS}", "#7BCB6B"),
+           ("retime", "re-timing: right cluster, in-jet time off", "#E69F00"),
+           ("mistimed", "HS track times wrong (> 50% of p_{T} #geq 3#sigma off)", "#5A3E2B"),
+           ("selection", "selection: the HS cluster was right, not chosen", "#3F90DA"),
+           ("hsoff", "the HS cluster is > 60 ps off", "#B3231C"),
+           ("nohs", "no HS cluster: too few HS tracks, or merged", "#8E5DB5"),
+           ("not0", "no t_{0}: no timed forward track", "#9C9C9C")]
+
+
+def classes(E, t0):
+    dt = E[f"dt_{t0}_clean"]
+    has = E["n_clusters_clean"] > 0
+    core = has & (np.abs(dt) < PASS)
+    retime = (has & ~core & (np.abs(E["dt_waves_full_clean"]) < PASS)) if t0 == "waves" else np.zeros(len(dt), bool)
+    hsc = has & (E["hs_purity_clean"] > 0.5)
+    hs_ok = hsc & (np.abs(E["dt_hs_clean"]) < PASS)
+    mist = (has & ~core & ~retime & (E["hs_pt_mistimed_clean"] > 0.5 * E["hs_pt_timed_clean"])
+            & (E["hs_pt_timed_clean"] > 0)) if args.mistimed else np.zeros(len(dt), bool)
+    rest = has & ~core & ~retime & ~mist
+    return {"core": core, "retime": retime, "mistimed": mist, "selection": rest & hs_ok, "hsoff": rest & hsc & ~hs_ok,
+            "nohs": rest & ~hsc, "not0": ~has}
+
+
+R = S.setup()
+cv = S.keep(R.TCanvas("fail", "", 1400, 700))
+for c, (path, lab) in enumerate(zip(args.trees, ("VBF H#rightarrowinv.", "Z+jets"))):
+    E = uproot.open(path)["events"].arrays(library="np")
+    w = E["weight"].astype(float)
+    n = np.minimum(E["n_hs_trk"], FOLD)
+    print(f"\n{lab.replace('#rightarrow', '->')}: {len(w):,} events")
+    for t0 in ("trkptz", "waves"):
+        C = classes(E, t0)
+        tot = sum(m.sum() for m in C.values())
+        assert tot == len(w), (t0, tot, len(w))
+        fails = w.sum() - w[C["core"]].sum()
+        print(f"  {t0:7s} " + "  ".join(f"{k} {100 * w[m].sum() / w.sum():5.1f}%" for k, m in C.items())
+              + "   | of the failures: " + "  ".join(f"{k} {100 * w[m].sum() / fails:4.0f}%" for k, m in C.items() if k != "core"))
+        for lo, hi in ((0, 2), (3, 6), (7, FOLD)):
+            mm = (n >= lo) & (n <= hi)
+            print(f"      n_hs {lo}-{hi}{'+' if hi == FOLD else ''} ({100 * w[mm].sum() / w.sum():4.1f}% of events): "
+                  + "  ".join(f"{k} {100 * w[m & mm].sum() / w[mm].sum():5.1f}%" for k, m in C.items()))
+    C = classes(E, "waves")
+    cv.cd(); S.pad(f"f_{c}", 0.5 * c, 0.0, 0.5 * c + 0.5, 1.0, top=0.06, bottom=0.13, left=0.13, right=0.04)
+    st = S.keep(R.THStack(f"st_{c}", ""))
+    leg = S.legend(0.17, 0.56, 0.80, 0.785, size=0.030, margin=0.12)
+    hs = []
+    den = np.histogram(n, np.arange(-0.5, FOLD + 1.5), weights=w)[0]
+    for key, name, col in [x for x in CLASSES if args.mistimed or x[0] != "mistimed"]:
+        h = S.keep(R.TH1D(f"h_{c}_{key}", "", FOLD + 1, -0.5, FOLD + 0.5))
+        num = np.histogram(n[C[key]], np.arange(-0.5, FOLD + 1.5), weights=w[C[key]])[0]
+        for i, v in enumerate(num / np.maximum(den, 1e-12)): h.SetBinContent(i + 1, v)
+        h.SetFillColor(S.colour(col)); h.SetLineColor(R.kBlack); h.SetLineWidth(1)
+        st.Add(h); hs.append((h, name))
+    fr = S.keep(R.gPad.DrawFrame(-0.5, 0.0, FOLD + 0.5, 1.85))   # headroom: header + legend above the stack
+    S.axes(fr, "Forward hard-scatter tracks with a time (last bin: #geq 20)", "Fraction of events (WAVeS t_{0})", size=0.042, ytoff=1.3, xtoff=1.2)
+    st.Draw("HIST SAME")
+    for h, name in hs: leg.AddEntry(h, name, "F")
+    leg.Draw()
+    dist = S.keep(R.TH1D(f"d_{c}", "", FOLD + 1, -0.5, FOLD + 0.5))
+    for i, v in enumerate(den / den.max() * 0.25): dist.SetBinContent(i + 1, v)
+    dist.SetLineColor(R.kBlack); dist.SetLineStyle(2); dist.SetLineWidth(2); dist.Draw("HIST SAME")
+    S.header(0.17, 0.88, ["#sqrt{s} = 14 TeV, #LT#mu#GT = 200", f"{lab}; dashed: the events' distribution (a.u.)"], size=0.034)
+    R.gPad.RedrawAxis()
+S.save(cv, args.out)

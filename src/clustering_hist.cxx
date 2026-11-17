@@ -100,6 +100,23 @@ auto main(int argc, char** argv) -> int {
   // --- Sample selection (--sample=vbf|zjets|dijet; default: local VBF ntuple) ---
   auto sample = MyUtl::resolveSample(argc, argv);
   MyUtl::resolveSelection(argc, argv);  // --vbs-deta=<x>; sets SELECTION_TAG
+  // --clean-times / --assoc-nsigma=X: the talk's t0 inputs (tags the output)
+  const double assocNsigma = MyUtl::resolveTimingInputs(argc, argv);
+  // --fix-select-share=X: the selection fix's "significant share" of the
+  // clustered pT (src/failure_fixes.h); changes only the WFIX_* rows
+  for (int i = 1; i < argc; ++i)
+    if (std::string(argv[i]).rfind("--fix-select-share=", 0) == 0)
+      MyUtl::FIX_SELECT_MIN_PT_SHARE = std::stod(std::string(argv[i]).substr(19));
+  std::cout << "[fixes] selection fix: >= 1 HS track and >= " << MyUtl::FIX_SELECT_MIN_PT_SHARE
+            << " of the clustered pT\n";
+  std::unique_ptr<MyUtl::AssocRule> assocRule;
+  if (assocNsigma > 0.0) {
+    assocRule = std::make_unique<MyUtl::AssocRule>();
+    assocRule->kind  = MyUtl::AssocRule::Kind::SIGNIFICANCE;
+    assocRule->cut   = assocNsigma;
+    assocRule->tag   = "signif";
+    assocRule->label = "z_{0} signif.";
+  }
   MyUtl::ENERGY_LABEL = sample.energyLabel;
   MyUtl::OUTPUT_DIR   = sample.outputDir;
   MyUtl::SAMPLE_NAME  = sample.sampleName;
@@ -237,7 +254,7 @@ auto main(int argc, char** argv) -> int {
       }
 
       // HGTD timing scenario (the only scenario currently active)
-      auto resHGTD = processEventData(&branch, false, true, *tlMap);
+      auto resHGTD = processEventData(&branch, false, true, *tlMap, assocRule.get());
 
       // Tally rejection cause (see EventResult::code in event_processing.h).
       switch (resHGTD.code) {

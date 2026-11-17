@@ -67,6 +67,9 @@ namespace MyUtl {
     double      fjvtMax;  // keep an fJVT-window jet iff fJVT <= this
     bool        rptFwd = false;  // also cut R_pT on forward jets (RPT_FWD_ETA_MAX)
     double      fwdPtMax = FJVT_PT_MAX;   // ... below this pT (rptFwd only)
+    double      rptMinFwd = -1.0;         // ... at this threshold (< 0: rptMin)
+    int         t0Gate = -1;              // >= 0: cut a t0-GATED R_pT instead, t0 source tdr::T0Idx (the caller
+                                          // computes it -- util/tdr_common.h's jvtRpt -- and puts it in JetDisc::rpt)
   };
   // R_pT thresholds: calibrated on local-VBF paper-HS jets in the JVT window
   // (|eta| < 2.5, 30 < pT < 60 GeV) to the published JVT working-point HS
@@ -86,6 +89,15 @@ namespace MyUtl {
     // range: JVT's own (< 60 GeV) or fJVT's (< 120 GeV), the definition not being fixed yet. Appended last, as above.
     {"jvt4pt60",  "_jvt4pt60",  0.0167, 1e9, true, 60.0},
     {"jvt4pt120", "_jvt4pt120", 0.0167, 1e9, true, 120.0},
+    // Two ways to make jvt4pt60 harder on forward pileup (2026-11-09 mini deck; the user: "lets make the time-gate
+    // JVT, and tighter forward threshold"). At <mu> = 200 a forward pileup jet passes the loose cut on ONE PV0 track.
+    //   t0: the same cut on the t0-gated R_pT (2 sigma, cleaned times; untimed tracks count) -- WAVeS t0, truth t0
+    //   fNN: a tighter forward threshold, R_pT >= 0.NN at 2.5 <= |eta| < 4.0 (central unchanged)
+    {"jvt4pt60t0",    "_jvt4pt60t0",    0.0167, 1e9, true, 60.0, -1.0, 2},
+    {"jvt4pt60t0tru", "_jvt4pt60t0tru", 0.0167, 1e9, true, 60.0, -1.0, 3},
+    {"jvt4pt60f03",   "_jvt4pt60f03",   0.0167, 1e9, true, 60.0, 0.03},
+    {"jvt4pt60f05",   "_jvt4pt60f05",   0.0167, 1e9, true, 60.0, 0.05},
+    {"jvt4pt60f10",   "_jvt4pt60f10",   0.0167, 1e9, true, 60.0, 0.10},
   };
 
   // The working point called `name`, or nullptr if there is none.
@@ -109,7 +121,9 @@ namespace MyUtl {
   // |eta|; with wp.rptFwd a forward jet can fail both (callers test jvtRemoves
   // first, so it is counted as a JVT removal).
   inline bool jvtRemoves (const JetDisc& d, const JvtWP& wp) {
-    return (d.jvtWin || (wp.rptFwd && d.rptFwdWin && d.pt < wp.fwdPtMax)) && d.rpt < wp.rptMin;
+    if (d.jvtWin) return d.rpt < wp.rptMin;
+    if (wp.rptFwd && d.rptFwdWin && d.pt < wp.fwdPtMax) return d.rpt < (wp.rptMinFwd >= 0.0 ? wp.rptMinFwd : wp.rptMin);
+    return false;
   }
   inline bool fjvtRemoves(const JetDisc& d, const JvtWP& wp) { return d.fjvtWin && d.fjvt > wp.fjvtMax; }
 

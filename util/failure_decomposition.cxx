@@ -37,6 +37,29 @@
 // The PDF decomposition is produced for WAVeS (the primary analysis score);
 // the TRKPTZ baseline is still printed as a console table.
 //
+// Grid / talk options (2026-11-09, the Global Performance talk; all opt-in, so a
+// bare run reproduces the original):
+//   --file-shard=i/N --max-events=N   as the other programs; with a shard the PDF
+//                                     is skipped (each shard is a fragment)
+//   --clean-times     the TDR's track-time cleaning (util/tdr_common.h): timed
+//                     tracks failing it are dropped from the clustering input,
+//                     as tdr::computeT0s does. Needs the RAW ntuples
+//   --assoc-nsigma=X  the z association for the clustering input (default 3.0;
+//                     the talk's t0s use 2.5, tdr::T0_ASSOC_NSIGMA)
+//   --waves-time=injet  WAVeS passes on its own time (calculateTime: the cluster's
+//                     tracks near forward jets), as the analysis uses it; the
+//                     default ("full") tests the chosen cluster's full time.
+//                     The ideal-world oracles always use full-cluster times.
+// Z+jets now also gets the lepton selection and the lepton-jet overlap removal
+// (as util/tdr_t0), which the original lacked. Every run writes a per-event tree
+// (<prefix>failure_decomposition.root, "events": weight, n_hs_trk and every
+// rung's flag) so shards merge with hadd and the ladder can be applied, weighted,
+// offline (python/gp_failure_ladder.py). It also carries a truth-identified
+// selection flag (sel_hs_*: the cluster holding the most hard-scatter pT, > 50%
+// hard scatter, passes) beside the original "any cluster passes", which a pileup
+// cluster can satisfy by chance, and re-timing flags (WAVeS's chosen cluster
+// passes on its full time but not on its in-jet time).
+//
 // Output:
 //   • Console summary table (WAVeS + TRKPTZ): principal-cause counts, the five
 //     buckets are mutually exclusive and sum to n_fail.
@@ -53,9 +76,13 @@
 #include <TLatex.h>
 #include <TLegend.h>
 #include <TStyle.h>
+#include <TFile.h>
+#include <TTree.h>
+#include <boost/filesystem.hpp>
 #include "clustering_constants.h"
 #include "event_processing.h"
 #include "sample_config.h"
+#include "tdr_common.h"
 
 using namespace MyUtl;
 
@@ -451,12 +478,60 @@ auto main(int argc, char** argv) -> int {
   // output of which was used. The defaults moved on 2026-08-26.
   MyUtl::resolveSelection(argc, argv);
 
+  bool cleanTimes = false, wavesInJet = false;
+  double assocNsigma = 3.0;
+  for (int i = 1; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a == "--clean-times") cleanTimes = true;
+    if (a.rfind("--assoc-nsigma=", 0) == 0) assocNsigma = std::stod(a.substr(15));
+    if (a == "--waves-time=injet") wavesInJet = true;
+  }
+  SampleConfig cfg = resolveSample(argc, argv);
+  ENERGY_LABEL = cfg.energyLabel; OUTPUT_DIR = cfg.outputDir; SAMPLE_NAME = cfg.sampleName;
+  OVERLAP_REMOVAL = cfg.overlapRemoval;
+  FILE_SHARD = resolveShard(argc, argv);
+  const Long64_t maxEvents = resolveMaxEvents(argc, argv);
+  const bool sharded = !FILE_SHARD.tag().empty();
+  const std::string outPath = histFilePath("failure_decomposition.root");
+  {
+    const auto dir = boost::filesystem::path(outPath).parent_path();
+    if (!dir.empty()) boost::filesystem::create_directories(dir);
+  }
+  std::printf("[failure_decomposition] sample=%s: clean-times %s, assoc %.1f sigma, WAVeS time %s; out=%s\n",
+              SAMPLE_NAME.empty() ? "local" : SAMPLE_NAME.c_str(), cleanTimes ? "on" : "off", assocNsigma,
+              wavesInJet ? "in-jet" : "full cluster", outPath.c_str());
+
   TChain chain("ntuple");
-  setupChain(chain, MyUtl::resolveSample(argc, argv).ntupleDir.c_str());
+  setupChain(chain, cfg.ntupleDir.c_str(), FILE_SHARD);
+  recordAvailableBranches(chain);
   TTreeReader reader(&chain);
   BranchPointerWrapper branch(reader);
-  ROOT::EnableImplicitMT();
+  const tdr::TimeCleaning CLEAN = tdr::setupCleaning(reader, cleanTimes ? tdr::CleanMode::T0 : tdr::CleanMode::OFF);
   gErrorIgnoreLevel = kFatal;
+
+  TFile fout(outPath.c_str(), "RECREATE");
+  TTree tout("events", "failure_decomposition flags per selected event");
+  int o_fidx = -1, o_nhs = 0;
+  Long64_t o_entry = -1;
+  float o_w = 0.f, o_badfrac = -1.f;
+  bool o_passT = false, o_passW = false, o_retimeW = false, o_selT = false, o_selW = false, o_selHsT = false, o_selHsW = false,
+       o_miscl = false, o_misclPt = false, o_badtime = false, o_idealT = false, o_idealW = false, o_teffT = false, o_teffW = false,
+       o_fixmisT = false, o_fixmisW = false;
+  tout.Branch("file_idx", &o_fidx, "file_idx/I");     tout.Branch("entry", &o_entry, "entry/L");
+  tout.Branch("weight", &o_w, "weight/F");            tout.Branch("n_hs_trk", &o_nhs, "n_hs_trk/I");
+  tout.Branch("pass_trkptz", &o_passT, "pass_trkptz/O"); tout.Branch("pass_waves", &o_passW, "pass_waves/O");
+  tout.Branch("retime_waves", &o_retimeW, "retime_waves/O");
+  tout.Branch("sel_any_trkptz", &o_selT, "sel_any_trkptz/O"); tout.Branch("sel_any_waves", &o_selW, "sel_any_waves/O");
+  tout.Branch("sel_hs_trkptz", &o_selHsT, "sel_hs_trkptz/O"); tout.Branch("sel_hs_waves", &o_selHsW, "sel_hs_waves/O");
+  tout.Branch("miscl", &o_miscl, "miscl/O");          tout.Branch("miscl_ptcut", &o_misclPt, "miscl_ptcut/O");
+  tout.Branch("badtime", &o_badtime, "badtime/O");    tout.Branch("hs_pt_bad_frac", &o_badfrac, "hs_pt_bad_frac/F");
+  tout.Branch("ideal_trkptz", &o_idealT, "ideal_trkptz/O"); tout.Branch("ideal_waves", &o_idealW, "ideal_waves/O");
+  tout.Branch("teff_trkptz", &o_teffT, "teff_trkptz/O");    tout.Branch("teff_waves", &o_teffW, "teff_waves/O");
+  // the counterfactual for "misassigned HS track times caused it" (2026-11-10): drop the HS tracks >= 3 sigma
+  // from the truth vertex time, re-cluster and re-choose; does the score pass now? (false when none is mistimed)
+  tout.Branch("fix_mistimed_trkptz", &o_fixmisT, "fix_mistimed_trkptz/O");
+  tout.Branch("fix_mistimed_waves", &o_fixmisW, "fix_mistimed_waves/O");
+  Long64_t nRead = 0;
 
   std::vector<BinData> bins(NBINS);    // TRKPTZ path (console only)
   std::vector<BinData> bins_w(NBINS);  // WAVeS path (console + plots)
@@ -474,19 +549,24 @@ auto main(int argc, char** argv) -> int {
     return out;
   };
 
-  std::cout << "Starting Event Loop\n";
-  const Long64_t N_EVENT = chain.GetEntries();
+  std::cout << "Starting Event Loop\n";   // no chain.GetEntries(): it opens every file (CLAUDE.MD, Job cost)
 
   while (reader.Next()) {
-    const Long64_t READ_NUM = chain.GetReadEntry() + 1;
-    if (READ_NUM % 100 == 0)
-      std::cout << "Progress: " << READ_NUM << "/" << N_EVENT << "\r" << std::flush;
+    if (maxEvents > 0 && nRead >= maxEvents) break;
+    if (++nRead % 10000 == 0) std::cout << "[failure_decomposition] read " << nRead << std::endl;
 
     // ── A. Event + track selection ────────────────────────────────────────
+    if (branch.recoVtxZ.GetSize() == 0 || branch.truthVtxZ.GetSize() == 0) continue;
+    branch.computeOverlapRemoval();                       // Z+jets: as util/tdr_t0
+    if (!branch.passLeptonSelection() || branch.vetoLeptonOverlap()) continue;
     if (!branch.passBasicCuts()) continue;
     if (!branch.passJetPtCut())  continue;
     std::vector<int> tracks =
-      getAssociatedTracks(&branch, MIN_TRACK_PT, MAX_TRACK_PT, 3.0);
+      getAssociatedTracks(&branch, MIN_TRACK_PT, MAX_TRACK_PT, assocNsigma);
+    if (cleanTimes)   // drop the timed tracks the TDR's cleaning un-times, as tdr::computeT0s does
+      tracks.erase(std::remove_if(tracks.begin(), tracks.end(),
+                                  [&](int i) { return branch.trackTimeValid[i] == 1 && !tdr::timed(branch, i, CLEAN, true); }),
+                   tracks.end());
 
     // ── B. Truth-HS tracks (valid HGTD time) + bin index ──────────────────
     std::vector<int> hsTracks;
@@ -508,13 +588,26 @@ auto main(int argc, char** argv) -> int {
     const Cluster* hgtdBestT = chooseBest(qualHGTD, Score::TRKPTZ.id);
     const Cluster* hgtdBestW = chooseBest(qualHGTD, Score::WAVES.id);
     const bool pass_T = hgtdBestT && hgtdBestT->passEfficiency(&branch);
-    const bool pass_W = hgtdBestW && hgtdBestW->passEfficiency(&branch);
+    const bool passW_full = hgtdBestW && hgtdBestW->passEfficiency(&branch);
+    bool pass_W = passW_full;
+    if (wavesInJet && hgtdBestW) {
+      Cluster cw = *hgtdBestW;
+      pass_W = std::abs(cw.calculateTime(Score::WAVES, &branch) - branch.truthVtxTime[0]) < PASS_SIGMA;
+    }
+    const bool retime_W = !pass_W && passW_full;   // the right cluster, moved off by the in-jet time
+    o_passT = pass_T; o_passW = pass_W; o_retimeW = retime_W;
+    o_selT = o_selW = o_selHsT = o_selHsW = o_miscl = o_misclPt = o_badtime = o_idealT = o_idealW = o_teffT = o_teffW = false;
+    o_fixmisT = o_fixmisW = false;
+    o_badfrac = -1.f; o_nhs = nHSTrack; o_w = (float)*branch.weight; o_entry = chain.GetTree()->GetReadEntry();
+    { const std::string fp = chain.GetCurrentFile()->GetName();
+      const size_t pp = fp.rfind('_'), dd = (pp == std::string::npos) ? pp : fp.find('.', pp);
+      o_fidx = (pp != std::string::npos && dd != std::string::npos) ? std::atoi(fp.substr(pp + 1, dd - pp - 1).c_str()) : -1; }
 
     bins[bin].total++;   bins_w[bin].total++;
     if (pass_T) bins[bin].n_pass++;   else bins[bin].n_fail++;
     if (pass_W) bins_w[bin].n_pass++; else bins_w[bin].n_fail++;
 
-    if (pass_T && pass_W) continue;  // nothing to decompose
+    if (pass_T && pass_W) { tout.Fill(); continue; }  // nothing to decompose
 
     // ── E. Selection failure (does another cluster already pass?) ─────────
     bool any_hgtd_pass = false;
@@ -522,6 +615,19 @@ auto main(int argc, char** argv) -> int {
       if (cc.passEfficiency(&branch)) { any_hgtd_pass = true; break; }
     const bool cat_sel_T = !pass_T && any_hgtd_pass;
     const bool cat_sel_W = !pass_W && any_hgtd_pass;
+    // the truth-identified version: the hard scatter's own cluster (most HS pT, > 50% HS) passes
+    bool hs_cluster_pass = false;
+    {
+      double hsMax = 0.0; const Cluster* hsC = nullptr;
+      for (const auto& cc : qualHGTD) {
+        double sum = 0.0;
+        for (int t : cc.trackIndices) sum += branch.trackPt[t];
+        if (cc.purity * sum > hsMax) { hsMax = cc.purity * sum; hsC = &cc; }
+      }
+      hs_cluster_pass = hsC && hsC->purity > 0.5 && hsC->passEfficiency(&branch);
+    }
+    o_selT = cat_sel_T; o_selW = cat_sel_W;
+    o_selHsT = !pass_T && hs_cluster_pass; o_selHsW = !pass_W && hs_cluster_pass;
 
     // ── F. Misclustering oracles (score-independent) ──────────────────────
     // Headline (truth-PU decontamination, keeps the algorithm's grouping): for
@@ -574,6 +680,26 @@ auto main(int argc, char** argv) -> int {
     }
     const bool cat_badtime =
       hs_pt_tot > 0. && (hs_pt_bad / hs_pt_tot) > BAD_HS_TIME_FRAC;
+    o_miscl = cat_miscl; o_misclPt = miscl_ptcut; o_badtime = cat_badtime;
+    if (hs_pt_bad > 0.) {   // the counterfactual: the same event without its mistimed HS tracks
+      std::vector<int> keep;
+      for (int idx : tracks) {
+        const bool hsBad = branch.trackToTruthvtx[idx] == 0 && branch.trackTimeValid[idx] == 1 &&
+                           std::abs(branch.trackTime[idx] - branch.truthVtxTime[0]) / branch.trackTimeRes[idx] >= TRUTH_PULL_CUT;
+        if (!hsBad) keep.push_back(idx);
+      }
+      const auto qualFix = filterClusters(clusterTracksInTime(
+        keep, &branch, DIST_CUT_CONE, /*useSmearedTimes=*/false, /*checkTimeValid=*/true, /*smearRes=*/-1.0,
+        ClusteringMethod::ITERATIVE, /*useZ0=*/false, /*sortTracks=*/false, /*calcPurityFlag=*/false));
+      const Cluster* fT = chooseBest(qualFix, Score::TRKPTZ.id);
+      const Cluster* fW = chooseBest(qualFix, Score::WAVES.id);
+      o_fixmisT = fT && fT->passEfficiency(&branch);
+      if (fW) {
+        if (wavesInJet) { Cluster cw = *fW; o_fixmisW = std::abs(cw.calculateTime(Score::WAVES, &branch) - branch.truthVtxTime[0]) < PASS_SIGMA; }
+        else o_fixmisW = fW->passEfficiency(&branch);
+      }
+    }
+    o_badfrac = hs_pt_tot > 0. ? (float)(hs_pt_bad / hs_pt_tot) : -1.f;
 
     auto idealRaw = clusterTracksInTime(
       tracks, &branch, DIST_CUT_CONE,
@@ -585,6 +711,8 @@ auto main(int argc, char** argv) -> int {
     const Cluster* idealBestW = chooseBest(qualIdeal, Score::WAVES.id);
     const bool cat_timing_T = cat_badtime || (idealBestT && idealBestT->passEfficiency(&branch));
     const bool cat_timing_W = cat_badtime || (idealBestW && idealBestW->passEfficiency(&branch));
+    o_idealT = idealBestT && idealBestT->passEfficiency(&branch);
+    o_idealW = idealBestW && idealBestW->passEfficiency(&branch);
 
     // ── H. Track efficiency loss oracle (Ideal Res. + Ideal Eff.) ─────────
     bool cat_teff_T = false, cat_teff_W = false;
@@ -600,6 +728,8 @@ auto main(int argc, char** argv) -> int {
       cat_teff_T = !cat_timing_T && effBestT && effBestT->passEfficiency(&branch);
       cat_teff_W = !cat_timing_W && effBestW && effBestW->passEfficiency(&branch);
     }
+    o_teffT = cat_teff_T; o_teffW = cat_teff_W;
+    tout.Fill();
 
     // ── I. Assign principal cause (Timing > Selection > Miscl > TrkEff) ───
     if (!pass_T) {
@@ -669,6 +799,9 @@ auto main(int argc, char** argv) -> int {
   }
 
   std::cout << "\nFINISHED PROCESSING\n";
+  fout.cd(); tout.Write(); fout.Close();
+  std::cout << "[failure_decomposition] wrote " << outPath << " (" << nRead << " events read)\n";
+  if (nRead == 0) { std::cerr << "[failure_decomposition] ERROR: read 0 events\n"; return 1; }
 
   printSummary(aggregate(bins_w), "WAVeS");
   printSummary(aggregate(bins),   "TRKPTZ");
@@ -712,6 +845,6 @@ auto main(int argc, char** argv) -> int {
 
   printPerBinTable(bins_w, "WAVeS");
 
-  plotFailures(bins_w, "WAVeS");
+  if (!sharded) plotFailures(bins_w, "WAVeS");   // a shard is a fragment: merge the trees instead
   return 0;
 }

@@ -122,6 +122,22 @@ int main(int argc, char** argv) {
   tree.Branch("n_hs_trk", &nHsTrk, "n_hs_trk/I");
   tree.Branch("n_fwd_jet", &nFwdJet, "n_fwd_jet/I");
   for (int k = 0; k < N; ++k) tree.Branch(("dt_" + NAMES[k]).c_str(), &dt[k], ("dt_" + NAMES[k] + "/D").c_str());
+  // the failure breakdown (cleaned times): what the clustering offered (tdr::T0Extra)
+  int nClus = 0; double dtBest = 0.0, dtWavesFull = 0.0;
+  tree.Branch("n_clusters_clean", &nClus, "n_clusters_clean/I");
+  tree.Branch("dt_best_clean", &dtBest, "dt_best_clean/D");
+  tree.Branch("dt_waves_full_clean", &dtWavesFull, "dt_waves_full_clean/D");
+  double dtHs = 0.0, hsPur = 0.0;
+  tree.Branch("dt_hs_clean", &dtHs, "dt_hs_clean/D");
+  tree.Branch("hs_purity_clean", &hsPur, "hs_purity_clean/D");
+  int nHsT = 0, nHsMis = 0;
+  double hsPtT = 0.0, hsPtMis = 0.0, hsPtMisHit = 0.0, hsPtJet = 0.0;
+  tree.Branch("n_hs_timed_clean", &nHsT, "n_hs_timed_clean/I");
+  tree.Branch("n_hs_mistimed_clean", &nHsMis, "n_hs_mistimed_clean/I");
+  tree.Branch("hs_pt_timed_clean", &hsPtT, "hs_pt_timed_clean/D");
+  tree.Branch("hs_pt_mistimed_clean", &hsPtMis, "hs_pt_mistimed_clean/D");
+  tree.Branch("hs_pt_misassigned_clean", &hsPtMisHit, "hs_pt_misassigned_clean/D");
+  tree.Branch("hs_pt_injet_clean", &hsPtJet, "hs_pt_injet_clean/D");
   const double NaN = std::numeric_limits<double>::quiet_NaN();
 
   Long64_t nRead = 0, nSel = 0;
@@ -138,7 +154,11 @@ int main(int argc, char** argv) {
     nHsTrk = counts.nForwardTrackHS;
     nFwdJet = counts.nForwardJet;
     const tdr::T0Set raw = tdr::computeT0s(branch, INFL, RAW);
-    const tdr::T0Set cln = tdr::computeT0s(branch, INFL, CLEAN);
+    tdr::T0Extra ex;
+    const tdr::T0Set cln = tdr::computeT0s(branch, INFL, CLEAN, &ex);
+    nClus = ex.nClusters;  dtBest = ex.bestDt;  dtWavesFull = ex.wavesFullDt;  dtHs = ex.hsDt;  hsPur = ex.hsPurity;
+    nHsT = ex.nHsTimed;  nHsMis = ex.nHsMistimed;  hsPtT = ex.hsPtTimed;  hsPtMis = ex.hsPtMistimed;
+    hsPtMisHit = ex.hsPtMisassigned;  hsPtJet = ex.hsPtInJet;
     const double tHS = branch.truthVtxTime[0];
     auto put = [&](int k, const tdr::T0Set& s, int idx) { dt[k] = s.ok[idx] ? s.t[idx] - tHS : NaN; };
     put(0, raw, tdr::T0_HGTD);

@@ -119,6 +119,9 @@ namespace MyUtl {
     // correct regardless of whether `char` is signed on the build platform.
     std::unique_ptr<TTreeReaderArray<char>> trackLeptonID;
     std::vector<char> removedJet;
+    // The TDR's track-time cleaning input, bound only when CLEAN_TIMES is set
+    // (the skims drop this branch: a cleaned run reads the raw ntuples).
+    std::unique_ptr<TTreeReaderValue<std::vector<bool>>> trackHitInLastLayer;
 
     // ---- Extended branches, bound only when EXTENDED_BRANCHES is set -------
     // The vertex fit's OWN track-to-vertex assignment and per-track fit weight,
@@ -218,6 +221,21 @@ namespace MyUtl {
         trackCovZ0Phi0     = F("Track_cov_z0phi0");
         trackCovZ0Qp       = F("Track_cov_z0qOverP");
       }
+      if (CLEAN_TIMES) {
+        if (!hasBranch("Track_hitInLastLayer")) {
+          std::cerr << "[clean] --clean-times needs Track_hitInLastLayer, which this input lacks"
+                       " (the skims drop it: read the raw ntuples with --ntuple-dir=)\n";
+          std::exit(1);
+        }
+        trackHitInLastLayer = std::make_unique<TTreeReaderValue<std::vector<bool>>>(r, "Track_hitInLastLayer");
+      }
+    }
+
+    // Does track t keep its time under the TDR's cleaning? Always true without
+    // --clean-times. Says nothing about whether the track HAS a time.
+    bool timeSurvivesCleaning(int t) {
+      if (!trackHitInLastLayer) return true;
+      return tdrTimeSurvivesCleaning((**trackHitInLastLayer)[t], trackEta[t], trackHgtdHits[t]);
     }
 
     // -----------------------------------------------------------------------

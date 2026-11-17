@@ -56,7 +56,9 @@
 //
 // Usage:  tdr_fwdpair [--sample=<s>] [--ntuple-dir=<d>] [--file-shard=i/N] [--max-events=N]
 //                     [--gate-sigma=X (default 2)] [--clean-times=all|t0|off (default all)] [--pair=ff|one (default ff)]
-//                     [--jvt=none|loose|tight|jvt4pt60|jvt4pt120 (default none)]
+//                     [--jvt=none|loose|tight|jvt4pt60|jvt4pt120|jvt4pt60t0|jvt4pt60t0tru|jvt4pt60f03|jvt4pt60f05|jvt4pt60f10 (default none)]
+//   jvt4pt60t0(tru): JVT's cut on the t0-gated R_pT (WAVeS / truth t0, --gate-sigma, cleaned times; untimed tracks
+//   count); jvt4pt60fNN: forward threshold 0.NN. j*_jvt_rpt is always the plain R_pT, j*_jvt_rpt_t0 the WAVeS-gated.
 //                     [--out=<path>]
 // Output: <prefix>tdr_fwdpair.root (TTrees "events", "meta"; merge shards with hadd -f).
 // Track-time cleaning needs Track_hitInLastLayer: read the RAW ntuples (--ntuple-dir=).
@@ -96,6 +98,7 @@ struct JetOut {
   int core_n = 0;
   double core_t = -999, core_sig = -1;
   float jvt_rpt = -1, fjvt = -999;           // the JVT / fJVT discriminants (--jvt), -1 / -999 without
+  float jvt_rpt_t0 = -1;                      // JVT's R_pT with the WAVeS t0 gate (--jvt), -1 without
 };
 constexpr double CORE_DR = 0.2, CORE_DIST_CUT = 2.0;   // util/vbs_time_veto.cxx's JET_TIME_DR, JET_TIME_DIST_CUT
 
@@ -228,7 +231,7 @@ int main(int argc, char** argv) {
   const bool oneFwd = pairMode == "one";
   if (oneFwd) SELECTION_TAG = SELECTION_TAG.empty() ? "onefwd" : SELECTION_TAG + "_onefwd";
   const JvtWP* jwp = jvtWPByName(jvtName);
-  if (!jwp || jvtName == "looseext") { std::cerr << "[tdr_fwdpair] --jvt must be none, loose, tight, jvt4pt60 or jvt4pt120\n"; return 1; }
+  if (!jwp || jvtName == "looseext") { std::cerr << "[tdr_fwdpair] --jvt must be none, loose, tight, jvt4pt60, jvt4pt120, jvt4pt60t0, jvt4pt60t0tru, jvt4pt60f03, jvt4pt60f05 or jvt4pt60f10\n"; return 1; }
   const bool jvtOn = jwp->rptMin >= 0.0;
   if (jvtOn) {
     EXTENDED_BRANCHES = true;                     // the discriminants need Track_recoVtx_idx
@@ -241,6 +244,7 @@ int main(int argc, char** argv) {
     SELECTION_TAG = SELECTION_TAG.empty() ? tag : SELECTION_TAG + "_" + tag;
   }
   const tdr::CleanMode cleanMode = tdr::cleaningMode(argc, argv);   // before the output path: it tags the file
+  tdr::rptTrkPtMaxMode(argc, argv);                                  // likewise
   const Inflation INFL = inflationFor(SAMPLE_NAME);
   const std::string outPath = outOverride.empty() ? histFilePath("tdr_fwdpair.root") : outOverride;
   {
@@ -317,6 +321,7 @@ int main(int argc, char** argv) {
     tree.Branch((p + "core_n").c_str(), &o.core_n, (p + "core_n/I").c_str());
     tree.Branch((p + "jvt_rpt").c_str(), &o.jvt_rpt, (p + "jvt_rpt/F").c_str());
     tree.Branch((p + "fjvt").c_str(), &o.fjvt, (p + "fjvt/F").c_str());
+    tree.Branch((p + "jvt_rpt_t0").c_str(), &o.jvt_rpt_t0, (p + "jvt_rpt_t0/F").c_str());
   }
 
   const std::regex jzRe("JZ([0-9])");
@@ -337,6 +342,18 @@ int main(int argc, char** argv) {
     ++nLep;
 
     if (jvtOn) D = computeJetDiscriminants(branch);   // for every jet: fJVT needs the central jets' vertices
+    // a t0-gated JVT needs the t0 BEFORE pairing (the t0s do not depend on which jets JVT keeps)
+    tdr::T0Set T;
+    bool haveT = false;
+    std::vector<float> rptPlain;
+    if (jvtOn && jwp->t0Gate >= 0) {
+      T = tdr::computeT0s(branch, INFL, CLEAN);  haveT = true;
+      rptPlain.resize(D.size());
+      for (int j = 0; j < (int)D.size(); ++j) {
+        rptPlain[j] = D[j].rpt;
+        D[j].rpt = (float)tdr::jvtRpt(branch, j, T, gate, CLEAN).t0[jwp->t0Gate];
+      }
+    }
     std::vector<int> js;
     for (int j = 0; j < (int)branch.topoJetPt.GetSize(); ++j) {
       if (branch.isJetRemoved(j) || branch.topoJetPt[j] < tdr::JET_PT_MIN) continue;
@@ -363,14 +380,16 @@ int main(int argc, char** argv) {
     mjj = (v1 + v2).M();
     deta = std::abs((double)branch.topoJetEta[j1] - (double)branch.topoJetEta[j2]);
 
-    const tdr::T0Set T = tdr::computeT0s(branch, INFL, CLEAN);
+    if (!haveT) T = tdr::computeT0s(branch, INFL, CLEAN);
     const tdr::TrackLists L = tdr::rptTrackLists(branch);
     for (int k = 0; k < tdr::N_T0; ++k) { t0[k] = T.t[k]; sig0[k] = T.sig[k]; infl[k] = T.infl[k]; ok0[k] = T.ok[k]; }
     J[0] = jetQuantities(branch, j1, L, T, gate, CLEAN);
     J[1] = jetQuantities(branch, j2, L, T, gate, CLEAN);
     if (jvtOn) {
-      J[0].jvt_rpt = D[j1].rpt;  J[0].fjvt = D[j1].fjvt;
-      J[1].jvt_rpt = D[j2].rpt;  J[1].fjvt = D[j2].fjvt;
+      J[0].jvt_rpt = rptPlain.empty() ? D[j1].rpt : rptPlain[j1];  J[0].fjvt = D[j1].fjvt;
+      J[1].jvt_rpt = rptPlain.empty() ? D[j2].rpt : rptPlain[j2];  J[1].fjvt = D[j2].fjvt;
+      J[0].jvt_rpt_t0 = (float)tdr::jvtRpt(branch, j1, T, gate, CLEAN).t0[tdr::T0_WAVES];
+      J[1].jvt_rpt_t0 = (float)tdr::jvtRpt(branch, j2, T, gate, CLEAN).t0[tdr::T0_WAVES];
     }
 
     const std::string fpath = chain.GetCurrentFile()->GetName();
@@ -397,6 +416,8 @@ int main(int argc, char** argv) {
   meta.Branch("n_two_fwd", &nTwo, "n_two_fwd/L");
   meta.Branch("n_selected", &nSel, "n_selected/L");
   meta.Branch("gate_sigma", &gate, "gate_sigma/D");
+  double rptPtMax = tdr::RPT_TRK_PT_MAX;
+  meta.Branch("rpt_trk_ptmax", &rptPtMax, "rpt_trk_ptmax/D");
   meta.Branch("pair_mode", &pairMode);
   meta.Branch("jvt_wp", &jvtName);
   meta.Branch("n_rm_jvt", &nRmJvt, "n_rm_jvt/L");
