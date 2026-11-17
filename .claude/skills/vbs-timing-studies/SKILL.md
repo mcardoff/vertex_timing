@@ -23,16 +23,20 @@ past 3.8 included. Per row it stores:
 here reproduces the composition counts exactly. Without it R2 is ~40%
 larger (local VBF: 4,744 vs 3,350), almost all of that from PU legs past
 |eta| 4.0 with R_pT = 0 in every row.
-**`--jvt=none|loose|tight`** (2026-09-25) applies the in-code JVT/fJVT
+**`--jvt=<wp>`** (2026-09-25) applies the in-code JVT/fJVT
 taggers (`src/jet_tagging.h`, identical to `vbs_region_diag --jvt`) to the
 pT-passing jets BEFORE the VBS pair is formed. It gates the regions only
 (narrow histograms + wide tree), like the `--vbs-*` knobs; the inclusive
-forward slices stay tagger-free. A tagged run:
+forward slices stay tagger-free. Accepted (`resolveJvtWP`):
+`none|loose|tight|looseext|jvt4pt60|jvt4pt120|jvt4pt60f03|jvt4pt60f05|jvt4pt60f10`.
+The t0-gated and TDR points (`jvt4pt60t0`, `jvt4pt60t0tru`, `jvt4pt60tdr`,
+`jvt4pt60tdrw`, `jvt4pt60tdrtru`) are refused: they cut an R_pT that only
+`tdr_fwdpair` computes. A tagged run:
 - turns on EXTENDED_BRANCHES (+ `recordAvailableBranches`), and refuses a
   sample without `Track_recoVtx_idx` rather than removing every jet;
-- tags its outputs `jvtLoose_`/`jvtTight_` (SELECTION_TAG; condor
-  `selargs=--jvt=loose seltag=jvtLoose_`);
-- writes `meta_vbs_jvt_wp`;
+- tags its outputs with the point's tag, `jvtLoose_`, `jvt4pt60_`, ...
+  (SELECTION_TAG; condor `selargs=--jvt=loose seltag=jvtLoose_`);
+- writes `meta_vbs_jvt_wp` (the point's index in `JVT_WPS`);
 - fills `jvt_wp`, each leg's JVT R_pT / fJVT, and the removed jets
   (`rm_jvt`, `rm_fjvt`, drawn by the displays) in the tree.
 Validated on local VBF: `--jvt=none` is bit-identical to before, and
@@ -40,6 +44,21 @@ Validated on local VBF: `--jvt=none` is bit-identical to before, and
 exactly (R1 4,183, R2 2,579 with its preselection).
 Merge shards with `hadd` (TTrees only); `hist_merge` refuses the key type,
 which is why it is a separate file.
+
+**`rpt_v5_plot` needs the same `--jvt=`** (`resolveRptJvt`, shared with
+`rpt_v5_hist`): it builds the tag that finds the tagged file, then checks the
+file's `meta_vbs_jvt_wp` (`checkJvtWP`; no key means `none`) and aborts on a
+mismatch.
+
+**rpt_v5's other output tags** (2026-11-17): `--dzpara` (the clustering
+input's association) tags `dzpara`, and `--rpt-signif` (the R_pT track list by
+z0 significance) tags `rptsignif`. Non-default ones are recorded as
+`meta_vbs_dzpara` / `meta_vbs_rpt_signif`, which `rpt_v5_plot` checks against
+its own flags (`CheckRunSettings`), and as the region-tree branches `dzpara` /
+`rpt_signif`. `rpt_dzpara`, the R_pT track list's rule, is written on every
+run as before. The full tag is `<sel>_<jvt>_dzpara_rptsignif`, e.g.
+`mjj500p0_jvtLoose_dzpara`.
+
 **The tree has no event weight, pT(ll) or MET column.** For the grid
 trees, three per-row friend files (same row order) sit beside them in
 `condor/<sample>/`:
@@ -231,8 +250,8 @@ paper-HS jet and the two pileup-only cells hold 65.6%, while VBF puts an HS
 jet on both legs 55% of the time on the same code. R2's scarcity on Z+jets is
 the central HS leg mostly not being there, not the m_jj picker outranking it.
 
-The SuperNtuples carry **no Jvt/fJvt branch**, so `--jvt=loose|tight`
-computes both in-code (`src/jet_tagging.h`, since 2026-09-25 shared with
+The SuperNtuples carry **no Jvt/fJvt branch**, so `--jvt=<wp>` (this study:
+`loose|tight`) computes both in-code (`src/jet_tagging.h`, since 2026-09-25 shared with
 `rpt_v5_hist --jvt`) from `Track_recoVtx_idx` + ghost tracks (R_pT as the
 JVT proxy, calibrated to the published 92% / 85% HS efficiencies on local
 VBF; fJVT per arXiv:1705.02211 with the published 0.5 / 0.4 cuts) and
@@ -257,4 +276,15 @@ applies them BEFORE pairing. `results/vbs_pair_composition_jvt.md`:
   has almost no Z above 200 GeV, and the sample has ≤1 ME parton and no EW
   Zjj. `z_pt`/`z_mass` are stored per event; `vbs_region_stack.py --zpt-min`.
 - dijet not run. `--jvt=none` is bit-identical to the pre-JVT diagnostic.
+
+**Which program takes which working point** (`JVT_WPS`, `src/jet_tagging.h`).
+`vbs_region_diag`, `vbs_time_veto` and `rpt_v5_hist` / `rpt_v5_plot` take every
+point that `computeJetDiscriminants` alone can evaluate (`resolveJvtWP`). They
+refuse the t0-gated and TDR points (`jvt4pt60t0*`, `jvt4pt60tdr*`), whose R_pT
+only `tdr_fwdpair` computes. `tdr_fwdpair --jvt` takes those too (every point
+but `looseext`), and exits on an input without `Track_recoVtx_idx` rather than
+giving every jet a JVT R_pT of 0 and removing them all. `tdr_pujet` carries on
+without that branch: its JVT columns (`jvt_rpt`, `jvt_rpt_t0_*`, and
+`jvt_rpt_t0_waves_lojo` under `--lojo`) are written as -1 for every jet, with a
+warning, and its TDR R_pT columns are unaffected.
 

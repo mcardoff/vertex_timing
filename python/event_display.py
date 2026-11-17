@@ -28,8 +28,10 @@ parser.add_argument('--file_path', type=str, required=True,
 parser.add_argument('--extra_time', type=float, required=False)
 parser.add_argument('--infl', type=float, required=False, default=1.38,
                     help='Vertex-time error inflation for the timed R_pT gate. '
-                         'Per-sample WAVeS values from rpt_v5_hist.cxx '
-                         'inflationFor(): vbf 1.38, zjets 1.65, dijet 1.46.')
+                         'Per-sample WAVeS values from util/rpt_v5_common.h '
+                         'inflationRow(): vbf 1.38, zjets 1.65, dijet 1.46; '
+                         'seeded: ttbar 1.46 (from dijet), zeejets 1.65 '
+                         '(from zjets).')
 parser.add_argument('--jet_idx', type=int, required=False, default=None,
                     help='Index of jet to highlight (orange) in R-Z and eta-phi displays')
 parser.add_argument('--jet_label', type=str, required=False, default=None,

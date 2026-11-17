@@ -72,6 +72,18 @@ nshards                  = 4
 #                                                          default; every result
 #                                                          in CLAUDE.md predating
 #                                                          that was made this way
+#   --clean-times                     cleant0_          <- needs the RAW ntuples:
+#                                                          add --ntuple-dir=<raw>
+#                                                          (which does not tag)
+#   --assoc-nsigma=2.5                assoc2p5_
+#   --dzpara                          dzpara_
+#   --fix-select-share=0.3            fixshare0p30_
+#
+# Combined, the tags join in a fixed order,
+# <sel>_cleant0_assoc<X>_dzpara_fixshare<X>_. Each run setting is recorded in
+# the file (meta_vbs_clean_times, ...), so clustering_plot must be given the
+# same flags: they build the tag that finds the merged file, and a mismatch
+# with the file's record aborts.
 #
 # Verify before submitting -- `condor_submit -dump` prints the expanded
 # transfer_output_files, and running the executable locally with the same

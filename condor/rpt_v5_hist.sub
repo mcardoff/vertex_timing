@@ -74,6 +74,20 @@ nshards                  = 4
 #   --jvt=loose                       jvtLoose_         <- JVT + fJVT loose before
 #                                                          VBS pairing (regions only)
 #   --jvt=tight                       jvtTight_
+#   --jvt=<wp>                        <its tag>_        <- any JVT_WPS point but the
+#                                                          t0-gated / TDR ones, e.g.
+#                                                          jvt4pt60 -> jvt4pt60_
+#   --dzpara                          dzpara_           <- clustering input by
+#                                                          getNewDzpara
+#   --rpt-signif                      rptsignif_        <- R_pT track list by z0
+#                                                          significance
+#
+# Combined, the tags join in a fixed order, <sel>_<jvt>_dzpara_rptsignif_:
+# e.g. selargs="--vbs-mjj=500 --jvt=loose --dzpara" needs
+# seltag=mjj500p0_jvtLoose_dzpara_. --jvt, --dzpara and --rpt-signif are
+# recorded in the file (meta_vbs_jvt_wp, meta_vbs_dzpara, meta_vbs_rpt_signif),
+# so rpt_v5_plot must be given the same flags: they build the tag that finds
+# the merged file, and a mismatch with the file's record aborts.
 #
 # Verify before submitting -- `condor_submit -dump` prints the expanded
 # transfer_output_files, and running the executable locally with the same

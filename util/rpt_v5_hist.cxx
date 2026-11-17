@@ -493,10 +493,11 @@ int main(int argc, char** argv) {
   unsigned nThreads = MyUtl::resolveThreads(argc, argv);
 
   // --dzpara: swap the z0-significance association for the reference study's
-  // getNewDzpara parameterization, in BOTH the R_pT track list and the WAVeS
-  // clustering input (they share passTrackVertexAssociation). Set before any
-  // worker thread starts; read-only afterwards. Default off -- see the trk_all
-  // comment for why the choice moves every improvement factor.
+  // getNewDzpara parameterization in the clustering input (MyUtl::USE_DZ_PARA).
+  // --rpt-signif: the R_pT track list by z0 significance instead of its default
+  // getNewDzpara (RPT_USE_DZ_PARA; independent of --dzpara, see its comment and
+  // the trk_all comment for why the choice moves every improvement factor).
+  // Set before any worker thread starts; read-only afterwards. Both default off.
   for (int i = 1; i < argc; ++i) {
     std::string a(argv[i]);
     if (a == "--dzpara")     MyUtl::USE_DZ_PARA = true;   // clustering input
