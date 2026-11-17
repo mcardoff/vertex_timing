@@ -731,8 +731,9 @@ namespace MyUtl {
 
   inline const Score Score::TEST_MISAS = { 13, STR_TRKPTZ + " [Events with Perfect Timing]"  , "TRKPTZ Perf. Time",    false, true, -1.f };
   // WAVES: WAVeS-style selection score — Σ pT·pT_jet/max(ΔR,floor) × exp(−1.5|Δz|).
-  // Pure selection: picks the highest-scoring main-collection cluster and reports its
-  // standard weighted-mean time and full-cluster purity (no in-jet-only recomputation).
+  // Picks the highest-scoring main-collection cluster and reports its in-jet time
+  // (TimeSource::IN_JET: the tracks within ΔR < 0.4 of a qualifying forward jet,
+  // Cluster::calculateTime) and the matching in-jet purity (Cluster::calculatePurity).
   inline const Score Score::WAVES  = { 18, "WAVeS Score", "WAVES", false, false, -1.f, -1.0, ClusteringMethod::ITERATIVE, false, TrackFilterType::ALL, VbsRegion::NONE, TimeSource::IN_JET };
   // JET_T_REFINED: clusters only jet-proximate tracks at DIST_CUT_T_REFINED (2σ iterative)
   inline const Score Score::JET_T_REFINED = { 19, "WAVeS 2#sigma t Re-clustering",  "WAVES_RECLUST", true,  false, -1.f,

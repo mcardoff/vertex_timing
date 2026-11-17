@@ -18,9 +18,13 @@
 //
 //   SLIM   drop branches nothing binds. BranchPointerWrapper binds 37 branches
 //          always, Track_leptonID under OVERLAP_REMOVAL, and 24 more under
-//          EXTENDED_BRANCHES (export_training_data only) -- 47.7% of the file's
-//          bytes, consistently across all four samples. The other 52% is read
-//          past on every pass and never used.
+//          EXTENDED_BRANCHES (set by export_training_data, the four tdr_*
+//          programs and vbs_region_diag; by rpt_v5_hist and vbs_time_veto when
+//          JVT tagging is on, and by vbs_time_veto --sr) -- 47.7% of the file's
+//          bytes, consistently across all four samples. (It also binds
+//          Track_hitInLastLayer under --clean-times; that one is dropped
+//          deliberately, since a cleaned run reads the raw ntuples.) The other
+//          52% is read past on every pass and never used.
 //
 // ...and a third, implicitly: output is chunked so one output file replaces
 // many input files, which is a direct multiplier on the per-file round trips
@@ -80,9 +84,11 @@ using namespace MyUtl;
 
 namespace {
 
-// The keep list IS the contract with BranchPointerWrapper -- these are exactly
-// the branches its constructor binds. Anything added there must be added here
-// or the skimmed sample will fail at first access with a missing branch.
+// The keep list IS the contract with BranchPointerWrapper -- these are the
+// branches its constructor binds, with one deliberate exception:
+// Track_hitInLastLayer (bound only under --clean-times) is not kept, because a
+// cleaned run reads the raw ntuples. Anything else added there must be added
+// here or the skimmed sample will fail at first access with a missing branch.
 // Grouped the same way the constructor groups them so the two can be diffed by
 // eye.
 const std::vector<std::string> KEEP_ALWAYS = {
@@ -106,8 +112,9 @@ const std::vector<std::string> KEEP_ALWAYS = {
 // sample must not depend on which flag the SKIM happened to run with.
 const std::vector<std::string> KEEP_LEPTON = { "Track_leptonID" };
 
-// EXTENDED_BRANCHES (export_training_data). Kept by default -- a skim that
-// silently breaks the ML exporter is a trap -- at a cost of 47.7% of the file
+// EXTENDED_BRANCHES (export_training_data, the tdr_* programs, vbs_region_diag,
+// and rpt_v5_hist / vbs_time_veto in some modes). Kept by default -- a skim that
+// silently breaks those programs is a trap -- at a cost of 47.7% of the file
 // against 31.1% without them. --no-extended drops them if space is tight.
 const std::vector<std::string> KEEP_EXTENDED = {
   "Track_recoVtx_idx", "Track_recoVtx_weight", "RecoVtx_sumPt2",
