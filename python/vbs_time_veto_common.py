@@ -32,8 +32,8 @@ T0_SRC = ["trkptz", "waves", "hgtd", "tzp", "truth"]
 # (legend, colour, marker): the region talk's case colours; jet-jet in black.
 # Event vetoes filled, jet removal open in the same colour.
 STYLE = {
-    "jj":        ("Jet vs jet (no t_{0})",                     "#000000",    20),
-    "jj_all":    ("Jet vs jet, all timed ghost tracks",        "#8C8C8C",    24),
+    "jj":        ("Jet time compatibility (no t_{0})",         "#000000",    20),
+    "jj_all":    ("Jet time compatibility, all ghost tracks",  "#8C8C8C",    24),
     "t0_trkptz": ("Jet vs t_{0}: TRKPTZ",                      "kP10Red",    21),
     "t0_waves":  ("Jet vs t_{0}: WAVeS",                       "kP10Yellow", 22),
     "t0_hgtd":   ("Jet vs t_{0}: HGTD (Athena)",               "kP10Blue",   23),
@@ -53,8 +53,76 @@ STYLE = {
 NBINS = [1, 2, 3, 4, 6, 9, 10**6]
 
 
+# HGTD acceptance of the tagging pair, from the legs' TRACKS, not the jet axes: an
+# axis past |eta| = 4.0 can still put tracks in HGTD. vbs_time_veto counts each
+# leg's ghost tracks passing the track selection in 2.38 < |eta| < 4.0 -- with a
+# valid HGTD time (hgtd_ntimed, --acc-count timed, the default: the jet can be
+# tested) or without (hgtd_n, --acc-count any). Reco-only. The category counts
+# the legs with >= min_trk such tracks: "both" (2), "one" (1), "neither" (0);
+# "all" is no restriction.
+ACCEPTANCE = {"all": None, "both": 2, "one": 1, "neither": 0}
+ACC_TEXT = {"both": "both tagging jets", "one": "exactly one tagging jet", "neither": "neither tagging jet"}
+# the talk's names for the categories (vbs_time_veto_plot.py --compact headline)
+CASE_TEXT = {"both": "Forward-Forward: both tagging jets in HGTD",
+             "one": "Central-Forward: one tagging jet in HGTD",
+             "neither": "neither tagging jet in HGTD", "all": "All selected events"}
+
+
+def add_acceptance_args(ap):
+    ap.add_argument("--acceptance", default="all", choices=list(ACCEPTANCE),
+                    help="restrict to events whose (no-timing) tagging pair has this many legs in HGTD "
+                         "acceptance, by tracks: >= --acc-min-trk ghost tracks in 2.38 < |eta| < 4.0, timed or not")
+    ap.add_argument("--acc-min-trk", type=int, default=1, help="HGTD-acceptance tracks a leg needs (--acceptance)")
+    ap.add_argument("--acc-count", default="timed", choices=["timed", "any"],
+                    help="--acceptance counts the leg's HGTD tracks with a valid time (default) or all of them")
+
+
+def acceptance_mask(nA, nB, mode, min_trk):
+    """events whose pair has ACCEPTANCE[mode] legs with >= min_trk HGTD tracks"""
+    want = ACCEPTANCE[mode]
+    if want is None: return np.ones(len(nA), bool)
+    return ((np.asarray(nA) >= min_trk).astype(int) + (np.asarray(nB) >= min_trk).astype(int)) == want
+
+
+def acc_column(count):
+    """the per-leg column --acc-count reads (prefix a_ / b_)"""
+    return "hgtd_ntimed" if count == "timed" else "hgtd_n"
+
+
+def acceptance_line(mode, min_trk, count="timed"):
+    """the figures' label line; '' for no restriction"""
+    if ACCEPTANCE[mode] is None: return ""
+    what = "timed track" if count == "timed" else "track"
+    trk = f"a {what}" if min_trk == 1 else f"#geq {min_trk} {what}s"
+    return f"{ACC_TEXT[mode]} with {trk} in HGTD (2.38 < |#eta_{{trk}}| < 4.0)"
+
+
 def mad(x):
     return 1.4826 * float(np.median(np.abs(x)))
+
+
+_DG_N = [0]
+
+
+def dgaus_core(values, lo=-400.0, hi=400.0, nbins=400):
+    """the project's core resolution: the narrower width of a double-Gaussian fit, the exact
+    recipe of FIT_DBLGAUS in src/plotting_utilities.h (shared mean within +-50 ps, sigma1
+    seeded at 13 ps, both widths >= 5 ps, fit option RQI over the histogram range; the smaller
+    sigma is the core, as fillFromModel's swapBySize). Entries outside [lo, hi] are not
+    filled. Returns (sigma_core, its error)."""
+    R = ROOT
+    _DG_N[0] += 1
+    h = R.TH1D(f"h_dgfit_{_DG_N[0]}", "", nbins, lo, hi)
+    for x in np.asarray(values, float): h.Fill(x)
+    f = R.TF1(f"dgaus_fit_{_DG_N[0]}", "[1]*TMath::Exp(-0.5*((x-[0])/[3])^2) + [2]*TMath::Exp(-0.5*((x-[0])/[4])^2)", lo, hi)
+    f.SetParameters(h.GetMean(), 0.8 * h.GetMaximum(), 1e-2 * h.GetMaximum(), 13.0, h.GetStdDev())
+    f.SetParLimits(0, -50.0, 50.0); f.SetParLimits(1, 0, 1e9); f.SetParLimits(2, 0, 1e9)
+    f.SetParLimits(3, 5.0, 1e6); f.SetParLimits(4, 5.0, 1e6)
+    h.Fit(f, "RQIN0")
+    s1, s2 = abs(f.GetParameter(3)), abs(f.GetParameter(4))
+    k = 3 if s1 <= s2 else 4
+    KEEP.extend([h, f])
+    return abs(f.GetParameter(k)), f.GetParError(k)
 
 
 def hs_pulls(e_all):
@@ -111,6 +179,21 @@ def measure(e_all, binned, source):
         m = (n >= lo) & (n < hi)
         fac.append(mad(p[m]) if m.sum() >= 20 else g)
     return Calib(g, fac, source, len(p))
+
+
+def t0_veto(e, cal, src, min_trk, nsigma=3.0):
+    """the jet-vs-t0 event veto exactly as vbs_time_veto_plot.decisions(): a leg is tested when its
+    jet time is built from >= min_trk tracks and the t0 exists; it fails when
+    |t_jet - t0| / sqrt((f(n) sigma_jet)^2 + (infl sigma_t0)^2) >= nsigma.
+    Returns (vetoed, failA, failB) per event."""
+    ok, t0, s0 = e[f"ok_{src}"].astype(bool), e[f"t0_{src}"], e[f"infl_{src}"] * e[f"sig0_{src}"]
+    fails = []
+    for L in "ab":
+        sg = cal(e[f"{L}_core_n"]) * e[f"{L}_core_sig"]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            pull = np.abs(e[f"{L}_core_t"] - t0) / np.sqrt(sg ** 2 + s0 ** 2)
+        fails.append(ok & (e[f"{L}_core_n"] >= min_trk) & (pull >= nsigma))
+    return fails[0] | fails[1], fails[0], fails[1]
 
 
 def eff(w, kept):
@@ -172,7 +255,8 @@ def graph(series, k, n_meth, key, edges, style):
         g.SetPointError(i, 0, 0, lo, hi)
     lab, c, mk = style[key]
     g.SetMarkerColor(colour(c)); g.SetLineColor(colour(c)); g.SetMarkerStyle(mk)
-    g.SetMarkerSize(1.15 if key == "jj" else 1.0); g.SetLineWidth(2)
+    # stars (29/30) and diamonds (33/27) draw small at the common size
+    g.SetMarkerSize(1.15 if key == "jj" else 1.7 if mk in (29, 30, 33, 27) else 1.0); g.SetLineWidth(2)
     KEEP.append(g)
     return g
 
@@ -183,10 +267,15 @@ def atlas_block(label, lines):
     al.DrawLatex(0.305, 0.895, "Simulation Internal")
     ROOT.ATLASEnergyLabel(0.18, 0.85, label)
     p = ROOT.TLatex(); p.SetNDC(); p.SetTextFont(42); p.SetTextSize(0.028); p.SetTextColor(ROOT.kGray + 2)
-    for i, ln in enumerate(lines):
-        p.DrawLatex(0.18, 0.81 - 0.036 * i, ln)
-    KEEP.extend([al, p])
-    return 0.81 - 0.036 * len(lines)
+    h = ROOT.TLatex(); h.SetNDC(); h.SetTextFont(62); h.SetTextSize(0.036)   # a line starting "**": a headline
+    y = 0.81
+    for ln in lines:
+        if ln.startswith("**"):
+            h.DrawLatex(0.18, y - 0.004, ln[2:]); y -= 0.046
+        else:
+            p.DrawLatex(0.18, y, ln); y -= 0.036
+    KEEP.extend([al, p, h])
+    return y
 
 
 def y_range(seriess, methods, ref=1.0, pct=False):
@@ -204,8 +293,65 @@ def y_range(seriess, methods, ref=1.0, pct=False):
     return ymin, ytop
 
 
+def _count_panel(pad, stem, counts, count_title, count_parts, edges, xnote, xaxis, ts, legend, labels=None):
+    """the MC count per m_jj column in `pad`: on a log scale, or -- with count_parts,
+    [(label, colour, per-column counts)] -- a linear stack, in 10^3 when large, the
+    total's outline on top. `ts` scales the text to the pad's height; `xaxis` draws
+    the m_jj axis; `legend` the parts' legend"""
+    pad.cd(); pad.SetLogy(True)
+    name = os.path.basename(stem)
+    tot = ROOT.TH1D("tot_" + name, "", len(edges) - 1, edges); KEEP.append(tot)
+    for b, n in enumerate(counts): tot.SetBinContent(b + 1, n)
+    tot.SetFillColor(ROOT.TColor.GetColor("#DCE6F2")); tot.SetLineColor(ROOT.kBlack); tot.SetLineWidth(1)
+    tot.GetXaxis().SetTitle(f"m_{{jj}} [GeV]   ({xnote})" if xaxis else "")
+    tot.GetYaxis().SetTitle(count_title)
+    tot.GetXaxis().SetTitleSize(0.13 * ts); tot.GetXaxis().SetLabelSize(0.11 * ts if xaxis else 0)
+    tot.GetXaxis().SetTitleOffset(1.25); tot.GetXaxis().SetTickLength(0.03 * ts)
+    tot.GetYaxis().SetTitleSize(0.11 * ts); tot.GetYaxis().SetLabelSize(0.10 * ts); tot.GetYaxis().SetTitleOffset(0.5 if ts == 1.0 else 0.42)
+    tot.GetYaxis().SetNdivisions(503)
+    top = max(max(counts), 1)
+    sc = 1.0
+    tot.SetMinimum(max(0.5, min([n for n in counts if n > 0] or [1]) / 3.0)); tot.SetMaximum(top * 60.0)
+    if count_parts:   # the count split by case: a stack (linear, so the shares read), the total's outline on top
+        pad.SetLogy(False)
+        sc = 1e-3 if top >= 10000 else 1.0   # thousands: the stack in units of 10^3 (the printed counts stay exact)
+        if sc != 1.0:
+            for b in range(len(counts)): tot.SetBinContent(b + 1, counts[b] * sc)
+            tot.GetYaxis().SetTitle(count_title + " [10^{3}]")
+        tot.SetMinimum(0.0); tot.SetMaximum(top * sc * 2.45)
+        ROOT.TGaxis.SetMaxDigits(6)   # full numbers on the axis: the x10^3 exponent sits on the pad edge
+        tot.GetYaxis().SetNdivisions(203 if ts == 1.0 else 202)
+        tot.SetFillStyle(0)
+        tot.Draw("HIST")
+        stk = ROOT.THStack("stk_" + name, ""); KEEP.append(stk)
+        lg = ROOT.TLegend(0.16, 1 - pad.GetTopMargin() - 0.14 * ts, 0.97, 1 - pad.GetTopMargin() - 0.005)
+        lg.SetNColumns(len(count_parts) + (1 if labels else 0)); KEEP.append(lg)
+        lg.SetBorderSize(0); lg.SetFillStyle(0); lg.SetTextSize(0.075 * ts); lg.SetTextFont(42)
+        for k, (lab, col, vals) in enumerate(count_parts):
+            h = ROOT.TH1D(f"cp_{k}_" + name, "", len(edges) - 1, edges); KEEP.append(h)
+            for b, n in enumerate(vals): h.SetBinContent(b + 1, n * sc)
+            h.SetFillColor(ROOT.TColor.GetColor(col)); h.SetLineColor(ROOT.kBlack); h.SetLineWidth(1)   # as the region stacks
+            stk.Add(h)
+            if sum(vals) > 0: lg.AddEntry(h, lab, "f")
+        if labels: lg.AddEntry(ROOT.nullptr, "numbers: S / B", "")
+        stk.Draw("HIST SAME")
+        tot.Draw("HIST SAME")
+        if legend: lg.Draw()
+    else:
+        tot.Draw("HIST")
+    q = ROOT.TLatex(); q.SetTextFont(42); q.SetTextSize((0.064 if labels else 0.075) * ts); KEEP.append(q)
+    for b, n in enumerate(counts):
+        if n <= 0: continue
+        q.SetTextAlign(11 if b == 0 else 21)
+        x = edges[0] + 0.015 * (edges[-1] - edges[0]) if b == 0 else 0.5 * (edges[b] + edges[b + 1])
+        q.DrawLatex(x, top * (sc * (1.34 if b % 2 == 0 else 1.06) if count_parts else (12.0 if b % 2 == 0 else 3.0)),
+                    labels[b] if labels else f"{int(n):,}")
+    pad.RedrawAxis()
+
+
 def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_title, edges, style, methods,
-                  ref=1.0, xnote="last bin includes overflow", pct=False, yrange=None):
+                  ref=1.0, xnote="last bin includes overflow", pct=False, yrange=None, compact=False, count_parts=None,
+                  sig_counts=None):
     """The region plots' layout: per-m_jj-column values on top (one dodged marker
     per method), the MC event count of each column underneath on a log scale.
     `ref` draws a dashed reference line (None: none); `pct`: the values are a
@@ -214,8 +360,8 @@ def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_
     c = ROOT.TCanvas("c_" + os.path.basename(stem), "", 800, 780)
     pTop = ROOT.TPad("pTop", "", 0.0, 0.30, 1.0, 1.0)
     pBot = ROOT.TPad("pBot", "", 0.0, 0.00, 1.0, 0.30)
-    pTop.SetBottomMargin(0.025); pTop.SetTopMargin(0.06)
     pBot.SetTopMargin(0.04); pBot.SetBottomMargin(0.40)
+    pTop.SetBottomMargin(0.025); pTop.SetTopMargin(0.06)
     pTop.Draw(); pBot.Draw(); KEEP.extend([c, pTop, pBot])
     pTop.cd()
     frame = ROOT.TH1D("frame_" + os.path.basename(stem), "", len(edges) - 1, edges); KEEP.append(frame)
@@ -223,8 +369,9 @@ def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_
     # headroom for the label block and legend; at least enough that the legend's
     # bottom edge (pad NDC; frame from 0.025 to 0.94) stays above the highest point
     legbot = 0.81 - 0.036 * len(lines) - 0.055 * ((len(methods) + 1) // 2)
-    top = max(ytop + (ytop - ymin) * (0.95 + 0.13 * max(0, len(lines) - 3)),
-              ymin + 0.915 * (ytop - ymin) / (legbot - 0.04))
+    top = ymin + 0.915 * (ytop - ymin) / (legbot - 0.04)   # the legend's bottom edge clears the highest point
+    if not compact:   # the long label block needs room of its own
+        top = max(top, ytop + (ytop - ymin) * (0.95 + 0.13 * max(0, len(lines) - 3)))
     frame.SetMinimum(ymin); frame.SetMaximum(top)
     frame.GetXaxis().SetLabelSize(0); frame.GetYaxis().SetTitle(ylab); frame.GetYaxis().SetTitleOffset(1.25)
     frame.Draw("AXIS")
@@ -241,25 +388,16 @@ def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_
         leg.AddEntry(g, style[m][0] + legend_extra.get(m, ""), "p")
     leg.Draw()
     pTop.RedrawAxis()
-    pBot.cd(); pBot.SetLogy(True)
-    tot = ROOT.TH1D("tot_" + os.path.basename(stem), "", len(edges) - 1, edges); KEEP.append(tot)
-    for b, n in enumerate(counts): tot.SetBinContent(b + 1, n)
-    tot.SetFillColor(ROOT.TColor.GetColor("#DCE6F2")); tot.SetLineColor(ROOT.kBlack); tot.SetLineWidth(1)
-    tot.GetXaxis().SetTitle(f"m_{{jj}} [GeV]   ({xnote})")
-    tot.GetYaxis().SetTitle(count_title)
-    tot.GetXaxis().SetTitleSize(0.13); tot.GetXaxis().SetLabelSize(0.11); tot.GetXaxis().SetTitleOffset(1.25)
-    tot.GetYaxis().SetTitleSize(0.11); tot.GetYaxis().SetLabelSize(0.10); tot.GetYaxis().SetTitleOffset(0.5)
-    tot.GetYaxis().SetNdivisions(503)
-    top = max(max(counts), 1)
-    tot.SetMinimum(max(0.5, min([n for n in counts if n > 0] or [1]) / 3.0)); tot.SetMaximum(top * 60.0)
-    tot.Draw("HIST")
-    q = ROOT.TLatex(); q.SetTextFont(42); q.SetTextSize(0.075); KEEP.append(q)
-    for b, n in enumerate(counts):
-        if n <= 0: continue
-        q.SetTextAlign(11 if b == 0 else 21)
-        x = edges[0] + 0.015 * (edges[-1] - edges[0]) if b == 0 else 0.5 * (edges[b] + edges[b + 1])
-        q.DrawLatex(x, top * (12.0 if b % 2 == 0 else 3.0), f"{int(n):,}")
-    pBot.RedrawAxis()
+    if sig_counts is None:
+        _count_panel(pBot, stem, counts, count_title, count_parts, edges, xnote, True, 1.0, True)
+    else:   # S/B-type figures: signal + background MC in ONE panel, case-stacked; labels "S / B"
+        scounts, sparts = sig_counts
+        tot = [a + b for a, b in zip(scounts, counts)]
+        parts = None
+        if count_parts and sparts:
+            parts = [(lab, col, [x + y for x, y in zip(sv, bv)]) for (lab, col, sv), (_, _, bv) in zip(sparts, count_parts)]
+        _count_panel(pBot, stem, tot, "S + B MC", parts, edges, xnote, True, 1.0, True,
+                     labels=[(f"{a / 1000:.1f}k" if a >= 10000 else f"{a:,}") + f" / {b:,}" for a, b in zip(scounts, counts)])
     c.Print(stem + ".pdf"); c.Print(stem + ".png")
     print("wrote", stem + ".pdf / .png")
 

@@ -67,7 +67,7 @@ import numpy as np
 import uproot
 import awkward as ak
 import vbs_time_veto_common as C
-from vbf_hinv_sr import METHODS, REGIONS, SR_J1_PT, SR_J2_PT, MZ_WIN, load, take, sr_select, jet_sigma, outcomes, ratio
+from vbf_hinv_sr import METHODS, REGIONS, SR_J1_PT, SR_J2_PT, MZ_WIN, load, subset, take, sr_select, jet_sigma, outcomes, ratio
 
 MJJ_EDGES = [800, 1000, 1500, 2000, 3500, 5000]     # the SR's m_jj bins; the last one includes the overflow
 SCAN = np.array([1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 8.0, 12.0])
@@ -94,6 +94,7 @@ ap.add_argument("--mjj-edges", default=",".join(str(x) for x in MJJ_EDGES),
                 help="m_jj columns of the figures [GeV]; the last one includes the overflow")
 ap.add_argument("--calib-file", help="measure the jet-time correction f(n) on this signal file's HS legs instead of --sig's (to compare two productions under one calibration)")
 ap.add_argument("--out", required=True, help="output stem")
+C.add_acceptance_args(ap)
 args = ap.parse_args()
 REG = REGIONS[args.region]
 WHERE = "in the SR" if args.region == "sr" else f"in the {args.region} set"
@@ -116,13 +117,40 @@ samples = {"sig": load(args.sig, "sig", args.sig_norm, "met_truth", False)}
 if args.bkg: samples["bkg"] = load(args.bkg, "bkg", args.bkg_norm, "z_pt", True)
 calib = C.measure(samples["sig"]["e"] if not args.calib_file else C.legs(args.calib_file), True,
                   "the sig file's HS legs" if not args.calib_file else f"{args.calib_file}'s HS legs")   # one procedure for S and B
-for s in samples.values():
+ACC = C.ACCEPTANCE[args.acceptance] is not None
+for r in list(samples):
+    s = samples[r]
     s["calib"] = calib
     s["sig"] = jet_sigma(s)
     s["none"] = sr_select(s, ak.ones_like(s["J"].jet_pt, dtype=bool), args.region)
+    if ACC:
+        # --acceptance: keep the events whose NO-TIMING tagging pair (j1, j2) is in the
+        # category, so every method is measured on one fixed set of events. A variant
+        # that removes jets can re-form the pair; it is still judged on those events.
+        # The SR pair is the stored a_/b_ legs (the two leading JVT-passing jets) in
+        # every event that passes -- checked here -- so the legs' counts apply; the
+        # timed count exists only per leg, jet_nhgtd per jet.
+        col = C.acc_column(args.acc_count)
+        if "a_" + col not in s["e"]:
+            raise SystemExit(f"{s['path']}: no {col} -- rerun util/vbs_time_veto for --acceptance")
+        ok0 = s["none"]["ok"]
+        j1, j2 = take(s["J"].jet_idx, s["none"]["i1"]), take(s["J"].jet_idx, s["none"]["i2"])
+        a, b = s["e"]["a_idx"], s["e"]["b_idx"]
+        if not np.all((((j1 == a) & (j2 == b)) | ((j1 == b) & (j2 == a)))[ok0]):
+            raise SystemExit(f"{s['path']}: the no-timing SR pair is not the stored legs in some event")
+        acc = ok0 & C.acceptance_mask(s["e"]["a_" + col], s["e"]["b_" + col], args.acceptance, args.acc_min_trk)
+        s["acc_frac"] = (s["w"][acc].sum() / s["w"][ok0].sum(), int(acc.sum()), int(ok0.sum()))
+        cal, sg = s["calib"], s["sig"]
+        s = samples[r] = subset(s, acc)
+        s["calib"], s["sig"] = cal, sg[acc]
+        s["none"] = sr_select(s, ak.ones_like(s["J"].jet_pt, dtype=bool), args.region)
+        assert s["none"]["ok"].all(), "the no-timing selection is event-local: every kept event must pass again"
     s["out"] = outcomes(s, args.nsigma, args.min_trk, args.region)
     print(f"[{s['role']}] {s['path']}: {s['info']['njobs']} job(s), {s['info']['n_read']:,} read, "
           f"{len(s['w']):,} SR candidates stored, {int(s['none']['ok'].sum()):,} {WHERE}")
+    if ACC:
+        print(f"[{s['role']}] acceptance {args.acceptance}: {s['acc_frac'][1]:,} of {s['acc_frac'][2]:,} MC events "
+              f"{WHERE}, {100 * s['acc_frac'][0]:.1f}% of their weight")
 
 # ── Summary ──────────────────────────────────────────────────────────────────
 both = "bkg" in samples
@@ -138,6 +166,11 @@ for s in samples.values():
     md.append(f"- **{s['role']}**: `{s['path']}` -- {i['njobs']} job(s), {i['n_read']:,} events read (sum w "
               f"{i['sumw_read']:.6g}), {len(s['w']):,} SR candidates ({s['rcol']} >= {i['sr_recoil_min']:g}); "
               f"normalisation: {C.NORM[s['norm']]['note'] if s['norm'] != 'none' else 'none'}")
+    if ACC:
+        f, n, n0 = s["acc_frac"]
+        md.append(f"  - **acceptance `{args.acceptance}`** (>= {args.acc_min_trk} HGTD track(s), {args.acc_count}, on j1 and j2 as no-timing "
+                  f"tagging pair): {n:,} of {n0:,} MC events {WHERE}, {100 * f:.1f}% of their weight; every number "
+                  "below is within these events")
 md += ["", f"**Cut flow {WHERE} without timing** (cumulative; MC events and the weighted fraction of the stored "
        "candidates)", "", "| cut | " + " | ".join(f"{r} MC | {r} frac." for r in samples) + " |",
        "|---|" + "---|---|" * len(samples)]
@@ -223,6 +256,7 @@ SEL1 = (("SR" if args.region == "sr" else "SR pair") + f": j_{{1,2}} > {J1:g}, {
 SEL2 = ("2-4 jets > 25 GeV (JVT), j_{3,4}: C < 0.6, m_{rel} < 0.05; fJVT on j_{1,2}; E_{T}^{jet} > 140 GeV"
         if args.region == "sr" else
         f"fJVT on j_{{1,2}};  {args.region} set: no jet veto, no E_{{T}}^{{jet}} cut, no E_{{T}}^{{miss}} bins")
+ACC_LINE = C.acceptance_line(args.acceptance, args.acc_min_trk, args.acc_count)
 TIMING = (f"timing |#Deltat| / #sigma #geq {args.nsigma:g}: filled = event veto on j_{{1,2}}, "
           "open = failing jets removed first")
 CALIB = (f"#sigma_{{jet}} #times {calib.fac[0]:.2f} (1 track) #rightarrow {calib.fac[-1]:.2f} "
@@ -257,7 +291,7 @@ for r, ylab, label in [("sig", "Signal yield / no timing", args.sig_label),
     extra = {m: f"  ({ratio(s['w'], s['out'][m]['ok'], s['none']['ok'])[0]:.3f})" for m in DRAWN}
     counts = [n for _, _, _, n in series[DRAWN[0]]]
     C.column_figure(f"{args.out}_{r}_ratio_mjj", ylab, series, extra, label,
-                    [SEL1, SEL2, met_line(r), TIMING, CALIB + ";  all bins in brackets"],
+                    [SEL1] + ([ACC_LINE] if ACC_LINE else []) + [SEL2, met_line(r), TIMING, CALIB + ";  all bins in brackets"],
                     counts, "MC events", EDGES, STYLE, DRAWN, xnote="final pair; last bin includes overflow",
                     yrange=RATIO_RANGE)
 
@@ -280,7 +314,7 @@ if both:
         extra = {m: f"  ({100 * (summ[m][0] / summ[m][2] ** p - 1):+.1f}%)" for m in DRAWN}
         C.column_figure(f"{args.out}_{stem}", f"{name} change vs no timing [%]", change, extra,
                         "S: VBF H#rightarrowinv.,  B: Z(#rightarrowll)+jets",
-                        [SEL1, SEL2, met_line("bkg").replace("p_{T}^{ll}", "E_{T}^{miss} (S: truth, B: p_{T}^{ll})"),
+                        [SEL1] + ([ACC_LINE] if ACC_LINE else []) + [SEL2, met_line("bkg").replace("p_{T}^{ll}", "E_{T}^{miss} (S: truth, B: p_{T}^{ll})"),
                          TIMING, f"all m_{{jj}} bins in brackets; > 0 = the timing test raises {name}"],
                         counts, "B MC events", EDGES, STYLE, DRAWN, ref=0.0, pct=True,
                         xnote="final pair; last bin includes overflow")
@@ -302,7 +336,7 @@ if both:
             extra[m] = f"  ({whole:{fmt}})"
         C.column_figure(f"{args.out}_{stem}_yields", f"{name.replace('/', ' / ')}  per m_{{jj}} bin", absol, extra,
                         f"S: VBF H#rightarrowinv.,  B: Z(#rightarrowll)+jets,  {args.lumi:g} fb^{{-1}}",
-                        [SEL1, SEL2, TIMING,
+                        [SEL1] + ([ACC_LINE] if ACC_LINE else []) + [SEL2, TIMING,
                          f"S at B(H#rightarrowinv) = {100 * args.bf_hinv:g}%;  B = Z(#rightarrowll)+jets alone "
                          "(stand-in for Z(#rightarrow#nu#nu));  all bins in brackets"],
                         counts, "B MC events", EDGES, STYLE, ["none"] + DRAWN, ref=None,

@@ -81,6 +81,13 @@ parser.add_argument('--tagged_out', type=str, default=None,
                     help='"IDX:JVT,IDX:fJVT,...": jets the pileup tagger removed '
                          'before pairing. Drawn faded with a dotted edge and '
                          'labelled, since they could not be a VBS leg.')
+parser.add_argument('--jet_time_tracks', type=str, default=None,
+                    help='"J:i,i;J:i": for jet J (ntuple index), the tracks its time is built from '
+                         '(vbs_time_veto core estimate); drawn thick in the R-Z view and marked at their '
+                         'times in the time histogram, one colour per jet')
+parser.add_argument('--drop_tagged', action='store_true',
+                    help='leave the --tagged_out jets out of the drawing altogether (listed in one '
+                         'line instead); the other jets keep their ntuple numbering (Jet N = index + 1)')
 parser.add_argument('--expect_rpt', type=str, default=None,
                     help='"z_hs,t_hs,z_pu,t_pu" from the analysis for the --legs pair '
                          '(nan to skip one); prints RPT_CHECK OK|MISMATCH')
@@ -637,7 +644,10 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
                 color=trk_color.get(track['idx'], 'lightgrey'),
                 linestyle='solid' if track['stat'] == 1 else 'dashed')
 
+    _row = 0
     for (jet_i, jet_tup) in enumerate(jet_info_list):
+        if args.drop_tagged and jet_tup['idx'] in tagged_out:
+            continue
         highlighted = (args.jet_idx is not None and jet_tup.get('idx') == args.jet_idx)
         jet_color = 'orange' if highlighted else ('green' if _is_hs(jet_tup) else 'grey')
         x_off1, y_off1 = jet_tup['x']-0.15*jet_tup['y'], jet_tup['y']+0.15*jet_tup['x']
@@ -661,7 +671,9 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
                     hatch=VBS_HATCH, linewidth=VBS_HATCH_LW, zorder=VBS_HATCH_Z)
 
         txt_color = 'orange' if highlighted else ('green' if _is_hs(jet_tup) else 'black')
-        label = f"Jet {jet_i+1}: $p_T$={jet_tup['pt']:.0f} GeV, $\eta$={jet_tup['eta']:.1f}"
+        # numbered by ntuple index: the same as the list position (jets are pT-ordered and
+        # only those >= 30 GeV are kept), and stable when --drop_tagged hides some
+        label = f"Jet {jet_tup['idx']+1}: $p_T$={jet_tup['pt']:.0f} GeV, $\eta$={jet_tup['eta']:.1f}"
         if jet_tup.get('isVBS'):
             _rz = jet_tup.get('rpt', float('nan'))
             _rt = jet_tup.get('rpt_t')
@@ -675,8 +687,16 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
         if _out:
             label += f"  [fails {_out}]"
             txt_color = 'grey'
-        ax.text(reco_hs_z - 6.8, 0.9 - (1.2 + jet_i*0.1),
+        ax.text(reco_hs_z - 6.8, 0.9 - (1.2 + _row*0.1),
                 label, weight='bold', fontsize=12, color=txt_color)
+        _row += 1
+    if args.drop_tagged and tagged_out:
+        _by = {}
+        for _i, _why in sorted(tagged_out.items()):
+            _by.setdefault(_why, []).append(f"{_i+1}")
+        ax.text(reco_hs_z - 6.8, 0.9 - (1.2 + _row*0.1),
+                "not drawn: " + "; ".join(f"Jet {', '.join(v)} ({k})" for k, v in _by.items()),
+                fontsize=11, color='grey', style='italic')
 
     draw_eta_reference_lines(ax, reco_hs_z, 2.4)
     ax.set_ylim(-1.0, 1.0)
@@ -741,7 +761,7 @@ def plot_rz_display(ax, track_info_list, jet_info_list):
     if args.jet_idx is not None:
         legend_handles.append(mpatches.Rectangle((0, 0), 1, 1, color='orange', alpha=0.7))
         legend_labels.append('Target jet')
-    if tagged_out:
+    if tagged_out and not args.drop_tagged:
         legend_handles.append(mpatches.Rectangle((0, 0), 1, 1, facecolor='lightgrey',
                                                  alpha=0.4, edgecolor='black',
                                                  linestyle=':'))
@@ -910,6 +930,87 @@ with PdfPages(filename) as pdf:
     # ---- Upper Region: R-Z Display ----
     plot_rz_display(event_display2, track_info, jet_info)
 
+    # ---- The tagging jets' time tracks (--jet_time_tracks) ----
+    JT_COLORS = ['#D81B60', '#00897B', '#8E24AA', '#F4511E']
+    jet_time_sets = []
+    if args.jet_time_tracks:
+        for k, tok in enumerate(args.jet_time_tracks.split(';')):
+            if ':' not in tok: continue
+            j, idxs = tok.split(':')
+            idxs = [int(i) for i in idxs.split(',') if i != '']
+            if idxs: jet_time_sets.append((int(j), idxs, JT_COLORS[k % len(JT_COLORS)]))
+    jt_handles = []
+    for j, idxs, col in jet_time_sets:
+        for i in idxs:
+            pt, eta, phi = branch.Track_pt[i], branch.Track_eta[i], branch.Track_phi[i]
+            pz = pt * np.sinh(eta)
+            sx = np.sign(eta) if eta != 0 else 1
+            sy = np.sign(np.sin(phi)) if np.sin(phi) != 0 else 1
+            th = np.arctan(pt / abs(pz))
+            x, y = (pt / 2) * np.cos(th) * sx, (pt / 2) * np.sin(th) * sy
+            event_display2.plot([branch.Track_z0[i], branch.Track_z0[i] + x], [0, y], color=col, lw=3.2,
+                                solid_capstyle='round', zorder=8)
+        jt_handles.append(mlines.Line2D([], [], color=col, lw=3.2,
+                                        label=f'Jet {j + 1} time: {len(idxs)} track' + ('s' if len(idxs) > 1 else '')))
+    # ---- Tagging-jet tracks outside the drawn z window: say where they are ----
+    # The R-Z view spans +-7 mm around the vertex; a pileup jet's tracks can sit 10-100+ mm away
+    # and would otherwise be invisible. Per tagging jet and side: an arrow at the edge with the
+    # number of its ghost tracks out there, their pT and z0 range (time tracks counted separately).
+    zlo, zhi = event_display2.get_xlim()
+    jt_col = {j: col for j, _, col in jet_time_sets}
+    jt_idx = {j: set(idxs) for j, idxs, _ in jet_time_sets}
+    off_rows = {-1: [], +1: []}
+    if vbs_pair[0] is not None:
+        for _p in vbs_pair:
+            _j = jet_info[_p]['idx']
+            gt = list(branch.AntiKt4EMTopoJets_ghostTrack_idx[_j])
+            tot = sum(branch.Track_pt[i] for i in gt)
+            for side in (-1, +1):
+                sel = [i for i in gt if (branch.Track_z0[i] < zlo if side < 0 else branch.Track_z0[i] > zhi)]
+                if not sel: continue
+                zs = [branch.Track_z0[i] for i in sel]
+                ntime = len(jt_idx.get(_j, set()) & set(sel))
+                txt = (f"Jet {_j + 1}: {len(sel)} track{'s' if len(sel) > 1 else ''}, "
+                       f"{sum(branch.Track_pt[i] for i in sel):.0f} of {tot:.0f} GeV\n"
+                       f"z0 = {min(zs):.0f} to {max(zs):.0f} mm" if len(sel) > 1 else
+                       f"Jet {_j + 1}: 1 track, {branch.Track_pt[sel[0]]:.0f} of {tot:.0f} GeV\nz0 = {zs[0]:.0f} mm")
+                if ntime: txt += f" ({ntime} time track{'s' if ntime > 1 else ''})"
+                off_rows[side].append((txt, jt_col.get(_j, '#333333')))
+    nrow = max(len(r) for r in off_rows.values())
+    if nrow:   # a thin panel of its own under the R-Z view: the view itself is left untouched
+        # explicit layout in inches: the R-Z view and the time histogram keep their exact sizes; the
+        # strip goes into the gap between them (under the R-Z x label, above the time histogram's
+        # title), and the figure grows only by what that gap lacks
+        W, H0 = fig2.get_size_inches()
+        rz, th = event_display2.get_position(), time_histo2.get_position()
+        gap = (rz.y0 - th.y1) * H0
+        h_strip = 0.5 * nrow + 0.15
+        need = 0.55 + 0.30 + h_strip + 0.45          # x label, strip title, strip, time-histogram title
+        grow = max(0.0, need - gap)
+        H = H0 + grow
+        fig2.set_size_inches(W, H)
+        event_display2.set_position([rz.x0, (rz.y0 * H0 + grow) / H, rz.width, rz.height * H0 / H])
+        time_histo2.set_position([th.x0, th.y0 * H0 / H, th.width, th.height * H0 / H])
+        strip = fig2.add_axes([rz.x0, (th.y1 * H0 + 0.45) / H, rz.width, h_strip / H])
+        strip.set_xlim(0, 1); strip.set_ylim(-nrow - 0.2, 0.2)
+        strip.set_xticks([]); strip.set_yticks([])
+        strip.set_facecolor('#F7F7F7')
+        strip.set_title('tagging-jet ghost tracks outside the z window above (arrows: which side)',
+                        fontsize=8.5, color='#555555', style='italic', pad=2)
+        for side, rows in off_rows.items():
+            for k, (txt, col) in enumerate(rows):
+                y = -k - 0.4
+                strip.annotate(txt, xy=(0.0 if side < 0 else 1.0, y), xytext=(0.07 if side < 0 else 0.93, y),
+                               ha='left' if side < 0 else 'right', va='center', fontsize=8.5, color=col,
+                               bbox=dict(boxstyle='round,pad=0.25', fc='white', ec=col),
+                               arrowprops=dict(arrowstyle='-|>', color=col, lw=1.6))
+    if jt_handles:
+        _main_leg = event_display2.get_legend()          # keep the tracks-and-jets legend
+        event_display2.legend(handles=jt_handles, loc='lower right', fontsize='small',
+                              title="Tagging-jet time tracks", title_fontsize='small')
+        if _main_leg is not None:
+            event_display2.add_artist(_main_leg)
+
     # ---- Lower Region: Z-T Display ----
     # No timed clusters (possible when the t0 is not a cluster time, e.g. the
     # HGTD or truth t0) leaves nothing to histogram; say so instead of crashing.
@@ -949,6 +1050,16 @@ with PdfPages(filename) as pdf:
     else:
         time_histo2.text(0.5, 0.5, 'no timed clusters', transform=time_histo2.transAxes,
                          ha='center', va='center', fontsize=14, color='grey')
+
+    # The tagging jets' time tracks: each at its HGTD time with its resolution
+    for k, (j, idxs, col) in enumerate(jet_time_sets):
+        ts = [branch.Track_time[i] for i in idxs]
+        rs = [branch.Track_timeRes[i] for i in idxs]
+        yv = (0.30 + 0.08 * k) * max_val
+        time_histo2.errorbar(ts, [yv] * len(ts), xerr=rs, fmt='D', color=col, ms=9, mec='black', capsize=3,
+                             lw=1.8, zorder=6, label=f'Jet {j + 1} time tracks')
+        extended_min_time = min(extended_min_time, min(ts) - 40)
+        extended_max_time = max(extended_max_time, max(ts) + 40)
 
     # Cluster Times
     time_histo2.scatter(cluster_times, [0.1*max_val]*len(cluster_times),
@@ -1026,6 +1137,8 @@ with PdfPages(filename) as pdf:
     for jet in jet_info:
         jet_eta = jet['eta']
         if abs(jet_eta) + 0.4 < ETA_MIN or abs(jet_eta) - 0.4 > ETA_MAX:
+            continue
+        if args.drop_tagged and jet['idx'] in tagged_out:
             continue
         highlighted = (args.jet_idx is not None and jet.get('idx') == args.jet_idx)
         jet_color = 'orange' if highlighted else ('green' if _is_hs(jet) else 'grey')

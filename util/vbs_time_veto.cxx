@@ -141,7 +141,14 @@ namespace {
 // uses (DIST_CUT_T_REFINED). Chosen on local VBF truth, 2026-09-28, against
 // dR 0.4 and 3 sigma: dR 0.2 is worth ~6 points of HS+HS pass rate, the cut
 // ~1 point, and picking the cluster by sum pT rather than track count ~1 point.
-constexpr double JET_TIME_DR       = 0.2;
+constexpr double JET_TIME_DR       = 0.2;   // default; --jet-time-dr=X overrides (output tagged _jtdrXpY)
+static double gJetTimeDr = JET_TIME_DR;
+static bool   gPureTimes = false;   // --pure-times: write the pure_ (perfect-assignment) jet times; tagged _pure
+// --jet-time-score=waves: pick the jet's time cluster by the WAVeS proximity weight, sum pT_i / max(dR_i,
+// WAVES_DR_FLOOR) over its tracks (the jet's own pT is common to all its clusters and drops out), instead
+// of the highest sum pT: tracks near the axis -- the jet's own -- decide; output tagged _jtwaves.
+// Meant with no cone (--jet-time-dr=1.0): every timed ghost track enters, the score does the selection.
+static bool   gJetTimeWaves = false;
 constexpr double JET_TIME_DIST_CUT = 2.0;
 
 // The clustering input for the t0 rows -- rpt_v5_hist's, verbatim.
@@ -199,7 +206,7 @@ JetTime jetTimeCore(BranchPointerWrapper& b, int j) {
     if (!(b.trackTimeRes[idx] > 0.0)) continue;
     if (!passTrackKinematics((size_t)idx, &b, MIN_TRACK_PT, MAX_TRACK_PT)) continue;
     const double dr = std::hypot(b.trackEta[idx] - je, TVector2::Phi_mpi_pi(b.trackPhi[idx] - jp));
-    if (dr >= JET_TIME_DR) continue;
+    if (dr >= gJetTimeDr) continue;
     cand.push_back(idx);
   }
   out.nCand = (int)cand.size();
@@ -209,8 +216,18 @@ JetTime jetTimeCore(BranchPointerWrapper& b, int j) {
                                                /*checkTimeValid=*/true, /*usez0=*/false);
   doIterativeClustering(&cl, JET_TIME_DIST_CUT);
   const Cluster* best = nullptr;   // TRKPT score = sum pT (summed on every merge)
-  for (const Cluster& c : cl)
-    if (!best || c.scores.at(Score::TRKPT.id) > best->scores.at(Score::TRKPT.id)) best = &c;
+  double bestScore = -1.0;
+  for (const Cluster& c : cl) {
+    double sc = c.scores.at(Score::TRKPT.id);
+    if (gJetTimeWaves) {   // the WAVeS proximity weight, per track
+      sc = 0.0;
+      for (int idx : c.trackIndices) {
+        const double dr = std::hypot(b.trackEta[idx] - je, TVector2::Phi_mpi_pi(b.trackPhi[idx] - jp));
+        sc += b.trackPt[idx] / std::max(dr, WAVES_DR_FLOOR);
+      }
+    }
+    if (!best || sc > bestScore) { best = &c; bestScore = sc; }
+  }
   out.t     = best->values[0];
   out.sig   = best->sigmas[0];
   out.n     = (int)best->trackIndices.size();
@@ -219,6 +236,58 @@ JetTime jetTimeCore(BranchPointerWrapper& b, int j) {
   for (int idx : best->trackIndices)
     if (b.trackToTruthvtx[idx] == 0) hs += b.trackPt[idx];
   out.hsFrac = out.sumPt > 0.0 ? hs / out.sumPt : -1.0;
+  return out;
+}
+
+// pure_ (--pure-times, TRUTH): the jet time with a perfect track-to-origin assignment -- the
+// timed ghost tracks passing the track selection in HGTD that come from the hard scatter
+// (truth vertex 0; wantHS) or from anywhere else (pileup, or unlinked), with NO dR cone and
+// no minimum count, clustered in time as core_ and the highest-sum-pT cluster taken. The
+// "ideal jet time" rung of the veto accounting: a hard-scatter jet timed by its own tracks,
+// a pileup jet by its own (dominant) collision's tracks.
+JetTime jetTimePure(BranchPointerWrapper& b, int j, bool wantHS) {
+  JetTime out;
+  const int nT = (int)b.trackPt.GetSize();
+  std::vector<int> cand;
+  for (int idx : b.topoJetGhostTrackIdx[j]) {
+    if (idx < 0 || idx >= nT || b.trackTimeValid[idx] != 1) continue;
+    if (!(b.trackTimeRes[idx] > 0.0)) continue;
+    if (!passTrackKinematics((size_t)idx, &b, MIN_TRACK_PT, MAX_TRACK_PT)) continue;
+    if ((b.trackToTruthvtx[idx] == 0) != wantHS) continue;
+    cand.push_back(idx);
+  }
+  out.nCand = (int)cand.size();
+  if (cand.empty()) return out;
+  static const std::unordered_map<int, double> kNone;
+  std::vector<Cluster> cl = makeSimpleClusters(cand, &b, /*useSmearedTimes=*/false, kNone, kNone,
+                                               /*checkTimeValid=*/true, /*usez0=*/false);
+  doIterativeClustering(&cl, JET_TIME_DIST_CUT);
+  const Cluster* best = nullptr;
+  for (const Cluster& c : cl)
+    if (!best || c.scores.at(Score::TRKPT.id) > best->scores.at(Score::TRKPT.id)) best = &c;
+  out.t = best->values[0];  out.sig = best->sigmas[0];
+  out.n = (int)best->trackIndices.size();
+  out.sumPt = best->scores.at(Score::TRKPT.id);
+  out.hsFrac = wantHS ? 1.0 : 0.0;
+  return out;
+}
+
+// HGTD acceptance of a jet, from its TRACKS rather than its axis: a jet whose
+// axis is past |eta| = 4.0 (or just inside 2.38) can still have ghost tracks
+// in HGTD. n = ghost tracks passing the standard track selection
+// (passTrackKinematics: 1 < pT < 30 GeV, quality, 2.38 < |eta| < 4.0) with or
+// without a time -- the geometric acceptance; nTimed = those of them with a
+// valid HGTD time. Reco-only, so the same definition works in data.
+struct HgtdCount { int n = 0, nTimed = 0; };
+HgtdCount hgtdTracks(BranchPointerWrapper& b, int j) {
+  HgtdCount out;
+  const int nT = (int)b.trackPt.GetSize();
+  for (int idx : b.topoJetGhostTrackIdx[j]) {
+    if (idx < 0 || idx >= nT) continue;
+    if (!passTrackKinematics((size_t)idx, &b, MIN_TRACK_PT, MAX_TRACK_PT)) continue;
+    ++out.n;
+    if (b.trackTimeValid[idx] == 1 && b.trackTimeRes[idx] > 0.0) ++out.nTimed;
+  }
   return out;
 }
 
@@ -232,6 +301,9 @@ struct Leg {
   int    core_n = 0, core_ncand = 0;
   double all_t = 0.0, all_sig = -1.0, all_hsfrac = -1.0;
   int    all_n = 0;
+  int    hgtd_n = 0, hgtd_ntimed = 0;     // hgtdTracks(): ghost tracks in HGTD acceptance
+  double pure_hs_t = 0.0, pure_hs_sig = -1.0, pure_pu_t = 0.0, pure_pu_sig = -1.0;   // --pure-times
+  int    pure_hs_n = 0, pure_pu_n = 0;
 };
 
 // The t0 sources, in column order. truth has sigma 0 and inflation 1.
@@ -257,6 +329,7 @@ struct Row {
   // jet counts, so these events are a superset of any re-paired selection. The
   // legs are the entries whose jet_idx equals a_idx / b_idx.
   std::vector<int>    jet_idx, jet_hs, jet_pu, jet_n;
+  std::vector<int>    jet_nhgtd;        // hgtdTracks().n
   std::vector<float>  jet_pt, jet_eta, jet_phi;
   std::vector<double> jet_t, jet_sig;   // core_ jet time; jet_n = 0: no time
   // --sr only: the tagger's discriminants and windows for every stored jet
@@ -335,9 +408,13 @@ int main(int argc, char** argv) {
       if (v != "jets" && v != "truth") { std::cerr << "[veto] " << a << ": jets | truth\n"; return 1; }
       srMetJets = (v == "jets");
     }
+    if (a.rfind("--jet-time-dr=", 0) == 0) { gJetTimeDr = std::stod(a.substr(14)); continue; }
+    if (a == "--pure-times") { gPureTimes = true; continue; }
+    if (a == "--jet-time-score=waves") { gJetTimeWaves = true; continue; }
+    if (a == "--jet-time-score=sumpt") { gJetTimeWaves = false; continue; }
     if (a.rfind("--jvt=", 0) != 0) continue;
     const JvtWP* hit = jvtWPByName(a.substr(6));
-    if (!hit) { std::cerr << "[veto] unknown " << a << " (none|loose|tight)\n"; return 1; }
+    if (!hit) { std::cerr << "[veto] unknown " << a << " (none|loose|tight|looseext)\n"; return 1; }
     wpSel = hit;
   }
   const JvtWP& WP = *wpSel;
@@ -348,6 +425,16 @@ int main(int argc, char** argv) {
     const std::string tag = std::string(WP.tag).substr(1);
     SELECTION_TAG = SELECTION_TAG.empty() ? tag : SELECTION_TAG + "_" + tag;
   }
+  // --jet-time-dr: a different jet-time cone is a different estimator -- tagged, so it can
+  // never overwrite the default (0.2) outputs
+  if (gJetTimeDr != JET_TIME_DR) {
+    if (!(gJetTimeDr > 0.0 && gJetTimeDr <= 1.0)) { std::cerr << "[veto] --jet-time-dr must be in (0, 1]\n"; return 1; }
+    std::ostringstream os; os << "jtdr" << std::fixed << std::setprecision(1) << gJetTimeDr;
+    std::string tag = os.str(); std::replace(tag.begin(), tag.end(), '.', 'p');
+    SELECTION_TAG = SELECTION_TAG.empty() ? tag : SELECTION_TAG + "_" + tag;
+  }
+  if (gJetTimeWaves) SELECTION_TAG = SELECTION_TAG.empty() ? "jtwaves" : SELECTION_TAG + "_jtwaves";
+  if (gPureTimes) SELECTION_TAG = SELECTION_TAG.empty() ? "pure" : SELECTION_TAG + "_pure";
   // --sr: the legs pass JVT loose; fJVT and everything else is applied offline
   const JvtWP& WPL = *jvtWPByName("loose");
   if (srMetJets && !srMode) { std::cerr << "[veto] --sr-met=jets needs --sr\n"; return 1; }
@@ -389,7 +476,7 @@ int main(int argc, char** argv) {
   else
     std::cout << " jvt=" << WP.name << " m_jj >= " << VBS_JET_MJJ << " |Deta| >= " << VBS_JET_D_ETA;
   std::cout << "  jet time: core = timed ghost tracks, " << MIN_TRACK_PT << "-" << MAX_TRACK_PT
-            << " GeV, dR < " << JET_TIME_DR << ", " << JET_TIME_DIST_CUT
+            << " GeV, dR < " << gJetTimeDr << ", " << JET_TIME_DIST_CUT
             << "-sigma time clustering, max sum-pT cluster\n";
   std::printf("[veto] t0 inflation (rpt_v5's, '%s'): hgtd %.2f trkptz %.2f waves %.2f tzp %.2f\n",
               SAMPLE_NAME.empty() ? "local (vbf)" : SAMPLE_NAME.c_str(),
@@ -458,6 +545,11 @@ int main(int argc, char** argv) {
     br("core_sumpt", &L.core_sumpt, "D");  br("core_hsfrac", &L.core_hsfrac, "D");
     br("all_t", &L.all_t, "D");  br("all_sig", &L.all_sig, "D");
     br("all_n", &L.all_n, "I");  br("all_hsfrac", &L.all_hsfrac, "D");
+    br("hgtd_n", &L.hgtd_n, "I");  br("hgtd_ntimed", &L.hgtd_ntimed, "I");
+    if (gPureTimes) {
+      br("pure_hs_t", &L.pure_hs_t, "D");  br("pure_hs_sig", &L.pure_hs_sig, "D");  br("pure_hs_n", &L.pure_hs_n, "I");
+      br("pure_pu_t", &L.pure_pu_t, "D");  br("pure_pu_sig", &L.pure_pu_sig, "D");  br("pure_pu_n", &L.pure_pu_n, "I");
+    }
   };
   legBranches("a_", R.a);
   legBranches("b_", R.b);
@@ -470,6 +562,7 @@ int main(int argc, char** argv) {
   tree.Branch("jet_t",   &R.jet_t);
   tree.Branch("jet_sig", &R.jet_sig);
   tree.Branch("jet_n",   &R.jet_n);
+  tree.Branch("jet_nhgtd", &R.jet_nhgtd);
   if (srMode) {
     tree.Branch("met_jets", &R.met_jets, "met_jets/F");
     tree.Branch("jet_rpt",     &R.jet_rpt);
@@ -679,6 +772,7 @@ int main(int argc, char** argv) {
       R.jet_t.push_back(c.t);
       R.jet_sig.push_back(c.sig);
       R.jet_n.push_back(c.n);
+      R.jet_nhgtd.push_back(hgtdTracks(branch, j).n);
       if (srMode) {
         R.jet_rpt.push_back(D[j].rpt);
         R.jet_fjvt.push_back(D[j].fjvt);
@@ -702,6 +796,13 @@ int main(int argc, char** argv) {
       L.core_sumpt = c.sumPt;  L.core_hsfrac = c.hsFrac;
       const JetTime g = jetTimeAllGhost(branch, j);
       L.all_t = g.t;  L.all_sig = g.sig;  L.all_n = g.n;  L.all_hsfrac = g.hsFrac;
+      const HgtdCount h = hgtdTracks(branch, j);
+      L.hgtd_n = h.n;  L.hgtd_ntimed = h.nTimed;
+      if (gPureTimes) {
+        const JetTime ph = jetTimePure(branch, j, true), pp = jetTimePure(branch, j, false);
+        L.pure_hs_t = ph.t;  L.pure_hs_sig = ph.sig;  L.pure_hs_n = ph.n;
+        L.pure_pu_t = pp.t;  L.pure_pu_sig = pp.sig;  L.pure_pu_n = pp.n;
+      }
       if (L.hs) { calCore.add(c, tHS); calAll.add(g, tHS); }
     };
     if (legI >= 0) fillLeg(legI, R.a);
@@ -755,7 +856,8 @@ int main(int argc, char** argv) {
   // --sr removes no jet here (jvt_wp -1) and keeps SR candidates (the pair cuts)
   int    jvtWp = srMode ? -1 : (int)(wpSel - JVT_WPS);
   double cutMjj = srMode ? SR_MJJ : VBS_JET_MJJ, cutDeta = srMode ? SR_DETA : VBS_JET_D_ETA;
-  double jdr = JET_TIME_DR, jcut = JET_TIME_DIST_CUT;
+  double jdr = gJetTimeDr, jcut = JET_TIME_DIST_CUT;
+  int    jscore = gJetTimeWaves ? 1 : 0;   // 0: highest sum pT, 1: WAVeS proximity weight
   bool   srFlag = srMode, srJetsFlag = srMetJets;
   double srRecoil = srRecoilMin, legRptMin = WPL.rptMin;
   bool   truthMet = hasTruthMet;
@@ -774,6 +876,7 @@ int main(int argc, char** argv) {
   meta.Branch("vbs_mjj_cut", &cutMjj, "vbs_mjj_cut/D");
   meta.Branch("vbs_deta_cut", &cutDeta, "vbs_deta_cut/D");
   meta.Branch("jet_time_dr", &jdr, "jet_time_dr/D");
+  meta.Branch("jet_time_score", &jscore, "jet_time_score/I");
   meta.Branch("jet_time_dist_cut", &jcut, "jet_time_dist_cut/D");
   meta.Branch("has_truth_met", &truthMet, "has_truth_met/O");
   meta.Branch("sample", &sample);

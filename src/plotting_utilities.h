@@ -39,6 +39,8 @@
 // ---------------------------------------------------------------------------
 
 #include "RtypesCore.h"
+#include "TFitResult.h"
+#include "TFitResultPtr.h"
 #include "clustering_includes.h"
 #include "clustering_constants.h"
 #include "clustering_structs.h"
@@ -362,8 +364,120 @@ namespace MyUtl {
     /* fallback   */ nullptr
   };
 
+  // ---------------------------------------------------------------------------
+  // FIT_PEAKTAIL — the timing-residual model: a two-Gaussian PEAK (core +
+  //   shoulder, one mean) plus a pileup TAIL centred on t_HS.
+  //
+  //   Why each piece (measured on the grid VBF / Z+jets WAVeS, TRKPTZ, HGTD
+  //   t0 - t_HS, 2026-10-23):
+  //     - the tail: a t0 on a pileup vertex sits sqrt(2) x 175 ps = 247 ps
+  //       from the hard scatter (independent collisions), widened by HGTD's
+  //       late wrong hits to ~280 ps; it is needed in every n_HS slice,
+  //       even at 0.4% of the events (likelihood gain 200-1700 on the grid);
+  //     - the shoulder: a second peak Gaussian ~2.1x the core's width,
+  //       15-40% of the peak in every slice (partly pileup-contaminated
+  //       clusters); a single peak Gaussian misfits every slice.
+  //   The fitted width SigmaPeak IS the peak's combined (core + shoulder)
+  //   area-weighted RMS, so Minuit reports its error with the correlations
+  //   included; the core and shoulder widths follow from it:
+  //       sigma_core = SigmaPeak / sqrt(1 - FracSh + FracSh * RatioSh^2)
+  //       sigma_sh   = RatioSh * sigma_core
+  //   FracSh is the shoulder's share of the peak's area. NormPeak scales the
+  //   peak's core height (core amplitude = NormPeak * (1 - FracSh)).
+  //   Poisson likelihood ("L"): the slices' tails hold 0-2 events per bin,
+  //   where a chi2 fit ignores the empty bins and runs the tail width to
+  //   its limit. All fills in this codebase are unweighted, so L applies.
+  //   Fallback (FIT_PEAKTAIL_FIXTAIL): when the tail width is poorly
+  //   constrained (> 10%, i.e. fewer than ~60-100 tail events) it is fixed
+  //   at 300 ps; the peak width moves by <= 0.3 ps for tails between 280
+  //   and 370 ps, which spans every sample's measured value.
+  // ---------------------------------------------------------------------------
+  inline TF1* makePeakTailFit(TH1D* hist, bool fixTail) {
+    double xlo = hist->GetXaxis()->GetXmin(), xhi = hist->GetXaxis()->GetXmax();
+    const char* f =
+      "[1]*((1-[3])*TMath::Exp(-0.5*((x-[0])/([2]/sqrt(1-[3]+[3]*[4]*[4])))^2)"
+      " + [3]/[4]*TMath::Exp(-0.5*((x-[0])/([4]*[2]/sqrt(1-[3]+[3]*[4]*[4])))^2))"
+      " + [5]*TMath::Exp(-0.5*(x/[6])^2)";
+    TF1* fit = new TF1(fixTail ? "peaktail_fix_fit" : "peaktail_fit", f, xlo, xhi);
+    fit->SetParNames("Mean", "NormPeak", "SigmaPeak", "FracSh", "RatioSh", "NormTail", "SigmaTail");
+    double peakX = hist->GetBinCenter(hist->GetMaximumBin());
+    fit->SetParameters(std::max(-50.0, std::min(50.0, peakX)),   // Mean: at the peak
+                       hist->GetMaximum(),                         // NormPeak
+                       20.0,                                       // SigmaPeak: combined width
+                       0.25,                                       // FracSh
+                       2.1,                                        // RatioSh: measured 1.9-2.2
+                       1e-2 * hist->GetMaximum(),                  // NormTail
+                       250.0);                                     // SigmaTail: sqrt(2) x 175 ps
+    fit->SetParLimits(0, -50.0, 50.0);
+    fit->SetParLimits(1, 0.0, 1.E8);
+    fit->SetParLimits(2, 3.0, 150.0);
+    fit->SetParLimits(3, 0.0, 0.95);
+    fit->SetParLimits(4, 1.2, 4.0);    // RatioSh: measured 1.4-2.4; capped so the shoulder cannot become the tail
+    fit->SetParLimits(5, 0.0, 1.E8);
+    if (fixTail) fit->FixParameter(6, 300.0);
+    else         fit->SetParLimits(6, 150.0, 400.0);
+    fit->SetNpx(2000);
+    fit->SetLineColor(kRed);
+    fit->SetLineWidth(2);
+    TFitResultPtr res = hist->Fit(fit, "RQLIS");
+    if (fixTail) return fit;
+    // The free tail is kept only when the fit is sound: converged with an accurate covariance, a tail
+    // that is present and measured to 10%, and a shoulder off its cap. Otherwise -- a sparse tail,
+    // typically -- refit with the tail fixed. (A failed fit reports ZERO errors, which the
+    // plotPostProcessing fallback, keyed on LARGE errors, would let through: local VBF HGTD at
+    // n_HS = 19 came out at 33.6 +- 0.0 ps against 24.5 +- 0.8 with the tail fixed.)
+    const double st = fit->GetParameter(6), ste = fit->GetParError(6);
+    const bool sound = (int)res == 0 && res->CovMatrixStatus() == 3
+                    && fit->GetParameter(5) > 0.0 && ste > 0.0 && ste / st < 0.10
+                    && fit->GetParameter(4) < 3.98 && fit->GetParError(2) > 0.0;
+    if (sound) return fit;
+    delete fit;
+    return makePeakTailFit(hist, true);
+  }
+  inline std::vector<TString> peakTailLines(TF1* f) {
+    const double sp = f->GetParameter("SigmaPeak"), fs = f->GetParameter("FracSh"), r = f->GetParameter("RatioSh");
+    const double sc = sp / std::sqrt(1.0 - fs + fs * r * r);
+    return {
+      TString::Format("#sigma_{peak} = %.2f #pm %.2f ps", sp, f->GetParError("SigmaPeak")),
+      TString::Format("  core %.1f ps, shoulder %.1f ps (%.0f%%)", sc, r * sc, 100.0 * fs),
+      TString::Format("#sigma_{tail} = %.0f ps%s", f->GetParameter("SigmaTail"), f->GetParError("SigmaTail") == 0.0 ? " (fixed)" : ""),
+    };
+  }
+  inline const FitModel FIT_PEAKTAIL_FIXTAIL = {
+    "peaktail_fixtail",
+    [](TH1D* hist) -> TF1* { return makePeakTailFit(hist, true); },
+    [](TF1* f) { return TString::Format("peak + tail (tail fixed): #chi^{2}_{#lambda}/ndf=%.2f", f->GetChisquare()/f->GetNDF()); },
+    [](TF1* f) { return peakTailLines(f); },
+    [](TF1* f, TH1D* h) {
+      std::vector<TString> v{TString::Format("N = %.0f", h->Integral())};
+      for (auto& l : peakTailLines(f)) v.push_back(l);
+      v.push_back(TString::Format("#chi^{2}_{#lambda}/ndf = %.1f/%d", f->GetChisquare(), f->GetNDF()));
+      return v;
+    },
+    /* params     */ { "SigmaPeak", "SigmaTail", "NormPeak", "NormTail" },
+    /* swapBySize */ false,
+    /* fallback   */ nullptr
+  };
+  inline const FitModel FIT_PEAKTAIL = {
+    "peaktail",
+    [](TH1D* hist) -> TF1* { return makePeakTailFit(hist, false); },
+    [](TF1* f) { return TString::Format("peak + tail: #chi^{2}_{#lambda}/ndf=%.2f", f->GetChisquare()/f->GetNDF()); },
+    [](TF1* f) { return peakTailLines(f); },
+    [](TF1* f, TH1D* h) {
+      std::vector<TString> v{TString::Format("N = %.0f", h->Integral())};
+      for (auto& l : peakTailLines(f)) v.push_back(l);
+      v.push_back(TString::Format("#chi^{2}_{#lambda}/ndf = %.1f/%d", f->GetChisquare(), f->GetNDF()));
+      return v;
+    },
+    /* params     */ { "SigmaPeak", "SigmaTail", "NormPeak", "NormTail" },
+    /* swapBySize */ false,
+    /* fallback   */ &FIT_PEAKTAIL_FIXTAIL
+  };
+
   // *** THE ONLY LINE TO TOUCH TO SWAP THE GLOBAL FIT METHOD ***
-  inline const FitModel& ACTIVE_FIT_MODEL = FIT_SNGGAUS_FULL;
+  //   FIT_PEAKTAIL since 2026-10-23 (was FIT_SNGGAUS_FULL, a single Gaussian
+  //   over the full range with no tail term: 187 ps on Z+jets n_HS = 3).
+  inline const FitModel& ACTIVE_FIT_MODEL = FIT_PEAKTAIL;
 
   // ---------------------------------------------------------------------------
   // FitParams
@@ -1684,7 +1798,7 @@ namespace MyUtl {
     // Plot Resolution
     plotWithLegend(
         [](auto& plt) { return plt->params->sigmaDist; },
-	"Core #sigma", RES_YMIN, RES_YMAX,
+	"Core #sigma (core + shoulder) [ps]", RES_YMIN, RES_YMAX,
 	15.0, "15ps Resolution", false,                   // logY
 	0.60, 0.65, 0.80, 0.92); // top-right: avoids tall σ bars at low track count
     canvas->Print(fname);

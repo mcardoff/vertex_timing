@@ -46,6 +46,7 @@ Writes <out>_{sig,bkg}_eff_mjj.(pdf|png), and with both files
 <out>_s_over_sqrtb.(pdf|png) (S/sqrt(B) change vs no veto in %, per column),
 <out>_s_over_sqrtb_yields.(pdf|png) (S/sqrt(B) from the yields at --lumi), the same two for S/B
 (<out>_s_over_b, <out>_s_over_b_yields), <out>_jet_time_{pulls,calib} (the HS-leg jet-time pulls and f(n)),
+<out>_t0_pulls(_bkg).(pdf|png) (the event t0s against the true vertex time, signal / background),
 <out>_tradeoff.(pdf|png) (signal efficiency against background rejection 1/eps_B,
 threshold scanned) and, with --compare, <out>_veto_vs_repair_tradeoff, plus
 <out>_summary.md (with the scan's points appended).
@@ -85,6 +86,10 @@ ap.add_argument("--jet-infl", default="sig-ntrk",
                      "sig: one global factor from the signal file; per-file / per-file-ntrk: each file its own; "
                      "or a number")
 ap.add_argument("--min-trk", type=int, default=1, help="tracks a jet-time estimate needs for the jet to count as timed")
+ap.add_argument("--t0-dt-sources", default="trkptz,waves,hgtd",
+                help="the reco t0s drawn in <out>_t0_dt (e.g. trkptz,waves: no Athena)")
+ap.add_argument("--t0-dt-only", action="store_true",
+                help="load the files and write only <out>_t0_dt (and _bkg), nothing else")
 ap.add_argument("--methods", default="jj,t0_trkptz,t0_waves,t0_hgtd,t0_truth",
                 help="drawn methods, e.g. t0_trkptz,t0_waves (event veto) or rp_trkptz,rp_waves (jet "
                      "removal + re-pairing); the summary always has every method the files support")
@@ -100,6 +105,14 @@ ap.add_argument("--bf-hinv", type=float, default=1.0,
                      "normalised to sigma_VBF alone); scales S linearly, cancels in every relative number")
 ap.add_argument("--tag", default="", help="selection note for the third label line (e.g. the JVT working point)")
 ap.add_argument("--out", required=True, help="output stem")
+ap.add_argument("--compact", action="store_true",
+                help="the m_jj-column figures carry only the category line (e.g. 'both tagging jets in HGTD'), "
+                     "not the selection / test / jet-time / calibration lines -- for slides that state those once")
+ap.add_argument("--jet-pulls-also", default="", help="with --jet-pulls quoted and --min-trk k > 1: further "
+                "track requirements overlaid on the jet-time pull plot only, e.g. 3,4 (nothing else uses them)")
+ap.add_argument("--jet-pulls", default="both", choices=["both", "quoted"],
+                help="<out>_jet_time_pulls: the quoted sigma and sigma x f(n) (both), or the quoted sigma alone")
+C.add_acceptance_args(ap)
 args = ap.parse_args()
 if not args.sig and not args.bkg:
     raise SystemExit("give --sig and/or --bkg")
@@ -141,6 +154,14 @@ def load(path, recoil_col, recoil_min, what):
         keep = e[recoil_col] > recoil_min
     else:
         keep = np.ones(len(e["weight"]), bool)
+    if C.ACCEPTANCE[args.acceptance] is not None:
+        col = C.acc_column(args.acc_count)
+        if "a_" + col not in e:
+            raise SystemExit(f"{path}: no {col} columns -- rerun util/vbs_time_veto for --acceptance")
+        acc = C.acceptance_mask(e["a_" + col], e["b_" + col], args.acceptance, args.acc_min_trk)
+        info["acc_frac"] = (e["weight"][keep & acc].sum() / e["weight"][keep].sum(), int((keep & acc).sum()),
+                            int(keep.sum()))
+        keep = keep & acc
     ev = {k: v[keep] for k, v in e.items()}
     ev["jets"] = jets[keep] if jets is not None else None
     # the calibration uses EVERY selected event's HS legs, not only the recoil-passing ones
@@ -273,6 +294,51 @@ loaded = {}
 for role, path, col, cut, norm in [("sig", args.sig, "met_truth", args.met_min, args.sig_norm),
                                    ("bkg", args.bkg, "z_pt", args.zpt_min, args.bkg_norm)]:
     if path: loaded[role] = (path, col, cut, norm) + load(path, col, cut, role)
+def t0_dt_figure(stem, e_all, what):
+    """<stem>_t0_dt: t0 - t_HS^truth in ps (not divided by sigma) for every selected event
+    of the file with that t0, one line per reco t0 -- the companion of <stem>_jet_time_dt"""
+    ROOT_ = C.ROOT if C.ROOT is not None else C.setup_root(stem)
+    c = ROOT_.TCanvas("c_t0dt_" + what, "", 800, 650); C.KEEP.append(c)
+    c.SetLeftMargin(0.14); c.SetRightMargin(0.05); c.SetLogy(True)
+    nsrc = len(args.t0_dt_sources.split(","))
+    leg = ROOT_.TLegend(0.16, 0.735 - 0.045 * nsrc, 0.93, 0.735); ROOT_.StyleLegend(leg, 0.027); C.KEEP.append(leg)
+    nall = len(e_all["t0_truth"])
+    for k, src in enumerate(args.t0_dt_sources.split(",")):
+        ok = e_all[f"ok_{src}"].astype(bool)
+        dt = e_all[f"t0_{src}"][ok] - e_all["t0_truth"][ok]
+        h = ROOT_.TH1D(f"h_t0dt_{what}_{src}", "", 80, -400, 400); C.KEEP.append(h)
+        for x in np.clip(dt, -399.9, 399.9): h.Fill(x)
+        h.Scale(1.0 / h.Integral())
+        lab, col, _ = STYLE["t0_" + src]
+        h.SetLineColor(C.colour(col)); h.SetLineWidth(2); h.SetLineStyle(1 if src != "hgtd" else 7)
+        if k == 0:
+            h.SetMinimum(2e-5); h.SetMaximum(2000.0)
+            h.GetXaxis().SetTitle("t_{0} - t_{HS}^{truth} [ps]   (overflow in the edge bins)")
+            h.GetYaxis().SetTitle("Fraction of events with that t_{0}")
+            h.Draw("HIST")
+        else:
+            h.Draw("HIST SAME")
+        name = lab.replace("Jet vs t_{0}: ", "")
+        leg.AddEntry(h, f"{name}: core #sigma {C.dgaus_core(dt)[0]:.1f} ps, {100 * np.mean(np.abs(dt) > 60):.0f}% beyond 60 ps;  "
+                     f"valid in {100 * ok.sum() / nall:.0f}%", "l")
+    leg.Draw()
+    ROOT_.ATLASLabel(0.17, 0.88, "")
+    t = ROOT_.TLatex(); t.SetNDC(); t.SetTextFont(42); t.SetTextSize(0.04); C.KEEP.append(t)
+    t.DrawLatex(0.31, 0.88, "Simulation Internal")
+    t2 = ROOT_.TLatex(); t2.SetNDC(); t2.SetTextFont(42); t2.SetTextSize(0.028); t2.SetTextColor(ROOT_.kGray + 2); C.KEEP.append(t2)
+    t2.DrawLatex(0.17, 0.835, f"{'VBF H#rightarrowinv.' if what == 'sig' else 'Z(#rightarrowll)+jets'}: every selected event, {nall:,}")
+    t2.DrawLatex(0.17, 0.80, "core #sigma: the narrow width of a double-Gaussian fit")
+    if "hgtd" in args.t0_dt_sources.split(","):
+        t2.DrawLatex(0.17, 0.765, "HGTD: Athena's RecoVtx_time, where valid")
+    out = f"{stem}_t0_dt{'' if what == 'sig' else '_bkg'}"
+    c.Print(out + ".pdf"); c.Print(out + ".png")
+    print("wrote", out + ".pdf / .png")
+
+
+if args.t0_dt_only:
+    for r in loaded:
+        t0_dt_figure(args.out, loaded[r][5], r)
+    raise SystemExit(0)
 HAS_JETS = all(v[4]["jets"] is not None for v in loaded.values())
 ALL_METHODS = VETO_METHODS + (REPAIR_METHODS if HAS_JETS else [])
 for m in DRAWN + [f"rp_{s}" for s in COMPARE]:
@@ -367,11 +433,34 @@ def calib_line(cal):
             f"measured on {src} HS jets, applied to S and B alike")
 
 
+# the bottom panel's MC count, split by the talk's cases (>= 1 timed HGTD track per jet)
+# colours from vbs_case_regions.py / vbs_region_stack.py: Forward-Forward = R1's (both legs forward),
+# Central-Forward = R2's (forward + central), Other = the light grey
+CASE_PARTS = [("Forward-Forward", "#3F8FFF", "both"), ("Central-Forward", "#B3231C", "one"), ("Other", "#CFCFCF", "neither")]
+
+
+def case_counts(e):
+    """per no-veto m_jj column: MC events of each case, in CASE_PARTS order"""
+    if "a_hgtd_ntimed" not in e: return None
+    idx = mjj_index(e["mjj"], EDGES)
+    out = []
+    for lab, col, mode in CASE_PARTS:
+        m = C.acceptance_mask(e["a_hgtd_ntimed"], e["b_hgtd_ntimed"], mode, 1)
+        out.append((lab, col, [int(np.sum(m & (idx == b))) for b in range(len(EDGES) - 1)]))
+    return out
+
+
 def column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_title, ref=1.0, methods=None,
-                  xnote="last bin includes overflow", pct=False, yrange=None):
+                  xnote="last bin includes overflow", pct=False, yrange=None, parts=None, sig=None):
     """vbs_time_veto_common.column_figure on this script's columns; `methods` defaults to DRAWN"""
+    acc = C.acceptance_line(args.acceptance, args.acc_min_trk, args.acc_count)
+    if args.compact:
+        lines = ["**" + C.CASE_TEXT[args.acceptance]]
+    elif acc:
+        lines = [lines[0], acc] + lines[1:]
     C.column_figure(stem, ylab, series, legend_extra, label, lines, counts, count_title, EDGES, STYLE,
-                    methods or DRAWN, ref=ref, xnote=xnote, pct=pct, yrange=yrange)
+                    methods or DRAWN, ref=ref, xnote=xnote, pct=pct, yrange=yrange, compact=args.compact,
+                    count_parts=parts, sig_counts=sig)
 
 
 def fmt_pct(v): return f"  ({100 * v:.1f}%)"
@@ -393,7 +482,7 @@ for role, ylab, label in [("sig", "Signal efficiency", args.sig_label), ("bkg", 
                   [sel_line(s), veto_line(), jet_line(), calib_line(s["calib"]),
                    "all m_{jj} columns in brackets; generator-weighted"
                    + ("; events binned in their no-veto m_{jj}" if ANY_RP else "")],
-                  counts, "MC events", yrange=EFF_RANGE)
+                  counts, "MC events", yrange=EFF_RANGE, parts=case_counts(s["e"]))
 
 # ── Yields and the summary ───────────────────────────────────────────────────
 def k_factor(s):
@@ -422,6 +511,10 @@ for role, s in samples.items():
               f"normalisation: {NORM[s['norm']]['note'] if s['norm'] != 'none' else 'none'}"
               + (f"; scaled to B(H->inv) = {100 * args.bf_hinv:g}%" if s["norm"] == "vbf" and args.bf_hinv != 1.0 else "")
               + (" (LOCAL sample: its own sum w, same cross-section assumed)" if i["sample"] == "local" and s["norm"] != "none" else ""))
+    if "acc_frac" in i:
+        f, n, n0 = i["acc_frac"]
+        md.append(f"  - **acceptance `{args.acceptance}`** (>= {args.acc_min_trk} HGTD track(s) per leg, {args.acc_count}): "
+                  f"{n:,} of {n0:,} MC events after the recoil cut, {100 * f:.1f}% of their weight")
 md.append("")
 both = len(samples) == 2
 hdr = "| method | " + " | ".join(("eff. " + r) for r in samples) + (" | S | B | S/sqrt(B) | vs no veto |" if both else " |")
@@ -517,6 +610,8 @@ def label_lines(methods):
 
 XNOTE = "final pair; last bin includes overflow" if ANY_RP else "last bin includes overflow"
 B_COUNTS = [int(np.sum(mjj_index(bk["e"]["mjj"], EDGES) == b)) for b in range(len(EDGES) - 1)]
+# the signal's MC count too, combined with the background's in one panel (S/B and S/sqrt(B) figures)
+S_PANEL = ([int(np.sum(mjj_index(sg["e"]["mjj"], EDGES) == b)) for b in range(len(EDGES) - 1)], case_counts(sg["e"]))
 
 # ── S / sqrt(B) and S / B per m_jj column relative to no veto, as a change in % ──
 # (S/S0) / f(B/B0) per column, f = sqrt for S/sqrt(B) and the identity for S/B. For
@@ -553,7 +648,7 @@ extra = {m: f"  ({100 * (eff(ws, sg['kept'][m])[0] / np.sqrt(eff(wb, bk['kept'][
 column_figure(f"{args.out}_s_over_sqrtb", "S/#sqrt{B} change vs no veto [%]", change, extra,
               f"S: {args.sig_label.split(', ')[-1]},  B: {args.bkg_label.split(', ')[-1]}",
               label_lines(DRAWN) + ["all m_{jj} columns in brackets; > 0 = the timing test raises S/#sqrt{B}"],
-              B_COUNTS, "B MC events", ref=0.0, pct=True, xnote=XNOTE)
+              B_COUNTS, "B MC", ref=0.0, pct=True, xnote=XNOTE, parts=case_counts(bk["e"]), sig=S_PANEL)
 
 # ── S / sqrt(B) from the YIELDS per m_jj column (absolute, at --lumi) ───────
 # The same information as the change above -- which is exactly this divided by
@@ -577,7 +672,7 @@ if ks and kb:
                   label_lines(DRAWN) +
                   [f"S at B(H#rightarrowinv) = {100 * args.bf_hinv:g}%;  B = Z(#rightarrowll)+jets alone (stand-in for "
                    f"Z(#rightarrow#nu#nu));  all columns in brackets"],
-                  B_COUNTS, "B MC events", ref=None, methods=SB_METHODS, xnote=XNOTE)
+                  B_COUNTS, "B MC", ref=None, methods=SB_METHODS, xnote=XNOTE, parts=case_counts(bk["e"]), sig=S_PANEL)
 
 
 # ── S / B per m_jj column: the change vs no veto, and from the yields ───────
@@ -587,7 +682,7 @@ extra = {m: f"  ({100 * (eff(ws, sg['kept'][m])[0] / eff(wb, bk['kept'][m])[0] -
 column_figure(f"{args.out}_s_over_b", "S/B change vs no veto [%]", change_b, extra,
               f"S: {args.sig_label.split(', ')[-1]},  B: {args.bkg_label.split(', ')[-1]}",
               label_lines(DRAWN) + ["all m_{jj} columns in brackets; > 0 = the timing test raises S/B"],
-              B_COUNTS, "B MC events", ref=0.0, pct=True, xnote=XNOTE)
+              B_COUNTS, "B MC", ref=0.0, pct=True, xnote=XNOTE, parts=case_counts(bk["e"]), sig=S_PANEL)
 if ks and kb:
     absol, extra = {}, {}
     for m in SB_METHODS:
@@ -603,7 +698,7 @@ if ks and kb:
                   label_lines(DRAWN) +
                   [f"S at B(H#rightarrowinv) = {100 * args.bf_hinv:g}%;  B = Z(#rightarrowll)+jets alone (stand-in for "
                    f"Z(#rightarrow#nu#nu));  all columns in brackets"],
-                  B_COUNTS, "B MC events", ref=None, methods=SB_METHODS, xnote=XNOTE)
+                  B_COUNTS, "B MC", ref=None, methods=SB_METHODS, xnote=XNOTE, parts=case_counts(bk["e"]), sig=S_PANEL)
 
 
 # ── How a jet gets a time: the HS-leg pulls against the true vertex time ─────
@@ -618,22 +713,35 @@ def jet_time_figures(stem, e_all, cal):
     c = ROOT_.TCanvas("c_jtp", "", 800, 650); C.KEEP.append(c)
     c.SetLeftMargin(0.14); c.SetRightMargin(0.05); c.SetLogy(True)
     hs = []
-    for name, v, col, fill in [("raw", p, "#9E9E9E", True), ("cal", pc, "kP10Blue", False)]:
+    drawn = [("raw", p, "#9E9E9E", True)] + ([("cal", pc, "kP10Blue", False)] if args.jet_pulls == "both" else [])
+    # --jet-pulls quoted with --min-trk k > 1: the jets the test still times, overlaid (quoted sigma too)
+    kmin = args.min_trk if args.jet_pulls == "quoted" and args.min_trk > 1 else None
+    kall = ([kmin] + [int(x) for x in args.jet_pulls_also.split(",") if x]) if kmin else []
+    KCOL = ["kP10Blue", "#E69F00", "#C0392B", "#7B3294"]
+    for i, k in enumerate(kall): drawn.append((f"min{k}", p[n >= k], KCOL[i % len(KCOL)], False))
+    for name, v, col, fill in drawn:
         h = ROOT_.TH1D(f"h_jtp_{name}", "", 64, -8, 8); C.KEEP.append(h)
         for x in np.clip(v, -7.99, 7.99): h.Fill(x)
         h.Scale(1.0 / h.Integral())
         h.SetLineColor(C.colour(col)); h.SetLineWidth(2)
         if fill: h.SetFillColor(C.colour(col)); h.SetFillStyle(3004)
         hs.append(h)
-    hs[0].SetMinimum(2e-5); hs[0].SetMaximum(200.0)   # two decades of headroom: the label and legend sit above the peak
+    hs[0].SetMinimum(2e-5); hs[0].SetMaximum(200.0 if len(hs) <= 2 else 2000.0)   # two decades of headroom: the label and legend sit above the peak
     hs[0].GetXaxis().SetTitle("(t_{jet} - t_{HS}^{truth}) / #sigma_{jet}   (overflow in the edge bins)")
     hs[0].GetYaxis().SetTitle("Fraction of truth-matched HS tagging jets")
-    hs[0].Draw("HIST"); hs[1].Draw("HIST SAME")
+    hs[0].Draw("HIST")
+    for h in hs[1:]: h.Draw("HIST SAME")
     g = ROOT_.TF1("f_unit", "[0]*exp(-0.5*x*x)", -8, 8); C.KEEP.append(g)
     g.SetParameter(0, 0.25 / np.sqrt(2 * np.pi)); g.SetLineColor(ROOT_.kBlack); g.SetLineStyle(2); g.Draw("SAME")
-    leg = ROOT_.TLegend(0.16, 0.60, 0.60, 0.735); ROOT_.StyleLegend(leg, 0.03); C.KEEP.append(leg)
-    leg.AddEntry(hs[0], f"quoted #sigma: {100 * np.mean(np.abs(p) >= args.nsigma):.0f}% beyond {args.nsigma:g}", "f")
-    leg.AddEntry(hs[1], f"#sigma #times f(n): {100 * np.mean(np.abs(pc) >= args.nsigma):.1f}% beyond {args.nsigma:g}", "l")
+    leg = ROOT_.TLegend(0.16, 0.735 - 0.045 * (len(hs) + 1), 0.60, 0.735); ROOT_.StyleLegend(leg, 0.03); C.KEEP.append(leg)
+    leg.AddEntry(hs[0], (f"all timed jets (quoted #sigma): " if kmin else "quoted #sigma: ") + f"{100 * np.mean(np.abs(p) >= args.nsigma):.0f}% beyond {args.nsigma:g}", "f")
+    if kmin:
+        for i, k in enumerate(kall):
+            pk = p[n >= k]
+            leg.AddEntry(hs[1 + i], f"time from #geq {k} tracks ({100 * len(pk) / len(p):.0f}% of jets): "
+                         f"{100 * np.mean(np.abs(pk) >= args.nsigma):.1f}% beyond {args.nsigma:g}", "l")
+    elif len(hs) > 1:
+        leg.AddEntry(hs[1], f"#sigma #times f(n): {100 * np.mean(np.abs(pc) >= args.nsigma):.1f}% beyond {args.nsigma:g}", "l")
     leg.AddEntry(g, "unit Gaussian", "l")
     leg.Draw()
     ROOT_.ATLASLabel(0.17, 0.88, "")
@@ -644,6 +752,44 @@ def jet_time_figures(stem, e_all, cal):
     t2.DrawLatex(0.17, 0.80, f"(#DeltaR < 0.3 to a truth HS jet with p_{{T}} > 10 GeV), with a time: {len(p):,} jets")
     t2.DrawLatex(0.17, 0.765, jet_line())
     c.Print(stem + "_jet_time_pulls.pdf"); c.Print(stem + "_jet_time_pulls.png")
+
+    # <stem>_jet_time_dt: the same jets and track requirements, in ps: t_jet - t_HS^truth, not
+    # divided by sigma_jet
+    dts, ns = [], []
+    for L in "ab":
+        m = e_all[f"{L}_hs"] & (e_all[f"{L}_core_n"] > 0)
+        dts.append(e_all[f"{L}_core_t"][m] - e_all["t0_truth"][m]); ns.append(e_all[f"{L}_core_n"][m])
+    dt, nn = np.concatenate(dts), np.concatenate(ns)
+    c2 = ROOT_.TCanvas("c_jdt", "", 800, 650); C.KEEP.append(c2)
+    c2.SetLeftMargin(0.14); c2.SetRightMargin(0.05); c2.SetLogy(True)
+    sets = [("all", dt, "#9E9E9E", True, "all timed jets")]
+    for i, k in enumerate(kall):
+        sets.append((f"dt{k}", dt[nn >= k], ["kP10Blue", "#E69F00", "#C0392B", "#7B3294"][i % 4], False,
+                     f"time from #geq {k} tracks ({100 * np.mean(nn >= k):.0f}% of jets)"))
+    hd = []
+    for name, v, col, fill, _ in sets:
+        h = ROOT_.TH1D(f"h_jdt_{name}", "", 80, -400, 400); C.KEEP.append(h)
+        for x in np.clip(v, -399.9, 399.9): h.Fill(x)
+        h.Scale(1.0 / h.Integral())
+        h.SetLineColor(C.colour(col)); h.SetLineWidth(2)
+        if fill: h.SetFillColor(C.colour(col)); h.SetFillStyle(3004)
+        hd.append(h)
+    hd[0].SetMinimum(2e-5); hd[0].SetMaximum(200.0 if len(hd) <= 2 else 2000.0)
+    hd[0].GetXaxis().SetTitle("t_{jet} - t_{HS}^{truth} [ps]   (overflow in the edge bins)")
+    hd[0].GetYaxis().SetTitle("Fraction of truth-matched HS tagging jets")
+    hd[0].Draw("HIST")
+    for h in hd[1:]: h.Draw("HIST SAME")
+    leg2 = ROOT_.TLegend(0.16, 0.735 - 0.045 * len(hd), 0.60, 0.735); ROOT_.StyleLegend(leg2, 0.03); C.KEEP.append(leg2)
+    for h, (_, v, _, fill, lab) in zip(hd, sets):
+        leg2.AddEntry(h, f"{lab}: core #sigma {C.dgaus_core(v)[0]:.1f} ps, {100 * np.mean(np.abs(v) > 60):.0f}% beyond 60 ps",
+                      "f" if fill else "l")
+    leg2.Draw()
+    ROOT_.ATLASLabel(0.17, 0.88, "")
+    t.DrawLatex(0.31, 0.88, "Simulation Internal")
+    t2.DrawLatex(0.17, 0.835, "VBF H#rightarrowinv. reco tagging jets truth-matched to a hard-scatter jet")
+    t2.DrawLatex(0.17, 0.80, f"(#DeltaR < 0.3 to a truth HS jet with p_{{T}} > 10 GeV), with a time: {len(dt):,} jets")
+    t2.DrawLatex(0.17, 0.765, jet_line())   # core sigma: the narrow width of a double-Gaussian fit
+    c2.Print(stem + "_jet_time_dt.pdf"); c2.Print(stem + "_jet_time_dt.png")
     print("wrote", stem + "_jet_time_pulls.pdf / .png")
     # f(n), with each bin's share of the jets and its tail after the correction
     c2 = ROOT_.TCanvas("c_jtc", "", 800, 650); C.KEEP.append(c2)
@@ -676,6 +822,57 @@ def jet_time_figures(stem, e_all, cal):
 
 jet_time_figures(args.out, loaded["sig"][5], calibs["sig"])
 
+
+# ── The other side of the test: the event t0 against the true vertex time ────
+def t0_figure(stem, e_all, what):
+    """<stem>_t0_pulls: (t0 - t_HS^truth) / (infl x sigma_t0) for every selected event
+    of the file with that t0, one line per reco t0 -- the t0 half of the jet-vs-t0
+    pull, with the sigma the test uses (inflation included)"""
+    ROOT_ = C.ROOT
+    c = ROOT_.TCanvas("c_t0p_" + what, "", 800, 650); C.KEEP.append(c)
+    c.SetLeftMargin(0.14); c.SetRightMargin(0.05); c.SetLogy(True)
+    leg = ROOT_.TLegend(0.16, 0.565, 0.93, 0.735); ROOT_.StyleLegend(leg, 0.027); C.KEEP.append(leg)
+    first = True
+    nall = len(e_all["t0_truth"])
+    for k, src in enumerate(["trkptz", "waves", "hgtd"]):
+        ok = e_all[f"ok_{src}"].astype(bool)
+        sg = e_all[f"infl_{src}"][ok] * e_all[f"sig0_{src}"][ok]
+        good = sg > 0
+        pull = (e_all[f"t0_{src}"][ok][good] - e_all["t0_truth"][ok][good]) / sg[good]
+        h = ROOT_.TH1D(f"h_t0p_{what}_{src}", "", 64, -8, 8); C.KEEP.append(h)
+        for x in np.clip(pull, -7.99, 7.99): h.Fill(x)
+        h.Scale(1.0 / h.Integral())
+        lab, col, _ = STYLE["t0_" + src]
+        h.SetLineColor(C.colour(col)); h.SetLineWidth(2); h.SetLineStyle(1 if src != "hgtd" else 7)
+        if first:
+            h.SetMinimum(2e-5); h.SetMaximum(200.0)
+            h.GetXaxis().SetTitle("(t_{0} - t_{HS}^{truth}) / #sigma_{t_{0}}   (overflow in the edge bins)")
+            h.GetYaxis().SetTitle("Fraction of events with that t_{0}")
+            h.Draw("HIST"); first = False
+        else:
+            h.Draw("HIST SAME")
+        name = lab.replace("Jet vs t_{0}: ", "")
+        leg.AddEntry(h, f"{name}: {100 * np.mean(np.abs(pull) >= args.nsigma):.1f}% beyond {args.nsigma:g};  "
+                     f"#sigma {np.median(sg[good]):.0f} ps (median);  valid in {100 * ok.sum() / nall:.0f}%", "l")
+    g = ROOT_.TF1("f_unit_t0_" + what, "[0]*exp(-0.5*x*x)", -8, 8); C.KEEP.append(g)
+    g.SetParameter(0, 0.25 / np.sqrt(2 * np.pi)); g.SetLineColor(ROOT_.kBlack); g.SetLineStyle(2); g.Draw("SAME")
+    leg.AddEntry(g, "unit Gaussian", "l")
+    leg.Draw()
+    ROOT_.ATLASLabel(0.17, 0.88, "")
+    t = ROOT_.TLatex(); t.SetNDC(); t.SetTextFont(42); t.SetTextSize(0.04); C.KEEP.append(t)
+    t.DrawLatex(0.31, 0.88, "Simulation Internal")
+    t2 = ROOT_.TLatex(); t2.SetNDC(); t2.SetTextFont(42); t2.SetTextSize(0.028); t2.SetTextColor(ROOT_.kGray + 2); C.KEEP.append(t2)
+    t2.DrawLatex(0.17, 0.835, f"{'VBF H#rightarrowinv.' if what == 'sig' else 'Z(#rightarrowll)+jets'}: every selected event, {nall:,}")
+    t2.DrawLatex(0.17, 0.80, "#sigma: the vertex time's quoted #sigma #times its per-sample inflation, as in the test")
+    t2.DrawLatex(0.17, 0.765, "HGTD: Athena's RecoVtx_time, where valid")
+    c.Print(f"{stem}_t0_pulls{'' if what == 'sig' else '_bkg'}.pdf"); c.Print(f"{stem}_t0_pulls{'' if what == 'sig' else '_bkg'}.png")
+    print("wrote", f"{stem}_t0_pulls{'' if what == 'sig' else '_bkg'}.pdf / .png")
+
+
+for r in loaded:
+    t0_figure(args.out, loaded[r][5], r)
+    t0_dt_figure(args.out, loaded[r][5], r)
+
 # ── The trade-off: eps_S against background rejection as the threshold moves ─
 # (all m_jj columns). Background rejection = 1 / eps_B, the ROC convention.
 SCAN = np.array([1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 8.0, 12.0])
@@ -698,7 +895,8 @@ def tradeoff_figure(stem, curves, methods, dashed=()):
     C.roc_figure(stem, xy, methods, STYLE, int(np.argmin(np.abs(SCAN - args.nsigma))),
                  [f"S: {sel_line(sg)}", f"B: {sel_line(bk)}",
                   f"threshold scanned {SCAN[0]:g}-{SCAN[-1]:g}#sigma; large markers at {args.nsigma:g}#sigma"
-                  + (";  dashed: jets removed, pair re-formed" if dashed else "")],
+                  + (";  dashed: jets removed, pair re-formed" if dashed else "")]
+                 + ([C.acceptance_line(args.acceptance, args.acc_min_trk, args.acc_count)] if C.ACCEPTANCE[args.acceptance] is not None else []),
                  "Signal efficiency #varepsilon_{S}", "Background rejection 1/#varepsilon_{B}", dashed=dashed)
 
 
