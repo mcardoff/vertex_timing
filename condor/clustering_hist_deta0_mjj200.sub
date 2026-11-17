@@ -12,7 +12,8 @@
 #
 # Identical to clustering_hist.sub except for `--vbs-deta=0 --vbs-mjj=200`.
 # vbs_mjj_diag (util/vbs_mjj_diag.cxx) measured both variables against the
-# candidate pair's truth-HS-match denominator on all three samples: the
+# candidate pair's truth-HS-match denominator on all three samples (with the
+# pre-2026-11-17 max-m_jj pair; it is now the leading-jet pair): the
 # default |Deta| >= 3 cut is purity-NEGATIVE on Z+jets (2.69% -> 2.51%) and
 # dijet (40.1% -> 35.0%) -- it preferentially admits pileup-legged candidate
 # pairs -- while m_jj is at-least-as-good at matched HS efficiency everywhere

@@ -265,8 +265,10 @@ static void mergeRegionCases(std::vector<RegionCase>& dst,
 //
 // "Wide" means forward = |eta| > JET_ETA_MIN with NO upper edge (central
 // |eta| < CENTRAL_ETA_MAX): the same pair-level R1/R2 the VBS composition
-// plots use, so legs past |eta| 3.8 -- and past HGTD/ITk at 4.0, where a jet
-// has no tracks and R_pT is 0 under every scenario -- are included. The
+// plots use, so legs between |eta| 3.8 and 4.0 are included. (Before the
+// 2026-11-17 leading-jet pair, legs past HGTD/ITk at 4.0, where a jet has no
+// tracks and R_pT is 0 under every scenario, were included too; the pair's
+// candidates now stop at |eta| 4.0, and `vbs_pair_lead` = 1 marks such trees.) The
 // _r1/_r2 HISTOGRAMS above keep the narrow 2.4-3.8 window (their ROCs need a
 // timeable HS leg); `core` flags the rows that are also in that narrow
 // region, which is a strict subset (same pair, same paper labels, only the
@@ -1039,7 +1041,8 @@ int main(int argc, char** argv) {
       // ── VBS-topology regions ────────────────────────────────────────────────
       // Two topologies where forward timing is the deciding information, taken
       // off the SAME VBS candidate pair the clustering-side selection uses
-      // (calcBestVbsPair: opposite-hemisphere, pT-passing, max m_jj):
+      // (calcLeadingVbsPair: the two highest-pT jets with |eta| < 4.0, required
+      // in opposite hemispheres):
       //
       //   R1  both legs forward, one truth-HS + one truth-PU.
       //       Both are in HGTD acceptance, so timing has to say WHICH is the
@@ -1069,8 +1072,8 @@ int main(int argc, char** argv) {
       //     redefine the primary result.
       //   - the regions ARE a VBS topology selection, so the knobs that define
       //     that topology have to apply here or they mean nothing.
-      // Note calcBestVbsPair only FINDS the max-m_jj opposite-hemisphere pair;
-      // it does not apply either cut. passJetPtCut is what normally applies
+      // Note calcLeadingVbsPair only FINDS the leading-jet pair; it does not
+      // apply either cut. passJetPtCut is what normally applies
       // them on the clustering side, and rpt_v5_hist deliberately never calls
       // it -- so without the explicit test below the knobs would be inert here,
       // changing only the output filename via SELECTION_TAG and making two
@@ -1195,9 +1198,10 @@ int main(int argc, char** argv) {
       }
 
       // ── Wide-window VBS regions -> side-file tree (see RegionRow) ─────────
-      // Same classifier, same max-m_jj pair, same paper labels as the block
+      // Same classifier, same leading-jet pair, same paper labels as the block
       // above; only the forward upper edge is lifted to VBS_FWD_ETA_MAX, so
-      // legs past |eta| 3.8 are kept. Nothing here fills a histogram -- the
+      // legs past |eta| 3.8 are kept (up to 4.0: the pair's candidates stop
+      // there, so no leg lies beyond it). Nothing here fills a histogram -- the
       // narrow _r1/_r2 sets above are exactly as before.
       {
         int wHS = -1, wPU = -1;
@@ -1487,6 +1491,9 @@ int main(int argc, char** argv) {
     double gate   = GATE_SIGMA;
     bool   dzpara = RPT_USE_DZ_PARA;
     double cutMjj = MyUtl::VBS_JET_MJJ, cutDeta = MyUtl::VBS_JET_D_ETA;
+    // 1: the pair is the leading-jet pair (calcLeadingVbsPair). Trees written
+    // before 2026-11-17 have no such branch: their pair is the max-m_jj one.
+    int    pairLead = 1;
     tree.Branch("file_path", &r.file_path);
     tree.Branch("entry",  &r.entry,  "entry/L");
     tree.Branch("region", &r.region, "region/I");
@@ -1520,6 +1527,7 @@ int main(int argc, char** argv) {
     tree.Branch("rpt_dzpara", &dzpara,    "rpt_dzpara/O");
     tree.Branch("vbs_mjj_cut",  &cutMjj,  "vbs_mjj_cut/D");
     tree.Branch("vbs_deta_cut", &cutDeta, "vbs_deta_cut/D");
+    tree.Branch("vbs_pair_lead", &pairLead, "vbs_pair_lead/I");
     // Non-default --dzpara / --rpt-signif (MyUtl::RUN_SETTINGS), one branch each;
     // a default run's tree is unchanged.
     for (auto& s : MyUtl::RUN_SETTINGS)

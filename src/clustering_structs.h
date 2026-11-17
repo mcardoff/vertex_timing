@@ -411,25 +411,45 @@ namespace MyUtl {
     }
 
     // -----------------------------------------------------------------------
-    // VbsPair / calcBestVbsPair
-    //   The VBS candidate jet pair: among the given pT-passing jet indices, the
-    //   pair in opposite η hemispheres (η_i · η_j < 0) with the largest
-    //   invariant mass m_jj — the standard VBS-candidate-jet definition.
+    // VbsPair / calcLeadingVbsPair
+    //   The VBS candidate jet pair, project-wide since 2026-11-17: the
+    //   LEADING-JET PAIR. A candidate is a jet from the given list with
+    //   pT > MIN_JET_PT, not removed by the lepton-jet overlap removal
+    //   (isJetRemoved), and |η| < MAX_ABS_ETA_JET. The pair is the two
+    //   highest-pT candidates, found by pT (never by the ntuple's jet order;
+    //   a pT tie goes to the lower jet index), and they must sit in opposite
+    //   η hemispheres (η_1 · η_2 < 0). If the two leading candidates are on the
+    //   same side there is NO pair: the search deliberately does not fall back
+    //   to a lower-pT jet.
     //
-    //   Returns m_jj alongside |Δη| (and the two reco jet indices) because the
-    //   pair search is identical either way: this used to return |Δη| only and
-    //   discard the m_jj it had just computed, which forced any m_jj study to
-    //   redo the whole search. The indices let callers ask whether each leg is
-    //   truth-HS-matched (isJetTruthHS) — i.e. whether the topology is genuine
-    //   or manufactured by a pileup jet.
+    //   The candidate cuts are applied HERE, whatever list the caller passes.
+    //   Callers hand in collectPtPassingJets' list, which keeps jets at any |η|
+    //   (MIN_PASSPT_JETS counts those), sometimes thinned first by a pileup-jet
+    //   tagger; a jet past |η| 4.0 must not become a leg either way.
     //
-    //   All fields keep their -1 sentinel when no opposite-hemisphere pair
-    //   exists; passJetPtCut relies on dEta and mjj staying -1 there so a
-    //   no-pair event fails even when a threshold is lowered to 0. Lowering a
-    //   threshold therefore relaxes only that quantity's MAGNITUDE cut — the
-    //   pair requirement itself survives. To drop the pair requirement too,
-    //   pass a NEGATIVE --vbs-deta, which passJetPtCut treats as "no VBS pair
+    //   idxI is the leading leg, idxJ the subleading one. m_jj (massless jets)
+    //   and |Δη| are computed on the pair; the indices let callers ask whether
+    //   each leg is truth-HS-matched (isJetTruthHS), i.e. whether the topology
+    //   is genuine or manufactured by a pileup jet.
+    //
+    //   Replaced calcBestVbsPair, which took the opposite-hemisphere pair with
+    //   the LARGEST m_jj among the pT-passing jets at any |η|. Since m_jj grows
+    //   like cosh(Δη) that pair systematically held the most forward jet in the
+    //   event. Every result before 2026-11-17 used it; histogram files from this
+    //   change on carry meta_vbs_pair_lead = 1 (see HistReader::CheckSelection).
+    //
+    //   All fields keep their -1 sentinel when there is no valid pair (fewer
+    //   than two candidates, or the leading two in one hemisphere);
+    //   passJetPtCut relies on dEta and mjj staying -1 there so a no-pair event
+    //   fails even when a threshold is lowered to 0. Lowering a threshold
+    //   therefore relaxes only that quantity's MAGNITUDE cut — the pair
+    //   requirement itself survives. To drop the pair requirement too, pass a
+    //   NEGATIVE --vbs-deta, which passJetPtCut treats as "no VBS pair
     //   required" and which bypasses both comparisons.
+    //
+    //   Mirrored in Python by python/event_display.py (the display's VBS hatch)
+    //   and python/vbs_time_veto_plot.py (lead_pair, for jet removal and
+    //   re-pairing); keep all three identical.
     // -----------------------------------------------------------------------
     struct VbsPair {
       double mjj  = -1.0;
@@ -438,24 +458,36 @@ namespace MyUtl {
       bool valid() const { return idxI >= 0; }
     };
 
-    VbsPair calcBestVbsPair(const std::vector<int>& passPtIdx) const {
-      VbsPair best;
-      for (size_t a = 0; a < passPtIdx.size(); ++a) {
-        for (size_t b = a + 1; b < passPtIdx.size(); ++b) {
-          int i = passPtIdx[a], j = passPtIdx[b];
-          float etaI = this->topoJetEta[i], etaJ = this->topoJetEta[j];
-          if (etaI * etaJ >= 0) continue;  // require opposite hemispheres
-
-          TLorentzVector ji, jj;
-          ji.SetPtEtaPhiM(this->topoJetPt[i], etaI, this->topoJetPhi[i], 0.0);
-          jj.SetPtEtaPhiM(this->topoJetPt[j], etaJ, this->topoJetPhi[j], 0.0);
-          double mjj = (ji + jj).M();
-
-          if (mjj > best.mjj)
-            best = {mjj, std::abs((double)etaI - (double)etaJ), i, j};
-        }
+    VbsPair calcLeadingVbsPair(const std::vector<int>& jetIdx) const {
+      // "a outranks b": higher pT, the lower index on a tie.
+      auto above = [&](int a, int b) {
+        return b < 0 || this->topoJetPt[a] > this->topoJetPt[b] ||
+               (this->topoJetPt[a] == this->topoJetPt[b] && a < b);
+      };
+      int lead = -1, sub = -1;
+      for (int j : jetIdx) {
+        if (j < 0 || j >= (int)this->topoJetPt.GetSize()) continue;
+        if (j == lead || j == sub)                           continue;
+        if (this->isJetRemoved(j))                           continue;
+        if (!(this->topoJetPt[j] > MIN_JET_PT))              continue;
+        if (!(std::abs(this->topoJetEta[j]) < MAX_ABS_ETA_JET)) continue;
+        if (above(j, lead))     { sub = lead; lead = j; }
+        else if (above(j, sub)) { sub = j; }
       }
-      return best;
+
+      VbsPair pair;
+      if (sub < 0) return pair;                        // fewer than two candidates
+      const float etaL = this->topoJetEta[lead], etaS = this->topoJetEta[sub];
+      if (etaL * etaS >= 0) return pair;               // same hemisphere: no pair, no fallback
+
+      TLorentzVector jl, js;
+      jl.SetPtEtaPhiM(this->topoJetPt[lead], etaL, this->topoJetPhi[lead], 0.0);
+      js.SetPtEtaPhiM(this->topoJetPt[sub],  etaS, this->topoJetPhi[sub],  0.0);
+      pair.mjj  = (jl + js).M();
+      pair.dEta = std::abs((double)etaL - (double)etaS);
+      pair.idxI = lead;
+      pair.idxJ = sub;
+      return pair;
     }
 
     // -----------------------------------------------------------------------
@@ -513,7 +545,8 @@ namespace MyUtl {
     // -----------------------------------------------------------------------
     // VbsRegion / classifyVbsRegion
     //   The two VBS topologies where forward timing is the deciding
-    //   information, classified off the VBS candidate pair (calcBestVbsPair):
+    //   information, classified off the VBS candidate pair (calcLeadingVbsPair,
+    //   the leading-jet pair):
     //
     //     R1  both legs forward (HGTD acceptance), one paper-HS + one paper-PU.
     //         Both jets are timeable, so timing must say WHICH is the
@@ -528,8 +561,10 @@ namespace MyUtl {
     //   agree on membership or the two "R1"s silently mean different samples.
     //
     //   The pair must also clear the runtime VBS topology knobs
-    //   (VBS_JET_MJJ / VBS_JET_D_ETA) -- calcBestVbsPair only finds the
-    //   max-m_jj pair, it does not cut on it.
+    //   (VBS_JET_MJJ / VBS_JET_D_ETA) -- calcLeadingVbsPair only finds the
+    //   pair, it does not cut on it. Its legs are always inside
+    //   |eta| < MAX_ABS_ETA_JET, so a fwdEtaMax above that (VBS_FWD_ETA_MAX)
+    //   classifies exactly as MAX_ABS_ETA_JET would.
     //
     //   outFwdHS / outFwdPU return the reco jet indices of the forward
     //   hard-scatter and forward pileup legs (-1 when the region has no such
@@ -541,8 +576,9 @@ namespace MyUtl {
     //
     //   jetKeep, when given, is a per-jet mask (indexed like the jet arrays)
     //   applied to the pT-passing list BEFORE pairing: 0 removes the jet, as a
-    //   pileup-jet tagger does in an analysis (src/jet_tagging.h). nullptr is
-    //   the historical behaviour.
+    //   pileup-jet tagger does in an analysis (src/jet_tagging.h), so the pair
+    //   is the leading two of the jets the tagger KEPT. nullptr is the
+    //   historical behaviour.
     // -----------------------------------------------------------------------
     VbsRegion classifyVbsRegion(double fwdEtaMin, double fwdEtaMax,
                                 double centralEtaMax,
@@ -560,7 +596,7 @@ namespace MyUtl {
         passPtIdx.erase(std::remove_if(passPtIdx.begin(), passPtIdx.end(), [&](int j) {
                           return j >= (int)jetKeep->size() || !(*jetKeep)[j]; }),
                         passPtIdx.end());
-      VbsPair pair = this->calcBestVbsPair(passPtIdx);
+      VbsPair pair = this->calcLeadingVbsPair(passPtIdx);
       if (outPair) *outPair = pair;
       if (!pair.valid())              return VbsRegion::NONE;
       if (pair.mjj  < VBS_JET_MJJ)    return VbsRegion::NONE;
@@ -618,6 +654,10 @@ namespace MyUtl {
     //   VBS candidate pair *without* the |Δη| requirement bundled in — i.e.
     //   see the m_jj/|Δη| distribution of everything the rest of the selection
     //   admits, which is what a cut on either has to be chosen from.
+    //
+    //   The list keeps jets at ANY |η|: MIN_PASSPT_JETS counts them, and
+    //   classifyEventRegion reads them. It is not the pair's candidate list --
+    //   calcLeadingVbsPair applies its own |η| < MAX_ABS_ETA_JET cut to it.
     // -----------------------------------------------------------------------
     void collectPtPassingJets(std::vector<int>& passPtIdx,
                               int& nPassPt, int& nPassPtEta) const {
@@ -733,12 +773,13 @@ namespace MyUtl {
     // -----------------------------------------------------------------------
     // passJetPtCut
     //   Requires at least MIN_PASSPT_JETS reco jets above MIN_JET_PT,
-    //   at least MIN_PASSETA_JETS of which are in the forward HGTD acceptance,
-    //   and that the VBS candidate pair — the opposite-hemisphere,
-    //   pT-passing jet pair with the largest m_jj — has an η separation ≥
-    //   VBS_JET_D_ETA, and m_jj >= VBS_JET_MJJ (0 by default -- a no-op, since
-    //   any valid pair has mjj > 0; see the comment on VBS_JET_MJJ). No
-    //   truth-HS matching required.
+    //   at least MIN_PASSETA_JETS of which are in the forward HGTD acceptance
+    //   (any such jets, not necessarily the pair's), and that the VBS
+    //   candidate pair -- the leading-jet pair, calcLeadingVbsPair: the two
+    //   highest-pT jets with |eta| < MAX_ABS_ETA_JET, required in opposite
+    //   hemispheres -- has an η separation >= VBS_JET_D_ETA (0 by default)
+    //   and m_jj >= VBS_JET_MJJ (200 GeV by default; see the comments on both
+    //   in clustering_constants.h). No truth-HS matching required.
     // -----------------------------------------------------------------------
     bool passJetPtCut() {
       int passptcount = 0, passptetacount = 0;
@@ -747,20 +788,21 @@ namespace MyUtl {
 
       bool passesPt   = passptcount   >= MIN_PASSPT_JETS;
       bool passesEta  = passptetacount >= MIN_PASSETA_JETS;
-      VbsPair pair    = calcBestVbsPair(passPtIdx);
+      VbsPair pair    = calcLeadingVbsPair(passPtIdx);
 
       // A NEGATIVE VBS_JET_D_ETA disables the VBS candidate-PAIR requirement
       // outright, and must bypass BOTH tests below -- not just the |Deta| one.
       //
-      // Every field of VbsPair keeps its -1 sentinel when no opposite-hemisphere
-      // pair exists, so `pair.dEta >= 0` and `pair.mjj >= 0` still REJECT a
+      // Every field of VbsPair keeps its -1 sentinel when there is no valid
+      // pair (fewer than two candidates, or the leading two in one
+      // hemisphere), so `pair.dEta >= 0` and `pair.mjj >= 0` still REJECT a
       // no-pair event. Lowering a threshold to 0 therefore only drops that
       // quantity's MAGNITUDE cut and leaves the pair requirement standing --
       // which is the thing that actually rejects Z+jets, since it rarely makes
       // two >30 GeV jets in opposite hemispheres on its own. Measured when this
-      // was found: --vbs-deta=0 moved zjets from 67,074 to 69,745 accepted
-      // events, +4%, where removing the pair requirement was expected to be
-      // worth several-fold.
+      // was found (with the pre-2026-11-17 max-m_jj pair): --vbs-deta=0 moved
+      // zjets from 67,074 to 69,745 accepted events, +4%, where removing the
+      // pair requirement was expected to be worth several-fold.
       //
       // Bypassing only passesDEta would reproduce that bug exactly, because the
       // default m_jj >= 200 GeV would then reject every no-pair event on its

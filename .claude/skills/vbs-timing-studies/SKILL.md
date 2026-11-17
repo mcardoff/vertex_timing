@@ -7,9 +7,13 @@ description: VBS-region timing studies — rpt_v5's wide-window region tree and 
 
 **Wide-window region tree** (2026-09-25): beside the histogram file,
 `rpt_v5_hist` writes `<prefix>rpt_v5_regions.root`, tree `regions`, one row
-per event whose max-m_jj pair is R1/R2 with forward = |eta| > 2.4 and **no
+per event whose VBS pair is R1/R2 with forward = |eta| > 2.4 and **no
 upper edge**. These are the same event sets as the composition plots, legs
-past 3.8 included. Per row it stores:
+past 3.8 included. The pair is the leading-jet pair (`calcLeadingVbsPair`: the
+two highest-pT jets with |eta| < 4.0, opposite hemispheres, no fallback) in
+trees carrying `vbs_pair_lead = 1` (2026-11-17 on); older trees used the
+max-m_jj pair, whose legs could sit past 4.0, and every number in this skill
+dated before 2026-11-17 comes from that old pair. Per row it stores:
 - every scenario's per-leg R_pT (`rpt_hs_<s>`, `rpt_pu_<s>`; R2's
   `rpt_hs_*` = −1, since its HS leg is central);
 - each scenario's exact gate inputs (`t0_<s>`, `sig0_<s>` before inflation,
@@ -20,9 +24,10 @@ past 3.8 included. Per row it stores:
   (a strict subset);
 - `n_jets_fwd_acc`, the jets >30 GeV in 2.38 < |eta| < 4.0.
 `vbs_region_diag`'s preselection requires ≥1 such jet, and requiring it
-here reproduces the composition counts exactly. Without it R2 is ~40%
-larger (local VBF: 4,744 vs 3,350), almost all of that from PU legs past
-|eta| 4.0 with R_pT = 0 in every row.
+here reproduces the composition counts exactly. Without it R2 was ~40%
+larger with the old pair (local VBF: 4,744 vs 3,350), almost all of that from
+PU legs past |eta| 4.0 with R_pT = 0 in every row; the leading-jet pair has no
+legs out there.
 **`--jvt=<wp>`** (2026-09-25) applies the in-code JVT/fJVT
 taggers (`src/jet_tagging.h`, identical to `vbs_region_diag --jvt`) to the
 pT-passing jets BEFORE the VBS pair is formed. It gates the regions only
@@ -150,6 +155,15 @@ HS-efficiency ceiling below the 0.80 window.
     tree now also carries every candidate jet (`jet_*`), and the plot script
     removes the jets failing the t0 test and re-forms the pair. The forward-jet
     preselection is not re-applied after removal.
+    - Since 2026-11-17 the re-formed pair is the leading-jet pair
+      (`lead_pair`, mirroring `calcLeadingVbsPair`), and re-pairing is no longer
+      monotone: a removal promotes the next jet, which can create a passing pair
+      an event did not have. The tree holds only events selected before removal,
+      so `rp_*` counts losses and migrations, not newly admitted events, and
+      `rp_jj` (the leading pair kept only if time-compatible) equals the `jj`
+      veto. The plot script refuses re-pairing on a file without `meta`'s
+      `vbs_pair_lead` (an old max-m_jj file) and warns; its event vetoes still
+      run. The results below are all from the old max-m_jj pair.
   - **Result (grid, recoil cuts at 100 GeV): jet removal does not beat the
     event veto.** It keeps 90-92% of the signal (event veto 84-86%) but
     78-85% of Z+jets (event veto 64-76%). S/sqrt(B) is x1.03-1.04 against
@@ -244,8 +258,13 @@ HS-efficiency ceiling below the 0.80 window.
 
 `util/vbs_region_diag` classifies every selected event's chosen tagging pair
 by the truth identity and detector region of each leg (21 cells; R1 and R2
-are two of them). `results/vbs_pair_composition.md`: **Z+jets has no
-hard-scatter leg to pair with** — at m_jj >= 200, 79.7% of its pairs carry no
+are two of them). Since 2026-11-17 the chosen pair is the shared leading-jet
+pair in every block (`all_`/`acc_`/`wide_` then differ only in `n_jets` and
+the `alt_*` pairs); the old `--pair=mjj|lead` flag, its `_leadpair` tag and the
+`pair_same_hemi` column are gone, and `vbs_region_stack.py --opphemi` with
+them. The results in this section are from the old max-m_jj pair.
+`results/vbs_pair_composition.md`: **Z+jets has no hard-scatter leg to pair
+with** — at m_jj >= 200, 79.7% of its pairs carry no
 paper-HS jet and the two pileup-only cells hold 65.6%, while VBF puts an HS
 jet on both legs 55% of the time on the same code. R2's scarcity on Z+jets is
 the central HS leg mostly not being there, not the m_jj picker outranking it.

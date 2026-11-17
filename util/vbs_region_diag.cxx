@@ -10,37 +10,47 @@
 //
 //   (a) the topology is absent -- the event has no central hard-scatter jet
 //       above MIN_JET_PT to be the second leg, so no pair could be R2;
-//   (b) the topology is present but the PAIR PICKER misses it --
-//       calcBestVbsPair takes the largest-m_jj opposite-hemisphere pair, and
-//       m_jj grows like cosh(dEta), so a wider pair outranks a genuine
-//       forward-pileup + central-hard-scatter pair that is actually there;
-//   (c) the winning pair is not an ANALYSIS pair at all -- calcBestVbsPair
-//       ranks over every jet above MIN_JET_PT at any |eta|, including jets
-//       beyond MAX_ABS_ETA_JET; and "forward" is currently HGTD acceptance
-//       (MIN_ABS_ETA_JET < |eta| < MAX_ABS_ETA_JET), so a jet past 4.0 is
-//       neither forward nor central and can only ever land the pair in Other.
+//   (b) the topology is present but the PAIR PICKER misses it -- the picker
+//       then (calcBestVbsPair) took the largest-m_jj opposite-hemisphere pair,
+//       and m_jj grows like cosh(dEta), so a wider pair outranked a genuine
+//       forward-pileup + central-hard-scatter pair that was actually there;
+//   (c) the winning pair is not an ANALYSIS pair at all -- that picker ranked
+//       every jet above MIN_JET_PT at any |eta|, including jets beyond
+//       MAX_ABS_ETA_JET; and "forward" was then HGTD acceptance
+//       (MIN_ABS_ETA_JET < |eta| < MAX_ABS_ETA_JET), so a jet past 4.0 was
+//       neither forward nor central and could only ever land the pair in Other.
+//
+// (b) and (c) describe the pair picker before 2026-11-17. Since then the
+// project-wide pair is the leading-jet pair, calcLeadingVbsPair: the two
+// highest-pT jets with |eta| < MAX_ABS_ETA_JET, required in opposite
+// hemispheres, with no fallback to another pair. Every result quoted from this
+// diagnostic before that date describes the max-m_jj pair.
 //
 // So every quantity here is computed THREE times over the same event, from the
 // same jets, differing only in what counts as a taggable jet and where
 // "forward" ends:
 //
-//   all_   every pT-passing jet; forward = MIN_ABS_ETA_JET..MAX_ABS_ETA_JET
-//          -- exactly what calcBestVbsPair and classifyVbsRegion do today.
+//   all_   every pT-passing jet; forward = MIN_ABS_ETA_JET..MAX_ABS_ETA_JET.
 //   acc_   only pT-passing jets with |eta| < MAX_ABS_ETA_JET; same forward
-//          window -- analysis-quality tagging jets only, so a jet the analysis
-//          would never tag on cannot win the m_jj ranking.
+//          window -- analysis-quality tagging jets only.
 //   wide_  every pT-passing jet; forward = anything above MIN_ABS_ETA_JET with
 //          NO upper edge -- "forward" as a topology statement rather than a
 //          detector-acceptance one. A tagging jet at |eta| 4.3 is still a
-//          forward tagging jet; HGTD simply cannot time it.
+//          forward tagging jet; HGTD simply cannot time it. The block the
+//          shared classifyVbsRegion (at VBS_FWD_ETA_MAX) must agree with.
 //
-// (c) is then the difference between the blocks, and (a) vs (b) is a two-way
-// table within any one of them.
+// Under the leading-jet pair the CHOSEN pair is the same in all three blocks:
+// its candidates are cut at |eta| < MAX_ABS_ETA_JET inside calcLeadingVbsPair,
+// so no leg sits where the blocks' zone labels differ. The blocks still differ
+// in n_jets and in the alt_* pairs below; the three-block layout is kept so the
+// tree's columns, and the plotting scripts reading them, stay as they were.
 //
 // Each block also carries, per pair SHAPE, the best-m_jj pair of that shape
-// that EXISTS in the event -- with its legs -- whether or not the picker chose
-// it. Comparing that pair's kinematics against the chosen one is what shows
-// which jets the m_jj ranking is actually reaching for.
+// that EXISTS in the event among the block's jets (any |eta| in all_ / wide_)
+// -- with its legs -- whether or not it is the chosen pair. These are
+// diagnostics of what pairs exist, not candidate-pair definitions: comparing
+// their kinematics against the chosen pair's shows which jets a pair of each
+// shape is built from.
 //
 // No clustering and no time gates: the question is purely about jet content,
 // and dropping them keeps a full Z+jets pass cheap.
@@ -74,13 +84,10 @@
 // threshold can be re-derived (python/vbs_jvt_calibrate.py) or scanned offline
 // without a rerun.
 //
-// --pair=mjj|lead picks the PAIR. mjj (default) is calcBestVbsPair: the
-// largest-m_jj opposite-hemisphere pair. lead is the Run-2 VBF H->inv
-// convention (arXiv:2202.07953, per the internal note): the two leading-pT
-// jets, full stop -- the paper then REQUIRES them in opposite hemispheres as
-// an event cut, so the pair carries a same_hemi flag and the plotting side
-// applies that cut rather than the picker. Tags the output _leadpair. The
-// alt_* per-shape pairs are picker-independent and unchanged.
+// The chosen pair is the shared calcLeadingVbsPair, the same function the
+// selection uses. (Until 2026-11-17 a --pair=mjj|lead flag chose between the
+// max-m_jj pair and a local leading-two-jets pair with a same-hemisphere flag,
+// tagged _leadpair; both went when the leading-jet pair became the default.)
 // -----------------------------------------------------------------------------
 #include <TChain.h>
 #include <TFile.h>
@@ -127,8 +134,7 @@ const double FWD_MAX_UNBOUNDED = 1e9;
 // -- see the file header -- so the two must stay structurally identical.
 struct PairBlock {
   float n_jets;
-  float pair_mjj, pair_deta;
-  float pair_same_hemi;   // 1 if both legs have the same sign of eta (only reachable under --pair=lead)
+  float pair_mjj, pair_deta;   // the chosen pair: legA the leading leg, legB the subleading one
   float legA_zone, legA_hs, legA_pu, legA_pt, legA_abseta;
   float legB_zone, legB_hs, legB_pu, legB_pt, legB_abseta;
   // Best pair of each shape present in the event, chosen or not.
@@ -208,16 +214,15 @@ int main(int argc, char** argv) {
   const JvtWP* wpSel = resolveJvtWP(argc, argv, "diag");
   if (!wpSel) return 1;
   const JvtWP& WP = *wpSel;
-  // --pair=mjj|lead: which two jets are "the VBF pair" (see the file header).
-  bool pairLead = false;
-  for (int i = 1; i < argc; ++i) {
-    const std::string a = argv[i];
-    if (a.rfind("--pair=", 0) != 0) continue;
-    const std::string w = a.substr(7);
-    if      (w == "lead") pairLead = true;
-    else if (w == "mjj")  pairLead = false;
-    else { std::cerr << "[diag] unknown --pair=" << w << " (mjj|lead)\n"; return 1; }
-  }
+  // --pair= was removed with the leading-jet pair (2026-11-17): refuse it
+  // rather than ignore it, so an old command line cannot silently run with a
+  // pair it did not ask for.
+  for (int i = 1; i < argc; ++i)
+    if (std::string(argv[i]).rfind("--pair=", 0) == 0) {
+      std::cerr << "[diag] --pair= no longer exists: the pair is always the leading-jet "
+                   "pair (calcLeadingVbsPair)\n";
+      return 1;
+    }
   // The discriminants need the vertex fit's track assignment, which lives in
   // the extended branch set. Must be set before the BranchPointerWrapper binds.
   EXTENDED_BRANCHES = true;
@@ -236,7 +241,7 @@ int main(int argc, char** argv) {
 
   std::string outPath = OUTPUT_DIR + "/" +
                         (SAMPLE_NAME.empty() ? std::string("local") : SAMPLE_NAME) +
-                        (noOR ? "_noOR" : "") + WP.tag + (pairLead ? "_leadpair" : "") +
+                        (noOR ? "_noOR" : "") + WP.tag +
                         "_vbs_region_diag.root";
   for (int i = 1; i < argc; ++i) {
     std::string a = argv[i];
@@ -250,8 +255,8 @@ int main(int argc, char** argv) {
     std::cout << " (R_pT >= " << WP.rptMin << " for |eta| < " << JVT_ETA_MAX
               << ", pT < " << JVT_PT_MAX << "; fJVT <= " << WP.fjvtMax << " for "
               << FJVT_ETA_MIN << " <= |eta| < " << FJVT_ETA_MAX << ", pT < " << FJVT_PT_MAX << ")";
-  std::cout << " pair=" << (pairLead ? "leading two jets" : "max m_jj, opposite hemispheres")
-            << " out=" << outPath << "\n";
+  std::cout << " pair=leading two jets with |eta| < " << MAX_ABS_ETA_JET
+            << ", opposite hemispheres out=" << outPath << "\n";
 
   TChain chain("ntuple");
   setupChain(chain, cfg.ntupleDir.c_str(), MyUtl::FILE_SHARD);
@@ -294,7 +299,7 @@ int main(int argc, char** argv) {
   auto branchBlock = [&](const char* pfx, PairBlock& B) {
     auto nm = [&](const char* f) { return std::string(pfx) + f; };
 #define BB(f) tree.Branch(nm(#f).c_str(), &B.f)
-    BB(n_jets); BB(pair_mjj); BB(pair_deta); BB(pair_same_hemi);
+    BB(n_jets); BB(pair_mjj); BB(pair_deta);
     BB(legA_zone); BB(legA_hs); BB(legA_pu); BB(legA_pt); BB(legA_abseta);
     BB(legB_zone); BB(legB_hs); BB(legB_pu); BB(legB_pt); BB(legB_abseta);
     BB(alt_r1_mjj); BB(alt_r2_mjj); BB(alt_pupu_mjj); BB(alt_bothhs_mjj);
@@ -459,7 +464,6 @@ int main(int argc, char** argv) {
       B = PairBlock{};
       B.n_jets = (float)idx.size();
       B.pair_mjj = B.pair_deta = -1.f;
-      B.pair_same_hemi = 0.f;
       B.alt_r1_mjj = B.alt_r2_mjj = B.alt_pupu_mjj = B.alt_bothhs_mjj = -1.f;
       B.alt_r2_fwd_abseta = B.alt_r2_cen_abseta = -1.f;
       B.alt_r1_hs_abseta  = B.alt_r1_pu_abseta  = -1.f;
@@ -473,8 +477,7 @@ int main(int argc, char** argv) {
         zn[k] = zoneOf(std::abs(eta), fwdMax);
       }
 
-      int bestA = -1, bestB = -1;
-      double bestM = -1.0;
+      // The alt_* pairs: every opposite-hemisphere pair of the block's jets.
       for (size_t a = 0; a < idx.size(); ++a) {
         for (size_t b = a + 1; b < idx.size(); ++b) {
           const int i = idx[a], j = idx[b];
@@ -484,9 +487,6 @@ int main(int argc, char** argv) {
           vi.SetPtEtaPhiM(branch.topoJetPt[i], ei, branch.topoJetPhi[i], 0.0);
           vj.SetPtEtaPhiM(branch.topoJetPt[j], ej, branch.topoJetPhi[j], 0.0);
           const double m = (vi + vj).M();
-          if (!pairLead && m > bestM) {
-            bestM = m; bestA = (int)a; bestB = (int)b;
-          }
           const bool r1 = (zn[a] == 1 && zn[b] == 1) &&
                           ((hs[a] && pu[b]) || (hs[b] && pu[a]));
           const bool r2 = (zn[a] == 1 && pu[a] && zn[b] == 0 && hs[b]) ||
@@ -513,23 +513,12 @@ int main(int argc, char** argv) {
           if (hs[a] && hs[b] && m > B.alt_bothhs_mjj) B.alt_bothhs_mjj = (float)m;
         }
       }
-      if (pairLead && idx.size() >= 2) {
-        // The two leading-pT jets, whatever their hemispheres; the flag lets
-        // the plotting side apply the paper's opposite-hemisphere cut.
-        int a0 = -1, a1 = -1;
-        for (size_t k = 0; k < idx.size(); ++k) {
-          const float pt = branch.topoJetPt[idx[k]];
-          if      (a0 < 0 || pt > branch.topoJetPt[idx[a0]]) { a1 = a0; a0 = (int)k; }
-          else if (a1 < 0 || pt > branch.topoJetPt[idx[a1]]) { a1 = (int)k; }
-        }
-        bestA = a0; bestB = a1;
-        TLorentzVector vi, vj;
-        vi.SetPtEtaPhiM(branch.topoJetPt[idx[a0]], branch.topoJetEta[idx[a0]], branch.topoJetPhi[idx[a0]], 0.0);
-        vj.SetPtEtaPhiM(branch.topoJetPt[idx[a1]], branch.topoJetEta[idx[a1]], branch.topoJetPhi[idx[a1]], 0.0);
-        bestM = (vi + vj).M();
-        B.pair_same_hemi = (branch.topoJetEta[idx[a0]] * branch.topoJetEta[idx[a1]] >= 0) ? 1.f : 0.f;
-      }
-      if (bestA < 0) return false;
+      // The chosen pair: the shared leading-jet pair, found among this block's
+      // jets (its |eta| < MAX_ABS_ETA_JET candidate cut is applied inside).
+      const BranchPointerWrapper::VbsPair P = branch.calcLeadingVbsPair(idx);
+      if (!P.valid()) return false;
+      const size_t bestA = std::find(idx.begin(), idx.end(), P.idxI) - idx.begin();
+      const size_t bestB = std::find(idx.begin(), idx.end(), P.idxJ) - idx.begin();
 
       auto leg = [&](size_t k, float& z, float& h, float& p, float& pt, float& ae,
                      float& rpt, float& fjvt) {
@@ -542,20 +531,19 @@ int main(int argc, char** argv) {
           B.legA_rpt, B.legA_fjvt);
       leg(bestB, B.legB_zone, B.legB_hs, B.legB_pu, B.legB_pt, B.legB_abseta,
           B.legB_rpt, B.legB_fjvt);
-      B.pair_mjj  = (float)bestM;
-      B.pair_deta = (float)std::abs((double)branch.topoJetEta[idx[bestA]] -
-                                    (double)branch.topoJetEta[idx[bestB]]);
+      B.pair_mjj  = (float)P.mjj;
+      B.pair_deta = (float)P.dEta;
       return true;
     };
 
-    // Block 1: every pT-passing jet -- reproduces calcBestVbsPair exactly.
+    // Block 1: every pT-passing jet -- the list the selection pairs from.
     const bool okAll = fillBlock(passPtIdx, MAX_ABS_ETA_JET, R.all);
     if (!okAll) ++nNoPairAll;
 
     // Block 2: analysis-quality tagging jets only -- pT-passing AND inside the
     // jet acceptance. A jet beyond MAX_ABS_ETA_JET is not something the
-    // analysis tags on and is not something HGTD can time, so letting one win
-    // the m_jj ranking describes a pair the analysis would never form.
+    // analysis tags on and is not something HGTD can time; the chosen pair
+    // already excludes one, so here it only drops out of n_jets and alt_*.
     std::vector<int> accIdx;
     for (int j : passPtIdx)
       if (std::abs((double)branch.topoJetEta[j]) < MAX_ABS_ETA_JET) accIdx.push_back(j);
@@ -563,9 +551,9 @@ int main(int argc, char** argv) {
     if (!okAcc) ++nNoPairAcc;
 
     // Block 3: every pT-passing jet again, but with no upper edge on
-    // "forward". Same pair the all_ block picks -- the m_jj ranking does not
+    // "forward". Same pair the all_ block picks -- the pair search does not
     // consult the zones -- so any difference between all_ and wide_ is purely
-    // the region LABELLING, not a different pair.
+    // the region LABELLING of the alt_* pairs, not a different pair.
     const bool okWide = fillBlock(passPtIdx, FWD_MAX_UNBOUNDED, R.wide);
 
     if (!okAll && !okAcc) continue;
@@ -575,10 +563,9 @@ int main(int argc, char** argv) {
     // actually fills must match what this
     // reconstructs from the legs, or the diagnostic describes another region.
     // Cross-check against the SHARED classifier. That classifier now runs at
-    // VBS_FWD_ETA_MAX, so the block it must agree with is wide_, not all_ --
-    // pointing it at all_ would report a disagreement on every event whose
-    // pair holds a leg past 4.00, which is exactly the population this
-    // diagnostic exists to study.
+    // VBS_FWD_ETA_MAX, so the block it must agree with is wide_. (Before the
+    // leading-jet pair, all_ would have disagreed on every event whose pair
+    // held a leg past 4.00; no pair leg is out there any more.)
     const bool locR1 = (R.wide.legA_zone == 1 && R.wide.legB_zone == 1) &&
                        ((R.wide.legA_hs && R.wide.legB_pu) ||
                         (R.wide.legB_hs && R.wide.legA_pu));
@@ -590,7 +577,7 @@ int main(int argc, char** argv) {
     // UNTAGGED jet list, so under a working point it disagrees on exactly the
     // events whose pair the tagger changed -- which is the measurement, not a
     // bug. Gated rather than reinterpreted so the counter keeps meaning "bug".
-    if (WP.rptMin < 0.0 && !pairLead) {
+    if (WP.rptMin < 0.0) {
       const VbsRegion shared =
           branch.classifyVbsRegion(MIN_ABS_ETA_JET, VBS_FWD_ETA_MAX, MIN_ABS_ETA_JET);
       if (okWide && (locR1 != (shared == VbsRegion::R1) ||
@@ -612,8 +599,8 @@ int main(int argc, char** argv) {
             << ", no pair (all jets) " << nNoPairAll
             << ", no pair (acceptance jets) " << nNoPairAcc
             << ", R1/R2 cross-check disagreements "
-            << (WP.rptMin < 0.0 && !pairLead ? std::to_string(nDisagree)
-                                             : std::string("n/a (working point or lead pair)")) << "\n";
+            << (WP.rptMin < 0.0 ? std::to_string(nDisagree)
+                                : std::string("n/a (working point)")) << "\n";
   std::cout << "[diag] jvt=" << WP.name << ": " << nJetsPre << " pT-passing jets, removed "
             << nRmJvt << " by JVT and " << nRmFjvt << " by fJVT; "
             << nEvtLostToWP << " events dropped below the jet requirements\n";

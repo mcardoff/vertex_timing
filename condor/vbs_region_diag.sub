@@ -18,8 +18,10 @@
 #   condor_submit -a sample=zjets                                    vbs_region_diag.sub
 #   condor_submit -a sample=zjets -a jvt=loose -a jvttag=_jvtLoose   vbs_region_diag.sub
 #   condor_submit -a sample=zjets -a jvt=tight -a jvttag=_jvtTight   vbs_region_diag.sub
-#   # leading-two-jets pair (Run-2 H->inv convention), any working point:
-#   condor_submit -a sample=zjets -a pair=lead -a pairtag=_leadpair   vbs_region_diag.sub
+#
+# The pair is always the leading-jet pair (calcLeadingVbsPair) since
+# 2026-11-17; the --pair=mjj|lead flag and its _leadpair tag are gone, and the
+# executable refuses --pair=.
 #
 # Outputs land in condor/<sample>/<sample>[_jvtLoose|_jvtTight]_vbs_region_diag.root
 # -- the same names the executable writes locally, so
@@ -47,19 +49,16 @@ executable               = run_analysis.sh
 #   tight    _jvtTight
 jvt                      = none
 jvttag                   =
-# Same pairing for --pair: pair=lead needs pairtag=_leadpair.
-pair                     = mjj
-pairtag                  =
-arguments                = vbs_region_diag $(sample) --jvt=$(jvt) --pair=$(pair)
+arguments                = vbs_region_diag $(sample) --jvt=$(jvt)
 
 should_transfer_files    = YES
 when_to_transfer_output  = ON_EXIT
 transfer_input_files     = ../build/vbs_region_diag
 
-transfer_output_files    = $(sample)/$(sample)$(jvttag)$(pairtag)_vbs_region_diag.root
+transfer_output_files    = $(sample)/$(sample)$(jvttag)_vbs_region_diag.root
 # LHS must be a bare filename (see CLAUDE.md, Grid Submission); the RHS
 # recreates the <sample>/ nesting the local run uses.
-transfer_output_remaps   = "$(sample)$(jvttag)$(pairtag)_vbs_region_diag.root=$(sample)/$(sample)$(jvttag)$(pairtag)_vbs_region_diag.root"
+transfer_output_remaps   = "$(sample)$(jvttag)_vbs_region_diag.root=$(sample)/$(sample)$(jvttag)_vbs_region_diag.root"
 
 getenv                   = True
 +JobFlavour              = "workday"

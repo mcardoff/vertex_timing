@@ -5,7 +5,8 @@ vbs_region_diag output -- untagged or JVT/fJVT-tagged alike.
 Every selected event's chosen pair (wide_ block: forward = |eta| >= 2.4, no
 upper edge) is put in exactly one band by the truth identity and region of
 its two legs, binned in m_jj (overflow folded into the top bin), and every
-column is normalised to 1.
+column is normalised to 1. The chosen pair is the leading-jet pair
+(calcLeadingVbsPair) in outputs from 2026-11-17 on, the max-m_jj pair before.
 
     PYTHONNOUSERSITE=1 ~/.venv-hgtd/bin/python python/vbs_region_stack.py \
         condor/zjets/zjets_jvtLoose_vbs_region_diag.root \
@@ -41,9 +42,6 @@ ap.add_argument("--deta", type=float, default=DETA_MIN)
 ap.add_argument("--zpt-min", type=float, default=0.0,
                 help="require the dilepton pT above this (GeV): the Z->ll stand-in for the SR's MET cut; "
                      "needs the z_pt column (Z+jets outputs from 2026-09-18 on)")
-ap.add_argument("--opphemi", action="store_true",
-                help="require the two legs in opposite hemispheres (the Run-2 H->inv cut; "
-                     "always true for the m_jj picker, a real cut for --pair=lead outputs)")
 ap.add_argument("--out", required=True, help="output stem (.pdf and .png)")
 args = ap.parse_args()
 
@@ -51,15 +49,16 @@ t = uproot.open(args.file)["events"]
 cols = ["wide_pair_mjj", "wide_pair_deta",
         "wide_legA_hs", "wide_legA_pu", "wide_legA_abseta",
         "wide_legB_hs", "wide_legB_pu", "wide_legB_abseta"]
-has_hemi = "wide_pair_same_hemi" in t.keys()
+if "wide_pair_same_hemi" in t.keys():
+    # vbs_region_diag --pair=lead, removed 2026-11-17: its pair took jets at any |eta|
+    # and kept same-hemisphere pairs, so it is neither the old nor the current pair
+    raise SystemExit(f"{args.file}: an old vbs_region_diag --pair=lead output (wide_pair_same_hemi); "
+                     "its pair is not the current leading-jet pair -- rerun vbs_region_diag")
 has_zpt  = "z_pt" in t.keys()
-a = t.arrays(cols + (["wide_pair_same_hemi"] if has_hemi else []) + (["z_pt"] if has_zpt else []), library="np")
+a = t.arrays(cols + (["z_pt"] if has_zpt else []), library="np")
 if args.zpt_min > 0 and not has_zpt:
     raise SystemExit("--zpt-min needs the z_pt column; this file predates it")
 sel = (a["wide_pair_mjj"] >= MJJ_EDGES[0]) & (a["wide_pair_deta"] > args.deta)
-n_same = int((sel & (a["wide_pair_same_hemi"] > 0.5)).sum()) if has_hemi else 0
-if args.opphemi and has_hemi:
-    sel &= a["wide_pair_same_hemi"] < 0.5
 n_before_zpt = int(sel.sum())
 if args.zpt_min > 0:
     sel &= a["z_pt"] >= args.zpt_min
@@ -123,7 +122,7 @@ al = ROOT.TLatex(); al.SetNDC(); al.SetTextFont(42); al.SetTextSize(0.045)
 al.DrawLatex(0.305, 0.895, "Simulation Internal")
 ROOT.ATLASEnergyLabel(0.18, 0.85, args.label)
 p = ROOT.TLatex(); p.SetNDC(); p.SetTextFont(42); p.SetTextSize(0.028); p.SetTextColor(ROOT.kGray + 2)
-line3 = f"|#Delta#eta| > {args.deta:g}" + (",  #eta_{1}#eta_{2} < 0" if args.opphemi else "") \
+line3 = f"|#Delta#eta| > {args.deta:g}" \
         + (f",  p_{{T}}^{{ll}} > {args.zpt_min:g} GeV" if args.zpt_min > 0 else "") \
         + f",   forward = |#eta| #geq {SPLIT} (no upper edge, split at {SPLIT})"
 p.DrawLatex(0.18, 0.81, line3)
@@ -158,7 +157,6 @@ pBot.RedrawAxis()
 
 c.Print(args.out + ".pdf"); c.Print(args.out + ".png")
 print(f"{args.file}: {n:,} pairs with m_jj >= {MJJ_EDGES[0]} and |dEta| > {args.deta:g}"
-      + (f" (pT(ll) > {args.zpt_min:g} keeps {n:,} of {n_before_zpt:,})" if args.zpt_min > 0 else "")
-      + (f" ({n_same:,} same-hemisphere pairs {'removed' if args.opphemi else 'KEPT'})" if has_hemi else "") + "; "
+      + (f" (pT(ll) > {args.zpt_min:g} keeps {n:,} of {n_before_zpt:,})" if args.zpt_min > 0 else "") + "; "
       + ", ".join(f"{k} {100.0*(band[sel]==i).mean():.1f}%" for i, (k, _, _) in enumerate(BANDS)))
 print("wrote", args.out + ".pdf / .png")

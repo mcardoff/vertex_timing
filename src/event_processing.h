@@ -814,7 +814,9 @@ namespace MyUtl {
     // pair) and only when a region-gated score is actually active.
     //
     // "Forward" here is VBS_FWD_ETA_MAX (unbounded), not MAX_ABS_ETA_JET --
-    // see the constant for the measurement behind that. rpt_v5_hist passes its
+    // see the constant for the measurement behind that (made with the old
+    // max-m_jj pair; the leading-jet pair's legs stop at 4.00, so for it the
+    // two windows classify alike). rpt_v5_hist passes its
     // own JET_ETA_MIN/JET_ETA_MAX instead, so the two analyses do NOT classify
     // an event identically; an earlier comment here claimed they did, which
     // was already untrue (2.38/4.00 against 2.4/3.8) before this change.

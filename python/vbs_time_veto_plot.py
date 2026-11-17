@@ -18,18 +18,29 @@ region-plot selection) and applies, offline:
       jj        both legs timed and |t_A - t_B| / sqrt(sA^2 + sB^2) >= n
       t0_<src>  the event has a t0 and ANY timed leg has
                 |t_leg - t0| / sqrt(s_leg^2 + (infl sigma_t0)^2) >= n
-    JET REMOVAL + RE-PAIRING (needs the jet_* arrays, vbs_time_veto >= the
-    version that writes them) -- the jets failing the test go, the selection
-    is re-applied to the rest, and the pair is re-formed:
+    JET REMOVAL + RE-PAIRING (needs the jet_* arrays, and a file with the
+    leading-jet pair: vbs_time_veto from 2026-11-17 on) -- the jets failing the
+    test go, the selection is re-applied to the rest, and the pair is re-formed:
       rp_<src>  every timed jet incompatible with t0 is removed; then >= 2
-                jets, the max-m_jj opposite-hemisphere pair, and the m_jj and
-                |Deta| cuts, as before. The region plots' ">= 1 jet in
+                jets, the leading-jet pair of the rest (the two highest-pT
+                jets with |eta| < 4.0, which must be in opposite hemispheres:
+                no fallback to another pair), and the m_jj and |Deta| cuts, as
+                before. The region plots' ">= 1 jet in
                 2.38 < |eta| < 4.0" preselection defines the starting sample
                 and is NOT re-applied after removal (--repair-reapply-fwd
                 does): it is not an analysis cut, and re-applying it drops
-                ~4% of the signal whose valid pair survives (local VBF)
-      rp_jj     no jet is removed; the pair is the max-m_jj pair whose two
-                jets are time-compatible (untimed jets are compatible)
+                ~4% of the signal whose valid pair survives (local VBF,
+                measured with the old max-m_jj pair)
+      rp_jj     no jet is removed; the leading-jet pair is kept only if its two
+                jets are time-compatible (untimed jets are compatible). With no
+                fallback to another pair this is the jj event veto again
+    The files hold only the events selected BEFORE any removal. Under the
+    leading-jet pair a removal can also promote a jet into a pair an event did
+    not have (leading two in one hemisphere, or m_jj below the cut), and those
+    events are not in the file: re-pairing here measures what removal does to
+    the selected events, not what it would newly admit. Files made before
+    2026-11-17 (no meta vbs_pair_lead) carry the max-m_jj pair, which this
+    script no longer reproduces, so re-pairing is refused for them.
     A jet is "timed" when its jet-time estimate has >= --min-trk tracks.
 Every efficiency is sum(w, kept) / sum(w, all) with the generator weight.
 Re-paired events move in m_jj: efficiencies are binned in each event's NO-VETO
@@ -139,6 +150,13 @@ def load(path, recoil_col, recoil_min, what):
         info[k] = u[0]
     info["sample"] = str(meta["sample"][0])
     info["njobs"] = len(meta["n_read"])
+    # the pair definition: 1 = the leading-jet pair (2026-11-17 on); no branch = the old max-m_jj pair
+    info["pair_lead"] = "vbs_pair_lead" in meta and bool(np.all(meta["vbs_pair_lead"] == 1))
+    if not info["pair_lead"]:
+        print(f"[{what}] WARNING: {path} predates the leading-jet VBS pair (no meta vbs_pair_lead): its pair "
+              "is the old max-m_jj one. The event vetoes use the stored legs and still work; jet removal + "
+              "re-pairing (rp_*) is disabled for it")
+        jets = None
     exp = EXPECTED_COMPLETE.get(info["sample"])
     if exp:
         okn = info["n_read"] == exp["n_read"]
@@ -220,25 +238,37 @@ def take(arr, idx):
     return ak.to_numpy(ak.firsts(arr[j]))
 
 
-def best_pair(J, jet_ok=None, pair_ok=None):
-    """calcBestVbsPair over the jets with jet_ok: the max-m_jj opposite-hemisphere
-    pair, first one on ties, among pairs pair_ok(i, k) allows. Returns numpy
-    (mjj, i, k) with i, k local indices into the ORIGINAL jet list; -1 if none."""
-    loc = ak.local_index(J.jet_pt)
-    if jet_ok is not None: loc = loc[jet_ok]
-    comb = ak.combinations(loc, 2)
-    i, k = comb["0"], comb["1"]
+# calcLeadingVbsPair's candidate cuts (clustering_constants.h: MIN_JET_PT, MAX_ABS_ETA_JET)
+MIN_JET_PT = 30.0
+
+
+def lead_pair(J, jet_ok=None):
+    """BranchPointerWrapper::calcLeadingVbsPair over the jets with jet_ok: the two
+    highest-pT jets with pT > MIN_JET_PT and |eta| < MAX_ABS_ETA_JET (a pT tie goes
+    to the lower jet index), which must be in opposite hemispheres -- if the leading
+    two are on one side there is NO pair, with no fallback to another one. Returns
+    numpy (mjj, i, k): i the leading and k the subleading leg, as local indices into
+    the ORIGINAL jet list; -1 where there is no pair."""
+    # the arrays are stored in jet-index order, so a stable sort breaks pT ties
+    # towards the lower jet index exactly as the C++ does
+    if len(J) and not ak.all(J.jet_idx[:, 1:] > J.jet_idx[:, :-1]):
+        raise SystemExit("jet_* arrays are not in jet-index order: the pT tie-break would differ from the C++")
     pt = ak.values_astype(J.jet_pt, np.float64)
-    eta = ak.values_astype(J.jet_eta, np.float64)
-    phi = ak.values_astype(J.jet_phi, np.float64)
-    m2 = 2 * pt[i] * pt[k] * (np.cosh(eta[i] - eta[k]) - np.cos(phi[i] - phi[k]))
-    ok = eta[i] * eta[k] < 0
-    if pair_ok is not None: ok = ok & pair_ok(i, k)
-    mjj = ak.where(ok, np.sqrt(ak.where(m2 > 0, m2, 0.0)), -1.0)
-    b = ak.argmax(mjj, axis=1, keepdims=True)
-    return (ak.to_numpy(ak.fill_none(ak.firsts(mjj[b]), -1.0)),
-            ak.to_numpy(ak.fill_none(ak.firsts(i[b]), -1)),
-            ak.to_numpy(ak.fill_none(ak.firsts(k[b]), -1)))
+    cand = (pt > MIN_JET_PT) & (np.abs(J.jet_eta) < MAX_ABS_ETA_JET)
+    if jet_ok is not None: cand = cand & jet_ok
+    loc = ak.local_index(J.jet_pt)[cand]
+    loc = loc[ak.argsort(-pt[cand], axis=1, stable=True)]
+    two = ak.pad_none(loc, 2, axis=1, clip=True)
+    i = ak.to_numpy(ak.fill_none(two[:, 0], -1)).astype(np.int64)
+    k = ak.to_numpy(ak.fill_none(two[:, 1], -1)).astype(np.int64)
+    # the hemisphere test in the C++ precision (float * float)
+    ok = (k >= 0) & (take(J.jet_eta, i) * take(J.jet_eta, k) < 0)
+    i, k = np.where(ok, i, -1), np.where(ok, k, -1)
+    pi_, ei, fi = (take(ak.values_astype(J[c], np.float64), i) for c in ("jet_pt", "jet_eta", "jet_phi"))
+    pk_, ek, fk = (take(ak.values_astype(J[c], np.float64), k) for c in ("jet_pt", "jet_eta", "jet_phi"))
+    m2 = 2 * pi_ * pk_ * (np.cosh(ei - ek) - np.cos(fi - fk))
+    mjj = np.where(ok, np.sqrt(np.where(m2 > 0, m2, 0.0)), -1.0)
+    return mjj, i, k
 
 
 def repair(e, calib, nsigma, min_trk, source, cuts):
@@ -250,16 +280,17 @@ def repair(e, calib, nsigma, min_trk, source, cuts):
     t = J.jet_t
     if source == "jj":
         jet_ok = None
-        def pair_ok(i, k):
-            both = timed[i] & timed[k]
-            pull = np.abs(t[i] - t[k]) / np.sqrt(sig[i] ** 2 + sig[k] ** 2)
-            return ~(both & (pull >= nsigma))
     else:
         s0 = e[f"infl_{source}"] * e[f"sig0_{source}"]
         pull = np.abs(t - e[f"t0_{source}"]) / np.sqrt(sig ** 2 + s0 ** 2)
         jet_ok = ~(timed & e[f"ok_{source}"] & (pull >= nsigma))
-        pair_ok = None
-    bm, bi, bk = best_pair(J, jet_ok, pair_ok)
+    bm, bi, bk = lead_pair(J, jet_ok)
+    if source == "jj":
+        # the leading pair must be time-compatible; no fallback to another pair
+        both = take(timed, bi) & take(timed, bk)
+        den = np.sqrt(np.where(both, take(sig, bi) ** 2 + take(sig, bk) ** 2, 1.0))
+        bad = (bi >= 0) & both & (np.abs(take(t, bi) - take(t, bk)) / den >= nsigma)
+        bm, bi, bk = np.where(bad, -1.0, bm), np.where(bad, -1, bi), np.where(bad, -1, bk)
     keepj = jet_ok if jet_ok is not None else ak.ones_like(timed)
     aeta = np.abs(J.jet_eta)
     nk = ak.to_numpy(ak.sum(keepj, axis=1))
@@ -343,7 +374,8 @@ HAS_JETS = all(v[4]["jets"] is not None for v in loaded.values())
 ALL_METHODS = VETO_METHODS + (REPAIR_METHODS if HAS_JETS else [])
 for m in DRAWN + [f"rp_{s}" for s in COMPARE]:
     if m.startswith("rp_") and not HAS_JETS:
-        raise SystemExit(f"{m} needs the jet_* arrays, which these files predate -- rerun util/vbs_time_veto")
+        raise SystemExit(f"{m} needs the jet_* arrays of a leading-jet-pair file, which these files "
+                         "predate -- rerun util/vbs_time_veto")
 # one calibration for every file unless asked otherwise (see the docstring)
 own = {r: measure(v[5], True, f"{r} HS legs") for r, v in loaded.items()}   # each file's own, for the record
 mode = args.jet_infl
@@ -379,9 +411,8 @@ for role, (path, col, cut, norm, ev, e_all, info) in loaded.items():
         J = ev["jets"]
         ev["la"] = ak.to_numpy(ak.argmax(J.jet_idx == ev["a_idx"], axis=1))
         ev["lb"] = ak.to_numpy(ak.argmax(J.jet_idx == ev["b_idx"], axis=1))
-        # the stored pair must be the one calcBestVbsPair finds in the arrays (the
-        # arrays are float, the C++ pairing double: only an exact m_jj tie could differ)
-        bm, bi, bk = best_pair(J)
+        # the stored pair must be the one calcLeadingVbsPair finds in the arrays
+        bm, bi, bk = lead_pair(J)
         bad = int(np.sum((bi != ev["la"]) | (bk != ev["lb"])))
         print(f"[{role}] pair re-formed from the jet arrays == stored legs in {len(bi) - bad:,} of {len(bi):,} events"
               + ("" if bad == 0 else "  WARNING: check the jet_* arrays"))
@@ -499,7 +530,9 @@ md = [f"# VBS timing tests: {os.path.basename(args.out)}", "",
       f"yields at {args.lumi:g} fb^-1", "",
       "Methods: `jj` / `t0_<src>` veto the EVENT (pair unchanged); `rp_<src>` REMOVE the jets that fail "
       "the t0 test and re-form the pair from the rest (event lost only if no pair passes the selection); "
-      "`rp_jj` keeps every jet and takes the max-m_jj time-compatible pair. After removal the "
+      "`rp_jj` keeps every jet and keeps the leading-jet pair only if it is time-compatible (the `jj` veto "
+      "again: no fallback pair). The files hold only events selected before removal, so jets a removal "
+      "would promote into a NEW passing pair are not counted. After removal the "
       "forward-jet preselection is " + ("re-applied" if args.repair_reapply_fwd else "NOT re-applied (--repair-reapply-fwd)")
       + ".", ""]
 for role, s in samples.items():
