@@ -347,11 +347,11 @@ the baseline `Score::TRKPTZ`, implemented in `Cluster::updateScores`
   the cluster's constituent tracks (nearest qualifying forward jet per
   track), then multiplied by `exp(−1.5·|Δz_cluster|)`. Falls back to the
   TRKPTZ score if no qualifying forward jets exist in the event.
-- **Time/purity**: for the `WAVES` row specifically (not its oracle
-  variants), both the reported time and purity are recomputed using only the
-  subset of the selected cluster's tracks that fall within `ΔR < 0.4` of a
-  qualifying forward jet — this purifies the time by dropping absorbed PU
-  tracks that the jet-agnostic clustering step picked up.
+- **Time/purity**: the reported time (`TimeSource::IN_JET`, which the oracle
+  variants below share) and, for the `WAVES` row alone, the purity are
+  recomputed using only the subset of the selected cluster's tracks that fall
+  within `ΔR < 0.4` of a qualifying forward jet — this purifies the time by
+  dropping absorbed PU tracks that the jet-agnostic clustering step picked up.
 - **`Score::JET_T_REFINED`** (short name `WAVES_RECLUST`, id 19): a
   *dedicated* collection — tracks are first filtered to those within
   `ΔR < 0.4` of a forward jet (`TrackFilterType::JET`), then re-clustered
@@ -458,7 +458,7 @@ stale entry is visible in the same log. The measurement is NOT circular (raw
 `var_vtx`, ungated track list, vertex times independent of the gate), so one
 pass suffices. Re-measure for any NEW sample. See Physics Findings for why
 this matters far less than it looks.
-`CONE_ITER_K` also still exists as a constant but nothing that builds reads it.
+`CONE_ITER_K` also still exists as a constant, but no built code reads it.
 Its sweep, `util/scratch/cone_iter_k_sweep.cxx` (local-only, like the rest of
 `util/scratch/`), no longer compiles: it uses `DIST_CUT_REFINE`, which has been
 removed.
