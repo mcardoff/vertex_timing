@@ -1524,7 +1524,8 @@ int main(int argc, char** argv) {
     // a default run's tree is unchanged.
     for (auto& s : MyUtl::RUN_SETTINGS)
       if (!s.isDefault()) tree.Branch(s.key.c_str(), &s.value, (s.key + "/D").c_str());
-    // --jvt: 0 none, 1 loose, 2 tight (JVT_WPS order), and what it did.
+    // --jvt: the working point's index in JVT_WPS (0 none, 1 loose, 2 tight, ...;
+    // src/jet_tagging.h), and what it did.
     int jvtWp = (int)(JVT_SEL - JVT_WPS);
     tree.Branch("jvt_wp",     &jvtWp,        "jvt_wp/I");
     tree.Branch("hs_jvt_rpt", &r.hs_jvt_rpt, "hs_jvt_rpt/D");

@@ -8,7 +8,7 @@
 // Structured in four lexical sections, in order:
 //   1. Load histograms (raw, unstyled) from the saved ROOT file.
 //   2. Derive every Integral()/GetMean()-based number (ROC graphs,
-//      the harmonized [0.6, 1.0] ROC window, the console summary, the
+//      the harmonized [0.80, 1.0] ROC window, the console summary, the
 //      rejection table).
 //      styleScen (cosmetic axis restriction) is NOT YET DEFINED here --
 //      see the sentinel comment below marking the end of this section.

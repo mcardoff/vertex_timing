@@ -18,7 +18,8 @@
 //   the forward-forward ones (cat = 1 / 2). A central jet's JVF uses the central association (z0
 //   significance < 5, tdr_common's CENTRAL_Z_SIGNIF), as its R_pT does: the forward parameterisation is
 //   several times too tight at |eta| < 2.4. Central jets carry no HGTD time.
-// --jvt=loose|tight (tag jvtLoose_ / jvtTight_; the user's analysis baseline, 2026-11-04: section 3 of
+// --jvt=<wp> (any JVT_WPS point but looseext, tagged by its name, e.g. jvtLoose_; full list in the usage
+//   below; the user's analysis baseline, 2026-11-04: section 3 of
 //   slides_tdr_timing gets "central JVT + fJVT loose"): the in-code JVT / fJVT taggers (src/jet_tagging.h,
 //   as vbs_time_veto / rpt_v5_hist --jvt) remove failing jets BEFORE the pair is formed. Needs the vertex
 //   fit's track assignment (Track_recoVtx_idx, an EXTENDED branch). Each selected jet's JVT R_pT and fJVT
