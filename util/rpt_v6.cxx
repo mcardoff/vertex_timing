@@ -209,7 +209,7 @@ int main(int argc, char** argv) {
   // able to scan this separates "the window is wrong for our t0" from "the
   // method does not work".
   double T0_NSIGMA = 2.0;
-  // Vertex-time error inflation, the timing analogue of Z0_VAR_INFLATION.
+  // Vertex-time error inflation, the timing analogue of the former Z0_VAR_INFLATION (removed 2026-11-16).
   // Measured on this sample: sigma_trk ~ 27.0 ps and sigma_vtx ~ 9.1 ps give a
   // quoted uncertainty of 28.6 ps, but the CORE spread of (t_trk - t_vtx) is
   // 50.8 ps -- the quoted error understates the truth by 1.78x, so a nominal
