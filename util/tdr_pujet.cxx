@@ -19,6 +19,7 @@
 //                   [--lojo]   (+ the WAVeS t0 with the tested jet left out, todo vt-9zl; tags the output "lojo")
 //                   [--max-events=N] [--gate-sigma=X (default 2)] [--clean-times=all|t0|off (default all)] [--rpt-match=ghost|dr02 (default ghost)] [--rpt-trk-ptmax=X|none (default 30)] [--out=<path>]
 // Output: <prefix>tdr_pujet.root (TTrees "jets", "meta"; merge shards with hadd -f).
+// The jvt_rpt* columns need Track_recoVtx_idx: an input without it gets -1 there for every jet, with a warning.
 // -----------------------------------------------------------------------------
 #include <TChain.h>
 #include <TFile.h>
@@ -81,6 +82,13 @@ int main(int argc, char** argv) {
   TChain chain("ntuple");
   setupChain(chain, cfg.ntupleDir.c_str(), FILE_SHARD);
   recordAvailableBranches(chain);
+  // Without the vertex fit's assignment recoVtxOf is a sentinel for every track and JVT's R_pT would read 0 for every
+  // jet, the value of a jet with no PV0-fitted track. The TDR R_pT columns do not need it, so the run goes on and the
+  // JVT columns are written as -1 (an R_pT is never negative) instead.
+  const bool haveVtxFit = hasBranch("Track_recoVtx_idx");
+  if (!haveVtxFit)
+    std::cerr << "[tdr_pujet] WARNING: this sample lacks Track_recoVtx_idx: jvt_rpt and jvt_rpt_t0_*"
+              << (lojo ? " (and jvt_rpt_t0_waves_lojo)" : "") << " are written as -1 for every jet\n";
   TTreeReader reader(&chain);
   BranchPointerWrapper branch(reader);
   const tdr::TimeCleaning CLEAN = tdr::setupCleaning(reader, cleanMode);
@@ -183,9 +191,14 @@ int main(int argc, char** argv) {
             std::abs(branch.trackTime[idx] - branch.truthVtxTime[0]) / branch.trackTimeRes[idx] >= TRUTH_PULL_CUT) ++nMisHs;
       rItk = r.itk;  rSelf = r.self;  rComb = r.comb;
       for (int k = 0; k < tdr::N_T0; ++k) rT0[k] = r.t0[k];
-      const tdr::JvtRpt jr = tdr::jvtRpt(branch, j, T, gate, CLEAN);
-      rJvt = jr.plain;
-      for (int k = 0; k < tdr::N_T0; ++k) rJvtT0[k] = jr.t0[k];
+      if (haveVtxFit) {
+        const tdr::JvtRpt jr = tdr::jvtRpt(branch, j, T, gate, CLEAN);
+        rJvt = jr.plain;
+        for (int k = 0; k < tdr::N_T0; ++k) rJvtT0[k] = jr.t0[k];
+      } else {
+        rJvt = -1.0;
+        for (int k = 0; k < tdr::N_T0; ++k) rJvtT0[k] = -1.0;
+      }
       if (lojo) {
         const double nan = std::numeric_limits<double>::quiet_NaN();
         const double tHS = branch.truthVtxTime[0];
@@ -200,7 +213,8 @@ int main(int argc, char** argv) {
           const double iw = T.infl[tdr::T0_WAVES];
           const tdr::WavesT0 a = tdr::wavesT0LeaveOut(branch, j, tdr::LeaveOut::JET_AND_TRACKS, CLEAN);
           rLojo = tdr::sumPt(branch, tdr::timeGate(branch, trk, a.t, a.sig, a.ok, iw, gate, CLEAN)) / pt;
-          rJvtLojo = tdr::sumPt(branch, tdr::timeGate(branch, pv, a.t, a.sig, a.ok, iw, gate, CLEAN)) / pt;
+          rJvtLojo = haveVtxFit ? tdr::sumPt(branch, tdr::timeGate(branch, pv, a.t, a.sig, a.ok, iw, gate, CLEAN)) / pt
+                                : -1.0;
           dtLojo = a.ok ? a.t - tHS : nan;
           nInLojo = a.nInJet;
           const tdr::WavesT0 c = tdr::wavesT0LeaveOut(branch, j, tdr::LeaveOut::JET, CLEAN);

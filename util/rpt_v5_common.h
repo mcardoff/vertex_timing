@@ -7,16 +7,20 @@
 //   file) and rpt_v5_plot.cxx (reads that file, produces the RpT PDF) --
 //   split out of the former single rpt_v5.cxx. Houses the Scenario container,
 //   the shared RpT histogram binning/booking, the save/load helpers that
-//   round-trip a Scenario set through histogram_io.h, and the per-sample
-//   vertex-t0 inflation table (also used by util/vbs_time_veto.cxx).
+//   round-trip a Scenario set through histogram_io.h, the per-sample
+//   vertex-t0 inflation table (also used by util/vbs_time_veto.cxx), and the
+//   --jvt parsing and file check both stages share.
 // ---------------------------------------------------------------------------
 
 #include "clustering_constants.h"
 #include "histogram_io.h"
+#include "jet_tagging.h"
+#include "sample_config.h"
 
 #include <TH1.h>
 #include <TString.h>
 
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -174,6 +178,46 @@ inline void loadScenarios(MyUtl::HistReader& r, std::vector<Scenario>& sv) {
     r.LoadInto(s.h_hs, s.h_hs->GetName());
     r.LoadInto(s.h_pu, s.h_pu->GetName());
   }
+}
+
+// -----------------------------------------------------------------------------
+// resolveRptJvt
+//   --jvt=<wp> for both stages (src/jet_tagging.h's resolveJvtWP), so the plot
+//   stage builds the same output tag as the hist stage and finds its file: a
+//   working point that tags (every one but none) appends its tag (jvtLoose,
+//   ...) to SELECTION_TAG. Call after resolveSelection. nullptr after an error
+//   message, for an unknown working point or one rpt_v5 cannot evaluate.
+// -----------------------------------------------------------------------------
+inline const JvtWP* resolveRptJvt(int argc, char** argv, const std::string& prog) {
+  const JvtWP* wp = resolveJvtWP(argc, argv, prog);
+  if (wp && wp->rptMin >= 0.0) {
+    const std::string tag = std::string(wp->tag).substr(1);
+    SELECTION_TAG = SELECTION_TAG.empty() ? tag : SELECTION_TAG + "_" + tag;
+  }
+  return wp;
+}
+
+// -----------------------------------------------------------------------------
+// checkJvtWP
+//   The plot stage's check that the file was made with the requested --jvt
+//   working point, as HistReader::CheckSelection does for the VBS cuts: the
+//   tag in the path no longer says which working point a --hist-file= file
+//   has. rpt_v5_hist writes meta_vbs_jvt_wp (the index in JVT_WPS) for every
+//   tagged run and has since --jvt existed (630cb9b), so a file without the
+//   key was made without pileup-jet tagging: that is fine for --jvt=none and a
+//   mismatch otherwise. Throws on a mismatch.
+// -----------------------------------------------------------------------------
+inline void checkJvtWP(MyUtl::HistReader& r, const JvtWP& wp) {
+  const Long64_t want = static_cast<Long64_t>(&wp - JVT_WPS);
+  const Long64_t nWP  = static_cast<Long64_t>(sizeof(JVT_WPS) / sizeof(JVT_WPS[0]));
+  Long64_t have = 0;   // none: what a file without the key was made with
+  r.FindScalarLong("meta_vbs_jvt_wp", have);
+  if (have == want) return;
+  const std::string haveName = (have >= 0 && have < nWP) ? JVT_WPS[have].name
+                                                         : "unknown index " + std::to_string(have);
+  throw std::runtime_error("checkJvtWP: this file was produced with --jvt=" + haveName +
+                           ", but this process is configured for --jvt=" + wp.name +
+                           ". Pass the matching --jvt=, or re-run the histogramming stage.");
 }
 
 #endif  // RPT_V5_COMMON_H

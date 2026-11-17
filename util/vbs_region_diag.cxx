@@ -67,7 +67,8 @@
 // fJVT 2.5 <= |eta| < 4.5 and pT < 120 GeV. A jet outside both windows is never
 // removed; a jet with no ghost tracks has R_pT = 0 and fails JVT in its window.
 //
-// --jvt=none|loose|tight picks the working point. The default, none, is
+// --jvt=<wp> picks the working point (src/jet_tagging.h's JVT_WPS, except the
+// t0-gated / TDR ones, whose R_pT is not computed here). The default, none, is
 // bit-identical to the pre-JVT diagnostic apart from the added columns. The
 // `jets` tree holds every pT-passing jet's discriminants BEFORE the cut, so a
 // threshold can be re-derived (python/vbs_jvt_calibrate.py) or scanned offline
@@ -201,17 +202,11 @@ int main(int argc, char** argv) {
   bool noOR = false;
   for (int i = 1; i < argc; ++i) if (std::string(argv[i]) == "--no-or") noOR = true;
   if (noOR) OVERLAP_REMOVAL = false;
-  // --jvt=none|loose|tight: pileup-jet tagging applied to the pT-passing list
-  // before any pairing (see the file header). Tags the output file.
-  const JvtWP* wpSel = &JVT_WPS[0];
-  for (int i = 1; i < argc; ++i) {
-    const std::string a = argv[i];
-    if (a.rfind("--jvt=", 0) != 0) continue;
-    const std::string w = a.substr(6);
-    const JvtWP* hit = jvtWPByName(w);
-    if (!hit) { std::cerr << "[diag] unknown --jvt=" << w << " (none|loose|tight)\n"; return 1; }
-    wpSel = hit;
-  }
+  // --jvt=<wp>: pileup-jet tagging applied to the pT-passing list before any
+  // pairing (see the file header). Tags the output file. The t0-gated / TDR
+  // working points are refused: their R_pT is not computed here.
+  const JvtWP* wpSel = resolveJvtWP(argc, argv, "diag");
+  if (!wpSel) return 1;
   const JvtWP& WP = *wpSel;
   // --pair=mjj|lead: which two jets are "the VBF pair" (see the file header).
   bool pairLead = false;
