@@ -359,8 +359,15 @@ namespace MyUtl {
     //   removedJet is empty (non-Z+jets samples, or before
     //   computeOverlapRemoval() has run), so every jet loop can guard on it
     //   unconditionally with zero effect on other samples.
+    //
+    //   Also true for leaveOutJet: a jet a caller treats as absent for one
+    //   computation (util/tdr_common.h's leave-one-jet-out t0: WAVeS's score,
+    //   in-jet time and purity all skip it). -1, the default, is no jet, so
+    //   nothing changes unless a caller sets it -- and it must reset it.
     // -----------------------------------------------------------------------
+    int leaveOutJet = -1;
     bool isJetRemoved(int j) const {
+      if (j >= 0 && j == leaveOutJet) return true;
       if (OVERLAP_MODE != OverlapMode::REMOVE_JETS) return false;
       return j >= 0 && j < (int)removedJet.size() && removedJet[j] != 0;
     }

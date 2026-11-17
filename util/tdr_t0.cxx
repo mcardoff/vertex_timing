@@ -9,9 +9,11 @@
 //                  the TRKPTZ and WAVeS t0s of util/tdr_common.h -- the ones the
 //                  presentation's R_pT plots use -- from the ntuple's track times
 //                  and from the cleaned ones, in the same event
+// and dt_<name>_clean for every later t0 source of util/tdr_common.h (wfix_*, the waves_* selection levers)
 // (NaN where a t0 is absent), with the number of forward hard-scatter tracks with a
 // valid time (n_hs_trk: the main analysis's EventCounts on the 3-sigma list, from the
-// ntuple's times, so raw and cleaned share one x axis) and of forward jets.
+// ntuple's times, so raw and cleaned share one x axis), of forward jets, and the pT of the
+// hardest forward truth-pileup jet (pu_fwd_ptmax, 0 = none).
 // Events: the main clustering analysis's gate -- Z+jets lepton selection and overlap
 // removal, passBasicCuts (MIN_JETS, vertex within MAX_VTX_DZ), passJetPtCut.
 //
@@ -100,6 +102,7 @@ int main(int argc, char** argv) {
               SAMPLE_NAME.empty() ? "local" : SAMPLE_NAME.c_str());
   std::cout << "[tdr_t0] out=" << outPath << "\n";
 
+  EXTENDED_BRANCHES = true;   // Track_recoVtx_idx: the waves_pv0 / waves_npu t0s (tdr_common.h)
   TChain chain("ntuple");
   setupChain(chain, cfg.ntupleDir.c_str(), FILE_SHARD);
   recordAvailableBranches(chain);
@@ -139,6 +142,17 @@ int main(int argc, char** argv) {
   tree.Branch("hs_pt_misassigned_clean", &hsPtMisHit, "hs_pt_misassigned_clean/D");
   tree.Branch("hs_pt_injet_clean", &hsPtJet, "hs_pt_injet_clean/D");
   const double NaN = std::numeric_limits<double>::quiet_NaN();
+  // every later t0 source of tdr_common.h (the truth-fixed WAVeS t0s, the selection levers of todo vt-5t0), from the
+  // cleaned t0 input as the R_pT plots use them: dt_<name>_clean
+  std::vector<double> dtX(tdr::N_T0, NaN);
+  for (int k = tdr::T0_WFIX_SEL; k < tdr::N_T0; ++k) {
+    const std::string n = std::string("dt_") + tdr::T0_NAMES[k] + "_clean";
+    tree.Branch(n.c_str(), &dtX[k], (n + "/D").c_str());
+  }
+  // the event's hardest forward truth-pileup jet (2.4 < |eta| < 4.0, pT > 30 GeV, isJetPaperPU; 0 = none): the
+  // > 50 GeV capture's population (util/scratch/kmeans_split_test.cxx's category)
+  double puFwdPtMax = 0.0;
+  tree.Branch("pu_fwd_ptmax", &puFwdPtMax, "pu_fwd_ptmax/D");
 
   Long64_t nRead = 0, nSel = 0;
   while (reader.Next()) {
@@ -164,6 +178,14 @@ int main(int argc, char** argv) {
     put(0, raw, tdr::T0_HGTD);
     put(1, raw, tdr::T0_TRKPTZ); put(2, cln, tdr::T0_TRKPTZ);
     put(3, raw, tdr::T0_WAVES);  put(4, cln, tdr::T0_WAVES);
+    for (int k = tdr::T0_WFIX_SEL; k < tdr::N_T0; ++k) dtX[k] = cln.ok[k] ? cln.t[k] - tHS : NaN;
+    puFwdPtMax = 0.0;
+    for (int j = 0; j < (int)branch.topoJetPt.GetSize(); ++j) {
+      if (branch.isJetRemoved(j) || branch.topoJetPt[j] < tdr::JET_PT_MIN) continue;
+      const double ae = std::abs((double)branch.topoJetEta[j]);
+      if (ae < tdr::FWD_ETA_MIN || ae >= tdr::FWD_ETA_MAX) continue;
+      if (branch.isJetPaperPU(branch.topoJetEta[j], branch.topoJetPhi[j])) puFwdPtMax = std::max(puFwdPtMax, (double)branch.topoJetPt[j]);
+    }
     const std::string fpath = chain.GetCurrentFile()->GetName();
     { const size_t p = fpath.rfind('_'), d = (p == std::string::npos) ? p : fpath.find('.', p);
       file_idx = (p != std::string::npos && d != std::string::npos) ? std::atoi(fpath.substr(p + 1, d - p - 1).c_str()) : -1; }

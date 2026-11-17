@@ -109,6 +109,13 @@ def axes(frame, xtitle, ytitle, size=0.05, ytoff=1.4, xtoff=1.4, ndiv_y=None):
     return frame
 
 
+def end_pad():
+    """draw a zero-length, thin, solid line as a pad's LAST primitive. In the EPS, the next pad's frame is painted with
+    the line style and width this pad leaves behind, so a pad ending on a dotted curve or legend entry (truth t0) drew
+    the next pad's frame dotted (tdr_pujet_plots / tdr_fwdpair_rpt ROCs, found 2026-11-13)"""
+    ln = keep(ROOT.TLine(0, 0, 0, 0)); ln.SetLineStyle(1); ln.SetLineWidth(1); ln.SetBit(ROOT.TLine.kLineNDC); ln.Draw()
+
+
 def save(canvas, stem, scale=1.5):
     """the PDF on a page of the canvas's own shape, via ROOT's EPS (whose bounding box is the canvas)
     and epstopdf -- ROOT 6.40's PDF writer puts every canvas on a fixed ~A4 page whatever the style's

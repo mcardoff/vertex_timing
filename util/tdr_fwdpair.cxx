@@ -97,10 +97,29 @@ struct JetOut {
   double t_hs = -999, var_hs_spread = -1, var_hs_mean = -1;
   int core_n = 0;
   double core_t = -999, core_sig = -1;
+  // the same core time without the misassigned hard-scatter tracks (tdr_common's misassignedHs): what the
+  // perfect-timing t0 sources' vetoes compare against
+  int core_n_fix = 0;
+  double core_t_fix = -999, core_sig_fix = -1;
   float jvt_rpt = -1, fjvt = -999;           // the JVT / fJVT discriminants (--jvt), -1 / -999 without
   float jvt_rpt_t0 = -1;                      // JVT's R_pT with the WAVeS t0 gate (--jvt), -1 without
+  // the core-time variants (2026-11-14, todo vt-r2k.21 / vt-r2k.20): the same estimator on other track sets, to see
+  // what a better jet time buys the veto (CV_NAMES below; -999 / -1 / 0 without a track, as core_*)
+  static constexpr int N_CV = 5;
+  std::array<int, N_CV> cv_n{};
+  std::array<double, N_CV> cv_t{-999, -999, -999, -999, -999}, cv_sig{-1, -1, -1, -1, -1};
 };
 constexpr double CORE_DR = 0.2, CORE_DIST_CUT = 2.0;   // util/vbs_time_veto.cxx's JET_TIME_DR, JET_TIME_DIST_CUT
+// the core-time variants, j*_core_{t,sig,n}_<name>:
+//   r04       tracks within dR < 0.4 of the axis instead of 0.2
+//   nocap     no 30 GeV upper track pT (MAX_TRACK_PT, copied from the t0 clustering, never chosen for jets)
+//   r04nocap  both
+//   zwin      the dR < 0.2 core restricted to tracks inside PV0's forward z window (getNewDzpara x 1.4, the R_pT
+//             association): a hard-scatter core built from pileup tracks far in z (vt-r2k.20). It also strips the
+//             pileup jets of their own tracks, so the veto goes blind (results/jet_core_variants.md)
+//   zpref     the standard tracks, but the core is the time cluster with the most pT INSIDE that z window; the
+//             highest-sum-pT cluster when no cluster has a track there (a pileup jet keeps its collision's time)
+constexpr const char* CV_NAMES[JetOut::N_CV] = {"r04", "nocap", "r04nocap", "zwin", "zpref"};
 
 // weighted mean, weighted variance of the times, and 1 / sum w (w = 1 / sigma_t^2)
 void timeStats(const std::vector<std::pair<double, double>>& tw, double& t, double& vSpread, double& vMean) {
@@ -163,7 +182,7 @@ JetOut jetQuantities(BranchPointerWrapper& b, int j, const tdr::TrackLists& L, c
     std::vector<char> hsT(trk.size(), 0);
     for (size_t k = 0; k < trk.size(); ++k) {
       if (!hsZ[k]) continue;
-      hsT[k] = !tdr::timeGate(b, {trk[k]}, T.t[s], T.sig[s], T.ok[s], T.infl[s], gate, C).empty();
+      hsT[k] = !tdr::timeGate(b, {trk[k]}, T.t[s], T.sig[s], T.ok[s], T.infl[s], gate, C, tdr::fixesTimes(s)).empty();
     }
     o.jvf_t0[s] = jvfOf(b, trk, hsT, nearPu);
   }
@@ -194,15 +213,53 @@ JetOut jetQuantities(BranchPointerWrapper& b, int j, const tdr::TrackLists& L, c
     if (tdr::dR(o.eta, o.phi, b.trackEta[idx], b.trackPhi[idx]) >= CORE_DR) continue;
     cand.push_back(idx);
   }
-  if (!cand.empty()) {
+  auto core = [&](const std::vector<int>& tracks, double& t, double& sig, int& n) {
+    if (tracks.empty()) return;
     static const std::unordered_map<int, double> kNone;
-    std::vector<Cluster> cl = makeSimpleClusters(cand, &b, /*useSmearedTimes=*/false, kNone, kNone,
+    std::vector<Cluster> cl = makeSimpleClusters(tracks, &b, /*useSmearedTimes=*/false, kNone, kNone,
                                                  /*checkTimeValid=*/true, /*usez0=*/false);
     doIterativeClustering(&cl, CORE_DIST_CUT);
     const Cluster* best = nullptr;   // TRKPT score = sum pT
     for (const Cluster& c : cl)
       if (!best || c.scores.at(Score::TRKPT.id) > best->scores.at(Score::TRKPT.id)) best = &c;
-    o.core_t = best->values[0];  o.core_sig = best->sigmas[0];  o.core_n = (int)best->trackIndices.size();
+    t = best->values[0];  sig = best->sigmas[0];  n = (int)best->trackIndices.size();
+  };
+  core(cand, o.core_t, o.core_sig, o.core_n);
+  std::vector<int> candFix;
+  for (int idx : cand) if (!tdr::misassignedHs(b, idx)) candFix.push_back(idx);
+  if (candFix.size() == cand.size()) { o.core_t_fix = o.core_t;  o.core_sig_fix = o.core_sig;  o.core_n_fix = o.core_n; }
+  else core(candFix, o.core_t_fix, o.core_sig_fix, o.core_n_fix);
+  // the core-time variants (CV_NAMES)
+  for (int v = 0; v < 4; ++v) {
+    const double drMax = (v == 0 || v == 2) ? 0.4 : CORE_DR;
+    const double ptMax = (v == 1 || v == 2) ? std::numeric_limits<double>::infinity() : MAX_TRACK_PT;
+    std::vector<int> cv;
+    for (int idx : b.topoJetGhostTrackIdx[j]) {
+      if (idx < 0 || idx >= nT) continue;
+      if (!tdr::timed(b, idx, C, C.jets()) || !(b.trackTimeRes[idx] > 0.0)) continue;
+      if (!passTrackKinematics((size_t)idx, &b, MIN_TRACK_PT, ptMax)) continue;
+      if (tdr::dR(o.eta, o.phi, b.trackEta[idx], b.trackPhi[idx]) >= drMax) continue;
+      if (v == 3 && !assocZ(b, idx, b.recoVtxZ[0], /*fwd=*/true)) continue;
+      cv.push_back(idx);
+    }
+    core(cv, o.cv_t[v], o.cv_sig[v], o.cv_n[v]);
+  }
+  if (!cand.empty()) {   // zpref: the standard candidates, the cluster with the most z-compatible pT preferred
+    static const std::unordered_map<int, double> kNone;
+    std::vector<Cluster> cl = makeSimpleClusters(cand, &b, /*useSmearedTimes=*/false, kNone, kNone,
+                                                 /*checkTimeValid=*/true, /*usez0=*/false);
+    doIterativeClustering(&cl, CORE_DIST_CUT);
+    const Cluster* best = nullptr;
+    double bestZ = 0.0;
+    for (const Cluster& c : cl) {
+      double zpt = 0.0;
+      for (int t : c.trackIndices) if (assocZ(b, t, b.recoVtxZ[0], /*fwd=*/true)) zpt += b.trackPt[t];
+      if (zpt > bestZ) { bestZ = zpt; best = &c; }
+    }
+    if (!best)   // no z-compatible track anywhere: the standard choice
+      for (const Cluster& c : cl)
+        if (!best || c.scores.at(Score::TRKPT.id) > best->scores.at(Score::TRKPT.id)) best = &c;
+    o.cv_t[4] = best->values[0];  o.cv_sig[4] = best->sigmas[0];  o.cv_n[4] = (int)best->trackIndices.size();
   }
   return o;
 }
@@ -231,10 +288,10 @@ int main(int argc, char** argv) {
   const bool oneFwd = pairMode == "one";
   if (oneFwd) SELECTION_TAG = SELECTION_TAG.empty() ? "onefwd" : SELECTION_TAG + "_onefwd";
   const JvtWP* jwp = jvtWPByName(jvtName);
-  if (!jwp || jvtName == "looseext") { std::cerr << "[tdr_fwdpair] --jvt must be none, loose, tight, jvt4pt60, jvt4pt120, jvt4pt60t0, jvt4pt60t0tru, jvt4pt60f03, jvt4pt60f05 or jvt4pt60f10\n"; return 1; }
+  if (!jwp || jvtName == "looseext") { std::cerr << "[tdr_fwdpair] --jvt must be none, loose, tight, jvt4pt60, jvt4pt120, jvt4pt60t0, jvt4pt60t0tru, jvt4pt60f03, jvt4pt60f05, jvt4pt60f10, jvt4pt60tdr, jvt4pt60tdrw or jvt4pt60tdrtru\n"; return 1; }
   const bool jvtOn = jwp->rptMin >= 0.0;
+  EXTENDED_BRANCHES = true;   // Track_recoVtx_idx: the JVT discriminants, and the waves_pv0 / waves_npu t0s (tdr_common.h)
   if (jvtOn) {
-    EXTENDED_BRANCHES = true;                     // the discriminants need Track_recoVtx_idx
     const std::string tag = std::string(jwp->tag).substr(1);
     SELECTION_TAG = SELECTION_TAG.empty() ? tag : SELECTION_TAG + "_" + tag;
   }
@@ -245,6 +302,10 @@ int main(int argc, char** argv) {
   }
   const tdr::CleanMode cleanMode = tdr::cleaningMode(argc, argv);   // before the output path: it tags the file
   tdr::rptTrkPtMaxMode(argc, argv);                                  // likewise
+  if (jvtOn && jwp->tdrRpt > -2 && std::isfinite(tdr::RPT_TRK_PT_MAX)) {
+    std::cerr << "[tdr_fwdpair] --jvt=" << jvtName << " is calibrated on the uncapped TDR R_pT: pass --rpt-trk-ptmax=none\n";
+    return 1;
+  }
   const Inflation INFL = inflationFor(SAMPLE_NAME);
   const std::string outPath = outOverride.empty() ? histFilePath("tdr_fwdpair.root") : outOverride;
   {
@@ -319,6 +380,15 @@ int main(int argc, char** argv) {
     tree.Branch((p + "core_t").c_str(), &o.core_t, (p + "core_t/D").c_str());
     tree.Branch((p + "core_sig").c_str(), &o.core_sig, (p + "core_sig/D").c_str());
     tree.Branch((p + "core_n").c_str(), &o.core_n, (p + "core_n/I").c_str());
+    tree.Branch((p + "core_t_fix").c_str(), &o.core_t_fix, (p + "core_t_fix/D").c_str());
+    tree.Branch((p + "core_sig_fix").c_str(), &o.core_sig_fix, (p + "core_sig_fix/D").c_str());
+    tree.Branch((p + "core_n_fix").c_str(), &o.core_n_fix, (p + "core_n_fix/I").c_str());
+    for (int v = 0; v < JetOut::N_CV; ++v) {
+      const std::string sfx = std::string("_") + CV_NAMES[v];
+      tree.Branch((p + "core_t" + sfx).c_str(), &o.cv_t[v], (p + "core_t" + sfx + "/D").c_str());
+      tree.Branch((p + "core_sig" + sfx).c_str(), &o.cv_sig[v], (p + "core_sig" + sfx + "/D").c_str());
+      tree.Branch((p + "core_n" + sfx).c_str(), &o.cv_n[v], (p + "core_n" + sfx + "/I").c_str());
+    }
     tree.Branch((p + "jvt_rpt").c_str(), &o.jvt_rpt, (p + "jvt_rpt/F").c_str());
     tree.Branch((p + "fjvt").c_str(), &o.fjvt, (p + "fjvt/F").c_str());
     tree.Branch((p + "jvt_rpt_t0").c_str(), &o.jvt_rpt_t0, (p + "jvt_rpt_t0/F").c_str());
@@ -352,6 +422,17 @@ int main(int argc, char** argv) {
       for (int j = 0; j < (int)D.size(); ++j) {
         rptPlain[j] = D[j].rpt;
         D[j].rpt = (float)tdr::jvtRpt(branch, j, T, gate, CLEAN).t0[jwp->t0Gate];
+      }
+    }
+    if (jvtOn && jwp->tdrRpt > -2) {   // the TDR R_pT (ITk or t0-gated) on the forward window's jets, JVT's elsewhere
+      if (!haveT) { T = tdr::computeT0s(branch, INFL, CLEAN);  haveT = true; }
+      const tdr::TrackLists Lp = tdr::rptTrackLists(branch);
+      rptPlain.resize(D.size());
+      for (int j = 0; j < (int)D.size(); ++j) {
+        rptPlain[j] = D[j].rpt;
+        if (!D[j].rptFwdWin) continue;
+        const tdr::JetRpt r = tdr::jetRpt(branch, j, Lp, T, gate, CLEAN, tdr::RptMatch::GHOST);
+        D[j].rpt = (float)(jwp->tdrRpt < 0 ? r.itk : r.t0[jwp->tdrRpt]);
       }
     }
     std::vector<int> js;

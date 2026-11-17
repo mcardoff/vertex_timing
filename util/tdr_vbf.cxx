@@ -86,6 +86,7 @@ int main(int argc, char** argv) {
   std::cout << "[tdr_vbf] track-time cleaning: " << tdr::cleanModeName(cleanMode) << "; R_pT matching: " << tdr::rptMatchName(rptMatch) << "\n";
   std::cout << "[tdr_vbf] out=" << outPath << "\n";
 
+  EXTENDED_BRANCHES = true;   // Track_recoVtx_idx: the waves_pv0 / waves_npu t0s (tdr_common.h)
   TChain chain("ntuple");
   setupChain(chain, cfg.ntupleDir.c_str(), FILE_SHARD);
   recordAvailableBranches(chain);

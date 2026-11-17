@@ -87,10 +87,38 @@ constexpr double CENTRAL_Z_SIGNIF = 5.0;   // central association: |dz| / sigma_
 constexpr double RPT_TRACK_JET_DR = 0.2;   // R_pT cone
 constexpr double T0_ASSOC_NSIGMA  = 2.5;   // t0 clustering input (rpt_v5 / vbs_time_veto)
 
-// t0 sources, in this order everywhere
-constexpr int N_T0 = 4;
-enum T0Idx { T0_HGTD = 0, T0_TRKPTZ = 1, T0_WAVES = 2, T0_TRUTH = 3 };
-inline const char* const T0_NAMES[N_T0] = {"hgtd", "trkptz", "waves", "truth"};
+// t0 sources, in this order everywhere. The last three (2026-11-13, todo vt-23j) are the WAVeS t0 with its failures
+// repaired by truth, exactly as clustering_hist's rows of the talk's "perfect timing / perfect selection" slide
+// (src/failure_fixes.h's applyFixes on the same clustering input):
+//   wfix_sel   Fix::SELECT             the hard scatter's cluster chosen (WFIX_SELECT, "perfect selection")
+//   wfix_time  Fix::MISTIMED           the HS tracks >= 3 sigma from t_HS dropped, re-clustered (WFIX_MISTIMED, "perfect timing")
+//   wfix_both  Fix::MISTIMED | SELECT  both (WFIX_C3)
+// They use WAVeS's inflation; no t0 (ok = false) when no cluster qualifies.
+// The next five (2026-11-14, todo vt-5t0) are two reco-level SELECTION levers against the > 50 GeV capture (a hard
+// forward pileup jet's collision wins WAVeS's choice, notes/gp_talk.md): WAVeS's choice re-made on the same clusters
+// with a modified score, then WAVeS's in-jet time and sigma for the new pick -- so they differ from WAVeS by the
+// selection alone (wavesLever below):
+//   waves_a0 / waves_a025 / waves_a05   pT_jet^alpha in place of WAVeS's pT_jet, alpha = 0 / 0.25 / 0.5 (WAVeS: 1)
+//   waves_pv0   WAVeS x the share of the cluster's pT the vertex fit gave PV0 (Track_recoVtx_idx)
+//   waves_npu   WAVeS x (1 - the share it gave ANOTHER reco vertex): tracks outside every fit count as PV0's
+// WAVeS's inflation. No t0 when no cluster qualifies, and for the vertex-fit pair when the input lacks Track_recoVtx_idx.
+// The last four (2026-11-14) size the room above 50 GeV, where perfect selection + timing (wfix_both = WFIX_C3) reach
+// ITk x1.58 at 85% and the truth t0 x2.88 (results/wfix_downstream.md):
+//   wfix_c4 / wfix_c5 / wfix_c6   the rest of clustering_hist's cumulative fix chain on WAVeS: + misclustering (the
+//                                 chosen cluster timed from its HS tracks alone), + HS track efficiency (untimed or
+//                                 cleaned HS tracks in HGTD given Gaus(t_HS, 30 ps)), + HS time resolution (timed HS
+//                                 tracks at Gaus(t_HS, 1 ps)); WAVeS's inflation; misassigned HS times untimed in the
+//                                 gate, as wfix_time / wfix_both (fixesTimes)
+//   truth_wsig                    t_HS exactly, but gated with WAVeS's sigma_t0 and inflation: the truth row's gate is
+//                                 narrower (sigma_t0 = 0), so truth - truth_wsig is the part of its gain that no real
+//                                 t0 can have; ok wherever WAVeS has a t0 (else sigma_t0 = 0, as truth)
+constexpr int N_T0 = 16;
+enum T0Idx { T0_HGTD = 0, T0_TRKPTZ = 1, T0_WAVES = 2, T0_TRUTH = 3, T0_WFIX_SEL = 4, T0_WFIX_TIME = 5, T0_WFIX_BOTH = 6,
+             T0_WA0 = 7, T0_WA025 = 8, T0_WA05 = 9, T0_WPV0 = 10, T0_WNPU = 11,
+             T0_WFIX_C4 = 12, T0_WFIX_C5 = 13, T0_WFIX_C6 = 14, T0_TRUTH_WSIG = 15 };
+inline const char* const T0_NAMES[N_T0] = {"hgtd", "trkptz", "waves", "truth", "wfix_sel", "wfix_time", "wfix_both",
+                                           "waves_a0", "waves_a025", "waves_a05", "waves_pv0", "waves_npu",
+                                           "wfix_c4", "wfix_c5", "wfix_c6", "truth_wsig"};
 
 struct T0Set {
   std::array<double, N_T0> t{}, sig{}, infl{};
@@ -166,6 +194,55 @@ struct T0Extra {
   double hsPtInJet = 0.0;       // within dR < 0.4 of a forward jet (pT > 30, 2.38 < |eta| < 4.0): what WAVeS up-weights
 };
 
+// ── Selection levers (todo vt-5t0) ───────────────────────────────────────────
+// WAVeS's score (Cluster::updateScores) generalised:
+//   S(C) = [ SUM_trk pT_trk * pT_jet^alpha / max(dR, WAVES_DR_FLOOR) ] * exp(-1.5 |dz_C|) * f_vtx(C)
+// with the nearest qualifying forward jet per track, and TRKPTZ's score in place of the bracket when the event has no
+// qualifying forward jet -- updateScores' loop and arithmetic exactly, so alpha = 1 with f_vtx = 1 IS Score::WAVES.
+enum class VtxFactor { NONE, PV0, NOT_OTHER };
+struct WavesLever { int k; double alpha; VtxFactor vf; };
+inline constexpr std::array<WavesLever, 5> WAVES_LEVERS = {{
+    {T0_WA0, 0.0, VtxFactor::NONE}, {T0_WA025, 0.25, VtxFactor::NONE}, {T0_WA05, 0.5, VtxFactor::NONE},
+    {T0_WPV0, 1.0, VtxFactor::PV0}, {T0_WNPU, 1.0, VtxFactor::NOT_OTHER}}};
+// The index of the cluster the lever picks: the first maximum, as chooseCluster. When every cluster scores 0 (a vertex
+// factor of 0 everywhere: none of the input reached PV0) the factor says nothing, and WAVeS's own pick (iWaves) stands.
+inline int wavesLeverPick(const std::vector<Cluster>& clusters, BranchPointerWrapper& b, const WavesLever& L,
+                          const std::vector<double>& zTerm, int iWaves) {
+  int best = 0;
+  double bestS = -1.0;
+  for (int c = 0; c < (int)clusters.size(); ++c) {
+    const Cluster& cl = clusters[c];
+    double sum = 0.0;
+    for (int idx : cl.trackIndices) {
+      const double trkEta = b.trackEta[idx], trkPhi = b.trackPhi[idx], trkPt = b.trackPt[idx];
+      double minDR = 1e6, nearJetPt = 0.0;
+      for (int j = 0; j < (int)b.topoJetEta.GetSize(); ++j) {
+        if (b.isJetRemoved(j)) continue;
+        const double jEta = b.topoJetEta[j], jPt = b.topoJetPt[j];
+        if (jPt < MIN_JET_PT) continue;
+        if (std::abs(jEta) < MIN_ABS_ETA_JET || std::abs(jEta) > MAX_ABS_ETA_JET) continue;
+        const double dr = std::hypot(jEta - trkEta, TVector2::Phi_mpi_pi(b.topoJetPhi[j] - trkPhi));
+        if (dr < minDR) { minDR = dr; nearJetPt = jPt; }
+      }
+      if (nearJetPt <= 0.0) continue;
+      sum += trkPt * (L.alpha == 1.0 ? nearJetPt : std::pow(nearJetPt, L.alpha)) / std::max(minDR, WAVES_DR_FLOOR);
+    }
+    double S = sum > 0.0 ? sum * zTerm[c] : cl.scores.at(Score::TRKPTZ.id);
+    if (L.vf != VtxFactor::NONE) {
+      double all = 0.0, pv0 = 0.0, other = 0.0;
+      for (int idx : cl.trackIndices) {
+        const double pt = b.trackPt[idx];
+        const int v = b.recoVtxOf(idx);
+        all += pt;
+        if (v == 0) pv0 += pt; else if (v > 0) other += pt;   // v < 0: in no vertex fit
+      }
+      S *= L.vf == VtxFactor::PV0 ? pv0 / all : (all - other) / all;
+    }
+    if (S > bestS) { bestS = S; best = c; }
+  }
+  return (L.vf != VtxFactor::NONE && !(bestS > 0.0)) ? iWaves : best;
+}
+
 // The event's t0s -- util/vbs_time_veto.cxx's block, verbatim, without TZP.
 inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL, const TimeCleaning& C, T0Extra* x = nullptr) {
   T0Set s;
@@ -173,6 +250,7 @@ inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL, const Ti
   s.sig[T0_HGTD] = b.recoVtxTimeRes[0];
   s.ok[T0_HGTD]  = (b.recoVtxValid[0] == 1);
   std::vector<int> trk_z = getAssociatedTracks(&b, MIN_TRACK_PT, MAX_TRACK_PT, T0_ASSOC_NSIGMA);
+  const std::vector<int> trk_pool = trk_z;   // before cleaning: the HS track-efficiency fix's pool (applyFixes' teffPool)
   if (C.t0())   // the clustering drops untimed tracks itself; drop the timed ones cleaning un-times
     trk_z.erase(std::remove_if(trk_z.begin(), trk_z.end(),
                                [&](int i) { return b.trackTimeValid[i] == 1 && !timed(b, i, C, true); }), trk_z.end());
@@ -181,6 +259,7 @@ inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL, const Ti
       /*useSmearedTimes=*/false, /*checkTimeValid=*/true, IDEAL_TRACK_RES,
       ClusteringMethod::ITERATIVE, /*useZ0=*/false,
       /*sortTracks=*/false, /*calcPurityFlag=*/true);
+  FixCache cache;   // the fixes' re-clusterings, shared by the rows with the same input bits
   if (!clusters.empty()) {
     auto bT = chooseCluster(clusters, Score::TRKPTZ);
     s.t[T0_TRKPTZ] = bT.calculateTime(Score::TRKPTZ, &b);
@@ -189,7 +268,41 @@ inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL, const Ti
     if (x) { auto full = bW; x->wavesFullDt = full.calculateTime(Score::TRKPTZ, &b) - b.truthVtxTime[0]; }
     s.t[T0_WAVES] = bW.calculateTime(Score::WAVES, &b);       // in-jet refined
     s.sig[T0_WAVES] = bW.sigmas[0];  s.ok[T0_WAVES] = true;
+    // the truth-fixed WAVeS t0s (the cache lets wfix_both reuse wfix_time's re-clustering)
+    for (const auto& [k, mask] : {std::pair<int, int>{T0_WFIX_SEL, Fix::SELECT}, {T0_WFIX_TIME, Fix::MISTIMED},
+                                  {T0_WFIX_BOTH, Fix::MISTIMED | Fix::SELECT}}) {
+      const auto c = applyFixes(mask, trk_z, trk_z, clusters, &b, cache);
+      if (c) { s.t[k] = c->values[0];  s.sig[k] = c->sigmas[0];  s.ok[k] = true; }
+    }
+    // the selection levers (todo vt-5t0): the same clusters re-scored, WAVeS's in-jet time for the pick
+    int iW = 0;
+    for (int c = 1; c < (int)clusters.size(); ++c)
+      if (clusters[c].scores.at(Score::WAVES.id) > clusters[iW].scores.at(Score::WAVES.id)) iW = c;
+    std::vector<double> zTerm(clusters.size());
+    for (size_t c = 0; c < clusters.size(); ++c) {
+      const float dz = std::get<1>(Cluster(clusters[c]).calcFeatures(&b));   // updateScores' rawDeltaZ
+      zTerm[c] = std::exp(-1.5 * std::abs(dz));
+    }
+    const bool haveVtx = (bool)b.trackRecoVtxIdx;   // bound only under EXTENDED_BRANCHES, and when the input has it
+    for (const WavesLever& L : WAVES_LEVERS) {
+      if (L.vf != VtxFactor::NONE && !haveVtx) continue;
+      const Cluster& p = clusters[wavesLeverPick(clusters, b, L, zTerm, iW)];
+      s.t[L.k] = p.calculateTime(Score::WAVES, &b);   // in-jet refined, as WAVeS
+      s.sig[L.k] = p.sigmas[0];  s.ok[L.k] = true;
+    }
   }
+  // the rest of the cumulative fix chain (clustering_hist's WFIX_C4..C6). Outside the block above: the track-efficiency
+  // fix can make a t0 in an event with no timed track, as in clustering_hist
+  for (const auto& [k, mask] : {std::pair<int, int>{T0_WFIX_C4, Fix::MISTIMED | Fix::SELECT | Fix::MISCL},
+                                {T0_WFIX_C5, Fix::MISTIMED | Fix::SELECT | Fix::MISCL | Fix::TEFF},
+                                {T0_WFIX_C6, Fix::MISTIMED | Fix::SELECT | Fix::MISCL | Fix::TEFF | Fix::RESOL}}) {
+    const auto c = applyFixes(mask, trk_z, trk_pool, clusters, &b, cache);
+    if (c) { s.t[k] = c->values[0];  s.sig[k] = c->sigmas[0];  s.ok[k] = true; }
+  }
+  // the truth time with a real t0's gate width
+  s.t[T0_TRUTH_WSIG] = b.truthVtxTime[0];
+  s.sig[T0_TRUTH_WSIG] = s.ok[T0_WAVES] ? s.sig[T0_WAVES] : 0.0;
+  s.ok[T0_TRUTH_WSIG] = true;
   if (x) {
     for (int idx : trk_z) {
       if (b.trackToTruthvtx[idx] != 0 || b.trackTimeValid[idx] != 1) continue;   // cleaned-away times already dropped
@@ -219,8 +332,55 @@ inline T0Set computeT0s(BranchPointerWrapper& b, const Inflation& INFL, const Ti
     }
   }
   s.t[T0_TRUTH] = b.truthVtxTime[0];  s.sig[T0_TRUTH] = 0.0;  s.ok[T0_TRUTH] = true;
-  s.infl = {INFL.hgtd, INFL.trkptz, INFL.waves, 1.0};
+  s.infl = {INFL.hgtd, INFL.trkptz, INFL.waves, 1.0, INFL.waves, INFL.waves, INFL.waves,
+            INFL.waves, INFL.waves, INFL.waves, INFL.waves, INFL.waves,
+            INFL.waves, INFL.waves, INFL.waves, INFL.waves};
   return s;
+}
+
+// The WAVeS t0 with one jet left out (todo vt-9zl, 2026-11-13). Above 50 GeV a forward pileup jet whose collision
+// sits close in z to the PV pulls the event's WAVeS t0 onto its own collision, so the gate keeps it (notes/gp_talk.md,
+// "Why the timing gain drops above 50 GeV"). Testing a jet against a t0 it did not help make removes that:
+//   LeaveOut::JET_AND_TRACKS  the jet is absent from WAVeS's jet list (score, in-jet time) AND the tracks within
+//                             dR < 0.4 of it leave the t0 input, which is re-clustered: the t0 as if the jet were not there
+//   LeaveOut::JET             the jet is absent from WAVeS's jet list only; its tracks stay in the clustering
+// computeT0s's WAVeS block otherwise (same input, clustering, choice, in-jet time and sigma). ok = false when nothing
+// is left to cluster: the gate then keeps every track, as for any event without a t0. nInJet: the chosen cluster's
+// tracks within dR < 0.4 of ANOTHER qualifying forward jet (WAVeS's jet definition), i.e. whether the t0 still has
+// a jet behind it -- for a guard that falls back to the event t0 when it does not.
+enum class LeaveOut { JET_AND_TRACKS, JET };
+struct WavesT0 { double t = 0.0, sig = 0.0; bool ok = false; int nInJet = 0; };
+inline WavesT0 wavesT0LeaveOut(BranchPointerWrapper& b, int j, LeaveOut mode, const TimeCleaning& C) {
+  std::vector<int> trk_z = getAssociatedTracks(&b, MIN_TRACK_PT, MAX_TRACK_PT, T0_ASSOC_NSIGMA);
+  if (C.t0())
+    trk_z.erase(std::remove_if(trk_z.begin(), trk_z.end(),
+                               [&](int i) { return b.trackTimeValid[i] == 1 && !timed(b, i, C, true); }), trk_z.end());
+  if (mode == LeaveOut::JET_AND_TRACKS) {
+    const double je = b.topoJetEta[j], jp = b.topoJetPhi[j];
+    trk_z.erase(std::remove_if(trk_z.begin(), trk_z.end(),
+                               [&](int i) { return dR(b.trackEta[i], b.trackPhi[i], je, jp) < 0.4; }), trk_z.end());
+  }
+  b.leaveOutJet = j;   // WAVeS's score and in-jet time skip it; reset before returning
+  WavesT0 w;
+  const auto clusters = clusterTracksInTime(
+      trk_z, &b, DIST_CUT_CONE,
+      /*useSmearedTimes=*/false, /*checkTimeValid=*/true, IDEAL_TRACK_RES,
+      ClusteringMethod::ITERATIVE, /*useZ0=*/false,
+      /*sortTracks=*/false, /*calcPurityFlag=*/true);
+  if (!clusters.empty()) {
+    auto bW = chooseCluster(clusters, Score::WAVES);
+    w.t = bW.calculateTime(Score::WAVES, &b);
+    w.sig = bW.sigmas[0];  w.ok = true;
+    for (int idx : bW.trackIndices)
+      for (int k = 0; k < (int)b.topoJetPt.GetSize(); ++k) {
+        if (b.isJetRemoved(k) || b.topoJetPt[k] < MIN_JET_PT) continue;   // skips j too
+        const double ak = std::abs((double)b.topoJetEta[k]);
+        if (ak < MIN_ABS_ETA_JET || ak > MAX_ABS_ETA_JET) continue;
+        if (dR(b.trackEta[idx], b.trackPhi[idx], b.topoJetEta[k], b.topoJetPhi[k]) < 0.4) { ++w.nInJet; break; }
+      }
+  }
+  b.leaveOutJet = -1;
+  return w;
 }
 
 // PV0-associated track lists: forward (rpt_v5's dz parameterisation) and central
@@ -299,14 +459,27 @@ inline double sumPt(BranchPointerWrapper& b, const std::vector<int>& trk) {
   return s;
 }
 
-// rpt_v5's applyTimeGate
+// A hard-scatter track whose HGTD time is misassigned: >= TRUTH_PULL_CUT sigma from t_HS, the definition Fix::MISTIMED
+// drops from the t0 input (src/failure_fixes.h). The "perfect timing" t0 sources (wfix_time, wfix_both) treat such a
+// track as UNTIMED everywhere downstream too -- in the R_pT / JVF gate and in tdr_fwdpair's fixed core jet time --
+// so perfect timing is one consistent world. Fixing only the t0 made the gate reject these tracks on hard-scatter
+// jets that the WAVeS t0, built partly from them, had kept (2026-11-13: 99% of the HS jets whose R_pT fell).
+inline bool misassignedHs(BranchPointerWrapper& b, int idx) {
+  return b.trackToTruthvtx[idx] == 0 && b.trackTimeValid[idx] == 1 && b.trackTimeRes[idx] > 0 &&
+         std::abs(b.trackTime[idx] - b.truthVtxTime[0]) / b.trackTimeRes[idx] >= TRUTH_PULL_CUT;
+}
+inline bool fixesTimes(int k) {
+  return k == T0_WFIX_TIME || k == T0_WFIX_BOTH || k == T0_WFIX_C4 || k == T0_WFIX_C5 || k == T0_WFIX_C6;
+}
+
+// rpt_v5's applyTimeGate. untimeMisHs: a misassigned hard-scatter track passes as untimed (the perfect-timing sources).
 inline std::vector<int> timeGate(BranchPointerWrapper& b, const std::vector<int>& base,
                                  double t0, double sig0, bool ok, double infl, double gate,
-                                 const TimeCleaning& C) {
+                                 const TimeCleaning& C, bool untimeMisHs = false) {
   std::vector<int> out;
   out.reserve(base.size());
   for (int idx : base) {
-    if (!ok || !timed(b, idx, C, C.jets())) { out.push_back(idx); continue; }
+    if (!ok || !timed(b, idx, C, C.jets()) || (untimeMisHs && misassignedHs(b, idx))) { out.push_back(idx); continue; }
     const double dt = b.trackTime[idx] - t0;
     const double vt = b.trackTimeRes[idx] * b.trackTimeRes[idx];
     if (std::abs(dt) / std::sqrt(infl * infl * sig0 * sig0 + vt) < gate) out.push_back(idx);
@@ -356,7 +529,7 @@ inline JetRpt jetRpt(BranchPointerWrapper& b, int j, const TrackLists& L, const 
   r.ntrk = (int)trk.size();
   r.itk = sumPt(b, trk) / pt;
   for (int k = 0; k < N_T0; ++k)
-    r.t0[k] = sumPt(b, timeGate(b, trk, T.t[k], T.sig[k], T.ok[k], T.infl[k], gate, C)) / pt;
+    r.t0[k] = sumPt(b, timeGate(b, trk, T.t[k], T.sig[k], T.ok[k], T.infl[k], gate, C, fixesTimes(k))) / pt;
   r.self = selfTagSumPt(b, trk, C, &r.ntimed) / pt;
   r.comb = T.ok[T0_HGTD] ? r.t0[T0_HGTD] : r.self;
   return r;
@@ -378,7 +551,7 @@ inline JvtRpt jvtRpt(BranchPointerWrapper& b, int j, const T0Set& T, double gate
   const double pt = b.topoJetPt[j];
   r.plain = sumPt(b, pv) / pt;
   for (int k = 0; k < N_T0; ++k)
-    r.t0[k] = sumPt(b, timeGate(b, pv, T.t[k], T.sig[k], T.ok[k], T.infl[k], gate, C)) / pt;
+    r.t0[k] = sumPt(b, timeGate(b, pv, T.t[k], T.sig[k], T.ok[k], T.infl[k], gate, C, fixesTimes(k))) / pt;
   return r;
 }
 
