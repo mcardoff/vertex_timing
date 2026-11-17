@@ -34,6 +34,19 @@ Run `ls` for the layout; each executable's header describes it. Non-obvious poin
 - `condor/vbs_region_diag.sub` needs its `jvt`/`jvttag` macros to agree; `condor/vbs_time_veto.sub`
   must read VBF from the RAW ntuples (`inputargs=--ntuple-dir=...`), Z+jets from its skim.
 
+## Notes map
+
+`notes/` (local-only) holds the dated history, read on demand; newer sections beat older ones and the
+repo beats both. New findings follow the `project-notes` skill; todos go in beads (`bd`).
+
+| note | covers |
+|---|---|
+| `notes/tdr_presentation.md` | the TDR-structured presentation (tdr_* programs, figures, grid runs) |
+| `notes/gp_talk.md` | the GPER / VDT talk and the studies after it (capture, failure fixes, levers, veto room) |
+| `notes/gp_talk_drafts.md` | the talk's removed draft text, by slide |
+| `notes/jvt_variants.md` | JVT variants and timing in the pileup-jet tagger |
+| `notes/repo.md` | repository state: the 2026-11-17 cleanup, the public code-only line, archive tags |
+
 ## Main Executables
 
 Since the histogramming/plotting split (see "Histogramming vs. Plotting
