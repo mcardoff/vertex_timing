@@ -532,6 +532,12 @@ int main(int argc, char** argv) {
             << " | R_pT central: z0 significance < " << CENTRAL_Z_SIGNIF
             << " | clustering: "
             << (MyUtl::USE_DZ_PARA ? "getNewDzpara" : "z0 significance") << '\n';
+  // --dzpara / --rpt-signif change every histogram: tag the outputs ("dzpara",
+  // "rptsignif", after any jvt tag) and record the settings in them. rpt_v5_plot
+  // builds the same tag from the same flags.
+  recordRptAssoc(MyUtl::USE_DZ_PARA, !RPT_USE_DZ_PARA);
+  if (MyUtl::USE_DZ_PARA || !RPT_USE_DZ_PARA)
+    std::cout << "[assoc] non-default association  (tag: " << MyUtl::SELECTION_TAG << ")\n";
 
   // Per-sample vertex-time calibration. Resolved here, before any worker thread
   // exists, so the event loop only ever reads it. Echoed so a run's stdout
@@ -1455,6 +1461,7 @@ int main(int argc, char** argv) {
   writer.WriteScalar("meta_pu_floor_lo",  merged.pu_floor_lo);
   writer.WriteScalar("meta_hs_tot_lo",    merged.hs_tot_lo);
   writer.WriteScalar("meta_hs_floor_lo",  merged.hs_floor_lo);
+  writer.WriteRunSettings(MyUtl::RUN_SETTINGS);  // non-default --dzpara / --rpt-signif only
   writer.WriteRunMeta(MyUtl::ENERGY_LABEL, merged.n_total, MyUtl::VBS_JET_D_ETA, MyUtl::VBS_JET_MJJ);
   // meta_vbs_ prefix: hist_merge requires it to agree across shards rather
   // than summing it. Written only for a tagged run, so an untagged file's key
@@ -1521,6 +1528,10 @@ int main(int argc, char** argv) {
     tree.Branch("rpt_dzpara", &dzpara,    "rpt_dzpara/O");
     tree.Branch("vbs_mjj_cut",  &cutMjj,  "vbs_mjj_cut/D");
     tree.Branch("vbs_deta_cut", &cutDeta, "vbs_deta_cut/D");
+    // Non-default --dzpara / --rpt-signif (MyUtl::RUN_SETTINGS), one branch each;
+    // a default run's tree is unchanged.
+    for (auto& s : MyUtl::RUN_SETTINGS)
+      if (!s.isDefault()) tree.Branch(s.key.c_str(), &s.value, (s.key + "/D").c_str());
     // --jvt: 0 none, 1 loose, 2 tight (JVT_WPS order), and what it did.
     int jvtWp = (int)(JVT_SEL - JVT_WPS);
     tree.Branch("jvt_wp",     &jvtWp,        "jvt_wp/I");

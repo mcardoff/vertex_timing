@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <deque>
 #include <iomanip>
 #include <iostream>
 #include <map>
@@ -348,35 +349,118 @@ namespace MyUtl {
   }
 
   // ---------------------------------------------------------------------------
-  // resolveTimingInputs -- the Global Performance talk's t0 inputs for the
-  //   clustering programs (2026-11-11): --clean-times (the TDR's track-time
-  //   cleaning, MyUtl::CLEAN_TIMES; needs the raw ntuples) and
-  //   --assoc-nsigma=X (the clustering list's z0 significance cut; the talk
-  //   uses 2.5). Call after resolveSelection: each appends to SELECTION_TAG
-  //   ("cleant0", "assoc2p5") so a run cannot overwrite the default output, and
-  //   the plot stage, given the same flags, finds the same file. Returns the
-  //   association cut, or a negative value when not given.
+  // Run settings -- result-changing flags other than the VBS selection.
+  //   A run made with a non-default one must neither overwrite the default
+  //   output nor leave no record of the setting, so recordRunSetting:
+  //     - appends `tag` to SELECTION_TAG, and so to every histFilePath()/
+  //       plotFilePath() name, when the value differs from `def`;
+  //     - keeps the setting in RUN_SETTINGS. A *_hist stage writes the
+  //       non-default ones into its file (HistWriter::WriteRunSettings: a
+  //       meta_vbs_<key> scalar, whose prefix makes hist_merge keep it once and
+  //       require the shards to agree) and its *_plot stage verifies the file
+  //       against its own flags (HistReader::CheckRunSettings). A TTree output
+  //       carries each as a per-row branch <key> instead, which survives hadd.
+  //   Only NON-default settings are written, so a default run's output is
+  //   exactly what it was before they were recorded, and a missing key reads as
+  //   the default. A plot stage given its hist stage's flags records the same
+  //   settings in the same order, so it builds the same file name.
+  //
+  //   Record every setting before the first output path is built. A deque, so a
+  //   TTree branch on a stored value keeps a valid address.
+  // ---------------------------------------------------------------------------
+  struct RunSetting {
+    std::string key;    // meta_vbs_<key> in a histogram file, branch <key> in a tree
+    std::string flag;   // the command-line flag, for messages
+    double value;       // this run's value (a switch is 0 or 1)
+    double def;         // the default: untagged and not written
+    bool isDefault() const { return std::abs(value - def) < 1e-9; }
+  };
+  inline std::deque<RunSetting> RUN_SETTINGS;
+
+  inline void addSelectionTag(const std::string& t) {
+    SELECTION_TAG = SELECTION_TAG.empty() ? t : SELECTION_TAG + "_" + t;
+  }
+
+  // "<label><v>" at `decimals` fixed decimals with '.' -> 'p' (assoc2p5,
+  // fixshare0p30). A value with more decimals than the tag carries is refused:
+  // two different settings must not share a name.
+  inline std::string numberTag(const std::string& flag, const std::string& label,
+                               double v, int decimals) {
+    const double scale = std::pow(10.0, decimals);
+    if (std::abs(v * scale - std::round(v * scale)) > 1e-6) {
+      std::cerr << flag << "=" << v << ": the output tag carries " << decimals
+                << " decimal(s); give the value to that precision.\n";
+      std::exit(1);
+    }
+    std::ostringstream os;
+    os << label << std::fixed << std::setprecision(decimals) << v;
+    std::string t = os.str();
+    std::replace(t.begin(), t.end(), '.', 'p');
+    return t;
+  }
+
+  inline void recordRunSetting(const std::string& key, const std::string& flag,
+                               double value, double def, const std::string& tag) {
+    RUN_SETTINGS.push_back({key, flag, value, def});
+    if (!RUN_SETTINGS.back().isDefault()) addSelectionTag(tag);
+  }
+
+  // True when the bare switch `flag` (e.g. "--dzpara") is on the command line.
+  inline bool hasFlag(int argc, char** argv, const std::string& flag) {
+    for (int i = 1; i < argc; ++i)
+      if (flag == argv[i]) return true;
+    return false;
+  }
+
+  // --dzpara (USE_DZ_PARA: the clustering's track-to-vertex association by
+  // getNewDzpara). Shared by the clustering and rpt_v5 programs, so the one flag
+  // has one tag ("dzpara") and one key.
+  inline void recordDzPara(bool on) {
+    recordRunSetting("dzpara", "--dzpara", on ? 1.0 : 0.0, 0.0, "dzpara");
+  }
+
+  // ---------------------------------------------------------------------------
+  // resolveTimingInputs -- the clustering programs' result-changing inputs
+  //   (clustering_hist and clustering_plot both call it, so they cannot drift):
+  //     --clean-times         the TDR's track-time cleaning (MyUtl::CLEAN_TIMES;
+  //                           needs the raw ntuples)                  "cleant0"
+  //     --assoc-nsigma=X      the clustering list's z0 significance cut (the
+  //                           Global Performance talk uses 2.5)       "assoc2p5"
+  //     --dzpara              the getNewDzpara association (USE_DZ_PARA) "dzpara"
+  //     --fix-select-share=X  the selection fix's share of the clustered pT
+  //                           (FIX_SELECT_MIN_PT_SHARE; the WFIX_* rows)
+  //                                                                   "fixshare0p30"
+  //   Call after resolveSelection. Each non-default one appends its tag to
+  //   SELECTION_TAG, in the order above, and is recorded (recordRunSetting), so
+  //   a run cannot overwrite the default output and the plot stage, given the
+  //   same flags, finds and checks the same file. Returns the association cut,
+  //   or a negative value when not given.
   // ---------------------------------------------------------------------------
   inline double resolveTimingInputs(int argc, char** argv) {
     double assocNsigma = -1.0;
+    const double shareDefault = FIX_SELECT_MIN_PT_SHARE;
     for (int i = 1; i < argc; ++i) {
       const std::string a = argv[i];
       if (a == "--clean-times") CLEAN_TIMES = true;
       if (a.rfind("--assoc-nsigma=", 0) == 0) assocNsigma = std::stod(a.substr(15));
+      if (a == "--dzpara") USE_DZ_PARA = true;
+      if (a.rfind("--fix-select-share=", 0) == 0) FIX_SELECT_MIN_PT_SHARE = std::stod(a.substr(19));
     }
-    auto add = [](const std::string& t) { SELECTION_TAG = SELECTION_TAG.empty() ? t : SELECTION_TAG + "_" + t; };
-    if (CLEAN_TIMES) add("cleant0");
-    if (assocNsigma > 0.0) {
-      std::ostringstream os;
-      os << "assoc" << std::fixed << std::setprecision(1) << assocNsigma;
-      std::string t = os.str();
-      std::replace(t.begin(), t.end(), '.', 'p');
-      add(t);
-    }
-    if (CLEAN_TIMES || assocNsigma > 0.0)
+    if (!(assocNsigma > 0.0)) assocNsigma = -1.0;  // not a cut: the default association
+    const bool shareSet = std::abs(FIX_SELECT_MIN_PT_SHARE - shareDefault) > 1e-9;
+    recordRunSetting("clean_times", "--clean-times", CLEAN_TIMES ? 1.0 : 0.0, 0.0, "cleant0");
+    recordRunSetting("assoc_nsigma", "--assoc-nsigma", assocNsigma, -1.0,
+                     assocNsigma > 0.0 ? numberTag("--assoc-nsigma", "assoc", assocNsigma, 1) : "");
+    recordDzPara(USE_DZ_PARA);
+    recordRunSetting("fix_select_share", "--fix-select-share", FIX_SELECT_MIN_PT_SHARE, shareDefault,
+                     shareSet ? numberTag("--fix-select-share", "fixshare", FIX_SELECT_MIN_PT_SHARE, 2) : "");
+    if (CLEAN_TIMES || assocNsigma > 0.0 || USE_DZ_PARA || shareSet)
       std::cout << "[timing inputs] track-time cleaning " << (CLEAN_TIMES ? "on" : "off")
                 << ", clustering association z0 signif. < "
-                << (assocNsigma > 0.0 ? assocNsigma : MAX_NSIGMA) << "  (tag: " << SELECTION_TAG << ")\n";
+                << (assocNsigma > 0.0 ? assocNsigma : MAX_NSIGMA)
+                << ", --dzpara " << (USE_DZ_PARA ? "on" : "off")
+                << ", selection-fix pT share " << FIX_SELECT_MIN_PT_SHARE
+                << "  (tag: " << SELECTION_TAG << ")\n";
     return assocNsigma;
   }
 

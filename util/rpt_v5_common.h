@@ -13,6 +13,7 @@
 
 #include "clustering_constants.h"
 #include "histogram_io.h"
+#include "sample_config.h"   // recordRunSetting / recordDzPara
 
 #include <TH1.h>
 #include <TString.h>
@@ -174,6 +175,20 @@ inline void loadScenarios(MyUtl::HistReader& r, std::vector<Scenario>& sv) {
     r.LoadInto(s.h_hs, s.h_hs->GetName());
     r.LoadInto(s.h_pu, s.h_pu->GetName());
   }
+}
+
+// -----------------------------------------------------------------------------
+// recordRptAssoc
+//   --dzpara (the WAVeS clustering input's association) and --rpt-signif (the
+//   R_pT track list by z0 significance) each change every rpt_v5 histogram, so a
+//   run with one tags its outputs ("dzpara", "rptsignif") and records the
+//   setting in them (MyUtl::recordRunSetting). rpt_v5_hist passes what it runs
+//   with, rpt_v5_plot the flags it was given: the same tags in the same order,
+//   so the plot stage finds the file.
+// -----------------------------------------------------------------------------
+inline void recordRptAssoc(bool clusterDzPara, bool rptSignif) {
+  MyUtl::recordDzPara(clusterDzPara);
+  MyUtl::recordRunSetting("rpt_signif", "--rpt-signif", rptSignif ? 1.0 : 0.0, 0.0, "rptsignif");
 }
 
 #endif  // RPT_V5_COMMON_H

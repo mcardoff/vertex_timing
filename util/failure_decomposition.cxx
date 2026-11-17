@@ -50,6 +50,9 @@
 //                     tracks near forward jets), as the analysis uses it; the
 //                     default ("full") tests the chosen cluster's full time.
 //                     The ideal-world oracles always use full-cluster times.
+//   A non-default option tags every output name (cleant0, assoc<X>, wavesinjet)
+//   and is recorded per row of the tree (clean_times, assoc_nsigma,
+//   waves_time_injet); a bare run's outputs are unchanged.
 // Z+jets now also gets the lepton selection and the lepton-jet overlap removal
 // (as util/tdr_t0), which the original lacked. Every run writes a per-event tree
 // (<prefix>failure_decomposition.root, "events": weight, n_hs_trk and every
@@ -290,7 +293,7 @@ static void drawStriped(double x0, double y0, double x1, double y1,
 }
 
 // ---------------------------------------------------------------------------
-// plotFailures — ../figs/failure_decomposition.pdf (2 pages)
+// plotFailures — ../figs/[<tag>_]failure_decomposition.pdf (2 pages)
 //   Overlap-aware composition: events are grouped by the SET of top-3 modes
 //   that can fix them.  Single-mode events are solid (timing = red,
 //   selection = tan, misclustering = blue); events equally fixable by several
@@ -308,7 +311,9 @@ static void plotFailures(const std::vector<BinData>& bins, const char* label) {
   const double xMin  = -0.5;
   const double xMax  = xData + 13.5;            // right margin reserved for legend
   const char*  xLbl  = "n Forward HS Tracks (with valid HGTD time)";
-  const char*  fname = "../figs/failure_decomposition.pdf";
+  // SELECTION_TAG: a run with non-default options must not overwrite the default PDF
+  const std::string fpath = "../figs/" + selectionTagged("failure_decomposition.pdf");
+  const char*  fname = fpath.c_str();
 
   const Int_t COL_TIMING = COLORS[1]; // red
   const Int_t COL_MISCL  = COLORS[0]; // blue
@@ -479,13 +484,21 @@ auto main(int argc, char** argv) -> int {
   MyUtl::resolveSelection(argc, argv);
 
   bool cleanTimes = false, wavesInJet = false;
-  double assocNsigma = 3.0;
+  const double assocDefault = 3.0;
+  double assocNsigma = assocDefault;
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
     if (a == "--clean-times") cleanTimes = true;
     if (a.rfind("--assoc-nsigma=", 0) == 0) assocNsigma = std::stod(a.substr(15));
     if (a == "--waves-time=injet") wavesInJet = true;
   }
+  // Each changes the result: a non-default one tags every output name and is
+  // recorded per row in the tree (see the branches below).
+  recordRunSetting("clean_times", "--clean-times", cleanTimes ? 1.0 : 0.0, 0.0, "cleant0");
+  recordRunSetting("assoc_nsigma", "--assoc-nsigma", assocNsigma, assocDefault,
+                   std::abs(assocNsigma - assocDefault) > 1e-9
+                     ? numberTag("--assoc-nsigma", "assoc", assocNsigma, 1) : "");
+  recordRunSetting("waves_time_injet", "--waves-time=injet", wavesInJet ? 1.0 : 0.0, 0.0, "wavesinjet");
   SampleConfig cfg = resolveSample(argc, argv);
   ENERGY_LABEL = cfg.energyLabel; OUTPUT_DIR = cfg.outputDir; SAMPLE_NAME = cfg.sampleName;
   OVERLAP_REMOVAL = cfg.overlapRemoval;
@@ -531,6 +544,10 @@ auto main(int argc, char** argv) -> int {
   // from the truth vertex time, re-cluster and re-choose; does the score pass now? (false when none is mistimed)
   tout.Branch("fix_mistimed_trkptz", &o_fixmisT, "fix_mistimed_trkptz/O");
   tout.Branch("fix_mistimed_waves", &o_fixmisW, "fix_mistimed_waves/O");
+  // The non-default options above, one branch each, repeated per row so the
+  // record survives hadd; a default run's tree is unchanged.
+  for (auto& s : RUN_SETTINGS)
+    if (!s.isDefault()) tout.Branch(s.key.c_str(), &s.value, (s.key + "/D").c_str());
   Long64_t nRead = 0;
 
   std::vector<BinData> bins(NBINS);    // TRKPTZ path (console only)

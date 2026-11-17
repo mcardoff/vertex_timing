@@ -25,7 +25,8 @@ auto main(int argc, char** argv) -> int {
   // --- Sample selection (--sample=vbf|zjets|dijet; default: local VBF ntuple) ---
   auto sample = MyUtl::resolveSample(argc, argv);
   MyUtl::resolveSelection(argc, argv);  // --vbs-deta=<x>; sets SELECTION_TAG
-  MyUtl::resolveTimingInputs(argc, argv);  // --clean-times / --assoc-nsigma: the file's tag
+  // --clean-times / --assoc-nsigma / --dzpara / --fix-select-share: the file's tag
+  MyUtl::resolveTimingInputs(argc, argv);
   MyUtl::ENERGY_LABEL = sample.energyLabel;
   MyUtl::OUTPUT_DIR   = sample.outputDir;
   MyUtl::SAMPLE_NAME  = sample.sampleName;
@@ -46,6 +47,7 @@ auto main(int argc, char** argv) -> int {
   {
     MyUtl::HistReader reader(histFile);
     reader.CheckSelection(MyUtl::VBS_JET_D_ETA, MyUtl::VBS_JET_MJJ);
+    reader.CheckRunSettings(MyUtl::RUN_SETTINGS);
     for (auto& [score, analysis] : mapHGTD) analysis.loadFrom(reader);
   }
 
